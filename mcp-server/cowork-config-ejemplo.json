@@ -1,0 +1,22 @@
+{
+  "_comentario": "Ejemplo de cómo registrar el MCP de prueba en Cowork / Claude Desktop. Copiar el bloque 'infoobras-onprem-bridge' dentro de 'mcpServers' en la config real (claude_desktop_config.json o equivalente de Cowork). Ajustar la ruta absoluta de mcp.js.",
+  "mcpServers": {
+    "infoobras-onprem-bridge": {
+      "command": "node",
+      "args": [
+        "C:\\Users\\Holbi\\Documents\\Freelance\\proyectos\\InfoObras\\Pivote\\src\\connection\\mcp\\mcp.js"
+      ],
+      "env": {
+        "SERVER_URL": "http://localhost:8090",
+        "REQUEST_TIMEOUT": "30000",
+        "LOG_FILE": "C:\\Users\\Holbi\\Documents\\Freelance\\proyectos\\InfoObras\\Pivote\\src\\connection\\mcp\\mcp.log"
+      }
+    }
+  },
+  "_notas": {
+    "auth": "Para el server real con token: agregar 'ONPREM_TOKEN': 'xxx' dentro de env. Nunca hardcodear en mcp.js.",
+    "https_cert_interno": "Si el server usa HTTPS con CA propia: agregar 'NODE_EXTRA_CA_CERTS': 'C:\\\\ruta\\\\ca-bundle.pem' dentro de env.",
+    "ip_lan": "Para apuntar al servidor real en la red: cambiar SERVER_URL a 'http://192.168.x.x:8090'.",
+    "windows_path": "En Windows las rutas en JSON van con doble backslash."
+  }
+}

@@ -1,26 +1,18 @@
 # Entorno virtual local
 /venv
 
-# Renderizado HTML del plan (versionado solo el .md fuente)
-plan_pivote.html
-
 # Memoria, settings y skills locales de Claude Code
 /.claude
 
-# Datos del cliente — NO commitear
-# Los Excels son entregables de análisis del ingeniero / outputs de Claude sobre
-# concursos reales (Indeconsult / Manuel Echandía) con datos identificables.
-/docs/files/
-/docs/sample_data/
-/docs/examples/
-/docs/new/
-# Insumos del cliente tras el reorg (fixtures de prueba con datos reales)
+# === Datos del cliente — NO commitear ===
+# fixtures/ = insumos reales (PDFs, Excels, docx) de concursos del cliente
+# (Indeconsult / Manuel Echandía) con datos identificables.
 /fixtures/
+/docs/examples/
 
-# Snapshots de código del backend (Alpamayo-InfoObras).
-# El README sí se commitea (explica de dónde se traen y cómo refrescarlos);
-# los .py son copias locales para referencia del dev, no fuente de verdad.
-/src/referencia/**/*.py
+# Descargas de portales (PDFs de InfoObras DownloadFile, etc.)
+/descargas_infoobras/
+**/_descargas_*/
 
 # Cache de Python
 __pycache__/
@@ -28,13 +20,14 @@ __pycache__/
 *$py.class
 *.egg-info/
 
+# Node
+**/node_modules/
+
 # Archivos temporales / scratch
 _tmp_*
 *.tmp
 
-# Binarios descargados de portales (InfoObras DownloadFile) — NO commitear PDFs
-/src/tools/_descargas_*/
-/descargas_infoobras/
+# Binarios pesados / datos crudos
 *.pdf
 .DS_Store
 Thumbs.db
@@ -44,7 +37,14 @@ Thumbs.db
 .idea/
 *.swp
 
-
-
+# HTML y JSON crudos: ignorados por defecto. Los dumps de scraping
+# (backend/exploracion/_sunat_dump/) traen RUCs reales, y los renders de
+# presentaciones son pesados. Excepciones de código abajo.
 *.html
 *.json
+
+# --- excepciones: código/config que SÍ se versiona ---
+!**/package.json
+!**/package-lock.json
+!**/tsconfig.json
+!mcp-server/cowork-config-ejemplo.json
