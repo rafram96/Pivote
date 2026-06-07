@@ -13,6 +13,9 @@ plan_pivote.html
 /docs/files/
 /docs/sample_data/
 /docs/examples/
+/docs/new/
+# Insumos del cliente tras el reorg (fixtures de prueba con datos reales)
+/fixtures/
 
 # Snapshots de código del backend (Alpamayo-InfoObras).
 # El README sí se commitea (explica de dónde se traen y cómo refrescarlos);
@@ -28,6 +31,11 @@ __pycache__/
 # Archivos temporales / scratch
 _tmp_*
 *.tmp
+
+# Binarios descargados de portales (InfoObras DownloadFile) — NO commitear PDFs
+/src/tools/_descargas_*/
+/descargas_infoobras/
+*.pdf
 .DS_Store
 Thumbs.db
 
@@ -35,3 +43,8 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+
+
+*.html
+*.json

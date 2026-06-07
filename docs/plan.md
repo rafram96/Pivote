@@ -1,5 +1,12 @@
 # Plan del pivote — 5 fases
 
+> ⚠ **2026-05-30 — SEGUNDO PIVOTE**: el cliente validó que Claude solo (1 prompt
+> + template Excel) hace extracción Y evaluación. La arquitectura híbrida de 3
+> JSONs de abajo quedó obsoleta. El rumbo vigente está en
+> **[`contrato_refactor.md`](contrato_refactor.md)** (Claude motor central +
+> backend verifica/enriquece, contrato Excel + JSON espejo). Lo de abajo es
+> historia.
+
 Estado al **2026-05-27**:
 
 ## 1 · Hacer JSONS a partir de los Excels y refinar la estructura  · ⏳ EN PROGRESO
