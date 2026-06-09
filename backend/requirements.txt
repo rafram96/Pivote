@@ -1,3 +1,15 @@
-# Dependencias de la skill analizar-licitacion-osce (lado cliente)
+# Dependencias del backend on-prem (validador + scrapers + scripts).
+# El lado cliente (skill) es Node — sus dependencias van en skill/package.json.
+
+# Contrato y validación
 pydantic>=2.0
+
+# Excel final enriquecido
 openpyxl>=3.1
+
+# Scraping SUNAT / InfoObras (backend/scraping/)
+requests>=2.31
+rapidfuzz>=3.0          # fuzzy match razón social (sunat.py)
+
+# Cache SUNAT en PostgreSQL (backend/scraping/sunat_cache.py)
+psycopg2-binary>=2.9

@@ -4,22 +4,44 @@
  * Versión Node del contrato (la PC del ingeniero solo tiene Node, no Python).
  * Equivalente a `backend/schemas/espejo.py` (Pydantic), forma plana real.
  *
+ * Contrato **v1.2.0** — mantener en paridad con el Pydantic (los cambios de
+ * versión se listan en el docstring de espejo.py). El test de contrato
+ * (`tools/test_contrato.py`) corre los mismos fixtures por ambos validadores.
+ *
  * El bloque `_backend` es opcional y va vacío/null en la salida de Claude.
  */
 const { z } = require("zod");
 
-// Datos reales: fechas pueden traer anotaciones; folios pueden ser número o rango.
-const fecha = z.string().nullable().optional();
+// ── Tipos flexibles (datos reales) ──────────────────────────────────────────
+// Sentinel de la NOTA 12: dato ilegible/no consignado tras reintentos.
+const SENTINEL_POR_VERIFICAR = "POR VERIFICAR";
+const RE_FECHA_ISO = /^\d{4}-\d{2}-\d{2}$/;          // 2016-06-10
+const RE_FECHA_PARCIAL = /^\d{4}-\d{2}(\D.*)?$/;     // "2015-11 (sin día)"
+
+// Fecha: ISO completa, parcial con anotación, o sentinel. Nada más.
+const fecha = z
+  .string()
+  .nullable()
+  .optional()
+  .refine(
+    (v) =>
+      v == null ||
+      RE_FECHA_ISO.test(v) ||
+      v.startsWith(SENTINEL_POR_VERIFICAR) ||
+      RE_FECHA_PARCIAL.test(v),
+    { message: `fecha inválida (se espera YYYY-MM-DD, 'YYYY-MM (anotación)' o '${SENTINEL_POR_VERIFICAR}…')` }
+  );
 const monto = z.number().nonnegative().nullable().optional();
 const txt = z.string().nullable().optional();
+// Folios reales: número (596), rango ("14-32 y 39-41") o texto.
 const folioT = z.union([z.string(), z.number()]).nullable().optional();
 
 const Formulario = z.object({
   anexo: z.string().default(""),
-  documento: z.string().optional(),      // new_format
+  documento: z.string().optional(),      // new_format (columna "DOCUMENTO")
   descripcion: z.string().optional(),    // formato Trujillo (compat)
   observacion: z.string().default(""),
-  folio: z.string().default(""),
+  folio: folioT.default(""),
 }).passthrough();
 
 const OfertaEconomica = z.object({
@@ -31,7 +53,7 @@ const ExperienciaPostor = z.object({
   cliente: txt, contrato: txt, proyecto: txt, tipo_acreditacion: txt,
   monto, pct_objeto: z.number().min(0).max(1).nullable().optional(),
   le_corresponde: monto,
-  acredita: z.union([z.number(), z.string()]).nullable().optional(), // n° o consorciado
+  acredita: z.union([z.number(), z.string()]).nullable().optional(), // consorciado que acredita (texto) o monto
   folio: folioT,
   ultimos_20_anios: txt, tipo_solicitado: txt, observaciones: txt,
 }).strict();
@@ -50,21 +72,39 @@ const ExperienciaProf = z.object({
   dias: monto, meses: monto, anios: monto,
   anterior_colegiatura: txt, cargo_ocupado: txt, cargo_bases_valido: txt,
   funciones_similares: txt, cert_antes_culminar: txt, incluye_covid: txt,
-  tipo_obra_valido: txt, observaciones: txt,
+  tipo_obra_valido: txt,
+  traslape: txt,                 // NOTA 9: SÍ/NO/null — Claude marca, backend re-verifica
+  observaciones: txt,
   _backend: Backend.optional(),
 }).strict().superRefine((e, ctx) => {
-  if (e.fecha_inicial && e.fecha_final && e.fecha_final < e.fecha_inicial) {
+  const ini = e.fecha_inicial, fin = e.fecha_final;
+  // Solo comparable si ambas son fechas ISO completas (no sentinel/parcial).
+  if (ini && fin && RE_FECHA_ISO.test(ini) && RE_FECHA_ISO.test(fin) && fin < ini) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: `exp ${e.n}: fecha_final < fecha_inicial` });
   }
 });
+
+// NOTA 1: cross-check contra el cuadro resumen del Anexo 16.
+const CrossCheck = z.object({
+  label: txt,
+  valor: z.union([z.string(), z.record(z.any())]).nullable().optional(),
+}).passthrough();
 
 const Profesional = z.object({
   n_prof: z.number().int().min(1),
   cargo: z.string().min(1),
   nombre: txt, folio_nombre: folioT, titulo: txt, folio_titulo: folioT,
-  profesion_valida: txt, colegiatura: txt, folio_colegiatura: folioT, certificaciones: txt,
+  profesion_valida: txt, colegiatura: txt,
+  fecha_colegiatura: fecha,
+  folio_colegiatura: folioT, certificaciones: txt,
+  // NOTA 1/5: lo autodeclarado en el Anexo 16 (número o texto literal del cuadro).
+  experiencia_total_declarada: z.union([z.number(), z.string()]).nullable().optional(),
+  // Requisitos de las bases para este cargo (cargos_validos, tipo_obra, …).
+  requisitos: z.record(z.any()).nullable().optional(),
   experiencias: z.array(ExperienciaProf).default([]),
   total: z.record(z.any()).default({}),
+  cross_checks: z.array(CrossCheck).optional(),
+  notas: z.array(z.string()).optional(),
   cumple: txt, anios_adicionales: txt,
 }).passthrough().superRefine((p, ctx) => {
   const ns = p.experiencias.map((e) => e.n);
@@ -77,7 +117,12 @@ const Profesional = z.object({
 const Factor = z.object({
   factor: z.string().min(1),
   criterio: txt, folio: folioT, detalle: txt,
-  puntaje: z.union([z.number(), z.string()]).nullable().optional(), // n° o "NO APLICA"
+  aplica: z.boolean().nullable().optional(),  // false ⇔ puntaje "NO APLICA"
+  puntaje: z.union([
+    z.number(),
+    z.string().refine((s) => s.trim().toUpperCase().startsWith("NO APLICA"),
+      { message: "puntaje inválido (número, null o 'NO APLICA…')" }),
+  ]).nullable().optional(),
 }).strict();
 
 const ResumenEvaluacion = z.object({
@@ -95,6 +140,8 @@ const JsonEspejo = z.object({
     experiencia_postor: z.array(ExperienciaPostor).default([]),
     experiencia_postor_total: z.record(z.any()).default({}),
     postor_cumple: txt,
+    // NOTA 14: quiénes integran el consorcio (para exigir ISO de TODOS).
+    consorciados: z.array(z.record(z.any())).nullable().optional(),
   }).passthrough(),
   profesionales: z.array(Profesional).min(1),
   resumen_evaluacion: ResumenEvaluacion.default({}),
@@ -106,4 +153,4 @@ const JsonEspejo = z.object({
   }
 });
 
-module.exports = { JsonEspejo };
+module.exports = { JsonEspejo, SENTINEL_POR_VERIFICAR };
