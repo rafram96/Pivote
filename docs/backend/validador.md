@@ -59,13 +59,15 @@ total de días deben cuadrar contra esa declaración.
 resumen del Anexo 16"; algunos requirieron "2do/3er intento (re-OCR a 400/450dpi)".
 
 **Verificación backend**:
-- `len(experiencias)` del espejo == `cross_check_nota1.declaradas`.
+- `len(experiencias)` del espejo == las `declaradas` del cross-check NOTA 1
+  (en `profesional.cross_checks[]`, entrada con `valor: {extraidas, declaradas,
+  cuadra, intentos}`).
 - `sum(dias)` recalculado desde `fecha_inicial/fecha_final` == `total.dias` reportado
   (tolerancia ±1 día por convención de conteo inclusivo).
-- Si `cross_check_nota1.cuadra == false` → `Observacion(advertencia)` con ambos números.
+- Si el cross-check trae `cuadra == false` → `Observacion(advertencia)` con ambos números.
 
-**Requiere**: que `cross_check_nota1` y `experiencia_total_declarada` existan en el
-schema espejo (hoy NO están — gap confirmado, va en la unificación del contrato).
+**Estado**: ✓ resuelto en contrato v1.2.0 — `profesional.cross_checks[]` y
+`profesional.experiencia_total_declarada` ya existen en ambos schemas.
 
 ### NOTA 2 — Cargo y tipo de obra estrictos según bases
 
@@ -212,14 +214,17 @@ Huecos reales del output actual de la skill de Manuel que el validador debe atra
 
 ## 4. Insumos que este doc le exige al contrato (espejo)
 
-Campos que deben agregarse al schema en la unificación (paso 2 del plan en `dev`):
+Estado tras la unificación v1.2.0 (commit en `dev`):
 
-1. `profesional.cross_check_nota1 = {extraidas, declaradas, dias_declarados, cuadra, intentos}` (N1)
-2. `profesional.experiencia_total_declarada` — texto literal del Anexo 16 (N1/N5)
-3. `experiencia.traslape: bool` (N9)
-4. `postor.consorciados[]` + titular por certificado ISO (N14)
-5. `_meta.version_contrato` — para rechazar espejos de versión incompatible en INGESTA
-6. `bases.n_personal_clave` o equivalente para el cruce de N15
+1. ✓ `profesional.cross_checks[] = [{label, valor:{extraidas, declaradas, cuadra, intentos}}]` (N1)
+2. ✓ `profesional.experiencia_total_declarada` — lo autodeclarado en el Anexo 16 (N1/N5)
+3. ✓ `experiencia.traslape` — "SÍ"/"NO"/null (N9)
+4. ✓ `postor.consorciados[]` (N14) — el titular por certificado ISO sigue en el
+   artefacto intermedio `isos_certificaciones[]` del mapa (el evaluador lo usa);
+   el espejo registra el veredicto en `factores[].detalle`
+5. ✓ `_meta.version_contrato` — la política de rechazo por versión la aplica INGESTA
+6. ⏳ `bases.n_personal_clave` o equivalente para el cruce de N15 — pendiente: la
+   salida de `agent-bases` aún no tiene schema ejecutable (gap conocido)
 
 ## 5. Checklist al recibir `reglas.md` de Manuel
 

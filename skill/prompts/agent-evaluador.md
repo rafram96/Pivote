@@ -13,24 +13,27 @@ y deja en `null` todo lo que requiere fuentes oficiales (eso es del backend).
 
 ### Por experiencia (Parte 4, una por fila atómica)
 Para cada experiencia, cruzándola con los requisitos del cargo en `bases`:
-1. **DÍAS / MESES / AÑOS**: calcula la duración entre `fecha_inicio` y
-   `fecha_culminacion` (días calendario; meses = días/30; años = días/365).
+1. **DÍAS / MESES / AÑOS**: calcula la duración entre `fecha_inicial` y
+   `fecha_final` (días calendario; meses = días/30; años = días/365). Si alguna
+   fecha es `"POR VERIFICAR…"` o parcial `"YYYY-MM (…)"`, NO calcules: deja
+   `dias/meses/anios` en `null` y emite observación.
    > ⚠ Es el cálculo **bruto** de Claude. El backend lo **recalcula descontando
    > paralizaciones** (Paso 5) — déjalo igual, pero el valor efectivo lo fija el
    > servidor.
 2. **`cargo_ocupado` y ¿es el cargo de las bases?** (`cargo_bases_valido`:
    cumple + razón literal citando la lista de cargos similares).
 3. **¿Tipo de obra válido?** (`tipo_obra_valido`) contra `tipos_obra_validos`.
-4. **`anterior_a_colegiatura`**: `true` si la experiencia es anterior a
-   `fecha_colegiacion` del profesional (cuando se conoce).
-5. **`cert_antes_de_culminar`**, **`incluye_covid`**: confirma/propaga lo que
+4. **`anterior_colegiatura`**: `"SÍ"` si la experiencia es anterior a la
+   `fecha_colegiatura` del profesional (cuando se conoce); si no, `"NO"`.
+5. **`cert_antes_culminar`**, **`incluye_covid`**: confirma/propaga lo que
    marcaron los `agent-propuesta-profesional`. La ventana COVID es
    **16/03/2020 – 30/06/2020** (NOTA 10): marca si el periodo se superpone con ella.
-   **Traslape (NOTA 9)**: propaga el `traslape: true` que detectó el subagente del
+   **Traslape (NOTA 9)**: propaga el `traslape: "SÍ"` que detectó el subagente del
    profesional entre periodos que se superponen en plazo, y márcalo para que el
    Excel los resalte en **rojo** (ambos periodos traslapados).
-6. **`cargo_emisor_valido_claude`**: tu juicio textual sobre si el cargo del
-   firmante (Rep. Legal/Común) faculta para emitir — márcalo como **"ASUMIDO"**.
+6. **`cargo_valido_emitir`**: tu juicio textual sobre si el cargo del firmante
+   (Rep. Legal/Común) faculta para emitir — con sufijo **"(ASUMIDO)"**
+   (ej. `"SÍ (ASUMIDO — Representante Común del consorcio emisor)"`).
    > El backend lo verifica de verdad contra SUNAT (`getRepLeg`). Tu valor es
    > provisional, no determinante.
 

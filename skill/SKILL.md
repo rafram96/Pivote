@@ -72,7 +72,7 @@ Cuando `agent-propuesta-mapa` devuelva la lista de profesionales con sus bundles
 lanza **un subagente por profesional en el mismo turno** (`prompts/agent-propuesta-
 profesional.md`), pasándole `n_prof`, `cargo`, `apellido_clave`, `folios_bundle`,
 `experiencia_total_declarada` y el texto de **solo esos folios**. Cada uno devuelve
-su profesional + experiencias atómicas + el `cross_check_nota1`. El nº de
+su profesional + experiencias atómicas + `cross_checks` (NOTA 1). El nº de
 subagentes = nº de profesionales del mapa.
 
 > Si hay muchísimos profesionales, lánzalos por lotes; ninguno debe quedar sin
@@ -115,11 +115,31 @@ node scripts/validar_espejo.js <ruta_json>
 con la lista de errores (campo + mensaje).
 
 Si sale `INVÁLIDO`, toma cada error y **reintenta el subagente responsable** de
-ese campo (máx. 2), pasándole el texto del error — una falla aislada no debe
-tumbar toda la corrida. El schema ya verifica los invariantes clave:
-`n_prof` 1..N contiguo, `n` de experiencias contiguo por profesional, fechas
-coherentes (`fecha_final ≥ fecha_inicial`), montos ≥ 0, y `_backend` opcional
-(Claude lo deja vacío).
+ese campo (máx. 2 reintentos por subagente), pasándole el texto literal del
+error — una falla aislada no debe tumbar toda la corrida.
+
+**Mapa error → subagente responsable** (por el prefijo de la ruta del error):
+
+| Prefijo de la ruta del error | Reintentar | Pasándole |
+|---|---|---|
+| `profesionales[i].experiencias[…]` | `agent-propuesta-profesional` del `n_prof = i+1` | su bundle + el error |
+| `profesionales[i].*` (resto de campos del profesional) | `agent-propuesta-profesional` del `n_prof = i+1` | su bundle + el error |
+| `postor.*` | `agent-propuesta-mapa` | el error (re-pasada acotada) |
+| `resumen_evaluacion.*` | `agent-evaluador` | bases + mapa + profesionales + el error |
+| `profesionales[i].cumple` / `anios_adicionales` / `dias·meses·anios` | `agent-evaluador` (campos de juicio) | ídem |
+| `_meta.*` | nadie — lo corrige el **orquestador** (él genera `_meta`) | — |
+| error de `n_prof` no contiguo (raíz) | nadie — el **orquestador** reindexa contra el mapa | — |
+
+Si tras los reintentos persiste el error, NO descartes la corrida: entrega el
+espejo con el problema documentado en `observaciones_claude`
+(`severidad: critical`) y díselo al usuario — el backend lo rechazará en ingesta
+y quedará trazado.
+
+El schema ya verifica los invariantes clave: `n_prof` 1..N contiguo, `n` de
+experiencias contiguo por profesional, fechas coherentes (`fecha_final ≥
+fecha_inicial`, solo entre fechas ISO completas), montos ≥ 0, fechas en una de
+tres formas (ISO · parcial `"YYYY-MM (anotación)"` · `"POR VERIFICAR…"`),
+`puntaje` numérico o `"NO APLICA…"`, y `_backend` opcional (Claude lo deja vacío).
 
 > **Entorno**: el código client-side es **Node** (`exceljs`, `zod`). Instalar una
 > vez: `cd ~/.claude/skills/analizar-licitacion-osce && npm install`. La **única
@@ -141,5 +161,7 @@ coherentes (`fecha_final ≥ fecha_inicial`), montos ≥ 0, y `_backend` opciona
 ## Referencias
 - `prompts/agent-bases.md`, `prompts/agent-propuesta-mapa.md`, `prompts/agent-propuesta-profesional.md`, `prompts/agent-evaluador.md` — prompts de los subagentes.
 - `references/salida.md` — contrato de salida (JSON espejo + bloque `_backend` + las 5 partes del Excel).
+- `schemas/espejo.js` — **schema ejecutable del espejo (zod, v1.2.0)**; su gemelo
+  Pydantic vive en `backend/schemas/espejo.py` y `tools/test_contrato.py` garantiza
+  la paridad.
 - `docs/contrato/contrato_refactor.md` — contrato técnico autoritativo del pivote.
-- `docs/contrato/schema_canonico_pydantic.md` — schemas Pydantic de validación.

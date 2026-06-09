@@ -21,9 +21,10 @@ su cuadro resumen. Para cada profesional:
 - `n_prof` (correlativo en orden del documento), `cargo` al que postula (si es
   legible aquí), `apellido_clave` usado para el match,
 - `folios_bundle`: rango/lista de folios de ese profesional,
-- `folio_colegiatura`, `folio_nombre_propuesta`,
-- `folio_cuadro_resumen` y, si lo declara, su **"experiencia total acumulada"**
-  (texto literal) — el subagente del profesional lo usará para el cross-check NOTA 1.
+- `folio_colegiatura`, `folio_nombre` (página donde la propuesta lo nombra),
+- `folio_cuadro_resumen` y, si lo declara, su `experiencia_total_declarada`
+  (**texto literal** del cuadro "experiencia total acumulada") — el subagente del
+  profesional lo usará para el cross-check NOTA 1.
 
 > No omitas profesionales. Si un apellido aparece disperso, incluye todos sus
 > folios en el bundle aunque estén lejos entre sí.
@@ -35,8 +36,15 @@ su cuadro resumen. Para cada profesional:
   `agent-bases`/`agent-evaluador` (90% de la cuantía).
 
 ## 3 · Experiencia del postor (Parte 2)
-Contratos del postor/consorcio: emisor, monto, tipo de acreditación, folio — los
-**hechos**, sin decidir si "acredita".
+Contratos del postor/consorcio: emisor, monto, tipo de acreditación, folio, y a
+**qué consorciado** pertenece cada contrato (`acredita`) — los **hechos**, sin
+decidir si cumple.
+
+## 3b · Consorciados (de la Promesa de Consorcio — Anexo 04)
+Si el postor es consorcio, extrae de la promesa la lista `consorciados`:
+`{ nombre, ruc (si aparece), pct (participación) }` y el **representante común**.
+Es insumo de la NOTA 14 (ISOs de TODOS) y de la detección de vinculación
+postor↔emisor que hace el backend.
 
 ## 4 · ISOs y certificaciones del postor (NOTA 3 — insumo Parte 5)
 Busca en TODO el documento los certificados de sistemas de gestión. **Varía la
@@ -66,11 +74,15 @@ profesional con bundle dudoso (`extraccion_parcial`), escaneo deficiente
 === mapa_propuesta.json ===
 {
   _meta(subagente:"agent-propuesta-mapa"),
-  postor: { formularios[], oferta_economica, experiencia_postor[], isos_certificaciones[] },
+  postor: { detalle, formularios[], oferta_economica, experiencia_postor[],
+            consorciados[], isos_certificaciones[] },
   profesionales_mapa: [ { n_prof, cargo, apellido_clave, folios_bundle,
-                          folio_colegiatura, folio_nombre_propuesta,
+                          folio_colegiatura, folio_nombre,
                           folio_cuadro_resumen, experiencia_total_declarada } ],
   observaciones_claude[]
 }
 ```
+Los campos de `postor` usan los nombres EXACTOS del schema espejo
+(`schemas/espejo.js`); `profesionales_mapa` e `isos_certificaciones` son
+artefactos intermedios para los otros subagentes (no van tal cual al espejo).
 Solo el JSON, sin texto extra.

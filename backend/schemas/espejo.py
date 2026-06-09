@@ -21,6 +21,10 @@ docs/backend/validador.md §4):
   `fecha_colegiatura`, `experiencia_total_declarada`, `requisitos`,
   `cross_checks` (NOTA 1), `notas`.
 - `ExperienciaProf.traslape` (NOTA 9) y `Postor.consorciados` (NOTA 14).
+- Capacidades nuevas del pivote en ExperienciaProf: `nivel_categoria` (comparación
+  II-1 ≤ II-2), `area_construida_m2`, `monto_contrato_soles`, y los insumos de la
+  resolución de CUI por nombre: `entidad_contratante`, `ubicacion`.
+- `observaciones_claude` formalizado a nivel raíz.
 """
 from __future__ import annotations
 
@@ -174,6 +178,11 @@ class ExperienciaProf(_Model):
     incluye_covid: Optional[str] = None
     tipo_obra_valido: Optional[str] = None
     traslape: Optional[str] = None        # NOTA 9: SÍ/NO/null — Claude marca, backend re-verifica
+    nivel_categoria: Optional[str] = None  # nivel hospitalario del proyecto ("II-1", "Centro de Salud"…)
+    area_construida_m2: Optional[float] = Field(default=None, ge=0)
+    monto_contrato_soles: Optional[float] = Field(default=None, ge=0)
+    entidad_contratante: Optional[str] = None  # dueño de la obra (≠ emisor del cert) → score CUI
+    ubicacion: Optional[str] = None       # dpto/prov/distrito si el cert lo cita → score CUI
     observaciones: Optional[str] = None
     backend: Backend = Field(default_factory=Backend, alias="_backend")
 
@@ -245,11 +254,20 @@ class ResumenEvaluacion(_ModelLax):
 
 
 # ── Raíz ─────────────────────────────────────────────────────────────────────
+class Observacion(_ModelLax):
+    """Hallazgo cualitativo de los subagentes (ambigüedad, ilegibilidad, …)."""
+    severidad: Optional[str] = None       # info | warning | critical
+    tipo: Optional[str] = None
+    mensaje: Optional[str] = None
+    referencia: Optional[str] = None
+
+
 class JsonEspejo(_ModelLax):
     meta: Meta = Field(alias="_meta")
     postor: Postor
     profesionales: list[Profesional] = Field(min_length=1)
     resumen_evaluacion: ResumenEvaluacion = Field(default_factory=ResumenEvaluacion)
+    observaciones_claude: list[Observacion] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _n_prof_contiguos(self):

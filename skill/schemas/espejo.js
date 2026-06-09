@@ -74,6 +74,11 @@ const ExperienciaProf = z.object({
   funciones_similares: txt, cert_antes_culminar: txt, incluye_covid: txt,
   tipo_obra_valido: txt,
   traslape: txt,                 // NOTA 9: SÍ/NO/null — Claude marca, backend re-verifica
+  nivel_categoria: txt,          // nivel hospitalario del proyecto ("II-1", "Centro de Salud"…)
+  area_construida_m2: monto,
+  monto_contrato_soles: monto,
+  entidad_contratante: txt,      // dueño de la obra (≠ emisor del cert) → score CUI
+  ubicacion: txt,                // dpto/prov/distrito si el cert lo cita → score CUI
   observaciones: txt,
   _backend: Backend.optional(),
 }).strict().superRefine((e, ctx) => {
@@ -131,6 +136,14 @@ const ResumenEvaluacion = z.object({
   nota: txt,
 }).passthrough();
 
+// Hallazgo cualitativo de los subagentes (ambigüedad, ilegibilidad, …).
+const Observacion = z.object({
+  severidad: txt,                // info | warning | critical
+  tipo: txt,
+  mensaje: txt,
+  referencia: txt,
+}).passthrough();
+
 const JsonEspejo = z.object({
   _meta: z.object({ analisis_id: z.string().min(1) }).passthrough(),
   postor: z.object({
@@ -145,6 +158,7 @@ const JsonEspejo = z.object({
   }).passthrough(),
   profesionales: z.array(Profesional).min(1),
   resumen_evaluacion: ResumenEvaluacion.default({}),
+  observaciones_claude: z.array(Observacion).optional(),
 }).passthrough().superRefine((d, ctx) => {
   const ns = d.profesionales.map((p) => p.n_prof);
   const esperado = ns.map((_, i) => i + 1);

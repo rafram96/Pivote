@@ -37,45 +37,86 @@ para **regenerar** el Excel final enriquecido (no parchea el del cliente).
 
 ## 2 · JSON espejo (fuente de verdad de máquina)
 
-Misma información, estructurada y autovalidante (Pydantic). Incluye la evaluación
-de Claude **y** un bloque `_backend` con todo en `null` — el **contrato explícito**
-de lo que el servidor debe llenar.
+Misma información, estructurada y autovalidante. **Contrato v1.2.0** — el schema
+ejecutable es `schemas/espejo.js` (zod, este lado) y `backend/schemas/espejo.py`
+(Pydantic, lado servidor); `tools/test_contrato.py` garantiza la paridad. Incluye
+la evaluación de Claude **y** un bloque `_backend` con todo en `null` — el
+**contrato explícito** de lo que el servidor debe llenar.
+
+Forma **plana**: las experiencias viven DENTRO de cada profesional (no a nivel
+raíz), y los datos del emisor/firmante son campos planos (no objetos anidados).
 
 ```jsonc
 {
   "_meta": { "analisis_id": "...", "concurso": "...", "postor": "...",
-             "version_contrato": "1.0.0", "generado_por": "claude-code" },
+             "version_contrato": "1.2.0", "generado_por": "claude-code" },
   "postor": {
-    "formularios": [ /* anexos 1-6: presenta/no, folio */ ],
-    "oferta_economica": { "monto": ..., "limite_inferior": ..., "cumple": ... },
-    "experiencia_postor": [ /* contrato, monto, %, le_corresponde, acredita */ ]
+    "detalle": "...",
+    "formularios": [ { "anexo", "documento", "observacion", "folio" } ],
+    "oferta_economica": { "cuantia", "limite_inferior", "propuesta", "detalle" },
+    "experiencia_postor": [ { "n", "cliente", "contrato", "proyecto",
+                              "tipo_acreditacion", "monto", "pct_objeto",
+                              "le_corresponde",
+                              "acredita",     // consorciado que acredita (texto) o monto
+                              "folio", "ultimos_20_anios", "tipo_solicitado",
+                              "observaciones" } ],
+    "experiencia_postor_total": { "acredita": ... },
+    "postor_cumple": "SÍ CUMPLE — razón literal …",
+    "consorciados": [ { "nombre", "ruc", "pct" } ]   // de la Promesa de Consorcio (NOTA 14)
   },
-  "profesionales": [ { "n_prof", "cargo", "nombre", "profesion", "colegiatura",
-                       "fecha_colegiatura", "profesion_valida", "certificaciones",
-                       "folios" } ],
-  "experiencias": [ {
-     "n_correlativo", "n_prof",
-     "proyecto",            // ⭐ VERBATIM y completo (sin abreviar ni meter metadata) — ver agent-propuesta §A-B
-     "cui",                 // ⭐ CUI/SNIP citado en el cert (solo dígitos) → cruce determinístico; null si no aparece
-     "emisor": { "nombre", "ruc": null },  // ruc del emisor (11 díg.) si está literal → cruce + ALT12
-     "firmante": { "nombre", "cargo_declarado" },
-     "cargo_emisor_valido_claude": { "cumple", "detalle": "ASUMIDO" },
-     "fecha_inicio", "fecha_fin", "dias", "meses", "anios", "folio",
-     "anterior_a_colegiatura", "cargo_ocupado", "cargo_bases_valido",
-     "cert_antes_de_culminar", "incluye_covid", "tipo_obra_valido",
-     "nivel_categoria",
-     "_backend": {                          // ⚠ Claude deja TODO en null
-        "fecha_creacion_emisor": null,      // SUNAT ALT04
-        "alerta_antiguedad_emisor": null,   // ALT04
-        "firmante_facultado_sunat": null,   // ALT12 (getRepLeg)
-        "vinculacion_postor_emisor": null,  // conflicto intragrupo (nuevo)
-        "codigo_ciu": null, "codigo_infoobras": null,  // InfoObras
-        "paralizaciones": null,             // InfoObras (Paso 5)
-        "alerta_experiencia_antigua": null  // recálculo cutoff 25 años
-     }
+  "profesionales": [ {
+     "n_prof", "cargo", "nombre", "folio_nombre",
+     "titulo", "folio_titulo", "profesion_valida",
+     "colegiatura", "fecha_colegiatura", "folio_colegiatura",
+     "certificaciones",                    // texto (incl. hechos PMP para Factor B)
+     "experiencia_total_declarada",        // lo autodeclarado en el Anexo 16 (NOTA 1/5)
+     "requisitos": { "cargos_validos", "tipo_experiencia", "tipo_obra" },
+     "experiencias": [ {
+        "n",
+        "entidad_emisora",     // empresa/entidad que emite el certificado
+        "ruc_emisor",          // ⭐ RUC (11 díg.) si está literal → cruce + ALT12; null si no
+        "proyecto",            // ⭐ VERBATIM y completo (sin abreviar ni meter metadata)
+        "cui",                 // ⭐ CUI/SNIP citado en el cert (solo dígitos) → cruce determinístico
+        "tipo_documento",
+        "nombre_emisor",       // persona que firma
+        "cargo_emisor",        // cargo del firmante
+        "cargo_valido_emitir", // juicio Claude, sufijo "(ASUMIDO)" — el backend confirma vía SUNAT
+        "fecha_inicial", "fecha_final", "fecha_emision",
+                               // ISO "YYYY-MM-DD" · parcial "YYYY-MM (anotación)" · "POR VERIFICAR…" (NOTA 12)
+        "folio", "dias", "meses", "anios",
+        "anterior_colegiatura", "cargo_ocupado", "cargo_bases_valido",
+        "funciones_similares", "cert_antes_culminar",
+        "incluye_covid",       // ventana 16/03/2020–30/06/2020 (NOTA 10)
+        "tipo_obra_valido",
+        "traslape",            // "SÍ" en AMBOS periodos que se superponen (NOTA 9)
+        "nivel_categoria",     // "II-1", "II-2", "Centro de Salud"… si el cert lo cita
+        "area_construida_m2", "monto_contrato_soles",
+        "entidad_contratante", // dueño de la obra (≠ emisor) → score CUI
+        "ubicacion",           // dpto/prov/distrito → score CUI
+        "observaciones",
+        "_backend": {                          // ⚠ Claude deja TODO en null
+           "fecha_creacion_emisor": null,      // SUNAT ALT04
+           "alerta_antiguedad_emisor": null,   // ALT04
+           "firmante_facultado_sunat": null,   // ALT12 (getRepLeg)
+           "vinculacion_postor_emisor": null,  // conflicto intragrupo (nuevo)
+           "codigo_ciu": null, "codigo_infoobras": null,  // InfoObras
+           "paralizaciones": null,             // InfoObras (Paso 5)
+           "alerta_experiencia_antigua": null  // recálculo cutoff 25 años
+        }
+     } ],
+     "total": { "dias", "meses", "anios" },
+     "cross_checks": [ { "label": "Cross-check vs cuadro resumen del Anexo 16:",
+                         "valor": { "extraidas", "declaradas", "cuadra", "intentos" } } ],
+     "notas": [ "…" ],
+     "cumple", "anios_adicionales"
   } ],
-  "resumen_evaluacion": { /* factores A, B, C, E, J → puntaje */ },
-  "observaciones_claude": [ /* severidad + referencia */ ]
+  "resumen_evaluacion": {
+    "factores": [ { "factor", "criterio", "folio", "detalle",
+                    "aplica",            // false ⇔ puntaje "NO APLICA"
+                    "puntaje" } ],       // número · null · "NO APLICA…"
+    "puntaje_total", "nota"
+  },
+  "observaciones_claude": [ { "severidad", "tipo", "mensaje", "referencia" } ]
 }
 ```
 
