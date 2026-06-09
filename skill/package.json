@@ -1,0 +1,16 @@
+{
+  "name": "analizar-licitacion-osce",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Skill (lado cliente, Node) — genera el Excel de evaluación y valida el JSON espejo. Corre en la PC del ingeniero (solo Node).",
+  "type": "commonjs",
+  "scripts": {
+    "validar": "node scripts/validar_espejo.js",
+    "excel": "node scripts/generar_excel.js"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "zod": "^3.23.0"
+  },
+  "engines": { "node": ">=18" }
+}

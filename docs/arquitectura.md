@@ -36,7 +36,7 @@ oficiales (SUNAT/InfoObras) y persiste → el **panel** lo muestra.
 |---|---|---|---|---|
 | 1 | **Skill** | PC del ingeniero (Cowork) | [`skill/`](../skill/) | 🔨 diseñada, sin código |
 | 2 | **MCP server** | PC del ingeniero | [`mcp-server/`](../mcp-server/) | 📐 POC funcional |
-| 3 | **Backend** | Servidor on-prem | [`backend/`](../backend/) | scrapers ✅ probados, validador 🔨 |
+| 3 | **Backend** | Servidor on-prem | [`backend/`](../backend/) | **8 componentes** → [mapa](backend/README.md) · [diagrama](backend/arquitectura_backend.html) · scrapers ✅ · resolución CUI ✅ · validador 🔨 |
 | 4 | **Frontend** | Servidor on-prem (panel) | ❌ NO aquí → `Panel-InfoObras` | ⏳ mockups |
 
 ### El MCP: solo construimos el *server*

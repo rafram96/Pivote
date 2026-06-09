@@ -157,7 +157,16 @@ def inventariar(html: str) -> dict[str, list[dict[str, Any]]]:
     return {"documentos": documentos, "imagenes": imagenes}
 
 
-def descargar(sess: requests.Session, item: dict[str, Any], destino: Path) -> tuple[bool, str]:
+def _slug_carpeta(seccion: str) -> str:
+    """Convierte el nombre de sección en un nombre de carpeta seguro en Windows."""
+    s = seccion.strip()
+    s = re.sub(r'[<>:"/\\|?*]', "", s)   # caracteres prohibidos en Windows
+    s = re.sub(r"\s+", " ", s).strip(" .")
+    return s or "(sin seccion)"
+
+
+def descargar(sess: requests.Session, item: dict[str, Any], destino: Path,
+              por_seccion: bool = False) -> tuple[bool, str | Path]:
     ext = item["extension"]
     params = {
         "filename": item["filename"],
@@ -174,9 +183,11 @@ def descargar(sess: requests.Session, item: dict[str, Any], destino: Path) -> tu
     nombre = item["nombre"]
     if not nombre.lower().endswith("." + ext.lower()):
         nombre = f"{nombre}.{ext}"
-    salida = destino / nombre
+    carpeta = destino / _slug_carpeta(item["seccion"]) if por_seccion else destino
+    carpeta.mkdir(parents=True, exist_ok=True)
+    salida = carpeta / nombre
     salida.write_bytes(r.content)
-    return True, f"{len(r.content):,} bytes → {salida.name}"
+    return True, salida
 
 
 def clasificar_pdf(ruta: Path) -> dict[str, Any]:
@@ -231,7 +242,10 @@ def main() -> int:
     ap.add_argument("--incluir-imagenes", action="store_true", help="también baja las imágenes físicas")
     ap.add_argument("--clasificar", action="store_true",
                     help="tras descargar, clasifica cada PDF en texto/imagen (PyMuPDF)")
+    ap.add_argument("--plano", action="store_true",
+                    help="guarda todo en un solo directorio (por defecto: una subcarpeta por sección)")
     args = ap.parse_args()
+    por_seccion = not args.plano
 
     sess = _session()
     print(f"→ Cargando {PAGINA}?obraId={args.obra_id}")
@@ -258,19 +272,20 @@ def main() -> int:
     destino = Path(args.salida) if args.salida else Path("descargas_infoobras") / str(args.obra_id)
     destino.mkdir(parents=True, exist_ok=True)
     objetivos = docs + (imgs if args.incluir_imagenes else [])
-    print(f"\n→ Descargando {len(objetivos)} archivo(s) en {destino}")
+    modo = "ordenando por sección" if por_seccion else "en un solo directorio"
+    print(f"\n→ Descargando {len(objetivos)} archivo(s) en {destino} ({modo})")
     ok = fail = 0
     bajados: list[Path] = []
     for it in objetivos:
-        exito, msg = descargar(sess, it, destino)
-        print(f"    {'✓' if exito else '✗'} {it['nombre']}: {msg}")
-        ok += exito
-        fail += not exito
+        exito, res = descargar(sess, it, destino, por_seccion=por_seccion)
         if exito:
-            nombre = it["nombre"]
-            if not nombre.lower().endswith("." + it["extension"].lower()):
-                nombre = f"{nombre}.{it['extension']}"
-            bajados.append(destino / nombre)
+            rel = res.relative_to(destino)
+            print(f"    ✓ {rel}  ({res.stat().st_size:,} bytes)")
+            bajados.append(res)
+            ok += 1
+        else:
+            print(f"    ✗ {it['nombre']}: {res}")
+            fail += 1
     print(f"\n  Listo: {ok} descargados, {fail} fallidos → {destino}")
 
     if args.clasificar:
