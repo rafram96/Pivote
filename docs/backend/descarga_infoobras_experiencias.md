@@ -1,6 +1,16 @@
-# Descarga de archivos InfoObras + ZIP por EXPERIENCIA (alcance futuro)
+# Descarga de archivos InfoObras + ZIP por EXPERIENCIA
 
-> Estado: ⏳ **pendiente de detallar** — el cliente dará más detalle más adelante.
+> Estado: ✓ **CONFIRMADO EN ALCANCE** (2026-06-10) — el cliente confirmó que el
+> ZIP es necesario: **sobre esos documentos se hace el análisis humano** (además
+> de lo extraído al Excel). Siguen pendientes los detalles de las preguntas
+> abiertas de abajo (qué archivos exactos, nomenclatura, entrega).
+>
+> Avance técnico: el prototipo `tools/descargar_documentos_infoobras.py` ya
+> **descubrió los endpoints de descarga** (`/InfobrasWeb/Mapa/DownloadFile`,
+> botones `data-download-url`) y descargó documentos reales de la obra 72056
+> (cronograma, valorizaciones, expediente técnico, ampliaciones) →
+> `tools/_descargas_72056/` (local). Falta: probarlo a escala (40-50 obras) y
+> medir tiempos/tamaños.
 > Doc creado tras la **aprobación del pivote** (2026-06-01).
 
 ## Hito: pivote aprobado ✓

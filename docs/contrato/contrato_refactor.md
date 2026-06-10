@@ -478,6 +478,8 @@ paralizaciones. **Confiable.**
 | PC de Manuel alcanza el servidor por LAN | ✓ confirmado |
 | Volumen = 100-200 análisis/mes, 1 usuario (Manuel) | ✓ confirmado |
 | Tamaño de propuesta = grandes / miles de folios es lo normal | ✓ confirmado 2026-05-30 → subagentes = esencial, no opcional |
-| ¿Formato Excel es definitivo? | ⚠ confirmar con Manuel (congelar versión) |
-| ¿Claude puede emitir JSON espejo sin degradar el Excel? | ⚠ confirmar con Manuel (define contrato §3) |
-| ¿Autocertificación intragrupo descalifica? | ⚠ criterio legal de Manuel |
+| ¿Formato Excel es definitivo? | ✓ **CONFIRMADO 2026-06-10**: el formato Libertador (`02. Formato de evaluacion COMPLETADO.xlsx`, hoja CLAUDE + hojas por profesional) es el definitivo — versión congelada |
+| Cutoff ALT03: ¿20 o 25 años? | ✓ **CONFIRMADO 2026-06-10**: 25 años (decisión del cliente, ya no es discrepancia silenciosa) |
+| ZIP de documentos InfoObras | ✓ **CONFIRMADO EN ALCANCE 2026-06-10**: sobre esos documentos se hace el análisis humano — ver `docs/backend/descarga_infoobras_experiencias.md` |
+| ¿Claude puede emitir JSON espejo sin degradar el Excel? | ⚠ pendiente: corrida end-to-end de la skill (primer espejo real) |
+| ¿Autocertificación intragrupo descalifica? | ⚠ criterio legal de Manuel ("no sabría" 2026-06-10) — el sistema solo marca la alerta |
