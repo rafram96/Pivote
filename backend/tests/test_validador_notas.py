@@ -6,9 +6,12 @@ se saltan si no están).
 Hallazgos de la calibración 2026-06-10 (fijados aquí):
 - Trujillo full: 0 observaciones (espejo limpio — round-trip validado).
 - Libertador: 14×VEREDICTO (el extractor de fixtures nunca mapeó `cumple` —
-  gap del extractor, la skill real SÍ debe emitirlo) + 2×NOTA9 reales:
-  prof 9, exps 3 y 4 se solapan 2 días (3 termina 2025-02-02, 4 empieza
-  2025-02-01) y nadie lo marcó en el Excel.
+  gap del extractor, la skill real SÍ debe emitirlo) + 2×NOTA9 en prof 9,
+  exps 3-4 (solape real de 2 días: 01-02/02/2025). CORRECCIÓN 2026-06-10:
+  Claude SÍ lo había detectado — está en `observaciones` (texto libre) y en
+  la columna Y del Excel (celda Y235); lo que falta es el campo estructurado
+  `traslape` (agregado al contrato v1.2.0, posterior al extractor). Por eso
+  la severidad es ADVERTENCIA (gap de estructura), no ALERTA (omisión).
 """
 from __future__ import annotations
 
@@ -76,6 +79,21 @@ def test_nota9_traslape_real_no_marcado_es_alerta():
     obs = nota9_traslapes(prof)
     assert {o.referencia for o in obs} == {"prof=3 exp=1", "prof=3 exp=2"}
     assert all(o.severidad == Severidad.ALERTA for o in obs)
+
+
+def test_nota9_detectado_en_texto_libre_es_advertencia():
+    # Claude lo vio (observaciones) pero no llenó el campo estructurado:
+    # gap de estructura, no de juicio → severidad menor.
+    prof = {"n_prof": 3, "experiencias": [
+        _exp(1, "2021-01-01", "2021-06-30",
+             observaciones="TRASLAPE de 30 día(s) con otra experiencia"),
+        _exp(2, "2021-06-01", "2021-12-31",
+             observaciones="TRASLAPE de 30 días con el certificado anterior"),
+    ]}
+    obs = nota9_traslapes(prof)
+    assert len(obs) == 2
+    assert all(o.severidad == Severidad.ADVERTENCIA for o in obs)
+    assert all("texto libre" in o.mensaje for o in obs)
 
 
 def test_nota9_marcado_correctamente_no_dispara():
@@ -164,10 +182,13 @@ def test_calibracion_libertador_hallazgos_conocidos():
     # El extractor de fixtures no mapea `cumple` → los 14 disparan (gap del
     # extractor; la skill real lo emite). Si esto baja, el fixture mejoró.
     assert por_codigo.get("VEREDICTO") == 14
-    # Traslape REAL de 2 días (prof 9: exp 3 termina 2025-02-02, exp 4
-    # empieza 2025-02-01) que nadie marcó en el Excel — hallazgo genuino.
+    # Traslape REAL de 2 días en prof 9 exps 3-4 (01-02/02/2025). Claude SÍ
+    # lo detectó (está en observaciones y en la celda Y235 del Excel) — lo
+    # que falta es el campo estructurado `traslape` → ADVERTENCIA.
     assert por_codigo.get("NOTA9") == 2
-    refs_n9 = {o.referencia for o in obs if o.codigo == "NOTA9"}
-    assert refs_n9 == {"prof=9 exp=3", "prof=9 exp=4"}
+    n9 = [o for o in obs if o.codigo == "NOTA9"]
+    assert {o.referencia for o in n9} == {"prof=9 exp=3", "prof=9 exp=4"}
+    assert all(o.severidad == Severidad.ADVERTENCIA for o in n9)
+    assert all("texto libre" in o.mensaje for o in n9)
     # Nada más dispara: COVID, orden, totales y puntaje están consistentes.
     assert set(por_codigo) == {"VEREDICTO", "NOTA9"}

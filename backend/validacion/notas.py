@@ -128,11 +128,21 @@ def nota9_traslapes(prof: dict) -> list[pipeline.Observacion]:
     for e in exps:
         n = e.get("n")
         marcado = _es_si(e.get("traslape"))
+        menciona_texto = "TRASLAP" in str(e.get("observaciones") or "").upper()
         if n in en_traslape and marcado is not True:
-            out.append(_obs(
-                "NOTA9", _SEV.ALERTA,
-                "traslape real entre periodos NO marcado por Claude",
-                f"prof={n_prof} exp={n}"))
+            if menciona_texto:
+                # Claude SÍ lo detectó (vive en observaciones, texto libre) pero
+                # no llenó el campo estructurado — gap de estructura, no de juicio.
+                out.append(_obs(
+                    "NOTA9", _SEV.ADVERTENCIA,
+                    "traslape real detectado por Claude en observaciones (texto libre) "
+                    "pero sin marcar el campo estructurado `traslape`",
+                    f"prof={n_prof} exp={n}"))
+            else:
+                out.append(_obs(
+                    "NOTA9", _SEV.ALERTA,
+                    "traslape real entre periodos NO marcado por Claude",
+                    f"prof={n_prof} exp={n}"))
         elif n not in en_traslape and marcado is True:
             out.append(_obs(
                 "NOTA9", _SEV.ADVERTENCIA,
