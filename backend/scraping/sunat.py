@@ -401,6 +401,35 @@ def _detectar_encoding(content_type: str) -> str:
     return "utf-8"
 
 
+# Markers de un reCAPTCHA real (no el stub actual). Si SUNAT activa captcha de
+# verdad, el scraper deja de funcionar — esto lo hace detectable en logs/etapa
+# en vez de un None silencioso.
+_CAPTCHA_REAL_RE = re.compile(
+    r"g-recaptcha|grecaptcha\.(?:execute|render)|data-sitekey|hcaptcha|cf-turnstile",
+    re.IGNORECASE,
+)
+
+
+def diagnosticar_html_sunat(html: str) -> Optional[str]:
+    """
+    Clasifica por qué un HTML de SUNAT no es parseable.
+
+    Devuelve:
+      - None: estructura conocida (detalle o lista parseables) — no hay anomalía.
+      - "captcha_real": la página trae un captcha de verdad (reCAPTCHA/hCaptcha/
+        Turnstile). El stub actual dejó de bastar → requiere intervención.
+      - "estructura_desconocida": no hay captcha pero tampoco los labels/patrones
+        conocidos → SUNAT cambió el HTML; hay que recalibrar los parsers.
+    """
+    if not html:
+        return "estructura_desconocida"
+    if _parse_detalle(html).get("Número de RUC") or _parse_lista(html):
+        return None
+    if _CAPTCHA_REAL_RE.search(html):
+        return "captcha_real"
+    return "estructura_desconocida"
+
+
 # ============================================================================
 # API pública
 # ============================================================================
@@ -493,7 +522,16 @@ def consultar_ruc(
 
     raw = _parse_detalle(html)
     if not raw or not raw.get("Número de RUC"):
-        logger.info("SUNAT no devolvio detalle parseable para RUC %s", ruc)
+        diagnostico = diagnosticar_html_sunat(html)
+        if diagnostico:
+            # Distinguible en logs: "captcha_real" / "estructura_desconocida" es
+            # un problema del scraper (alerta operativa), no un RUC inexistente.
+            logger.warning(
+                "SUNAT no devolvio detalle parseable para RUC %s · diagnostico=%s",
+                ruc, diagnostico,
+            )
+        else:
+            logger.info("SUNAT no devolvio detalle parseable para RUC %s", ruc)
         return None
 
     # El campo "Número de RUC" viene como "12345 - RAZON SOCIAL"
@@ -581,6 +619,143 @@ def buscar_por_razon_social(
             session.close()
 
     return _parse_lista(html)
+
+
+# ============================================================================
+# Representantes legales (acción getRepLeg) — insumo de ALT12
+# ============================================================================
+
+@dataclass
+class RepresentanteLegal:
+    """Representante legal declarado ante SUNAT (consulta getRepLeg)."""
+
+    tipo_documento: str
+    nro_documento: str
+    nombre: str
+    cargo: str
+    fecha_desde: Optional[date] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        if self.fecha_desde:
+            d["fecha_desde"] = self.fecha_desde.isoformat()
+        return d
+
+
+_TIPOS_DOC_REP = ("DNI", "CE", "C.E.", "CARNET EXT.", "PASAPORTE", "RUC", "OTROS")
+
+
+def _parse_representantes(html: str) -> list[RepresentanteLegal]:
+    """
+    Extrae la tabla de representantes del HTML de getRepLeg.
+
+    Estructura observada (dump 25_getRepLeg.html):
+      <table class="table"> con columnas
+      Documento | Nro. Documento | Nombre | Cargo | Fecha Desde
+    """
+    decoded = html_module.unescape(html)
+    reps: list[RepresentanteLegal] = []
+    for tr in re.finditer(r"<tr[^>]*>([\s\S]*?)</tr>", decoded, re.I):
+        celdas = [
+            _strip_tags(td)
+            for td in re.findall(r"<t[dh][^>]*>([\s\S]*?)</t[dh]>", tr.group(1), re.I)
+        ]
+        celdas = [c for c in celdas if c]
+        # Fila de datos: 5 columnas y la 1.ª es un tipo de documento conocido
+        if len(celdas) == 5 and celdas[0].upper().rstrip(".") in (
+            t.rstrip(".") for t in _TIPOS_DOC_REP
+        ):
+            reps.append(RepresentanteLegal(
+                tipo_documento=celdas[0].upper(),
+                nro_documento=celdas[1],
+                nombre=celdas[2],
+                cargo=celdas[3],
+                fecha_desde=_parse_fecha_sunat(celdas[4]),
+            ))
+    return reps
+
+
+def consultar_representantes(
+    ruc: str,
+    *,
+    timeout: float = 20.0,
+    session: Optional[requests.Session] = None,
+) -> list[RepresentanteLegal]:
+    """
+    Consulta los representantes legales de un RUC (acción getRepLeg).
+
+    Insumo de ALT12: ¿el firmante del certificado está facultado según SUNAT?
+    Requiere encadenar dos consultas: consPorRuc (para obtener `numRnd` y la
+    razón social) y luego getRepLeg.
+
+    Devuelve [] si el RUC no existe, no tiene representantes declarados, o
+    SUNAT no respondió (el detalle queda en logs, ver diagnosticar_html_sunat).
+    """
+    if not re.match(r"^\d{11}$", ruc):
+        raise ValueError(f"RUC debe ser 11 digitos: {ruc!r}")
+
+    own_session = session is None
+    if session is None:
+        session = _crear_session_sunat()
+
+    try:
+        r_form = _request_with_retry(
+            session, "GET", HOST + FORM_PATH,
+            timeout=timeout, description=f"bootstrap repleg {ruc}",
+        )
+        if r_form is None or r_form.status_code >= 400:
+            return []
+
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": HOST + FORM_PATH,
+            "Origin": HOST,
+        }
+        body_ruc = {
+            "accion": "consPorRuc", "razSoc": "", "nroRuc": ruc, "nrodoc": "",
+            "search1": ruc, "search2": "", "search3": "", "tipdoc": "1",
+            "rbtnTipo": "1", "codigo": "", "contexto": "ti-it", "modo": "1",
+            "token": _fake_captcha_token(),
+        }
+        r_det = _request_with_retry(
+            session, "POST", HOST + SEARCH_PATH, data=body_ruc, headers=headers,
+            timeout=timeout, description=f"detalle repleg {ruc}",
+        )
+        if r_det is None or r_det.status_code >= 400:
+            return []
+        r_det.encoding = _detectar_encoding(r_det.headers.get("Content-Type", ""))
+        html_det = r_det.text
+
+        # getRepLeg exige el numRnd de la página de detalle + la razón social
+        m_rnd = re.search(r'name="numRnd"\s+value="([^"]*)"', html_det)
+        m_raz = re.search(r"\d{11}\s*-\s*([^<]+)<", html_det)
+        body_rep = {
+            "accion": "getRepLeg", "nroRuc": ruc,
+            "desRuc": _strip_tags(m_raz.group(1)) if m_raz else "",
+            "contexto": "ti-it", "modo": "1",
+            "numRnd": m_rnd.group(1) if m_rnd else "",
+            "token": _fake_captcha_token(),
+        }
+        r_rep = _request_with_retry(
+            session, "POST", HOST + SEARCH_PATH, data=body_rep, headers=headers,
+            timeout=timeout, description=f"getRepLeg {ruc}",
+        )
+        if r_rep is None or r_rep.status_code >= 400:
+            return []
+        r_rep.encoding = _detectar_encoding(r_rep.headers.get("Content-Type", ""))
+
+        if SUNAT_THROTTLE_DELAY > 0:
+            time.sleep(SUNAT_THROTTLE_DELAY)
+
+        reps = _parse_representantes(r_rep.text)
+        if not reps:
+            diagnostico = diagnosticar_html_sunat(r_rep.text)
+            if diagnostico == "captcha_real":
+                logger.warning("SUNAT getRepLeg %s · diagnostico=captcha_real", ruc)
+        return reps
+    finally:
+        if own_session:
+            session.close()
 
 
 # ============================================================================

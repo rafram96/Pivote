@@ -18,7 +18,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional
 
 import requests
@@ -248,7 +248,7 @@ def _parse_timestamp_json(ts_str: Optional[str]) -> Optional[date]:
     if not m:
         return None
     ts = int(m.group(1)) / 1000
-    return datetime.utcfromtimestamp(ts).date()
+    return datetime.fromtimestamp(ts, tz=timezone.utc).date()
 
 
 # ---------------------------------------------------------------------------

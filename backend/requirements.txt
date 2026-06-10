@@ -13,3 +13,6 @@ rapidfuzz>=3.0          # fuzzy match razón social (sunat.py)
 
 # Cache SUNAT en PostgreSQL (backend/scraping/sunat_cache.py)
 psycopg2-binary>=2.9
+
+# Dev (tests offline en backend/tests/ — no se necesita en el servidor)
+pytest>=8.0
