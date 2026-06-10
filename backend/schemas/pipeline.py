@@ -128,6 +128,18 @@ class ProgresoJob(_Model):
     mensaje: Optional[str] = None
 
 
+# ── El concurso (la unidad mental del usuario; el job es plomería) ───────────
+class Concurso(_ModelLax):
+    """Entidad central del panel (decisión: modelarla desde el día 1 — ver
+    docs/frontend/README.md). Un concurso agrupa los análisis (jobs) de sus
+    N postores y habilita el cuadro comparativo y el histórico."""
+    concurso_id: str
+    nomenclatura: str                      # "CP-02-2025/GOB.REG.HVCA/C"
+    entidad: Optional[str] = None          # entidad convocante
+    fecha_presentacion: Optional[datetime] = None
+    creado_en: Optional[datetime] = None
+
+
 # ── El registro del job (PostgreSQL) ─────────────────────────────────────────
 class Job(_ModelLax):
     """Estado persistente del análisis. El orquestador lo actualiza tras cada etapa
@@ -136,7 +148,8 @@ class Job(_ModelLax):
     aparte (no se embeben aquí para mantener el registro liviano)."""
     job_id: str
     analisis_id: str
-    concurso: Optional[str] = None
+    concurso_id: Optional[str] = None      # FK a Concurso (panel agrupa por esto)
+    concurso: Optional[str] = None         # texto libre del espejo (_meta.concurso)
     postor: Optional[str] = None
     estado: JobEstado = JobEstado.RECIBIDO
     etapas: list[ResultadoEtapa] = Field(default_factory=list)
