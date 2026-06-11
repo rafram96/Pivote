@@ -48,3 +48,6 @@ Thumbs.db
 !**/package-lock.json
 !**/tsconfig.json
 !mcp-server/cowork-config-ejemplo.json
+
+# Datos locales de la API del pivote (jobs, espejos, entregables)
+/backend/datos_pivote/
