@@ -136,10 +136,10 @@ class Builder:
         self.r += 1
 
 
-def generar_excel(espejo: dict, salida: Path) -> Path:
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Evaluación"
+def construir_hoja_evaluacion(ws, espejo: dict) -> None:
+    """Construye la hoja de evaluación (5 partes) en un worksheet existente.
+    La usa este script (hoja única) y `entregables/excel_final.py` (hoja CLAUDE
+    dentro del Excel final con Base de Datos + hojas por profesional)."""
     for col, w in WIDTHS.items():
         ws.column_dimensions[col].width = w
     b = Builder(ws)
@@ -230,6 +230,12 @@ def generar_excel(espejo: dict, salida: Path) -> Path:
     if re_.get("nota"):
         b.kv("NOTA:", re_["nota"])
 
+
+def generar_excel(espejo: dict, salida: Path) -> Path:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "CLAUDE"
+    construir_hoja_evaluacion(ws, espejo)
     salida.parent.mkdir(parents=True, exist_ok=True)
     wb.save(salida)
     return salida
