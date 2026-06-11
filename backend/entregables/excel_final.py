@@ -30,7 +30,7 @@ from reglas import anios, dias_efectivos_profesional, dias_inclusivos, restar_pa
 from scripts.generar_excel import (
     AL_HEAD, AL_WRAP, BORDER, F_BOLD, F_CELL, F_HEAD, F_PARTE, F_PROF,
     FILL_BACKEND, FILL_CLAUDE, FILL_HEAD, FILL_PARTE, FILL_PROF,
-    FMT_DEC, FMT_INT, construir_hoja_evaluacion,
+    FMT_DEC, FMT_FECHA, FMT_INT, construir_hoja_evaluacion, fecha_excel,
 )
 
 Paralizaciones = dict[tuple[int, int], list[tuple[date, date]]]
@@ -83,7 +83,7 @@ def construir_hoja_base_datos(ws, espejo: dict) -> int:
             valores = [
                 prof.get("cargo"), prof.get("n_prof"), prof.get("nombre"), e.get("n"),
                 e.get("entidad_emisora"), e.get("proyecto"), e.get("cui"),
-                e.get("fecha_inicial"), e.get("fecha_final"),
+                fecha_excel(e.get("fecha_inicial")), fecha_excel(e.get("fecha_final")),
                 e.get("dias"), e.get("meses"), e.get("anios"),
                 e.get("cargo_ocupado"), e.get("incluye_covid"), e.get("traslape"),
                 e.get("folio"), e.get("observaciones"),
@@ -91,6 +91,8 @@ def construir_hoja_base_datos(ws, espejo: dict) -> int:
             for i, v in enumerate(valores, start=1):
                 c = ws.cell(r, i, v)
                 c.font, c.border, c.alignment, c.fill = F_CELL, BORDER, AL_WRAP, fill
+                if i in (8, 9) and isinstance(v, date):
+                    c.number_format = FMT_FECHA
                 if i == 10 and isinstance(v, (int, float)):
                     c.number_format = FMT_INT
                 if i in (11, 12) and isinstance(v, (int, float)):
@@ -130,6 +132,8 @@ def construir_hoja_profesional(ws, prof: dict, paralizaciones: Paralizaciones) -
             c = ws.cell(r, i, v)
             c.font = F_BOLD if bold else F_CELL
             c.border, c.alignment = BORDER, AL_WRAP
+            if i in (2, 3) and isinstance(v, date):
+                c.number_format = FMT_FECHA   # presentación dd/mm/yy
             if i == 4 and isinstance(v, (int, float)):
                 c.number_format = FMT_INT
             if v not in (None, ""):
@@ -166,17 +170,16 @@ def construir_hoja_profesional(ws, prof: dict, paralizaciones: Paralizaciones) -
             r += 1
             continue
 
-        fila("Periodo certificado", ini.isoformat(), fin.isoformat(),
-             dias_inclusivos(ini, fin))
+        fila("Periodo certificado", ini, fin, dias_inclusivos(ini, fin))
 
         paral = paralizaciones.get((n_prof, n_exp), [])
         for k, (p_ini, p_fin) in enumerate(paral, start=1):
-            fila(f"Paralización {k} de la obra (InfoObras)", p_ini.isoformat(),
-                 p_fin.isoformat(), dias_inclusivos(p_ini, p_fin), backend=True)
+            fila(f"Paralización {k} de la obra (InfoObras)", p_ini, p_fin,
+                 dias_inclusivos(p_ini, p_fin), backend=True)
 
         tramos = restar_paralizaciones((ini, fin), paral)
         for k, (t_ini, t_fin) in enumerate(tramos, start=1):
-            fila(f"Tramo efectivo {k}", t_ini.isoformat(), t_fin.isoformat(),
+            fila(f"Tramo efectivo {k}", t_ini, t_fin,
                  dias_inclusivos(t_ini, t_fin), backend=bool(paral))
         efectivo = sum(dias_inclusivos(a, b) for a, b in tramos)
         fila(f"EFECTIVO EXPERIENCIA {n_exp}", "", "", efectivo, bold=True,

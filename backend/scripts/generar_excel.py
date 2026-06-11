@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import date as _date
 from pathlib import Path
 
 import openpyxl
@@ -54,6 +55,20 @@ AL_TITLE = Alignment(vertical="center", horizontal="left")
 FMT_MONEY = "#,##0.00"
 FMT_DEC = "0.00"
 FMT_INT = "#,##0"
+FMT_FECHA = "dd/mm/yy"   # formato de presentación pedido por el cliente
+
+
+def fecha_excel(v):
+    """ISO 'YYYY-MM-DD' → date real (NOTA 13: fechas en formato fecha, se
+    muestran dd/mm/yy). Sentinels ('POR VERIFICAR…') y parciales quedan texto."""
+    if isinstance(v, _date):
+        return v
+    if isinstance(v, str) and len(v) == 10:
+        try:
+            return _date.fromisoformat(v)
+        except ValueError:
+            return v
+    return v
 
 # Anchos del formato del ingeniero (rejilla compartida por las 5 partes)
 WIDTHS = {"A": 6, "B": 25, "C": 35, "D": 30, "E": 41, "F": 22, "G": 18, "H": 18,
@@ -103,7 +118,7 @@ class Builder:
             c = ws.cell(self.r, i, v)
             c.font = F_BOLD if bold else F_CELL
             c.border, c.alignment = BORDER, AL_WRAP
-            if i in fmts and isinstance(v, (int, float)):
+            if i in fmts and isinstance(v, (int, float, _date)):
                 c.number_format = fmts[i]
             if v not in (None, ""):
                 c.fill = FILL_BACKEND if i in backend_cols else FILL_CLAUDE
@@ -188,7 +203,7 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
                "CARGO EMISOR", "¿VÁLIDO EMITIR?", "FECHA INI", "FECHA FIN", "FECHA EMISIÓN", "FOLIO",
                "DÍAS", "MESES", "AÑOS", "¿ANT. COLEG.?", "CARGO OCUPÓ", "¿CARGO BASES?",
                "¿FUNCIONES?", "¿ANTES CULMINAR?", "¿COVID?", "¿TIPO OBRA?", "OBSERVACIONES"]
-    m4 = {12: FMT_INT, 13: FMT_DEC, 14: FMT_DEC}
+    m4 = {8: FMT_FECHA, 9: FMT_FECHA, 10: FMT_FECHA, 12: FMT_INT, 13: FMT_DEC, 14: FMT_DEC}
     for prof in espejo.get("profesionales", []):
         b.profblock(f"PROFESIONAL {prof.get('n_prof')}: {prof.get('cargo', '')}")
         b.headers(["No", "CARGO", "DETALLE", "INFORMACIÓN DE LA PROPUESTA", "FOLIO", "PUNTAJE"])
@@ -203,7 +218,8 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
         for e in prof.get("experiencias", []):
             b.row([e.get("n"), e.get("entidad_emisora"), e.get("proyecto"), e.get("tipo_documento"),
                    e.get("nombre_emisor"), e.get("cargo_emisor"), e.get("cargo_valido_emitir"),
-                   e.get("fecha_inicial"), e.get("fecha_final"), e.get("fecha_emision"), e.get("folio"),
+                   fecha_excel(e.get("fecha_inicial")), fecha_excel(e.get("fecha_final")),
+                   fecha_excel(e.get("fecha_emision")), e.get("folio"),
                    e.get("dias"), e.get("meses"), e.get("anios"), e.get("anterior_colegiatura"),
                    e.get("cargo_ocupado"), e.get("cargo_bases_valido"), e.get("funciones_similares"),
                    e.get("cert_antes_culminar"), e.get("incluye_covid"), e.get("tipo_obra_valido"),
