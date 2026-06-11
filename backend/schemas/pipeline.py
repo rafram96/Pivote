@@ -151,6 +151,7 @@ class Job(_ModelLax):
     concurso_id: Optional[str] = None      # FK a Concurso (panel agrupa por esto)
     concurso: Optional[str] = None         # texto libre del espejo (_meta.concurso)
     postor: Optional[str] = None
+    origen: Optional[str] = None           # "mcp" (automático desde Claude) | "dropzone"
     estado: JobEstado = JobEstado.RECIBIDO
     etapas: list[ResultadoEtapa] = Field(default_factory=list)
     observaciones: list[Observacion] = Field(default_factory=list)

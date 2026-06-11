@@ -24,6 +24,9 @@ class Repositorio(Protocol):
     def listar(self) -> list[pipeline.Job]: ...
     def guardar_espejo(self, job_id: str, espejo: dict) -> None: ...
     def cargar_espejo(self, job_id: str) -> Optional[dict]: ...
+    def guardar_concurso(self, concurso: pipeline.Concurso) -> None: ...
+    def cargar_concurso(self, concurso_id: str) -> Optional[pipeline.Concurso]: ...
+    def listar_concursos(self) -> list[pipeline.Concurso]: ...
 
 
 class RepositorioMemoria:
@@ -32,6 +35,7 @@ class RepositorioMemoria:
     def __init__(self):
         self._jobs: dict[str, str] = {}      # job_id → JSON (simula serialización)
         self._espejos: dict[str, str] = {}
+        self._concursos: dict[str, str] = {}
 
     def guardar(self, job: pipeline.Job) -> None:
         self._jobs[job.job_id] = job.model_dump_json()
@@ -49,6 +53,16 @@ class RepositorioMemoria:
     def cargar_espejo(self, job_id: str) -> Optional[dict]:
         crudo = self._espejos.get(job_id)
         return json.loads(crudo) if crudo else None
+
+    def guardar_concurso(self, concurso: pipeline.Concurso) -> None:
+        self._concursos[concurso.concurso_id] = concurso.model_dump_json()
+
+    def cargar_concurso(self, concurso_id: str) -> Optional[pipeline.Concurso]:
+        crudo = self._concursos.get(concurso_id)
+        return pipeline.Concurso.model_validate_json(crudo) if crudo else None
+
+    def listar_concursos(self) -> list[pipeline.Concurso]:
+        return [pipeline.Concurso.model_validate_json(c) for c in self._concursos.values()]
 
 
 class RepositorioArchivos:
@@ -84,6 +98,22 @@ class RepositorioArchivos:
     def cargar_espejo(self, job_id: str) -> Optional[dict]:
         ruta = self._ruta(job_id, "espejo")
         return json.loads(ruta.read_text(encoding="utf-8")) if ruta.exists() else None
+
+    def guardar_concurso(self, concurso: pipeline.Concurso) -> None:
+        self._ruta(concurso.concurso_id, "concurso").write_text(
+            concurso.model_dump_json(indent=2), encoding="utf-8")
+
+    def cargar_concurso(self, concurso_id: str) -> Optional[pipeline.Concurso]:
+        ruta = self._ruta(concurso_id, "concurso")
+        if not ruta.exists():
+            return None
+        return pipeline.Concurso.model_validate_json(ruta.read_text(encoding="utf-8"))
+
+    def listar_concursos(self) -> list[pipeline.Concurso]:
+        return [
+            pipeline.Concurso.model_validate_json(p.read_text(encoding="utf-8"))
+            for p in sorted(self.dir.glob("*.concurso.json"))
+        ]
 
 
 # La implementación PostgreSQL vive en el servidor (tabla jobs JSONB + espejos).
