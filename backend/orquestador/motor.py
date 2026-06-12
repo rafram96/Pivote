@@ -74,7 +74,8 @@ class Motor:
         se saltan, así que re-llamar tras una caída continúa donde quedó."""
         job = self._cargar(job_id)
         espejo = self._repo.cargar_espejo(job_id) or {}
-        ctx = Contexto(job=job, espejo=espejo)
+        ctx = Contexto(job=job, espejo=espejo,
+                       enriquecimiento=self._repo.cargar_enriquecimiento(job_id))
 
         job.estado = pipeline.JobEstado.EN_PROCESO
         self._checkpoint(job)
@@ -95,6 +96,7 @@ class Motor:
                     for res in resultados:
                         self._registrar(job, res)
                         abortar = abortar or res.estado == pipeline.EstadoEtapa.ERROR
+                    self._repo.guardar_enriquecimiento(job.job_id, ctx.enriquecimiento)
                     self._checkpoint(job, etapa_actual=nombre)
                     if abortar:
                         return self._abortar(job)
@@ -107,6 +109,7 @@ class Motor:
 
             res = self._ejecutar(nombre, ctx)
             self._registrar(job, res)
+            self._repo.guardar_enriquecimiento(job.job_id, ctx.enriquecimiento)
             self._checkpoint(job, etapa_actual=nombre)
             if res.estado == pipeline.EstadoEtapa.ERROR:
                 return self._abortar(job)
@@ -142,6 +145,7 @@ class Motor:
             espejo=espejo,
             solo_items={(n_prof, n_exp)},
             datos_humano={(n_prof, n_exp): dato},
+            enriquecimiento=self._repo.cargar_enriquecimiento(job_id),
         )
 
         orden = pipeline.Etapa.orden()
@@ -151,6 +155,7 @@ class Motor:
             # vale la pena el pool) — y solo si la etapa pertenece al tramo.
             res = self._ejecutar(nombre, ctx)
             self._registrar(job, res, parcial=True)
+            self._repo.guardar_enriquecimiento(job.job_id, ctx.enriquecimiento)
             if res.estado == pipeline.EstadoEtapa.ERROR:
                 self._checkpoint(job)
                 return self._abortar(job)

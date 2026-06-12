@@ -95,6 +95,11 @@ class ItemRevision(_Model):
     candidatos: list[dict] = Field(default_factory=list)  # para que el humano elija o confirme
     accion_sugerida: Optional[str] = None  # "pegar CUI", "confirmar firmante facultado"
     resuelto: bool = False
+    # Contexto para que el humano decida sin abrir nada más (lo muestra el panel):
+    profesional: Optional[str] = None
+    cargo: Optional[str] = None
+    proyecto: Optional[str] = None
+    fechas: Optional[str] = None
 
 
 # ── Métrica y resultado por etapa (el checkpoint) ────────────────────────────

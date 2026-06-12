@@ -25,15 +25,19 @@ from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 from entregables import construir_zip_infoobras, generar_excel_final
-from orquestador import Motor, RepositorioArchivos, etapas_esqueleto
+from orquestador import Motor, RepositorioArchivos, etapas_esqueleto, etapas_reales
 from schemas import pipeline
 from schemas.espejo import JsonEspejo
 
 DATA_DIR = Path(os.getenv("PIVOTE_DATA_DIR", "datos_pivote"))
 
-app = FastAPI(title="InfoObras Pivote API", version="0.1.0")
+app = FastAPI(title="InfoObras Pivote API", version="0.2.0")
 repo = RepositorioArchivos(DATA_DIR)
-motor = Motor(etapas_esqueleto(), repo)
+# PIVOTE_ETAPAS=esqueleto -> stubs (tests/desarrollo sin red); default: reales.
+if os.getenv("PIVOTE_ETAPAS", "real") == "esqueleto":
+    motor = Motor(etapas_esqueleto(), repo)
+else:
+    motor = Motor(etapas_reales(DATA_DIR), repo)
 
 ETAPA_FUENTE = {
     pipeline.Etapa.SUNAT: "SUNAT",
@@ -204,21 +208,30 @@ def resumen(job_id: str):
     espejo = _espejo_o_404(job_id)
     decisiones = _decisiones(job_id)
 
+    enr = repo.cargar_enriquecimiento(job_id)
     veredictos = []
     for p in espejo.get("profesionales", []):
         total = p.get("total") or {}
+        np_ = p.get("n_prof")
+        d = enr.get(f"prof:{np_}") or {}
+        motivo = None
+        if d.get("dias_paralizados") or d.get("dias_traslape"):
+            partes = []
+            if d.get("dias_paralizados"):
+                partes.append(f"paralizaciones de obra: -{d['dias_paralizados']} dias")
+            if d.get("dias_traslape"):
+                partes.append(f"traslapes entre experiencias: -{d['dias_traslape']} dias")
+            motivo = " - ".join(partes)
         veredictos.append({
-            "n_prof": p.get("n_prof"),
+            "n_prof": np_,
             "cargo": p.get("cargo"),
             "nombre": p.get("nombre"),
             "cumple_claude": p.get("cumple") or "(sin veredicto en el espejo)",
             "anios_brutos": total.get("anios") or 0,
-            # La verificación (días efectivos / paralizaciones) la llena la
-            # etapa de reglas cuando corre con datos de InfoObras.
-            "cumple_backend": None,
-            "anios_efectivos": None,
-            "motivo_backend": None,
-            "fuente": None,
+            "cumple_backend": d.get("cumple_backend"),
+            "anios_efectivos": d.get("anios_efectivos"),
+            "motivo_backend": motivo,
+            "fuente": "InfoObras" if d.get("dias_paralizados") else ("recalculo" if d else None),
         })
 
     alertas = []

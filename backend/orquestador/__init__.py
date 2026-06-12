@@ -11,11 +11,12 @@ Uso mínimo:
     job = motor.resolver_revision(job.job_id, n_prof=3, n_exp=2, dato={"cui": "2338373"})
 """
 from .etapas import Contexto, ErrorEstructural, EtapaBase, EtapaIngesta, EtapaStub, etapas_esqueleto
+from .etapas_reales import etapas_reales
 from .motor import Motor
 from .repositorio import Repositorio, RepositorioArchivos, RepositorioMemoria
 
 __all__ = [
     "Contexto", "ErrorEstructural", "EtapaBase", "EtapaIngesta", "EtapaStub",
-    "etapas_esqueleto", "Motor", "Repositorio", "RepositorioArchivos",
+    "etapas_esqueleto", "etapas_reales", "Motor", "Repositorio", "RepositorioArchivos",
     "RepositorioMemoria",
 ]

@@ -37,6 +37,7 @@ ESPEJO = {
 def cliente(tmp_path, monkeypatch):
     """App fresca con datos en tmp_path (aisla cada test)."""
     monkeypatch.setenv("PIVOTE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("PIVOTE_ETAPAS", "esqueleto")  # sin red en tests
     import api.app as modulo
     importlib.reload(modulo)
     from fastapi.testclient import TestClient

@@ -41,6 +41,19 @@ class Contexto:
     # Dato que el humano aportó al resolver un ItemRevision:
     # {(n_prof, n_exp): {"cui": "...", ...}}
     datos_humano: dict = field(default_factory=dict)
+    # Lo que las etapas van llenando (CUI, paralizaciones, SUNAT, días efectivos).
+    # Claves string para serializar: "n_prof:n_exp" por experiencia, "prof:n" por
+    # profesional. El motor lo persiste tras cada etapa (sobrevive reanudaciones).
+    enriquecimiento: dict = field(default_factory=dict)
+
+    def items_experiencia(self):
+        """Itera (exp_dict, (n_prof, n_exp)) respetando `solo_items`."""
+        for p in self.espejo.get("profesionales", []):
+            for e in p.get("experiencias", []):
+                clave = (p.get("n_prof"), e.get("n"))
+                if self.solo_items is not None and clave not in self.solo_items:
+                    continue
+                yield e, clave
 
 
 @runtime_checkable

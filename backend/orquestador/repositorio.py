@@ -27,6 +27,8 @@ class Repositorio(Protocol):
     def guardar_concurso(self, concurso: pipeline.Concurso) -> None: ...
     def cargar_concurso(self, concurso_id: str) -> Optional[pipeline.Concurso]: ...
     def listar_concursos(self) -> list[pipeline.Concurso]: ...
+    def guardar_enriquecimiento(self, job_id: str, datos: dict) -> None: ...
+    def cargar_enriquecimiento(self, job_id: str) -> dict: ...
 
 
 class RepositorioMemoria:
@@ -63,6 +65,13 @@ class RepositorioMemoria:
 
     def listar_concursos(self) -> list[pipeline.Concurso]:
         return [pipeline.Concurso.model_validate_json(c) for c in self._concursos.values()]
+
+    def guardar_enriquecimiento(self, job_id: str, datos: dict) -> None:
+        self._espejos[f"enr-{job_id}"] = json.dumps(datos, ensure_ascii=False)
+
+    def cargar_enriquecimiento(self, job_id: str) -> dict:
+        crudo = self._espejos.get(f"enr-{job_id}")
+        return json.loads(crudo) if crudo else {}
 
 
 class RepositorioArchivos:
@@ -114,6 +123,14 @@ class RepositorioArchivos:
             pipeline.Concurso.model_validate_json(p.read_text(encoding="utf-8"))
             for p in sorted(self.dir.glob("*.concurso.json"))
         ]
+
+    def guardar_enriquecimiento(self, job_id: str, datos: dict) -> None:
+        self._ruta(job_id, "enriquecimiento").write_text(
+            json.dumps(datos, ensure_ascii=False, indent=1), encoding="utf-8")
+
+    def cargar_enriquecimiento(self, job_id: str) -> dict:
+        ruta = self._ruta(job_id, "enriquecimiento")
+        return json.loads(ruta.read_text(encoding="utf-8")) if ruta.exists() else {}
 
 
 # La implementación PostgreSQL vive en el servidor (tabla jobs JSONB + espejos).
