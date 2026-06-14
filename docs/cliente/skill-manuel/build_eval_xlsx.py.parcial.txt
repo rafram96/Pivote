@@ -1,0 +1,48 @@
+# build_eval_xlsx.py — de la skill `propuestas` de Manuel
+# ⚠ TRANSCRIPCIÓN PARCIAL desde captura (2026-06-11): solo se ven ~las primeras
+#   40 líneas (hasta el inicio de `def pdate`). El cuerpo de funciones que arma
+#   las secciones NO está visible. Guardado como .txt para no confundirlo con un
+#   módulo ejecutable. Pedir el archivo completo a Manuel.
+
+#!/usr/bin/env python3
+"""
+Utilidades de estilo/estructura para construir el formato de evaluación (.xlsx) con openpyxl.
+
+No es un generador "de un clic": cada proceso tiene su propia plantilla. Importa estos helpers
+y arma las secciones (Parte 1, económica, Parte 2, Partes 3-4 por profesional, Parte 5) con los
+datos ya extraídos. Respeta references/reglas.md (fechas como fecha, montos como número, rojo =
+incumple/traslape/COVID, verde = por verificar) y references/estructura_formato.md.
+
+Requisitos: pip install openpyxl
+"""
+import datetime
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+# Paleta semántica
+FILL_TITLE = PatternFill("solid", fgColor="1F4E78")
+FILL_HDR   = PatternFill("solid", fgColor="2E75B6")
+FILL_SUB   = PatternFill("solid", fgColor="538DD5")
+FILL_LBL   = PatternFill("solid", fgColor="DDEBF7")
+FILL_RED   = PatternFill("solid", fgColor="FFC7CE")   # incumple / traslape / COVID
+FILL_GREEN = PatternFill("solid", fgColor="C6EFCE")   # por verificar / duda
+F_TITLE = Font(bold=True, size=13, color="FFFFFF")
+F_HDR   = Font(bold=True, size=9,  color="FFFFFF")
+F_RED   = Font(color="9C0006", size=9)
+F_GREEN = Font(color="006100", size=9)
+F9      = Font(size=9)
+_thin   = Side(style="thin", color="BFBFBF")
+BORDER  = Border(left=_thin, right=_thin, top=_thin, bottom=_thin)
+WRAP    = Alignment(wrap_text=True, vertical="top")
+CTR     = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+# Paleta para diferenciar profesionales en la hoja "Base de Datos"
+PROF_PALETTE = ["DDEBF7", "FCE4D6", "E2EFDA", "FFF2CC", "FBE5D6", "E4DFEC", "D9E1F2", "EAD1DC"]
+
+def pdate(s):
+    """'dd/mm/aaaa' -> datetime.date (o None)."""
+    if not s or not isinstance(s, str): return None
+    try:
+        d, m, y = s.strip().split("/"); return datetime.date(int(y), int(m), int(d))
+    except Exception:
+        # [TRUNCADO en la captura — falta el resto del archivo]
+        ...

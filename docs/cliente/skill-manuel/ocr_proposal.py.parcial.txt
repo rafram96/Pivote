@@ -1,0 +1,47 @@
+# ocr_proposal.py — de la skill `propuestas` de Manuel
+# ⚠ TRANSCRIPCIÓN PARCIAL desde captura (2026-06-11): solo se ven ~las primeras
+#   40 líneas (hasta el inicio de `ensure_spa`). Guardado como .txt. Pedir el
+#   archivo completo a Manuel cuando esté disponible — este es el OCR que la
+#   skill del pivote (Paso 0) debe reusar, no reescribir.
+
+#!/usr/bin/env python3
+"""
+OCR reanudable (español) para PDFs escaneados grandes (cientos/miles de páginas).
+
+Aprendizajes incorporados:
+- Tesseract con idioma 'spa' (descarga tessdata_fast si falta) en un TESSDATA_PREFIX escribible.
+- OMP_THREAD_LIMIT=1 por proceso => evita la sobre-suscripción de hilos de Tesseract.
+  Esto es lo que da el gran salto de velocidad (clave). Paraleliza con Pool(n° de CPUs).
+- Idempotente y auto-limitado por tiempo: cada corrida procesa las páginas que falten hasta
+  agotar un presupuesto de segundos, y al volver a llamarse retoma donde quedó. Pensado para
+  shells con timeout corto (~45 s) que NO conservan procesos de fondo entre llamadas.
+
+Uso:
+    export TESSDATA_PREFIX=/tmp/tessdata    # opcional; el script lo arma si falta
+    python ocr_proposal.py <ruta.pdf> <carpeta_salida> [budget_seg] [dpi] [nprocs]
+    # Llama repetidamente hasta que imprima ALLDONE. Cada página -> <salida>/p0001.txt ...
+
+Requisitos: pip install pymupdf ; tesseract-ocr instalado en el sistema.
+"""
+import os, sys, time, subprocess, urllib.request
+from multiprocessing import Pool
+
+PDF    = sys.argv[1]
+OUT    = sys.argv[2]
+BUDGET = float(sys.argv[3]) if len(sys.argv) > 3 else 33
+DPI    = int(sys.argv[4])   if len(sys.argv) > 4 else 120
+NPROC  = int(sys.argv[5])   if len(sys.argv) > 5 else (os.cpu_count() or 2)
+
+os.makedirs(OUT, exist_ok=True)
+
+def ensure_spa():
+    prefix = os.environ.get("TESSDATA_PREFIX") or "/tmp/tessdata"
+    os.makedirs(prefix, exist_ok=True)
+    # copia los traineddata del sistema si existen
+    for base in ("/usr/share/tesseract-ocr/4.00/tessdata", "/usr/share/tesseract-ocr/tessdata",
+                 "/usr/share/tessdata"):
+        if os.path.isdir(base):
+            for f in os.listdir(base):
+                dst = os.path.join(prefix, f)
+                if f.endswith(".traineddata") and not os.path.exists(dst):
+                    ...  # [TRUNCADO en la captura — falta el resto del archivo]

@@ -1,6 +1,11 @@
 # Validador determinístico — spec de las 15 NOTAS
 
-> **Status: 📝 borrador reconstruido — pendiente confirmar contra `references/reglas.md`
+> **Status: ✅ N1–N11 CONFIRMADAS contra `reglas.md` de Manuel (capturas parciales,
+> 2026-06-11) — ver `docs/cliente/skill-manuel/`. Pendiente solo N12–N15 (no
+> visibles en la captura). Correcciones del diff ya aplicadas: numeración 6/8
+> resuelta (N8 = no omitir, no "sub-periodos"); ventana COVID = 16/03 (no 15/03).**
+>
+> _(histórico)_ borrador reconstruido — pendiente confirmar contra `references/reglas.md`
 > de la skill de Manuel.** Fuentes de esta reconstrucción:
 >
 > 1. `propuesta-command.docx` (2026-06-09) — el SKILL.md real de la skill `propuestas`
@@ -38,12 +43,12 @@ Claude que el backend solo re-chequea parcialmente (◐), o puramente del lado C
 | 3 | ISOs: buscar en todo el documento, ≥4 variaciones de búsqueda | ✘ | ✓ alta |
 | 4 | PMP: solo emitido por PMI, con vigencia de 2 años | ◐ | ✓ alta |
 | 5 | Leer del certificado, no de la autodeclaración | ✘ | ✓ alta |
-| 6 | Una fila por periodo atómico del certificado | ✔ | ⚠ numeración 6/8 |
+| 6 | Una fila por periodo atómico del certificado | ✔ | ✓ confirmada |
 | 7 | Orden: profesionales según documento; experiencias por fecha final asc | ✔ | ✓ alta |
-| 8 | Sub-periodos de "experiencia efectiva" del certificado | ✔ | ⚠ numeración 6/8 |
+| 8 | No omitir ninguna experiencia; cada periodo en su fila (refuerza N6) | ✔ | ✓ confirmada |
 | 9 | Traslapes entre periodos del mismo profesional → marcar (rojo) | ✔ | ✓ alta |
-| 10 | Ventana COVID 16/03/2020–30/06/2020 → marcar (rojo) | ✔ | ⚠ numeración 10/11 |
-| 11 | Incumplimientos / preguntas de validación que no cumplen → rojo | ✔ | ⚠ numeración 10/11 |
+| 10 | Ventana COVID 16/03/2020–30/06/2020 → marcar (rojo) | ✔ | ✓ confirmada |
+| 11 | Incumplimientos / preguntas de validación que no cumplen → rojo | ✔ | ✓ confirmada |
 | 12 | Verde = por verificar; insistir hasta 4 veces antes de marcar | ◐ | ✓ alta |
 | 13 | Fechas como fecha, montos como número | ✔ | ✓ alta |
 | 14 | Consorcio: ISO puntúa solo si TODOS los consorciados acreditan | ✔ | ✓ alta |
