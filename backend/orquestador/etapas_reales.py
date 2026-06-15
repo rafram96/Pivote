@@ -299,7 +299,8 @@ class EtapaInfoObrasReal:
             enr["valorizaciones"] = [
                 {"anio": a.anio, "mes": a.mes, "estado": getattr(a, "estado", None),
                  "fisico_real": getattr(a, "avance_fisico_real", None),
-                 "valorizado_real": getattr(a, "valorizado_real", None)}
+                 "valorizado_real": getattr(a, "valorizado_real", None),
+                 "docs": getattr(a, "num_documentos", 0)}
                 for a in (getattr(obra, "avances", []) or [])
                 if getattr(a, "anio", 0) and getattr(a, "mes", 0)
             ]

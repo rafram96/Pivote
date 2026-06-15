@@ -142,7 +142,7 @@ def construir_hoja_profesional(
     revisiones = revisiones or {}
     # A:D = cuadro de hitos (izquierda) · F:J = ficha de obra + valorizaciones
     anchos = {"A": 52, "B": 14, "C": 14, "D": 10, "E": 2,
-              "F": 5, "G": 18, "H": 14, "I": 18, "J": 14}
+              "F": 5, "G": 18, "H": 14, "I": 18, "J": 14, "K": 13}
     for col, w in anchos.items():
         ws.column_dimensions[col].width = w
     n_prof = prof.get("n_prof")
@@ -208,21 +208,23 @@ def construir_hoja_profesional(
 
         vals = sorted(fx.get("valorizaciones") or [],
                       key=lambda v: (v.get("anio") or 0, v.get("mes") or 0), reverse=True)
-        ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=10)
+        ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
         c = ws.cell(rr, 6, "VALORIZACIONES — en amarillo, las del periodo del certificado")
         c.font, c.fill = F_PARTE, FILL_PARTE
         c.alignment = Alignment(vertical="center", wrap_text=True)
         rr += 1
         for i, h in enumerate(["N°", "AÑO / MES", "AVANCE FÍSICO REAL",
-                               "VALORIZADO REAL (S/)", "ESTADO"], start=6):
+                               "VALORIZADO REAL (S/)", "ESTADO", "ARCHIVOS (ZIP)"], start=6):
             cc = ws.cell(rr, i, h)
             cc.font, cc.fill, cc.border, cc.alignment = F_HEAD, FILL_HEAD, BORDER, AL_HEAD
         rr += 1
         for n, v in enumerate(vals, start=1):
             anio, mes = v.get("anio") or 0, v.get("mes") or 0
             resaltar = _mes_en_rango(anio, mes, ini, fin)
+            ndoc = v.get("docs") or 0
             celdas = [n, f"{anio} / {_MES_ES.get(mes, mes)}",
-                      v.get("fisico_real"), v.get("valorizado_real"), v.get("estado") or ""]
+                      v.get("fisico_real"), v.get("valorizado_real"), v.get("estado") or "",
+                      f"Sí ({ndoc})" if ndoc else "—"]
             for i, val in enumerate(celdas, start=6):
                 cc = ws.cell(rr, i, val)
                 cc.font, cc.border, cc.alignment = F_CELL, BORDER, AL_WRAP

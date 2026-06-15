@@ -99,6 +99,7 @@ class AvanceMensual:
     valorizado_real: Optional[float] = None           # S/.
     pct_ejecucion_financiera: Optional[float] = None  # %
     monto_ejecucion_financiera: Optional[float] = None  # S/.
+    num_documentos: int = 0            # documentos de valorización adjuntos (van al ZIP)
 
 
 @dataclass
@@ -538,6 +539,9 @@ def _procesar_avances(raw_list: list[dict]) -> list[AvanceMensual]:
             valorizado_real=_to_float(r.get("RealFinanc")),
             pct_ejecucion_financiera=_to_float(r.get("PorcEjecFinanc")),
             monto_ejecucion_financiera=_to_float(r.get("MontoEjecFinanc")),
+            # documentos de valorización adjuntos a este avance (los que el ZIP
+            # baja a la carpeta del hito); 'lImgFisico' son imágenes, no van al ZIP
+            num_documentos=len(r.get("lImgValorizacion") or []),
         ))
     return avances
 

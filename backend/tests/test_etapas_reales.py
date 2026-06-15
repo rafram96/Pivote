@@ -532,3 +532,31 @@ def test_excel_muestra_modificaciones_de_plazo(tmp_path):
     texto = "\n".join(str(c.value) for row in wb[hoja].iter_rows()
                       for c in row if c.value)
     assert "MODIFICACIONES DE PLAZO" in texto and "Ampliación del plazo" in texto
+
+
+def test_excel_marca_valorizaciones_con_archivos(tmp_path):
+    from entregables.excel_final import generar_excel_final
+    espejo = {
+        "_meta": {}, "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N", "experiencias": [
+                {"n": 1, "proyecto": "Hospital X", "fecha_inicial": "2015-01-01",
+                 "fecha_final": "2015-12-31", "folio": "1"}]}],
+    }
+    fichas = {(1, 1): {
+        "cui": "123", "codigo_infobras": "33900", "estado": "Finalizado",
+        "valorizaciones": [
+            {"anio": 2015, "mes": 6, "estado": "En ejecución", "fisico_real": 50,
+             "valorizado_real": 100, "docs": 2},
+            {"anio": 2015, "mes": 5, "estado": "En ejecución", "fisico_real": 40,
+             "valorizado_real": 80, "docs": 0}],
+    }}
+    ruta = tmp_path / "valdocs.xlsx"
+    generar_excel_final(espejo, ruta, {}, {(1, 1): "123"}, fichas)
+    wb = openpyxl.load_workbook(ruta)
+    hoja = next(s for s in wb.sheetnames if s.startswith("P1"))
+    texto = "\n".join(str(c.value) for row in wb[hoja].iter_rows()
+                      for c in row if c.value)
+    assert "ARCHIVOS (ZIP)" in texto   # nueva columna
+    assert "Sí (2)" in texto           # valorización con 2 documentos
+    assert "—" in texto                # valorización sin documentos
