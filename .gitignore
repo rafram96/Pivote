@@ -51,3 +51,5 @@ Thumbs.db
 
 # Datos locales de la API del pivote (jobs, espejos, entregables)
 /backend/datos_pivote/
+
+/.pytest_cache

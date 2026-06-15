@@ -60,6 +60,27 @@ def _fecha_iso(v) -> Optional[date]:
     return None
 
 
+# Si el periodo del certificado solapa menos de esto con el rango de
+# valorizaciones de la obra elegida, lo más probable es que se haya emparejado
+# la obra equivocada (o que el periodo caiga en un hueco no registrado): va a
+# revisión humana. Caso 133630/Valdizán: el certificado cae entre dos registros.
+_COBERTURA_MIN = 0.5
+
+
+def _cobertura_cert(avances, cert_ini: Optional[date], cert_fin: Optional[date]) -> Optional[float]:
+    """Fracción [0..1] del periodo del certificado cubierta por el rango de
+    valorizaciones de la obra. None si faltan datos para decidir."""
+    if not (cert_ini and cert_fin) or cert_fin <= cert_ini:
+        return None
+    meses = [date(a.anio, a.mes, 1) for a in (avances or [])
+             if getattr(a, "anio", 0) and getattr(a, "mes", 0)]
+    if not meses:
+        return 0.0
+    vi, vf = min(meses), max(meses)
+    solape = (min(cert_fin, vf) - max(cert_ini, vi)).days
+    return max(0, solape) / (cert_fin - cert_ini).days
+
+
 # ── 1 · Revisión de consistencia (las notas puras del validador) ─────────────
 
 class EtapaValidacionReal:
@@ -158,7 +179,7 @@ class EtapaInfoObrasReal:
         return fetch_by_cui(cui, cert_ini, cert_fin)
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
-        ok = err = 0
+        ok = err = rev = 0
         obs: list[pipeline.Observacion] = []
         descargadas = 0
         cache: dict[str, object] = {}
@@ -230,6 +251,34 @@ class EtapaInfoObrasReal:
                             f"— no cuentan como experiencia",
                     origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
 
+            # cobertura: ¿las valorizaciones de la obra elegida cubren el periodo
+            # certificado? Si casi no solapan, el emparejamiento es dudoso (obra
+            # equivocada o periodo en un hueco) → revisión humana.
+            cob = _cobertura_cert(getattr(obra, "avances", []) or [], cert_ini, cert_fin)
+            if cob is not None and cob < _COBERTURA_MIN:
+                pct = round(cob * 100)
+                obs.append(pipeline.Observacion(
+                    codigo="COBERTURA", severidad=pipeline.Severidad.ADVERTENCIA,
+                    mensaje=f"la obra CUI {cui} ({getattr(obra, 'codigo_infobras', None) or '?'}) "
+                            f"solo cubre el {pct}% del periodo certificado — revisar si es la obra correcta",
+                    origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+                ya = any(it.n_prof == np_ and it.n_exp == ne and not it.resuelto
+                         for it in ctx.job.items_revision)
+                if not ya:
+                    prof = next((p for p in ctx.espejo.get("profesionales", [])
+                                 if p.get("n_prof") == np_), {})
+                    ctx.job.items_revision.append(pipeline.ItemRevision(
+                        n_prof=np_, n_exp=ne, etapa=self.nombre,
+                        motivo=f"el periodo del certificado solo solapa {pct}% con las "
+                               f"valorizaciones de la obra {getattr(obra, 'codigo_infobras', None) or cui}",
+                        accion_sugerida="confirmar la obra o pegar el CUI correcto",
+                        candidatos=[],
+                        profesional=prof.get("nombre"), cargo=prof.get("cargo"),
+                        proyecto=_e.get("proyecto"),
+                        fechas=f"{_e.get('fecha_inicial')} → {_e.get('fecha_final')}",
+                    ))
+                    rev += 1
+
             # descarga de documentos (acotada para la demo)
             if (self.dir_descargas and descargadas < self.max_descargas
                     and getattr(obra, "obra_id", None)):
@@ -245,8 +294,8 @@ class EtapaInfoObrasReal:
                     logger.warning("descarga obra %s: %r", cui, ex)
 
         total = sum(1 for _ in ctx.items_experiencia())
-        return _res(self.nombre, EE.OK if err == 0 else EE.ERROR_PARCIAL,
-                    _met(total, ok, 0, err), obs)
+        estado = EE.ERROR_PARCIAL if err else (EE.OK_CON_REVISION if rev else EE.OK)
+        return _res(self.nombre, estado, _met(total, ok, rev, err), obs)
 
 
 # ── 3b · Consulta a SUNAT (ALT04) ────────────────────────────────────────────

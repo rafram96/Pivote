@@ -19,7 +19,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
-from typing import Optional
+from typing import Callable, Optional
 
 import requests
 
@@ -790,10 +790,30 @@ def _estado_obra(o: dict) -> str:
     return (o.get("estObra") or o.get("estadoObra") or "").strip().upper()
 
 
+def _ventana_obra(
+    o: dict,
+    rango_valorizaciones: Optional[Callable[[object], tuple]] = None,
+) -> tuple[Optional[date], Optional[date]]:
+    """Ventana real de actividad de una obra. Las fechas de cabecera
+    (fechaIniObra/fechaFinObra) suelen quedarse cortas: caso 133630/33900, la
+    cabecera dice fin 2015-02 pero las valorizaciones llegan a 2016-07. Cuando
+    hay un fetcher de valorizaciones, la ventana se EXTIENDE con su rango."""
+    oi = _parse_timestamp_json(o.get("fechaIniObra"))
+    of = _parse_timestamp_json(o.get("fechaFinObra")) or oi
+    if rango_valorizaciones:
+        vi, vf = rango_valorizaciones(o.get("codigoObra"))
+        if vi:
+            oi = min(oi, vi) if oi else vi
+        if vf:
+            of = max(of, vf) if of else vf
+    return oi, of
+
+
 def seleccionar_obra(
     obras: list[dict],
     cert_inicio: Optional[date] = None,
     cert_fin: Optional[date] = None,
+    rango_valorizaciones: Optional[Callable[[object], tuple]] = None,
 ) -> Optional[dict]:
     """Elige la obra correcta cuando un CUI devuelve varias (caso real: CUI con
     7 registros y solo 1 finalizado).
@@ -803,7 +823,13 @@ def seleccionar_obra(
          aún no tiene todas sus valorizaciones/hitos).
       2. Entre las candidatas, la que más solapa con el periodo del certificado
          [cert_inicio, cert_fin]; sin solape, la de fecha de inicio más cercana.
+         El solape se mide sobre la ventana REAL de actividad (cabecera extendida
+         con el rango de valorizaciones, si `rango_valorizaciones` lo provee).
       3. Sin fechas del certificado, la primera de las candidatas.
+
+    `rango_valorizaciones(obra_id) -> (date|None, date|None)` es opcional e
+    inyectable: solo se consulta en el desempate multi-candidata, para no pedir
+    DatosEjecucion cuando no hace falta.
     """
     if not obras:
         return None
@@ -817,8 +843,7 @@ def seleccionar_obra(
 
     if cert_inicio and cert_fin:
         def _solape(o: dict) -> int:
-            oi = _parse_timestamp_json(o.get("fechaIniObra"))
-            of = _parse_timestamp_json(o.get("fechaFinObra")) or oi
+            oi, of = _ventana_obra(o, rango_valorizaciones)
             if not oi:
                 return -10 ** 9  # sin fecha → al fondo
             ini, fin = max(oi, cert_inicio), min(of, cert_fin)
@@ -858,13 +883,34 @@ def fetch_by_cui(
         # Un CUI puede tener varias obras (ej.: ejecución, obras complementarias,
         # supervisión, re-registros). Se elige la FINALIZADA que cubre el periodo
         # del certificado — de ahí salen los hitos de valorización correctos.
+        # El solape se mide sobre la ventana real de valorizaciones (las fechas
+        # de cabecera mienten: caso 133630/33900). El rango se consulta perezoso
+        # y con cache, solo cuando hay que desempatar entre varias finalizadas.
+        _cache_rango: dict[object, tuple] = {}
+
+        def _rango_val(obra_id):
+            if obra_id in _cache_rango:
+                return _cache_rango[obra_id]
+            rango = (None, None)
+            try:
+                avs = _procesar_avances(
+                    _extraer_datos_ejecucion(session, obra_id).get("lAvances", []))
+                meses = [date(a.anio, a.mes, 1) for a in avs
+                         if getattr(a, "anio", 0) and getattr(a, "mes", 0)]
+                if meses:
+                    rango = (min(meses), max(meses))
+            except Exception as e:  # noqa: BLE001 — portal intermitente
+                logger.warning("InfoObras: rango valorizaciones ObraId %s: %r", obra_id, e)
+            _cache_rango[obra_id] = rango
+            return rango
+
         if len(obras) > 1:
             logger.info(
                 "InfoObras: CUI %s devolvió %d obras (estados: %s) — seleccionando",
                 cui, len(obras),
                 ", ".join(sorted({_estado_obra(o) or "?" for o in obras})),
             )
-        obra_raw = seleccionar_obra(obras, cert_inicio, cert_fin)
+        obra_raw = seleccionar_obra(obras, cert_inicio, cert_fin, _rango_val)
         obra_id = obra_raw.get("codigoObra")
 
         # InfoObras a veces devuelve la obra sin codigoObra en el 1er request
@@ -877,7 +923,7 @@ def fetch_by_cui(
             time.sleep(2.0)
             obras_retry = _buscar_por_cui(session, cui)
             if obras_retry:
-                obra_raw = seleccionar_obra(obras_retry, cert_inicio, cert_fin)
+                obra_raw = seleccionar_obra(obras_retry, cert_inicio, cert_fin, _rango_val)
                 obra_id = obra_raw.get("codigoObra")
 
         if not obra_id:

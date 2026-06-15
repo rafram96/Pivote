@@ -237,3 +237,23 @@ def test_seleccionar_obra_sin_fechas_cae_a_la_primera_finalizada():
     a = _obra("Finalizado", codigoObra=7)
     b = _obra("Finalizado", codigoObra=8)
     assert infoobras.seleccionar_obra([a, b])["codigoObra"] == 7
+
+
+def test_seleccionar_obra_solape_usa_valorizaciones_no_cabecera():
+    # caso 133630: la cabecera de la obra A termina antes del certificado, pero
+    # sus valorizaciones llegan hasta 2016-07 → es la que realmente solapa.
+    # La obra B (principal) arranca DESPUÉS del certificado y por cercanía de
+    # fecha ganaría con el criterio viejo (cabecera).
+    a = _obra("Finalizado", date(2014, 10, 30), date(2015, 2, 27), codigoObra=33900)
+    b = _obra("Finalizado", date(2017, 6, 1), date(2018, 12, 1), codigoObra=71173)
+    rangos = {
+        33900: (date(2015, 1, 1), date(2016, 7, 1)),
+        71173: (date(2017, 6, 1), date(2021, 4, 1)),
+    }
+    cert_ini, cert_fin = date(2016, 6, 10), date(2017, 5, 15)
+    # sin valorizaciones (solo cabecera) gana la principal 71173 — el bug viejo
+    assert infoobras.seleccionar_obra([a, b], cert_ini, cert_fin)["codigoObra"] == 71173
+    # con el rango real de valorizaciones gana 33900 (la única que solapa)
+    elegida = infoobras.seleccionar_obra(
+        [a, b], cert_ini, cert_fin, rango_valorizaciones=lambda oid: rangos[oid])
+    assert elegida["codigoObra"] == 33900
