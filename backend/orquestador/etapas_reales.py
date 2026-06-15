@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -79,6 +79,33 @@ def _cobertura_cert(avances, cert_ini: Optional[date], cert_fin: Optional[date])
     vi, vf = min(meses), max(meses)
     solape = (min(cert_fin, vf) - max(cert_ini, vi)).days
     return max(0, solape) / (cert_fin - cert_ini).days
+
+
+def _fuera_de_ventana(avances, cert_ini: Optional[date], cert_fin: Optional[date]
+                      ) -> list[tuple[date, date]]:
+    """Tramos del certificado que caen FUERA de la ventana de valorizaciones de
+    la obra (antes de la 1ª / después de la última). Son días sin valorización
+    que los respalde → no cuentan como experiencia (clamp del Paso 5).
+
+    Si la obra no tiene avances, TODO el certificado queda fuera. Estos tramos
+    son disjuntos de los huecos internos (que viven DENTRO de [1ª, última]), así
+    que no hay doble descuento. Solo aplica a obras traídas con éxito; un fetch
+    fallido NO se clampa (ventana desconocida) — eso se marca sin_verificar."""
+    if not (cert_ini and cert_fin):
+        return []
+    meses = [date(a.anio, a.mes, 1) for a in (avances or [])
+             if getattr(a, "anio", 0) and getattr(a, "mes", 0)]
+    if not meses:
+        return [(cert_ini, cert_fin)]  # obra sin valorizaciones → todo fuera
+    vi, vf = min(meses), max(meses)
+    # fin del mes de la última valorización (la valoriz de un mes cubre el mes)
+    vf_fin = date(vf.year + vf.month // 12, vf.month % 12 + 1, 1) - timedelta(days=1)
+    fuera: list[tuple[date, date]] = []
+    if vi > cert_ini:
+        fuera.append((cert_ini, vi - timedelta(days=1)))
+    if vf_fin < cert_fin:
+        fuera.append((vf_fin + timedelta(days=1), cert_fin))
+    return fuera
 
 
 # ── 1 · Revisión de consistencia (las notas puras del validador) ─────────────
@@ -219,6 +246,15 @@ class EtapaInfoObrasReal:
                 {"inicio": p["inicio"].isoformat(), "fin": p["fin"].isoformat(),
                  "tipo": p["tipo"]} for p in periodos
             ]
+            # CLAMP (Paso 5): el tramo del certificado fuera de la ventana de
+            # valorizaciones no cuenta como experiencia (sin valoriz que lo
+            # respalde). Se inyecta como descuento para que reglas/ lo reste sin
+            # tocar su firma. Disjunto de los huecos internos → sin doble conteo.
+            enr["paralizaciones"] += [
+                {"inicio": a.isoformat(), "fin": b.isoformat(), "tipo": "fuera_de_ventana"}
+                for a, b in _fuera_de_ventana(getattr(obra, "avances", []) or [], cert_ini, cert_fin)
+            ]
+            enr.pop("sin_verificar", None)  # se trajo OK: ya no es incierta
             enr["codigo_infobras"] = getattr(obra, "codigo_infobras", None)
             enr["obra_nombre"] = getattr(obra, "nombre", None)
             # ficha de la obra + todas las valorizaciones (para la hoja Excel)
@@ -323,10 +359,16 @@ class EtapaInfoObrasReal:
                 obra = _fetch_obra(cui, cert_ini, cert_fin, obra_id)
                 if obra is None:
                     cont["err"] += 1
+                    # ventana DESCONOCIDA: no se clampa (sería NO CUMPLE falso).
+                    # Se marca para que reglas trate el veredicto como provisional.
+                    k = _clave(np_, ne)
+                    enr = ctx.enriquecimiento.get(k) or {}
+                    enr["sin_verificar"] = True
+                    ctx.enriquecimiento[k] = enr
                     obs.append(pipeline.Observacion(
                         codigo="INFOOBRAS", severidad=pipeline.Severidad.ADVERTENCIA,
                         mensaje=f"la obra CUI {cui} no respondió en InfoObras (tras 2 pasadas) "
-                                f"— sin paralizaciones que descontar",
+                                f"— experiencia sin verificar, veredicto provisional",
                         origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
                 else:
                     _procesar(_e, np_, ne, cui, cert_ini, cert_fin, obra)
@@ -411,6 +453,7 @@ class EtapaReglasReal:
             total += 1
             periodos: list[tuple[date, date]] = []
             paral_por_idx: dict[int, list[tuple[date, date]]] = {}
+            sin_verificar: list[int] = []  # experiencias sin ventana conocida
             for e in p.get("experiencias", []):
                 ini, fin = _fecha_iso(e.get("fecha_inicial")), _fecha_iso(e.get("fecha_final"))
                 if not (ini and fin) or fin < ini:
@@ -418,6 +461,8 @@ class EtapaReglasReal:
                 idx = len(periodos)
                 periodos.append((ini, fin))
                 enr = ctx.enriquecimiento.get(_clave(np_, e.get("n"))) or {}
+                if enr.get("sin_verificar"):
+                    sin_verificar.append(e.get("n"))
                 paral = [periodo_fechas(p) for p in enr.get("paralizaciones", [])]
                 if paral:
                     paral_por_idx[idx] = paral
@@ -449,6 +494,24 @@ class EtapaReglasReal:
                         mensaje=f"profesional {np_}: {anios_ef} años efectivos tras descontar "
                                 f"paralizaciones y traslapes — por debajo del mínimo de {minimo} años",
                         origen=self.nombre, referencia=f"prof={np_}"))
+            # veredicto provisional: alguna experiencia no se pudo verificar en
+            # InfoObras (fetch fallido) → la ventana es desconocida, no se clampó,
+            # así que el número puede estar inflado. Va a revisión humana.
+            if sin_verificar:
+                datos["veredicto_provisional"] = sin_verificar
+                exp0 = next((x for x in p.get("experiencias", [])
+                             if x.get("n") == sin_verificar[0]), {})
+                ya = any(it.n_prof == np_ and it.n_exp == sin_verificar[0] and not it.resuelto
+                         for it in ctx.job.items_revision)
+                if not ya:
+                    ctx.job.items_revision.append(pipeline.ItemRevision(
+                        n_prof=np_, n_exp=sin_verificar[0], etapa=self.nombre,
+                        motivo=f"no se pudo verificar en InfoObras la(s) experiencia(s) "
+                               f"{', '.join(map(str, sin_verificar))} — veredicto provisional",
+                        accion_sugerida="reintentar la consulta o verificar la obra a mano",
+                        candidatos=[], profesional=p.get("nombre"), cargo=p.get("cargo"),
+                        proyecto=exp0.get("proyecto"),
+                        fechas=f"{exp0.get('fecha_inicial')} → {exp0.get('fecha_final')}"))
             ctx.enriquecimiento[f"prof:{np_}"] = datos
             ok += 1
         return _res(self.nombre, EE.OK, _met(total, ok), obs)

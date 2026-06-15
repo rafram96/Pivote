@@ -104,6 +104,10 @@ def fetcher_fake(cui):
     if cui == "395001":
         # cubre el periodo certificado (2019-11 → 2023-03), sin paralización
         return ObraFake(222, "HOSPITAL MATERNO AMBO", avances=_meses((2019, 11), (2023, 3)))
+    if cui == "777999":
+        # CUI pegado a mano por el humano → resuelve a una obra que cubre su cert
+        # (Quisqui: 2023-11-22 → 2025-07-22)
+        return ObraFake(333, "PUESTO DE SALUD QUISQUI", avances=_meses((2023, 11), (2025, 7)))
     return None
 
 
@@ -350,3 +354,73 @@ def test_infoobras_cache_por_obra_id(tmp_path):
     assert len(enr["1:2"]["valorizaciones"]) == 24
     # La consulta real al fetcher de InfoObras debió ocurrir SOLO UNA VEZ
     assert estado["llamadas"] == 1
+
+
+def test_clamp_descuenta_cert_fuera_de_la_ventana(tmp_path):
+    # cert 2016-01 → 2017-12 (731 días) pero la obra valoriza solo ene-jun 2016.
+    # Lo que cae fuera de la ventana de valorizaciones no cuenta (clamp Paso 5).
+    espejo = {
+        "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
+        "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N",
+             "requisitos": {"tipo_experiencia": "mínimo 2 años"},
+             "experiencias": [
+                 {"n": 1, "proyecto": "Centro de Salud Pillco Marca, Huanuco", "cui": "2418877",
+                  "fecha_inicial": "2016-01-01", "fecha_final": "2017-12-31", "folio": "1"},
+             ]},
+        ],
+        "resumen_evaluacion": {"factores": []},
+    }
+
+    def fetcher_parcial(cui, *a, **k):
+        return ObraFake(111, "C.S. PILLCO MARCA", avances=_meses((2016, 1), (2016, 6)))
+
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
+                                fetcher_infoobras=fetcher_parcial,
+                                consultor_sunat=lambda r: None,
+                                descargar=lambda *a, **k: None), repo)
+    job = motor.correr(motor.crear_job(espejo).job_id)
+
+    enr = repo.cargar_enriquecimiento(job.job_id)
+    assert "fuera_de_ventana" in {p["tipo"] for p in enr["1:1"]["paralizaciones"]}
+    p1 = enr["prof:1"]
+    assert p1["dias_brutos"] == 731        # cert completo (2016 bisiesto + 2017)
+    assert p1["dias_efectivos"] == 182     # solo ene-jun 2016 (lo valorizado)
+
+
+def test_fetch_fallido_no_se_clampa_y_marca_veredicto_provisional(tmp_path):
+    # el portal cae en ambas pasadas → ventana DESCONOCIDA: no clampar a 0 (sería
+    # NO CUMPLE falso). El profesional queda con veredicto provisional + revisión.
+    espejo = {
+        "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
+        "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N",
+             "requisitos": {"tipo_experiencia": "mínimo 2 años"},
+             "experiencias": [
+                 {"n": 1, "proyecto": "Centro de Salud Pillco Marca, Huanuco", "cui": "2418877",
+                  "fecha_inicial": "2021-01-01", "fecha_final": "2023-06-30", "folio": "1"},
+             ]},
+        ],
+        "resumen_evaluacion": {"factores": []},
+    }
+
+    def fetcher_siempre_cae(cui, *a, **k):
+        raise ConnectionError("portal caído todo el run")
+
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
+                                fetcher_infoobras=fetcher_siempre_cae,
+                                consultor_sunat=lambda r: None,
+                                descargar=lambda *a, **k: None), repo)
+    job = motor.correr(motor.crear_job(espejo).job_id)
+
+    enr = repo.cargar_enriquecimiento(job.job_id)
+    assert enr["1:1"].get("sin_verificar") is True
+    assert not enr["1:1"].get("valorizaciones")          # no se inventó tabla
+    assert enr["prof:1"].get("veredicto_provisional") == [1]
+    assert job.estado == JobEstado.REQUIERE_REVISION
+    assert any(it.n_prof == 1 and not it.resuelto and "provisional" in it.motivo
+               for it in job.items_revision)

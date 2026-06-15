@@ -276,7 +276,7 @@ def construir_hoja_profesional(
             # InfoObras trae las paralizaciones de toda la vida de la obra, pero las
             # de antes/después de su ventana no le aplican. Se recortan a [ini, fin].
             periodos = paralizaciones.get((n_prof, n_exp), [])
-            n_par = n_gap = 0
+            n_par = n_gap = n_fv = 0
             tuplas: list[tuple[date, date]] = []
             for p in periodos:
                 p_ini, p_fin = periodo_fechas(p)
@@ -288,6 +288,9 @@ def construir_hoja_profesional(
                 if tipo == "sin_valorizacion":
                     n_gap += 1
                     etiqueta = f"Sin valorización {n_gap} — obra parada (InfoObras)"
+                elif tipo == "fuera_de_ventana":
+                    n_fv += 1
+                    etiqueta = f"Sin valorización {n_fv} — fuera del periodo de la obra (InfoObras)"
                 else:
                     n_par += 1
                     etiqueta = f"Paralización {n_par} de la obra (InfoObras)"
