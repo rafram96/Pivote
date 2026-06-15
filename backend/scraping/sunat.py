@@ -416,6 +416,9 @@ def diagnosticar_html_sunat(html: str) -> Optional[str]:
 
     Devuelve:
       - None: estructura conocida (detalle o lista parseables) — no hay anomalía.
+      - "ruc_inexistente": el portal respondió NORMAL con su mensaje nativo de
+        "el número de RUC ... no es válido" → no es un fallo del scraper, es un
+        RUC que no existe. No debe generar alerta operativa.
       - "captcha_real": la página trae un captcha de verdad (reCAPTCHA/hCaptcha/
         Turnstile). El stub actual dejó de bastar → requiere intervención.
       - "estructura_desconocida": no hay captcha pero tampoco los labels/patrones
@@ -425,6 +428,10 @@ def diagnosticar_html_sunat(html: str) -> Optional[str]:
         return "estructura_desconocida"
     if _parse_detalle(html).get("Número de RUC") or _parse_lista(html):
         return None
+    # mensaje nativo del portal para un RUC que no existe (respuesta normal)
+    bajo = html.lower()
+    if any(s in bajo for s in ("no es válido", "no es valido", "no existe", "no registr")):
+        return "ruc_inexistente"
     if _CAPTCHA_REAL_RE.search(html):
         return "captcha_real"
     return "estructura_desconocida"
@@ -523,9 +530,12 @@ def consultar_ruc(
     raw = _parse_detalle(html)
     if not raw or not raw.get("Número de RUC"):
         diagnostico = diagnosticar_html_sunat(html)
-        if diagnostico:
-            # Distinguible en logs: "captcha_real" / "estructura_desconocida" es
-            # un problema del scraper (alerta operativa), no un RUC inexistente.
+        if diagnostico == "ruc_inexistente":
+            # respuesta NORMAL del portal: el RUC no existe. Info, no alerta.
+            logger.info("SUNAT: RUC %s no es válido / no existe (respuesta normal del portal)", ruc)
+        elif diagnostico:
+            # "captcha_real" / "estructura_desconocida" SÍ es un problema del
+            # scraper (alerta operativa).
             logger.warning(
                 "SUNAT no devolvio detalle parseable para RUC %s · diagnostico=%s",
                 ruc, diagnostico,

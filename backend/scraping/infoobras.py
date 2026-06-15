@@ -256,11 +256,24 @@ def _parse_timestamp_json(ts_str: Optional[str]) -> Optional[date]:
 # ---------------------------------------------------------------------------
 
 def _crear_session() -> requests.Session:
-    """Crea una session HTTP con cookies y headers de InfoObras."""
+    """Crea una session HTTP con cookies y headers de InfoObras.
+
+    El GET de calentamiento (obtiene las cookies ASP.NET) se reintenta: si caía
+    por una microcaída/DNS del portal, el resolver abortaba toda la consulta
+    devolviendo None aunque la obra existiera."""
     s = requests.Session()
     s.headers.update(HEADERS)
-    s.get(f"{BASE_WEB}/", timeout=10)
-    return s
+    ultimo_err: Optional[Exception] = None
+    for intento in range(3):
+        try:
+            s.get(f"{BASE_WEB}/", timeout=10)
+            return s
+        except requests.RequestException as e:
+            ultimo_err = e
+            logger.warning("InfoObras: warmup de session intento %d/3: %r", intento + 1, e)
+            if intento < 2:
+                time.sleep(1.5 * (intento + 1))
+    raise ultimo_err
 
 
 def _buscar_por_cui(session: requests.Session, cui: str) -> list[dict]:

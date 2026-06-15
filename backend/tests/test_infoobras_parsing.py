@@ -378,6 +378,26 @@ def test_datos_ejecucion_propaga_si_agota_reintentos(monkeypatch):
         infoobras._extraer_datos_ejecucion(_SesionInestable(fallos=99), 1)
 
 
+def test_crear_session_reintenta_el_warmup(monkeypatch):
+    # el GET de calentamiento cae 2 veces y responde a la 3ra → no debe abortar
+    monkeypatch.setattr(infoobras.time, "sleep", lambda *_: None)
+    estado = {"n": 0}
+
+    class FakeSession:
+        def __init__(self):
+            self.headers = {}
+
+        def get(self, *a, **k):
+            estado["n"] += 1
+            if estado["n"] < 3:
+                raise requests.ConnectionError("warmup caído")
+            return object()
+
+    monkeypatch.setattr(infoobras.requests, "Session", lambda: FakeSession())
+    s = infoobras._crear_session()
+    assert estado["n"] == 3 and isinstance(s, FakeSession)
+
+
 def test_consulta_query_reintenta_con_backoff(monkeypatch):
     # microcaída del portal: la búsqueda por código debe reintentar (no degradar
     # a "sin resultados" al primer fallo, que mandaba 6:1 a revisión por error)

@@ -77,6 +77,15 @@ def test_diagnostico_estructura_desconocida():
     assert sunat.diagnosticar_html_sunat("") == "estructura_desconocida"
 
 
+def test_diagnostico_ruc_inexistente():
+    # respuesta NORMAL del portal para un RUC que no existe (caso 20607105615)
+    html = ("<html><body><strong> El número de RUC 20607105615 consultado no es "
+            "válido. Debe verificar el número y volver a ingresar. </strong></body></html>")
+    assert sunat.diagnosticar_html_sunat(html) == "ruc_inexistente"
+    assert sunat.diagnosticar_html_sunat("<p>El RUC no existe</p>") == "ruc_inexistente"
+    # no debe confundirse con captcha ni con estructura desconocida
+
+
 # ── Helpers puros ────────────────────────────────────────────────────────────
 
 def test_parse_fecha_sunat_formatos():
