@@ -68,6 +68,12 @@ def _fecha_iso(v) -> Optional[date]:
 _COBERTURA_MIN = 0.2
 
 
+def _fin_de_mes(d: date) -> date:
+    """Último día del mes de `d`. La valorización de un mes cubre TODO el mes —
+    convención única para cobertura, clamp y mensajes (evita desfase de bordes)."""
+    return date(d.year + d.month // 12, d.month % 12 + 1, 1) - timedelta(days=1)
+
+
 def _cobertura_cert(avances, cert_ini: Optional[date], cert_fin: Optional[date]) -> Optional[float]:
     """Fracción [0..1] del periodo del certificado cubierta por el rango de
     valorizaciones de la obra. None si faltan datos para decidir."""
@@ -78,7 +84,8 @@ def _cobertura_cert(avances, cert_ini: Optional[date], cert_fin: Optional[date])
     if not meses:
         return 0.0
     vi, vf = min(meses), max(meses)
-    solape = (min(cert_fin, vf) - max(cert_ini, vi)).days
+    # fin-de-mes de la última valoriz: misma ventana que el clamp (_fuera_de_ventana)
+    solape = (min(cert_fin, _fin_de_mes(vf)) - max(cert_ini, vi)).days
     return max(0, solape) / (cert_fin - cert_ini).days
 
 
@@ -99,8 +106,7 @@ def _fuera_de_ventana(avances, cert_ini: Optional[date], cert_fin: Optional[date
     if not meses:
         return [(cert_ini, cert_fin)]  # obra sin valorizaciones → todo fuera
     vi, vf = min(meses), max(meses)
-    # fin del mes de la última valorización (la valoriz de un mes cubre el mes)
-    vf_fin = date(vf.year + vf.month // 12, vf.month % 12 + 1, 1) - timedelta(days=1)
+    vf_fin = _fin_de_mes(vf)  # la valoriz del último mes cubre todo el mes
     fuera: list[tuple[date, date]] = []
     if vi > cert_ini:
         fuera.append((cert_ini, vi - timedelta(days=1)))
@@ -120,7 +126,7 @@ def _motivo_cobertura(avances, cert_ini, cert_fin, cod, pct: int) -> str:
         return (f"la obra {cod} está registrada SIN valorizaciones ejecutadas "
                 f"— no es verificable en InfoObras")
     vi, vf = min(meses), max(meses)
-    if cert_ini and vf < cert_ini:
+    if cert_ini and _fin_de_mes(vf) < cert_ini:  # mismo borde de mes que el clamp
         return (f"la obra {cod} valorizó hasta {vf.strftime('%m/%Y')}, antes de que "
                 f"empiece el certificado ({cert_ini.strftime('%m/%Y')}) — periodo no respaldado")
     if cert_fin and vi > cert_fin:
@@ -383,10 +389,13 @@ class EtapaInfoObrasReal:
                 if obra is None:
                     cont["err"] += 1
                     # ventana DESCONOCIDA: no se clampa (sería NO CUMPLE falso).
-                    # Se marca para que reglas trate el veredicto como provisional.
+                    # Se marca provisional Y se limpian las paralizaciones de una
+                    # corrida exitosa previa (re-disparo): reglas no debe descontar
+                    # tramos de una obra que ya no se pudo verificar.
                     k = _clave(np_, ne)
                     enr = ctx.enriquecimiento.get(k) or {}
                     enr["sin_verificar"] = True
+                    enr.pop("paralizaciones", None)
                     ctx.enriquecimiento[k] = enr
                     obs.append(pipeline.Observacion(
                         codigo="INFOOBRAS", severidad=pipeline.Severidad.ADVERTENCIA,

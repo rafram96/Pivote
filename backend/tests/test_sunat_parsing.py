@@ -82,8 +82,18 @@ def test_diagnostico_ruc_inexistente():
     html = ("<html><body><strong> El número de RUC 20607105615 consultado no es "
             "válido. Debe verificar el número y volver a ingresar. </strong></body></html>")
     assert sunat.diagnosticar_html_sunat(html) == "ruc_inexistente"
-    assert sunat.diagnosticar_html_sunat("<p>El RUC no existe</p>") == "ruc_inexistente"
-    # no debe confundirse con captcha ni con estructura desconocida
+
+
+def test_diagnostico_no_enmascara_problemas_con_substrings_amplias():
+    # una frase legítima como "no registra operaciones" NO debe clasificarse como
+    # ruc_inexistente (anclamos a "no es válido", no a "no registr").
+    assert sunat.diagnosticar_html_sunat(
+        "<html><body>El contribuyente no registra operaciones</body></html>") \
+        == "estructura_desconocida"
+    # captcha gana aunque la página contenga una frase genérica
+    captcha = ('<html><body>no registra representantes'
+               '<div class="g-recaptcha" data-sitekey="x"></div></body></html>')
+    assert sunat.diagnosticar_html_sunat(captcha) == "captcha_real"
 
 
 # ── Helpers puros ────────────────────────────────────────────────────────────

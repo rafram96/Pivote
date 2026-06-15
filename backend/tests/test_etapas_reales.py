@@ -460,6 +460,18 @@ def test_fecha_por_verificar_en_no_cumple_va_a_revision(tmp_path):
                and "fecha sin verificar" in it.motivo for it in job.items_revision)
 
 
+def test_cobertura_y_clamp_coinciden_en_borde_de_mes():
+    # la valoriz de un mes cubre TODO el mes: cobertura y clamp deben usar el
+    # mismo límite (fin-de-mes). Borde: última valoriz marzo, cert empieza 15/03.
+    from orquestador.etapas_reales import _cobertura_cert, _fuera_de_ventana
+    avs = [AvanceFake(2020, m, "En ejecución") for m in (1, 2, 3)]
+    ci, cf = date(2020, 3, 15), date(2020, 6, 30)
+    # el clamp acredita 15-31 de marzo → la cobertura NO debe caer a 0
+    assert _cobertura_cert(avs, ci, cf) > 0
+    fuera = _fuera_de_ventana(avs, ci, cf)
+    assert fuera and fuera[0][0] == date(2020, 4, 1)  # fuera empieza 01/04, no 16/03
+
+
 def test_motivo_cobertura_distingue_la_causa():
     from orquestador.etapas_reales import _motivo_cobertura
     ci, cf = date(2020, 1, 1), date(2021, 1, 1)

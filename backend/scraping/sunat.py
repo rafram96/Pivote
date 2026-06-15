@@ -428,12 +428,17 @@ def diagnosticar_html_sunat(html: str) -> Optional[str]:
         return "estructura_desconocida"
     if _parse_detalle(html).get("Número de RUC") or _parse_lista(html):
         return None
-    # mensaje nativo del portal para un RUC que no existe (respuesta normal)
-    bajo = html.lower()
-    if any(s in bajo for s in ("no es válido", "no es valido", "no existe", "no registr")):
-        return "ruc_inexistente"
+    # captcha PRIMERO: es la señal operativa más grave, no debe quedar enmascarada
+    # por una frase genérica.
     if _CAPTCHA_REAL_RE.search(html):
         return "captcha_real"
+    # mensaje nativo del portal para un RUC que no existe (respuesta normal).
+    # Anclado a la frase específica "no es válido" — NO a substrings amplias como
+    # "no registr"/"no existe", que matchean frases legítimas de páginas SUNAT
+    # ("no registra operaciones/representantes") y enmascararían una rotura real.
+    bajo = html.lower()
+    if "no es válido" in bajo or "no es valido" in bajo:
+        return "ruc_inexistente"
     return "estructura_desconocida"
 
 

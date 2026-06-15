@@ -902,7 +902,15 @@ def seleccionar_obra(
     def _fin(o: dict) -> int:
         return 1 if "FINALIZAD" in _estado_obra(o) else 0
 
-    # P1 · obras con solape positivo
+    def _cod(o: dict) -> int:
+        # desempate DETERMINÍSTICO: el orden que devuelve el portal no es estable
+        # entre corridas, así que se rompe el empate por menor codigoObra.
+        try:
+            return int(o.get("codigoObra") or o.get("obraId") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    # P1 · obras con solape positivo: mayor solape, finalizada, menor codigoObra
     con_solape: list[tuple[dict, int]] = []
     for o in obras:
         oi, of = _ventana_obra(o, rango_valorizaciones)
@@ -912,7 +920,7 @@ def seleccionar_obra(
         if dias > 0:
             con_solape.append((o, dias))
     if con_solape:
-        con_solape.sort(key=lambda od: (od[1], _fin(od[0])), reverse=True)
+        con_solape.sort(key=lambda od: (od[1], _fin(od[0]), -_cod(od[0])), reverse=True)
         return con_solape[0][0]
 
     # P2 · nadie solapa → la ventana más cercana al inicio del certificado
@@ -920,7 +928,7 @@ def seleccionar_obra(
         oi, _ = _ventana_obra(o, rango_valorizaciones)
         return abs((oi - cert_inicio).days) if oi else 10 ** 9
 
-    return sorted(obras, key=lambda o: (_dist(o), -_fin(o)))[0]
+    return sorted(obras, key=lambda o: (_dist(o), -_fin(o), _cod(o)))[0]
 
 
 def elegir_obra_raw(
@@ -1009,18 +1017,20 @@ def fetch_by_cui(
                 cui, len(obras),
                 ", ".join(sorted({_estado_obra(o) or "?" for o in obras})),
             )
+        obra_id_req = obra_id  # el obra_id que pidió el resolver (para el reintento)
         obra_raw = elegir_obra_raw(obras, cert_inicio, cert_fin, obra_id, _rango_val)
         obra_id = obra_raw.get("codigoObra")
 
         # InfoObras a veces devuelve la obra sin codigoObra en el 1er request
-        # (warmup de session). Reintentar 1 vez con un pequeno delay.
+        # (warmup de session). Reintentar 1 vez con un pequeno delay — respetando
+        # el mismo bypass-validado-por-cobertura que la ruta normal.
         if not obra_id:
             logger.info(
                 "InfoObras: 1er request sin codigoObra para CUI %s, reintentando", cui)
             time.sleep(2.0)
             obras_retry = _buscar_por_cui(session, cui)
             if obras_retry:
-                obra_raw = seleccionar_obra(obras_retry, cert_inicio, cert_fin, _rango_val)
+                obra_raw = elegir_obra_raw(obras_retry, cert_inicio, cert_fin, obra_id_req, _rango_val)
                 obra_id = obra_raw.get("codigoObra")
 
         if not obra_id:

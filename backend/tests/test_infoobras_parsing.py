@@ -290,6 +290,17 @@ def test_seleccionar_obra_cabecera_no_da_solape_falso():
     assert elegida["codigoObra"] == 83130
 
 
+def test_seleccionar_obra_desempate_deterministico_sin_solape():
+    # dos obras con MISMA ventana (mismo _dist) y mismo estado, ninguna solapa
+    # el cert → el desempate debe ser estable (menor codigoObra), independiente
+    # del orden de entrada (el portal no garantiza orden entre corridas).
+    a = _obra("Finalizado", date(2010, 1, 1), date(2010, 6, 1), codigoObra=500)
+    b = _obra("Finalizado", date(2010, 1, 1), date(2010, 6, 1), codigoObra=200)
+    ci, cf = date(2020, 1, 1), date(2021, 1, 1)  # cert lejano → ninguna solapa
+    assert infoobras.seleccionar_obra([a, b], ci, cf)["codigoObra"] == 200
+    assert infoobras.seleccionar_obra([b, a], ci, cf)["codigoObra"] == 200
+
+
 def test_elegir_obra_raw_valida_el_bypass_por_cobertura():
     # Valdizán: el resolver puede pasar 71173 (no cubre el cert); el bypass debe
     # corregir a 33900 (la que cubre). Si pasa 33900, se respeta.
