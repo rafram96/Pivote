@@ -60,11 +60,12 @@ def _fecha_iso(v) -> Optional[date]:
     return None
 
 
-# Si el periodo del certificado solapa menos de esto con el rango de
-# valorizaciones de la obra elegida, lo más probable es que se haya emparejado
-# la obra equivocada (o que el periodo caiga en un hueco no registrado): va a
-# revisión humana. Caso 133630/Valdizán: el certificado cae entre dos registros.
-_COBERTURA_MIN = 0.5
+# Umbral de cobertura para mandar a revisión. Con el clamp del Paso 5 ya en
+# sitio, la cobertura parcial se PRORRATEA de forma justa (los días fuera de la
+# ventana no cuentan), así que solo se manda a revisión la cobertura MUY baja —
+# síntoma de obra equivocada o sin valorizaciones reales (recomendación del
+# cliente: <20%). Una obra a 46% que igual CUMPLE no necesita revisión.
+_COBERTURA_MIN = 0.2
 
 
 def _cobertura_cert(avances, cert_ini: Optional[date], cert_fin: Optional[date]) -> Optional[float]:
@@ -106,6 +107,27 @@ def _fuera_de_ventana(avances, cert_ini: Optional[date], cert_fin: Optional[date
     if vf_fin < cert_fin:
         fuera.append((vf_fin + timedelta(days=1), cert_fin))
     return fuera
+
+
+def _motivo_cobertura(avances, cert_ini, cert_fin, cod, pct: int) -> str:
+    """Mensaje específico —legible para un evaluador NO técnico— de por qué la
+    obra no cubre el periodo certificado. Distingue las causas en vez de un
+    genérico '% de solape'."""
+    cod = cod or "?"
+    meses = [date(a.anio, a.mes, 1) for a in (avances or [])
+             if getattr(a, "anio", 0) and getattr(a, "mes", 0)]
+    if not meses:
+        return (f"la obra {cod} está registrada SIN valorizaciones ejecutadas "
+                f"— no es verificable en InfoObras")
+    vi, vf = min(meses), max(meses)
+    if cert_ini and vf < cert_ini:
+        return (f"la obra {cod} valorizó hasta {vf.strftime('%m/%Y')}, antes de que "
+                f"empiece el certificado ({cert_ini.strftime('%m/%Y')}) — periodo no respaldado")
+    if cert_fin and vi > cert_fin:
+        return (f"la obra {cod} empezó a valorizar en {vi.strftime('%m/%Y')}, después de "
+                f"que termina el certificado ({cert_fin.strftime('%m/%Y')}) — periodo no respaldado")
+    return (f"el periodo del certificado solo solapa {pct}% con las valorizaciones de "
+            f"la obra {cod} — posible obra complementaria o periodo en un hueco")
 
 
 # ── 1 · Revisión de consistencia (las notas puras del validador) ─────────────
@@ -298,10 +320,12 @@ class EtapaInfoObrasReal:
             cob = _cobertura_cert(getattr(obra, "avances", []) or [], cert_ini, cert_fin)
             if cob is not None and cob < _COBERTURA_MIN:
                 pct = round(cob * 100)
+                cod = getattr(obra, "codigo_infobras", None)
+                motivo = _motivo_cobertura(getattr(obra, "avances", []) or [],
+                                           cert_ini, cert_fin, cod, pct)
                 obs.append(pipeline.Observacion(
                     codigo="COBERTURA", severidad=pipeline.Severidad.ADVERTENCIA,
-                    mensaje=f"la obra CUI {cui} ({getattr(obra, 'codigo_infobras', None) or '?'}) "
-                            f"solo cubre el {pct}% del periodo certificado — revisar si es la obra correcta",
+                    mensaje=f"{motivo} (CUI {cui})",
                     origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
                 ya = any(it.n_prof == np_ and it.n_exp == ne and not it.resuelto
                          for it in ctx.job.items_revision)
@@ -310,8 +334,7 @@ class EtapaInfoObrasReal:
                                  if p.get("n_prof") == np_), {})
                     ctx.job.items_revision.append(pipeline.ItemRevision(
                         n_prof=np_, n_exp=ne, etapa=self.nombre,
-                        motivo=f"el periodo del certificado solo solapa {pct}% con las "
-                               f"valorizaciones de la obra {getattr(obra, 'codigo_infobras', None) or cui}",
+                        motivo=motivo,
                         accion_sugerida="confirmar la obra o pegar el CUI correcto",
                         candidatos=[],
                         profesional=prof.get("nombre"), cargo=prof.get("cargo"),
@@ -565,10 +588,16 @@ class EtapaExcelReal:
             if enr.get("obra_ficha") or enr.get("valorizaciones"):
                 fichas[(np_, ne)] = {**(enr.get("obra_ficha") or {}),
                                      "valorizaciones": enr.get("valorizaciones") or []}
+        # experiencias en revisión → su motivo, para que la hoja del profesional
+        # muestre "EN REVISIÓN" + la razón en vez de una columna vacía.
+        revisiones: dict[tuple[int, int], str] = {}
+        for it in ctx.job.items_revision:
+            if not it.resuelto and it.n_exp is not None:
+                revisiones.setdefault((it.n_prof, it.n_exp), it.motivo)
         ruta = self.dir_salida / f"{ctx.job.job_id}.final.xlsx"
         if ruta.exists():
             ruta.unlink()  # regenerar (re-disparo tras revisión humana)
-        generar_excel_final(ctx.espejo, ruta, paral, cuis, fichas)
+        generar_excel_final(ctx.espejo, ruta, paral, cuis, fichas, revisiones)
         ctx.job.excel_final = f"/api/pivote/jobs/{ctx.job.job_id}/excel"
         ctx.job.zip_infoobras = f"/api/pivote/jobs/{ctx.job.job_id}/zip"
         zip_previo = self.dir_salida / f"{ctx.job.job_id}.infoobras.zip"

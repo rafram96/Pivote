@@ -458,3 +458,39 @@ def test_fecha_por_verificar_en_no_cumple_va_a_revision(tmp_path):
     assert enr["prof:1"].get("veredicto_provisional") == [2]
     assert any(it.n_prof == 1 and it.n_exp == 2 and not it.resuelto
                and "fecha sin verificar" in it.motivo for it in job.items_revision)
+
+
+def test_motivo_cobertura_distingue_la_causa():
+    from orquestador.etapas_reales import _motivo_cobertura
+    ci, cf = date(2020, 1, 1), date(2021, 1, 1)
+    # obra sin valorizaciones
+    assert "valorizaciones ejecutadas" in _motivo_cobertura([], ci, cf, "10056", 0)
+    # certificado posterior a la última valorización
+    avs_viejos = [AvanceFake(2017, m, "En ejecución") for m in (1, 2, 3)]
+    m1 = _motivo_cobertura(avs_viejos, ci, cf, "71173", 0)
+    assert "valorizó hasta" in m1 and "no respaldado" in m1
+    # certificado anterior a la primera valorización
+    avs_nuevos = [AvanceFake(2024, m, "En ejecución") for m in (1, 2, 3)]
+    m2 = _motivo_cobertura(avs_nuevos, ci, cf, "99999", 0)
+    assert "empezó a valorizar" in m2 and "no respaldado" in m2
+
+
+def test_excel_muestra_bloque_en_revision(tmp_path):
+    # una experiencia sin obra (en revisión) debe mostrar "EN REVISIÓN" + el
+    # motivo en su hoja, no una columna de obra vacía.
+    from entregables.excel_final import generar_excel_final
+    espejo = {
+        "_meta": {}, "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N", "experiencias": [
+                {"n": 1, "proyecto": "Hospital X", "fecha_inicial": "2020-01-01",
+                 "fecha_final": "2020-12-31", "folio": "1"}]}],
+    }
+    ruta = tmp_path / "rev.xlsx"
+    generar_excel_final(espejo, ruta, {}, {}, {},
+                        revisiones={(1, 1): "sin candidato fiable en InfoObras"})
+    wb = openpyxl.load_workbook(ruta)
+    hoja = next(s for s in wb.sheetnames if s.startswith("P1"))
+    texto = "\n".join(str(c.value) for row in wb[hoja].iter_rows()
+                      for c in row if c.value)
+    assert "EN REVISIÓN" in texto and "sin candidato" in texto.lower()

@@ -135,9 +135,11 @@ def construir_hoja_profesional(
     ws, prof: dict, paralizaciones: Paralizaciones,
     cuis: Optional[dict] = None,
     fichas: Optional[dict] = None,
+    revisiones: Optional[dict] = None,
 ) -> None:
     cuis = cuis or {}
     fichas = fichas or {}
+    revisiones = revisiones or {}
     # A:D = cuadro de hitos (izquierda) · F:J = ficha de obra + valorizaciones
     anchos = {"A": 52, "B": 14, "C": 14, "D": 10, "E": 2,
               "F": 5, "G": 18, "H": 14, "I": 18, "J": 14}
@@ -236,6 +238,21 @@ def construir_hoja_profesional(
             rr += 1
         return rr - 1
 
+    def render_revision(top: int, motivo: str) -> int:
+        """Bloque para una experiencia que NO se cruzó: explica por qué quedó en
+        revisión humana, en vez de dejar la columna de la obra vacía."""
+        rr = top
+        ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=10)
+        c = ws.cell(rr, 6, "EXPERIENCIA EN REVISIÓN")
+        c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
+        rr += 1
+        ws.merge_cells(start_row=rr, start_column=6, end_row=rr + 3, end_column=10)
+        c = ws.cell(rr, 6, f"{str(motivo).capitalize()}.\n\nAcción: confirmar la obra "
+                           f"o pegar el CUI correcto en el panel para completar el cruce.")
+        c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
+        rr += 4
+        return rr - 1
+
     banda(f"PROFESIONAL {n_prof}: {prof.get('cargo', '')}")
     ws.cell(r, 1, f"Nombre: {prof.get('nombre') or '—'}").font = F_BOLD; r += 1
     ws.cell(r, 1, f"Colegiatura: {prof.get('colegiatura') or '—'}").font = F_CELL; r += 1
@@ -310,9 +327,13 @@ def construir_hoja_profesional(
             if tuplas:
                 paral_por_idx[idx] = tuplas
 
-        # lado derecho: ficha de la obra + valorizaciones (en amarillo las del periodo)
+        # lado derecho: ficha de la obra; si la experiencia está en revisión, un
+        # bloque que lo explica (en vez de dejar la columna vacía).
         if fx:
             r_right = render_obra(r_top, fx, ini, fin)
+            r = max(r, r_right + 1)
+        elif (n_prof, n_exp) in revisiones:
+            r_right = render_revision(r_top, revisiones[(n_prof, n_exp)])
             r = max(r, r_right + 1)
 
     # Resumen del profesional (Paso 5 completo, con fusión de traslapes ALT11)
@@ -340,6 +361,7 @@ def generar_excel_final(
     paralizaciones: Optional[Paralizaciones] = None,
     cuis: Optional[dict] = None,
     fichas: Optional[dict] = None,
+    revisiones: Optional[dict] = None,
 ) -> Path:
     """Construye el Excel final: CLAUDE + Base de Datos + 1 hoja por profesional.
 
@@ -355,6 +377,7 @@ def generar_excel_final(
     paralizaciones = paralizaciones or {}
     cuis = cuis or {}
     fichas = fichas or {}
+    revisiones = revisiones or {}
     wb = openpyxl.Workbook()
 
     ws = wb.active
@@ -365,7 +388,8 @@ def generar_excel_final(
 
     for prof in espejo.get("profesionales", []):
         nombre = _nombre_hoja(prof.get("n_prof", 0), prof.get("cargo", ""))
-        construir_hoja_profesional(wb.create_sheet(nombre), prof, paralizaciones, cuis, fichas)
+        construir_hoja_profesional(wb.create_sheet(nombre), prof, paralizaciones,
+                                   cuis, fichas, revisiones)
 
     salida.parent.mkdir(parents=True, exist_ok=True)
     wb.save(salida)
