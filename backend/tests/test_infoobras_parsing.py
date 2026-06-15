@@ -158,3 +158,42 @@ def test_normalizar_tokens_y_jaccard():
 
     c = "Centro de Salud de Pichari"
     assert infoobras._jaccard(a, c) < 0.5
+
+
+# ── Huecos de valorización (obra parada sin estado "Paralizado") ─────────────
+
+def test_huecos_de_valorizacion_caso_real():
+    # tabla real (caso del ingeniero): valorizaciones hasta dic-2017, reanuda
+    # abr-2018 → ene/feb/mar-2018 ausentes, TODAS las filas dicen "En ejecución"
+    avances = infoobras._procesar_avances(
+        [_avance(2017, m, "En ejecución")
+         for m in ("AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE")]
+        + [_avance(2018, m, "En ejecución")
+           for m in ("ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO")])
+    huecos = infoobras._huecos_de_valorizacion(avances)
+    assert huecos == [(date(2018, 1, 1), date(2018, 3, 31))]
+    from reglas import dias_inclusivos
+    assert dias_inclusivos(*huecos[0]) == 90  # ene+feb+mar 2018
+
+
+def test_huecos_no_marca_meses_consecutivos():
+    avances = infoobras._procesar_avances([
+        _avance(2021, "ENERO", "En ejecución"),
+        _avance(2021, "FEBRERO", "En ejecución"),
+        _avance(2021, "MARZO", "En ejecución"),
+    ])
+    assert infoobras._huecos_de_valorizacion(avances) == []
+
+
+def test_periodos_inactividad_combina_paralizado_y_hueco_ordenados():
+    avances = infoobras._procesar_avances([
+        _avance(2017, "DICIEMBRE", "En ejecución"),   # último antes del hueco
+        _avance(2018, "ABRIL", "Paralizado"),          # reanuda pero paralizado
+        _avance(2018, "MAYO", "En ejecución"),
+    ])
+    per = infoobras.periodos_inactividad(avances)
+    tipos = {p["tipo"] for p in per}
+    assert tipos == {"sin_valorizacion", "paralizado"}
+    # ordenados por inicio: el hueco (ene) va antes que la paralización (abr)
+    assert per[0]["tipo"] == "sin_valorizacion"
+    assert per[0]["inicio"] == date(2018, 1, 1)

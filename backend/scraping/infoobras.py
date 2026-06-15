@@ -18,7 +18,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import requests
@@ -741,6 +741,45 @@ def _extraer_periodos_suspension(avances: list[AvanceMensual]) -> list[tuple[dat
         periodos.append((inicio_actual, fin_actual))
 
     return periodos
+
+
+def _huecos_de_valorizacion(avances: list[AvanceMensual]) -> list[tuple[date, date]]:
+    """Periodos SIN valorización: meses ausentes en la serie de avances.
+
+    Si InfoObras tiene valorización hasta dic-2017 y la siguiente es abr-2018,
+    los meses ene/feb/mar-2018 NO existen como filas → la obra estuvo parada,
+    aunque NINGUNA fila diga 'Paralizado'. El postor cuenta ese tramo como
+    experiencia; en realidad no vale (hallazgo reunión 2026-06-07).
+
+    Devuelve (primer día del primer mes ausente, último día del último ausente).
+    """
+    meses = sorted({(a.anio, a.mes) for a in avances if a.anio and a.mes})
+    huecos: list[tuple[date, date]] = []
+    for (a1, m1), (a2, m2) in zip(meses, meses[1:]):
+        sig_y, sig_m = (a1, m1 + 1) if m1 < 12 else (a1 + 1, 1)
+        if (sig_y, sig_m) == (a2, m2):
+            continue  # meses consecutivos: no hay hueco
+        inicio = date(sig_y, sig_m, 1)
+        fin = date(a2, m2, 1) - timedelta(days=1)  # último día del mes previo a la reanudación
+        if fin >= inicio:
+            huecos.append((inicio, fin))
+    return huecos
+
+
+def periodos_inactividad(avances: list[AvanceMensual]) -> list[dict]:
+    """TODOS los periodos en que la obra NO avanzó, cada uno con su tipo:
+      - 'paralizado'        → meses con estado 'Paralizado'/'Suspendido'
+      - 'sin_valorizacion'  → huecos: meses ausentes entre valorizaciones
+    Ambos se descuentan igual de la experiencia; el tipo es para el reporte.
+    Cada dict: {'inicio': date, 'fin': date, 'tipo': str}. Ordenados por inicio.
+    """
+    out: list[dict] = []
+    for a, b in _extraer_periodos_suspension(avances):
+        out.append({"inicio": a, "fin": b, "tipo": "paralizado"})
+    for a, b in _huecos_de_valorizacion(avances):
+        out.append({"inicio": a, "fin": b, "tipo": "sin_valorizacion"})
+    out.sort(key=lambda p: p["inicio"])
+    return out
 
 
 # ---------------------------------------------------------------------------

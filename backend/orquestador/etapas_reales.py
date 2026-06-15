@@ -25,7 +25,7 @@ from typing import Callable, Optional
 from schemas import pipeline
 from validacion import verificar_espejo
 from resolucion import ConsultaInfoObras, resolver_con_dedup
-from reglas import anios, dias_efectivos_profesional
+from reglas import anios, dias_efectivos_profesional, periodo_fechas
 from entregables import generar_excel_final
 from .etapas import Contexto, EtapaIngesta, EtapaStub
 
@@ -182,19 +182,29 @@ class EtapaInfoObrasReal:
                     origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
                 continue
 
-            from scraping.infoobras import _extraer_periodos_suspension
-            periodos = _extraer_periodos_suspension(getattr(obra, "avances", []) or [])
-            enr["paralizaciones"] = [(a.isoformat(), b.isoformat()) for a, b in periodos]
+            from scraping.infoobras import periodos_inactividad
+            periodos = periodos_inactividad(getattr(obra, "avances", []) or [])
+            enr["paralizaciones"] = [
+                {"inicio": p["inicio"].isoformat(), "fin": p["fin"].isoformat(),
+                 "tipo": p["tipo"]} for p in periodos
+            ]
             enr["codigo_infobras"] = getattr(obra, "codigo_infobras", None)
             enr["obra_nombre"] = getattr(obra, "nombre", None)
             ctx.enriquecimiento[k] = enr
             ok += 1
             if periodos:
-                dias_p = sum((b - a).days + 1 for a, b in periodos)
+                dias_p = sum((p["fin"] - p["inicio"]).days + 1 for p in periodos)
+                n_par = sum(1 for p in periodos if p["tipo"] == "paralizado")
+                n_gap = sum(1 for p in periodos if p["tipo"] == "sin_valorizacion")
+                partes = []
+                if n_par:
+                    partes.append(f"{n_par} paralización(es)")
+                if n_gap:
+                    partes.append(f"{n_gap} periodo(s) sin valorización (obra parada)")
                 obs.append(pipeline.Observacion(
                     codigo="PARALIZACION", severidad=pipeline.Severidad.ADVERTENCIA,
-                    mensaje=f"la obra CUI {cui} registra {len(periodos)} paralización(es) "
-                            f"({dias_p} días) — se descuentan de la experiencia",
+                    mensaje=f"la obra CUI {cui} tiene {' y '.join(partes)} ({dias_p} días) "
+                            f"— no cuentan como experiencia",
                     origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
 
             # descarga de documentos (acotada para la demo)
@@ -297,8 +307,7 @@ class EtapaReglasReal:
                 idx = len(periodos)
                 periodos.append((ini, fin))
                 enr = ctx.enriquecimiento.get(_clave(np_, e.get("n"))) or {}
-                paral = [(date.fromisoformat(a), date.fromisoformat(b))
-                         for a, b in enr.get("paralizaciones", [])]
+                paral = [periodo_fechas(p) for p in enr.get("paralizaciones", [])]
                 if paral:
                     paral_por_idx[idx] = paral
             if not periodos:
@@ -343,12 +352,13 @@ class EtapaExcelReal:
         self.dir_salida = Path(dir_salida)
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
-        paral: dict[tuple[int, int], list[tuple[date, date]]] = {}
+        # pasa los periodos CON su tipo (paralizado / sin valorización) para que
+        # el Excel los muestre diferenciados; el generador normaliza las fechas.
+        paral: dict[tuple[int, int], list] = {}
         for k, enr in ctx.enriquecimiento.items():
             if ":" in k and not k.startswith("prof:") and enr.get("paralizaciones"):
                 np_, ne = (int(x) for x in k.split(":"))
-                paral[(np_, ne)] = [(date.fromisoformat(a), date.fromisoformat(b))
-                                    for a, b in enr["paralizaciones"]]
+                paral[(np_, ne)] = enr["paralizaciones"]
         ruta = self.dir_salida / f"{ctx.job.job_id}.final.xlsx"
         if ruta.exists():
             ruta.unlink()  # regenerar (re-disparo tras revisión humana)

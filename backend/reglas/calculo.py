@@ -35,6 +35,21 @@ def dias_inclusivos(inicio: date, fin: date) -> int:
     return (fin - inicio).days + 1
 
 
+def periodo_fechas(p) -> tuple[date, date]:
+    """Normaliza un periodo a (inicio, fin) como `date`. Acepta:
+      - tupla/lista (date|iso, date|iso)
+      - dict {"inicio": date|iso, "fin": date|iso, "tipo"?: str}
+    Así el cálculo no depende de si el periodo trae o no su 'tipo' (paralizado
+    vs sin valorización) — eso es solo para la presentación."""
+    if isinstance(p, dict):
+        a, b = p.get("inicio"), p.get("fin")
+    else:
+        a, b = p[0], p[1]
+    a = a if isinstance(a, date) else date.fromisoformat(str(a)[:10])
+    b = b if isinstance(b, date) else date.fromisoformat(str(b)[:10])
+    return a, b
+
+
 def _normalizar(intervalos: Iterable[tuple[date, date]]) -> list[tuple[date, date]]:
     """Ordena y fusiona intervalos que se traslapan O son contiguos (unión).
     La fusión de contiguos no afecta el conteo de traslape (suma idéntica)."""

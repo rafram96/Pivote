@@ -99,6 +99,20 @@ def test_excel_final_hoja_profesional_cuadro_de_hitos(tmp_path):
     assert "DÍAS EFECTIVOS" in texto
 
 
+def test_excel_final_muestra_periodos_sin_valorizacion(tmp_path):
+    # un periodo con tipo 'sin_valorizacion' (hueco) debe verse etiquetado como
+    # "obra parada" en la hoja del profesional, no como "Paralización"
+    paral = {(1, 1): [
+        {"inicio": date(2021, 10, 1), "fin": date(2021, 10, 31), "tipo": "paralizado"},
+        {"inicio": date(2022, 1, 1), "fin": date(2022, 3, 31), "tipo": "sin_valorizacion"},
+    ]}
+    salida = generar_excel_final(ESPEJO, tmp_path / "final.xlsx", paral)
+    ws = openpyxl.load_workbook(salida)["P1 JEFE DE SUPERVISIÓN"]
+    texto = "\n".join(str(c.value) for f in ws.iter_rows() for c in f if c.value)
+    assert "Paralización 1 de la obra (InfoObras)" in texto
+    assert "Sin valorización 1 — obra parada (InfoObras)" in texto
+
+
 def test_excel_final_fechas_no_computables_quedan_anotadas(tmp_path):
     salida = generar_excel_final(ESPEJO, tmp_path / "final.xlsx", PARALIZACIONES)
     ws = openpyxl.load_workbook(salida)["P2 ESP. ESTRUCTURAS"]

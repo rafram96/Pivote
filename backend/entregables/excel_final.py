@@ -26,7 +26,10 @@ import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from reglas import anios, dias_efectivos_profesional, dias_inclusivos, restar_paralizaciones
+from reglas import (
+    anios, dias_efectivos_profesional, dias_inclusivos, periodo_fechas,
+    restar_paralizaciones,
+)
 from scripts.generar_excel import (
     AL_HEAD, AL_WRAP, BORDER, F_BOLD, F_CELL, F_HEAD, F_PARTE, F_PROF,
     FILL_BACKEND, FILL_CLAUDE, FILL_HEAD, FILL_PARTE, FILL_PROF,
@@ -172,32 +175,42 @@ def construir_hoja_profesional(ws, prof: dict, paralizaciones: Paralizaciones) -
 
         fila("Periodo certificado", ini, fin, dias_inclusivos(ini, fin))
 
-        paral = paralizaciones.get((n_prof, n_exp), [])
-        for k, (p_ini, p_fin) in enumerate(paral, start=1):
-            fila(f"Paralización {k} de la obra (InfoObras)", p_ini, p_fin,
-                 dias_inclusivos(p_ini, p_fin), backend=True)
+        # periodos inactivos de la obra (dict con tipo, o tupla legacy=paralizado)
+        periodos = paralizaciones.get((n_prof, n_exp), [])
+        n_par = n_gap = 0
+        for p in periodos:
+            p_ini, p_fin = periodo_fechas(p)
+            tipo = p.get("tipo", "paralizado") if isinstance(p, dict) else "paralizado"
+            if tipo == "sin_valorizacion":
+                n_gap += 1
+                etiqueta = f"Sin valorización {n_gap} — obra parada (InfoObras)"
+            else:
+                n_par += 1
+                etiqueta = f"Paralización {n_par} de la obra (InfoObras)"
+            fila(etiqueta, p_ini, p_fin, dias_inclusivos(p_ini, p_fin), backend=True)
 
-        tramos = restar_paralizaciones((ini, fin), paral)
+        tuplas = [periodo_fechas(p) for p in periodos]
+        tramos = restar_paralizaciones((ini, fin), tuplas)
         for k, (t_ini, t_fin) in enumerate(tramos, start=1):
             fila(f"Tramo efectivo {k}", t_ini, t_fin,
-                 dias_inclusivos(t_ini, t_fin), backend=bool(paral))
+                 dias_inclusivos(t_ini, t_fin), backend=bool(tuplas))
         efectivo = sum(dias_inclusivos(a, b) for a, b in tramos)
         fila(f"EFECTIVO EXPERIENCIA {n_exp}", "", "", efectivo, bold=True,
-             backend=bool(paral))
+             backend=bool(tuplas))
         r += 1
 
         idx = len(periodos_validos)
         periodos_validos.append((ini, fin))
-        if paral:
-            paral_por_idx[idx] = paral
+        if tuplas:
+            paral_por_idx[idx] = tuplas
 
     # Resumen del profesional (Paso 5 completo, con fusión de traslapes ALT11)
     if periodos_validos:
         res = dias_efectivos_profesional(periodos_validos, paral_por_idx)
         banda("RESUMEN PASO 5 — DÍAS EFECTIVOS DEL PROFESIONAL", F_PARTE, FILL_PARTE, 18)
         fila("Días brutos (suma de certificados)", "", "", res.dias_brutos, bold=True)
-        fila("(−) Paralizaciones de obra (InfoObras)", "", "", res.dias_paralizados,
-             bold=True, backend=True)
+        fila("(−) Periodos sin avance en obra (paralización / sin valorización)", "", "",
+             res.dias_paralizados, bold=True, backend=True)
         fila("(−) Traslapes entre experiencias (ALT11)", "", "", res.dias_traslape,
              bold=True, backend=True)
         fila("DÍAS EFECTIVOS", "", "", res.dias_efectivos, bold=True, backend=True)

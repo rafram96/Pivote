@@ -134,9 +134,10 @@ def test_flujo_real_completo_con_revision_humana(tmp_path):
     assert enr["1:1"]["cui"] == "2418877" and enr["1:1"]["via"] == "CUI_TEXTO"
     # (2,1): resuelto por RUC supervisor
     assert enr["2:1"]["cui"] == "395001" and enr["2:1"]["via"] == "RUC"
-    # paralizaciones de la obra 2418877 (feb-abr 2022)
+    # paralizaciones de la obra 2418877 (feb-abr 2022) — ahora dicts con tipo
     assert len(enr["1:1"]["paralizaciones"]) == 1
-    assert enr["1:1"]["paralizaciones"][0][0] == "2022-02-01"
+    assert enr["1:1"]["paralizaciones"][0]["inicio"] == "2022-02-01"
+    assert enr["1:1"]["paralizaciones"][0]["tipo"] == "paralizado"
     # SUNAT en (2,1) con ALT04
     assert enr["2:1"]["sunat"]["razon_social"] == "CONSORCIO X SAC"
     obs_alt04 = [o for e in job.etapas for o in e.observaciones if o.codigo == "ALT04"]
