@@ -172,32 +172,42 @@ class EtapaInfoObrasReal:
         self._descargar = descargar
         self.max_descargas = int(os.getenv("PIVOTE_MAX_DESCARGAS", "0"))
 
-    def _fetch(self, cui: str, cert_ini=None, cert_fin=None):
+    def _fetch(self, cui: str, cert_ini=None, cert_fin=None, obra_id=None):
         if self._fetcher:
-            return self._fetcher(cui)
+            try:
+                return self._fetcher(cui, cert_ini, cert_fin, obra_id)
+            except TypeError:
+                return self._fetcher(cui)
         from scraping.infoobras import fetch_by_cui
-        return fetch_by_cui(cui, cert_ini, cert_fin)
+        return fetch_by_cui(cui, cert_ini, cert_fin, obra_id)
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
         obs: list[pipeline.Observacion] = []
         cache: dict[tuple, object] = {}
         cont = {"ok": 0, "rev": 0, "err": 0, "descargadas": 0}
 
-        def _fetch_obra(cui, cert_ini, cert_fin):
+        def _fetch_obra(cui, cert_ini, cert_fin, obra_id=None):
             # Cachea SOLO éxitos: si la obra cae por flakiness no se memoriza el
             # None, para que la 2da pasada (o un hermano con el mismo CUI) pueda
             # reintentar. La ventana del certificado desambigua si el CUI trae
             # varias obras.
-            ckey = (cui, cert_ini, cert_fin)
+            if obra_id is not None:
+                ckey_lookup = (cui, None, None, obra_id)
+                if ckey_lookup in cache:
+                    return cache[ckey_lookup]
+
+            ckey = (cui, cert_ini, cert_fin, obra_id)
             if ckey in cache:
                 return cache[ckey]
             try:
-                obra = self._fetch(cui, cert_ini, cert_fin)
+                obra = self._fetch(cui, cert_ini, cert_fin, obra_id)
             except Exception as ex:  # noqa: BLE001 — portal intermitente
                 logger.warning("InfoObras CUI %s: %r", cui, ex)
                 return None
             if obra is not None:
                 cache[ckey] = obra
+                if getattr(obra, "obra_id", None) is not None:
+                    cache[(cui, None, None, obra.obra_id)] = obra
             return obra
 
         def _procesar(_e, np_, ne, cui, cert_ini, cert_fin, obra):
@@ -292,13 +302,15 @@ class EtapaInfoObrasReal:
         # (todavía NO se marca error) para reintentarlo al final.
         fallidos: list[tuple] = []
         for _e, (np_, ne) in ctx.items_experiencia():
-            cui = (ctx.enriquecimiento.get(_clave(np_, ne)) or {}).get("cui")
+            enr = ctx.enriquecimiento.get(_clave(np_, ne)) or {}
+            cui = enr.get("cui")
             if not cui:
                 continue  # sin obra identificada: nada que consultar
             cert_ini, cert_fin = _fecha_iso(_e.get("fecha_inicial")), _fecha_iso(_e.get("fecha_final"))
-            obra = _fetch_obra(cui, cert_ini, cert_fin)
+            obra_id = enr.get("obra", {}).get("obra_id") if isinstance(enr.get("obra"), dict) else None
+            obra = _fetch_obra(cui, cert_ini, cert_fin, obra_id)
             if obra is None:
-                fallidos.append((_e, np_, ne, cui, cert_ini, cert_fin))
+                fallidos.append((_e, np_, ne, cui, cert_ini, cert_fin, obra_id))
             else:
                 _procesar(_e, np_, ne, cui, cert_ini, cert_fin, obra)
 
@@ -307,8 +319,8 @@ class EtapaInfoObrasReal:
         # las que SIGUEN sin responder se marcan como error honesto.
         if fallidos:
             logger.info("InfoObras: 2da pasada para %d obra(s) caídas por flakiness", len(fallidos))
-            for _e, np_, ne, cui, cert_ini, cert_fin in fallidos:
-                obra = _fetch_obra(cui, cert_ini, cert_fin)
+            for _e, np_, ne, cui, cert_ini, cert_fin, obra_id in fallidos:
+                obra = _fetch_obra(cui, cert_ini, cert_fin, obra_id)
                 if obra is None:
                     cont["err"] += 1
                     obs.append(pipeline.Observacion(

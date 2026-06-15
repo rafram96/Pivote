@@ -310,3 +310,43 @@ def test_obra_privada_no_va_a_revision(tmp_path):
     assert job.estado == JobEstado.COMPLETADO  # N/A no pide revisión humana
     enr = repo.cargar_enriquecimiento(job.job_id)
     assert enr["1:1"]["via"] == "NA"
+
+
+def test_infoobras_cache_por_obra_id(tmp_path):
+    """Dos experiencias con el mismo CUI y obra_id pero diferentes fechas
+    certificado solo hacen 1 llamada al fetcher (gracias al caché por obra_id)."""
+    espejo = {
+        "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
+        "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N",
+             "requisitos": {"tipo_experiencia": "mínimo 2 años"},
+             "experiencias": [
+                 {"n": 1, "proyecto": "Centro de Salud Pillco Marca 1", "cui": "2418877",
+                  "fecha_inicial": "2021-01-01", "fecha_final": "2021-06-30", "folio": "1"},
+                 {"n": 2, "proyecto": "Centro de Salud Pillco Marca 2", "cui": "2418877",
+                  "fecha_inicial": "2022-01-01", "fecha_final": "2022-06-30", "folio": "2"},
+             ]},
+        ],
+        "resumen_evaluacion": {"factores": []},
+    }
+
+    estado = {"llamadas": 0}
+
+    def fetcher_con_conteo(cui, cert_ini=None, cert_fin=None, obra_id=None):
+        estado["llamadas"] += 1
+        return ObraFake(111, "C.S. PILLCO MARCA", avances=_meses((2021, 1), (2022, 12)))
+
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
+                                fetcher_infoobras=fetcher_con_conteo,
+                                consultor_sunat=lambda r: None,
+                                descargar=lambda *a, **k: None), repo)
+    job = motor.correr(motor.crear_job(espejo).job_id)
+
+    # Ambas experiencias deben haberse procesado exitosamente
+    enr = repo.cargar_enriquecimiento(job.job_id)
+    assert len(enr["1:1"]["valorizaciones"]) == 24
+    assert len(enr["1:2"]["valorizaciones"]) == 24
+    # La consulta real al fetcher de InfoObras debió ocurrir SOLO UNA VEZ
+    assert estado["llamadas"] == 1
