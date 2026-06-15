@@ -11,6 +11,9 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
+import requests
+
 from scraping import infoobras
 
 
@@ -281,3 +284,38 @@ def test_coincide_codigo_filtra_colision_por_substring():
     assert infoobras.coincide_codigo(real, "2157301")        # codUniqInv exacto
     assert not infoobras.coincide_codigo(ajena, "95555")     # substring → descartar
     assert infoobras.coincide_codigo(ajena, "2595555")       # su propio CUI sí
+
+
+class _SesionInestable:
+    """Sesión falsa que falla `fallos` veces y luego responde."""
+    def __init__(self, fallos: int, texto="var lAvances = [];"):
+        self.headers, self.fallos, self.texto, self.llamadas = {}, fallos, texto, 0
+
+    def _responder(self):
+        self.llamadas += 1
+        if self.llamadas <= self.fallos:
+            raise requests.ConnectionError("RemoteDisconnected transitorio")
+
+        class R:
+            text = self.texto
+            def raise_for_status(self_inner):
+                return None
+        return R()
+
+    def get(self, *a, **k):
+        return self._responder()
+
+
+def test_datos_ejecucion_reintenta_ante_caida_transitoria(monkeypatch):
+    # 2 caídas y a la 3ra responde → debe recuperar (no perder la obra)
+    monkeypatch.setattr(infoobras.time, "sleep", lambda *_: None)
+    ses = _SesionInestable(fallos=2)
+    datos = infoobras._extraer_datos_ejecucion(ses, 999)
+    assert ses.llamadas == 3 and "lAvances" in datos
+
+
+def test_datos_ejecucion_propaga_si_agota_reintentos(monkeypatch):
+    # si el portal nunca responde, propaga (la etapa lo marca como error honesto)
+    monkeypatch.setattr(infoobras.time, "sleep", lambda *_: None)
+    with pytest.raises(requests.RequestException):
+        infoobras._extraer_datos_ejecucion(_SesionInestable(fallos=99), 1)

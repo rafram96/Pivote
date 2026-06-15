@@ -284,9 +284,21 @@ def _buscar_por_cui(session: requests.Session, cui: str) -> list[dict]:
         "rowsPerPage": 20,
         "Parameters": json.dumps(params_json, separators=(",", ":")),
     }
-    r = session.post(url, params=query, timeout=15)
-    r.raise_for_status()
-    data = r.json()
+    data = None
+    ultimo_err: Optional[Exception] = None
+    for intento in range(3):  # el portal cae a ratos; reintentar el POST
+        try:
+            r = session.post(url, params=query, timeout=15)
+            r.raise_for_status()
+            data = r.json()
+            break
+        except requests.RequestException as e:
+            ultimo_err = e
+            logger.warning("InfoObras: busqueda CUI %s intento %d/3: %s", cui, intento + 1, e)
+            if intento < 2:
+                time.sleep(1.5 * (intento + 1))
+    if data is None:
+        raise ultimo_err
     result = data.get("Result", data)
     if isinstance(result, list):
         obras = result
@@ -357,15 +369,30 @@ def _parse_js_vars(html: str) -> dict[str, list]:
 
 def _extraer_datos_ejecucion(session: requests.Session, obra_id: int) -> dict[str, list]:
     """
-    Descarga DatosEjecucion y extrae las variables JS embebidas.
-    Retorna {nombre_variable: lista_de_dicts}.
+    Descarga DatosEjecucion y extrae las variables JS embebidas (incluye
+    lAvances = las valorizaciones). Retorna {nombre_variable: lista_de_dicts}.
+
+    Reintenta ante caídas transitorias del portal (RemoteDisconnected/5xx): es
+    el dato CRÍTICO de la obra, y un solo drop hacía perder la obra entera (se
+    veían tablas de valorización vacías al azar entre corridas).
     """
     url = f"{BASE_WEB}/Mapa/DatosEjecucion"
-    session.headers["Accept"] = "text/html,*/*"
-    r = session.get(url, params={"ObraId": obra_id}, timeout=30)
-    session.headers["Accept"] = "application/json, text/javascript, */*; q=0.01"
-    r.raise_for_status()
-    return _parse_js_vars(r.text)
+    ultimo_err: Optional[Exception] = None
+    for intento in range(3):
+        session.headers["Accept"] = "text/html,*/*"
+        try:
+            r = session.get(url, params={"ObraId": obra_id}, timeout=30)
+            r.raise_for_status()
+            return _parse_js_vars(r.text)
+        except requests.RequestException as e:
+            ultimo_err = e
+            logger.warning("InfoObras: DatosEjecucion ObraId %s intento %d/3: %s",
+                           obra_id, intento + 1, e)
+            if intento < 2:
+                time.sleep(1.5 * (intento + 1))
+        finally:
+            session.headers["Accept"] = "application/json, text/javascript, */*; q=0.01"
+    raise ultimo_err
 
 
 def _extraer_datos_preparacion(session: requests.Session, obra_id: int) -> dict[str, list]:
