@@ -289,10 +289,14 @@ def _buscar_por_cui(session: requests.Session, cui: str) -> list[dict]:
     data = r.json()
     result = data.get("Result", data)
     if isinstance(result, list):
-        return result
-    if isinstance(result, dict):
-        return result.get("data", result.get("obras", [result]))
-    return []
+        obras = result
+    elif isinstance(result, dict):
+        obras = result.get("data", result.get("obras", [result]))
+    else:
+        return []
+    # filtro exacto: la API matchea codSnip por substring (buscar '95555' trae
+    # '2595555'). Quedarse solo con los registros del código pedido.
+    return [o for o in obras if coincide_codigo(o, cui)]
 
 
 def _parse_js_vars(html: str) -> dict[str, list]:
@@ -809,6 +813,17 @@ def _ventana_obra(
     return oi, of
 
 
+def coincide_codigo(o: dict, codigo: str) -> bool:
+    """¿El registro corresponde EXACTAMENTE al código buscado? La búsqueda de
+    InfoObras hace match por substring sobre `codSnip`: buscar '95555' trae
+    '2595555' (obra ajena). Solo es válido si el código coincide exacto con el
+    SNIP (`codSnip`) o con el CUI único (`codUniqInv`)."""
+    codigo = str(codigo or "").strip()
+    if not codigo:
+        return True  # sin código que comparar → no filtrar
+    return any(str(o.get(c) or "").strip() == codigo for c in ("codSnip", "codUniqInv"))
+
+
 def seleccionar_obra(
     obras: list[dict],
     cert_inicio: Optional[date] = None,
@@ -816,43 +831,53 @@ def seleccionar_obra(
     rango_valorizaciones: Optional[Callable[[object], tuple]] = None,
 ) -> Optional[dict]:
     """Elige la obra correcta cuando un CUI devuelve varias (caso real: CUI con
-    7 registros y solo 1 finalizado).
+    varios registros: ejecución, contingencia, supervisión, re-registros).
 
-    Criterio, en orden:
-      1. Si hay obras FINALIZADAS, solo se consideran esas (una obra en curso
-         aún no tiene todas sus valorizaciones/hitos).
-      2. Entre las candidatas, la que más solapa con el periodo del certificado
-         [cert_inicio, cert_fin]; sin solape, la de fecha de inicio más cercana.
-         El solape se mide sobre la ventana REAL de actividad (cabecera extendida
-         con el rango de valorizaciones, si `rango_valorizaciones` lo provee).
-      3. Sin fechas del certificado, la primera de las candidatas.
+    Sin fechas del certificado: compat — finalizada primero, luego la primera.
 
-    `rango_valorizaciones(obra_id) -> (date|None, date|None)` es opcional e
-    inyectable: solo se consulta en el desempate multi-candidata, para no pedir
-    DatosEjecucion cuando no hace falta.
+    Con fechas del certificado [cert_inicio, cert_fin]:
+      P1. Si alguna obra SOLAPA (días de solape > 0) la ventana real de
+          valorizaciones con el certificado, solo se consideran esas, ordenadas
+          por mayor solape (FINALIZADA como desempate).
+      P2. Si NINGUNA solapa, se ordenan TODAS por cercanía del inicio de su
+          ventana al inicio del certificado (sin excluir las no finalizadas:
+          el caso Egoavil 66057 es una obra paralizada que debe ganarle a una
+          contingencia finalizada antigua). FINALIZADA como desempate.
+
+    La ventana se mide sobre `_ventana_obra` (cabecera + rango de valorizaciones
+    si `rango_valorizaciones` lo provee; inyectable y perezoso).
     """
     if not obras:
         return None
     if len(obras) == 1:
         return obras[0]
 
-    finalizadas = [o for o in obras if "FINALIZAD" in _estado_obra(o)]
-    candidatas = finalizadas or list(obras)
-    if len(candidatas) == 1:
-        return candidatas[0]
+    if not (cert_inicio and cert_fin):
+        finalizadas = [o for o in obras if "FINALIZAD" in _estado_obra(o)]
+        return (finalizadas or obras)[0]
 
-    if cert_inicio and cert_fin:
-        def _solape(o: dict) -> int:
-            oi, of = _ventana_obra(o, rango_valorizaciones)
-            if not oi:
-                return -10 ** 9  # sin fecha → al fondo
-            ini, fin = max(oi, cert_inicio), min(of, cert_fin)
-            if fin >= ini:
-                return (fin - ini).days            # días de solape (más = mejor)
-            return -abs((oi - cert_inicio).days)   # sin solape: penaliza distancia
+    def _fin(o: dict) -> int:
+        return 1 if "FINALIZAD" in _estado_obra(o) else 0
 
-        candidatas = sorted(candidatas, key=_solape, reverse=True)
-    return candidatas[0]
+    # P1 · obras con solape positivo
+    con_solape: list[tuple[dict, int]] = []
+    for o in obras:
+        oi, of = _ventana_obra(o, rango_valorizaciones)
+        if not oi:
+            continue
+        dias = (min(of, cert_fin) - max(oi, cert_inicio)).days
+        if dias > 0:
+            con_solape.append((o, dias))
+    if con_solape:
+        con_solape.sort(key=lambda od: (od[1], _fin(od[0])), reverse=True)
+        return con_solape[0][0]
+
+    # P2 · nadie solapa → la ventana más cercana al inicio del certificado
+    def _dist(o: dict) -> int:
+        oi, _ = _ventana_obra(o, rango_valorizaciones)
+        return abs((oi - cert_inicio).days) if oi else 10 ** 9
+
+    return sorted(obras, key=lambda o: (_dist(o), -_fin(o)))[0]
 
 
 def fetch_by_cui(

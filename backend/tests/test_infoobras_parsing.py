@@ -257,3 +257,27 @@ def test_seleccionar_obra_solape_usa_valorizaciones_no_cabecera():
     elegida = infoobras.seleccionar_obra(
         [a, b], cert_ini, cert_fin, rango_valorizaciones=lambda oid: rangos[oid])
     assert elegida["codigoObra"] == 33900
+
+
+def test_seleccionar_obra_sin_solape_principal_paralizada_gana_a_contingencia():
+    # caso Egoavil 1:4: ninguna obra solapa el certificado (2023-11 → 2025-07);
+    # la principal PARALIZADA y reciente debe ganarle a la contingencia
+    # FINALIZADA antigua por cercanía — sin gate duro de finalizada.
+    contingencia = _obra("Finalizado", date(2017, 12, 1), date(2019, 3, 1), codigoObra=64149)
+    principal = _obra("Paralizada", date(2019, 11, 1), date(2022, 10, 1), codigoObra=66057)
+    rangos = {64149: (date(2017, 12, 1), date(2019, 3, 1)),
+              66057: (date(2019, 11, 1), date(2022, 10, 1))}
+    elegida = infoobras.seleccionar_obra(
+        [contingencia, principal], date(2023, 11, 22), date(2025, 7, 22),
+        rango_valorizaciones=lambda oid: rangos[oid])
+    assert elegida["codigoObra"] == 66057
+
+
+def test_coincide_codigo_filtra_colision_por_substring():
+    # buscar '95555' no debe traer '2595555' (substring): solo match exacto
+    real = _obra("Finalizado", codSnip="95555", codUniqInv="2157301")
+    ajena = _obra("Finalizado", codSnip="2595555", codUniqInv="2595555")
+    assert infoobras.coincide_codigo(real, "95555")          # codSnip exacto
+    assert infoobras.coincide_codigo(real, "2157301")        # codUniqInv exacto
+    assert not infoobras.coincide_codigo(ajena, "95555")     # substring → descartar
+    assert infoobras.coincide_codigo(ajena, "2595555")       # su propio CUI sí

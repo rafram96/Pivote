@@ -251,6 +251,12 @@ class ConsultaInfoObras:
                 r.raise_for_status()
                 res = r.json().get("Result", [])
                 res = res if isinstance(res, list) else []
+                # solo al buscar por código: filtro exacto (la API matchea
+                # codSnip por substring; '95555' traería '2595555'). En la
+                # búsqueda por nombre NO se filtra (el código no es la query).
+                if codsnip:
+                    from scraping.infoobras import coincide_codigo
+                    res = [o for o in res if coincide_codigo(o, codsnip)]
                 self._cache[key] = res
                 return res
             except Exception:  # noqa: BLE001 — API pública intermitente
@@ -286,6 +292,17 @@ def _elegir_obra(obras: list[dict], cert_ini=None, cert_fin=None) -> dict:
 
 # ── resolución ───────────────────────────────────────────────────────────────
 
+def _cui_de(o: dict) -> Optional[str]:
+    """CUI oficial de un registro: se prefiere `codUniqInv` (CUI único, 7 díg)
+    sobre `codSnip` (SNIP heredado, 5-6 díg). El de 7 díg es clave estable y
+    evita colisiones por substring en la API (buscar '95555' trae '2595555')."""
+    for campo in ("codUniqInv", "codSnip"):
+        v = str(o.get(campo) or "").strip()
+        if v.isdigit() and len(v) >= 3 and int(v) != 0:
+            return v
+    return None
+
+
 def resolver(exp: dict, consulta: Consulta) -> dict:
     """Resuelve UNA experiencia. Devuelve:
     {estado: 'resuelto'|'revision'|'na', cui, via, decision, candidatos[], obra}
@@ -307,20 +324,21 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
             # el periodo del certificado (de ahí salen los hitos correctos)
             ci, cf = _fecha_cert(exp.get("fecha_inicial")), _fecha_cert(exp.get("fecha_final"))
             o = _elegir_obra(obras, ci, cf)
+            cui_out = _cui_de(o) or codigo  # preferir CUI único de 7 díg
             full = norm(o.get("nombrObra") or "")
             toks = _tokens_clave(establecimiento(proyecto))
             n_hit = len(toks & _palabras(full))
             depmatch = norm(o.get("nombrDepartamento") or "") in ubicacion(proyecto)
-            obra = {"cui": codigo, "nombre_obra": o.get("nombrObra"),
+            obra = {"cui": cui_out, "nombre_obra": o.get("nombrObra"),
                     "departamento": o.get("nombrDepartamento"),
                     "obra_id": o.get("codigoObra") or o.get("obraId")}
             if (toks and n_hit >= max(1, (len(toks) + 1) // 2)) or depmatch:
-                return {"estado": "resuelto", "cui": codigo, "via": "CUI_TEXTO",
+                return {"estado": "resuelto", "cui": cui_out, "via": "CUI_TEXTO",
                         "decision": "código CUI verificado contra la obra",
                         "candidatos": [], "obra": obra}
             return {"estado": "revision", "cui": None, "via": "CUI_TEXTO",
                     "decision": "el código CUI del certificado no coincide con la obra — confirmar",
-                    "candidatos": [{"cui": codigo, "nombre_obra": (o.get("nombrObra") or "")[:90],
+                    "candidatos": [{"cui": cui_out, "nombre_obra": (o.get("nombrObra") or "")[:90],
                                     "departamento": o.get("nombrDepartamento"), "score": 50}],
                     "obra": None}
 
@@ -333,25 +351,33 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
     ruc_cert = mruc.group(1) if mruc else None
     toks = _tokens_clave(establecimiento(proyecto))
 
-    cands: dict[str, dict] = {}
+    # recolectar TODOS los registros distintos (sin descartar por CUI todavía:
+    # un CUI puede tener varias obras y la 1ª devuelta no es la mejor)
+    vistos: dict = {}
     for f in fragmentos(proyecto):
         for o in consulta.buscar(f):
-            cui = str(o.get("codSnip") or "").strip()
-            if cui.isdigit() and len(cui) >= 3 and int(cui) != 0:
-                cands.setdefault(cui, o)
+            if _cui_de(o):
+                vistos.setdefault(o.get("codigoObra") or o.get("obraId"), o)
 
-    ranked = []
-    for cui, o in cands.items():
+    # puntuar cada registro y agrupar por CUI (clave codUniqInv preferida),
+    # conservando el de mayor score como representante de su CUI
+    porcui: dict[str, dict] = {}
+    for o in vistos.values():
+        cui = _cui_de(o)
         rej = str(o.get("rucEjecutor") or "").strip()
         rsup = str(o.get("rucSupervisor") or "").strip()
         ruc_match = bool(ruc_cert and ruc_cert in (rej, rsup))
         sc = _puntuar(o, pn, deptos_hint, anio_cert) + (30 if ruc_match else 0)
-        ranked.append({"cui": cui, "nombre_obra": (o.get("nombrObra") or "")[:90],
-                       "full": norm(o.get("nombrObra") or ""),
-                       "departamento": o.get("nombrDepartamento"),
-                       "obra_id": o.get("codigoObra") or o.get("obraId"),
-                       "ruc_match": ruc_match, "score": round(sc, 1)})
-    ranked.sort(key=lambda x: x["score"], reverse=True)
+        cand = {"cui": cui, "nombre_obra": (o.get("nombrObra") or "")[:90],
+                "full": norm(o.get("nombrObra") or ""),
+                "departamento": o.get("nombrDepartamento"),
+                "obra_id": o.get("codigoObra") or o.get("obraId"),
+                "ruc_match": ruc_match, "score": round(sc, 1)}
+        prev = porcui.get(cui)
+        if prev is None or cand["score"] > prev["score"]:
+            porcui[cui] = cand
+
+    ranked = sorted(porcui.values(), key=lambda x: x["score"], reverse=True)
     best = ranked[0] if ranked else None
 
     n_hit = len(toks & _palabras(best["full"])) if best else 0
