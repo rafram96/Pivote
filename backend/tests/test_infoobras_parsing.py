@@ -319,3 +319,30 @@ def test_datos_ejecucion_propaga_si_agota_reintentos(monkeypatch):
     monkeypatch.setattr(infoobras.time, "sleep", lambda *_: None)
     with pytest.raises(requests.RequestException):
         infoobras._extraer_datos_ejecucion(_SesionInestable(fallos=99), 1)
+
+
+def test_consulta_query_reintenta_con_backoff(monkeypatch):
+    # microcaída del portal: la búsqueda por código debe reintentar (no degradar
+    # a "sin resultados" al primer fallo, que mandaba 6:1 a revisión por error)
+    import resolucion.cui as cui_mod
+    monkeypatch.setattr(cui_mod.time, "sleep", lambda *_: None)
+    estado = {"n": 0}
+
+    class R:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"Result": [{"codSnip": "123456", "codUniqInv": "1234567"}]}
+
+    class Ses:
+        def post(self, *a, **k):
+            estado["n"] += 1
+            if estado["n"] < 3:
+                raise requests.ConnectionError("microcaída del portal")
+            return R()
+
+    c = cui_mod.ConsultaInfoObras()
+    monkeypatch.setattr(c, "_ses", lambda: Ses())
+    res = c.por_codigo("123456")
+    assert estado["n"] == 3 and len(res) == 1

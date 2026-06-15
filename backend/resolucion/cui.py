@@ -16,10 +16,14 @@ solo la etapa en vivo toca el portal.
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 import unicodedata
 from datetime import date
 from typing import Optional, Protocol
+
+logger = logging.getLogger(__name__)
 
 try:
     from rapidfuzz import fuzz
@@ -259,10 +263,16 @@ class ConsultaInfoObras:
                     res = [o for o in res if coincide_codigo(o, codsnip)]
                 self._cache[key] = res
                 return res
-            except Exception:  # noqa: BLE001 — API pública intermitente
-                if intento == 2:
-                    return []
-        return []
+            except Exception as e:  # noqa: BLE001 — API pública intermitente
+                # Backoff entre reintentos: una microcaída del portal hacía
+                # fallar los 3 intentos en milisegundos → el resolver asumía
+                # "sin resultados" y degradaba al fragmento genérico (caso 6:1).
+                # Se loguea para que el fallo deje de ser silencioso.
+                logger.warning("InfoObras búsqueda (nombre=%r codsnip=%r) intento %d/3: %r",
+                               nombre, codsnip, intento + 1, e)
+                if intento < 2:
+                    time.sleep(1.5 * (intento + 1))
+        return []  # agotados los reintentos: el portal no respondió
 
     def por_codigo(self, codigo: str) -> list[dict]:
         return self._query(codsnip=str(codigo))
