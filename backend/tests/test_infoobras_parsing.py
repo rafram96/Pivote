@@ -319,6 +319,30 @@ def test_coincide_codigo_filtra_colision_por_substring():
     assert infoobras.coincide_codigo(ajena, "2595555")       # su propio CUI sí
 
 
+def test_resolver_distingue_portal_caido_de_sin_resultados():
+    # un fallo de red NO debe degradar al fragmento genérico y dar "ubicación
+    # contradice"; debe ser revisión con motivo honesto "el portal no respondió".
+    from resolucion.cui import resolver, PortalNoResponde
+
+    class PortalCaido:
+        def por_codigo(self, codigo):
+            raise PortalNoResponde("caído")
+
+        def buscar(self, nombre):
+            raise PortalNoResponde("caído")
+
+    # PASO 2 (por nombre): no hay código en el texto
+    r = resolver({"proyecto": "Supervisión del Hospital Regional de Tacna",
+                  "fecha_inicial": "2020-01-01"}, PortalCaido())
+    assert r["estado"] == "revision" and r["via"] == "PORTAL"
+    assert "no respondió" in r["decision"] and not r["candidatos"]
+
+    # PASO 0 (código explícito): por_codigo cae → también revisión PORTAL
+    r0 = resolver({"proyecto": "Hospital Regional de Tacna", "cui": "2418877"},
+                  PortalCaido())
+    assert r0["estado"] == "revision" and r0["via"] == "PORTAL"
+
+
 class _SesionInestable:
     """Sesión falsa que falla `fallos` veces y luego responde."""
     def __init__(self, fallos: int, texto="var lAvances = [];"):

@@ -25,6 +25,13 @@ from typing import Optional, Protocol
 
 logger = logging.getLogger(__name__)
 
+
+class PortalNoResponde(Exception):
+    """El portal de InfoObras no respondió tras los reintentos. Es DISTINTO de
+    'la búsqueda no tuvo resultados': permite al resolver mandar la experiencia a
+    revisión con un motivo honesto en vez de degradar al fragmento genérico."""
+
+
 try:
     from rapidfuzz import fuzz
 
@@ -272,7 +279,9 @@ class ConsultaInfoObras:
                                nombre, codsnip, intento + 1, e)
                 if intento < 2:
                     time.sleep(1.5 * (intento + 1))
-        return []  # agotados los reintentos: el portal no respondió
+        # agotados los reintentos: el portal no respondió. Se SEÑALA (≠ vacío)
+        # para que el resolver no degrade al fragmento genérico.
+        raise PortalNoResponde(f"InfoObras no respondió (nombre={nombre!r} codsnip={codsnip!r})")
 
     def por_codigo(self, codigo: str) -> list[dict]:
         return self._query(codsnip=str(codigo))
@@ -328,7 +337,12 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
     mcod = RE_CODIGO.search(proyecto)
     codigo = cui_campo if 4 <= len(cui_campo) <= 8 else (mcod.group(1) if mcod else None)
     if codigo:
-        obras = consulta.por_codigo(codigo)
+        try:
+            obras = consulta.por_codigo(codigo)
+        except PortalNoResponde:
+            return {"estado": "revision", "cui": None, "via": "PORTAL",
+                    "decision": "el portal de InfoObras no respondió — reintentar",
+                    "candidatos": [], "obra": None}
         if obras:
             # un CUI puede traer varias obras: preferir la finalizada que cubre
             # el periodo del certificado (de ahí salen los hitos correctos)
@@ -364,10 +378,22 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
     # recolectar TODOS los registros distintos (sin descartar por CUI todavía:
     # un CUI puede tener varias obras y la 1ª devuelta no es la mejor)
     vistos: dict = {}
+    fallo_red = False
     for f in fragmentos(proyecto):
-        for o in consulta.buscar(f):
+        try:
+            resultados = consulta.buscar(f)
+        except PortalNoResponde:
+            fallo_red = True  # un fragmento cayó; quizá otros respondan
+            continue
+        for o in resultados:
             if _cui_de(o):
                 vistos.setdefault(o.get("codigoObra") or o.get("obraId"), o)
+    # si NINGÚN fragmento trajo nada y hubo caída de red, no degradar: es
+    # "el portal no respondió", no "sin candidato" (motivo de revisión honesto).
+    if not vistos and fallo_red:
+        return {"estado": "revision", "cui": None, "via": "PORTAL",
+                "decision": "el portal de InfoObras no respondió — reintentar",
+                "candidatos": [], "obra": None}
 
     # puntuar cada registro y agrupar por CUI (clave codUniqInv preferida),
     # conservando el de mayor score como representante de su CUI
