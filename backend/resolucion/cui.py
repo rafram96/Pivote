@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+from datetime import date
 from typing import Optional, Protocol
 
 try:
@@ -264,6 +265,25 @@ class ConsultaInfoObras:
         return self._query(nombre=nombre)
 
 
+# ── selección de obra cuando un CUI trae varias ──────────────────────────────
+
+def _fecha_cert(v) -> Optional[date]:
+    try:
+        return date.fromisoformat(str(v)[:10]) if v else None
+    except ValueError:
+        return None
+
+
+def _elegir_obra(obras: list[dict], cert_ini=None, cert_fin=None) -> dict:
+    """Prefiere la obra FINALIZADA que cubre el periodo del certificado. Delega
+    en el selector del scraper; si no está disponible, cae a la primera."""
+    try:
+        from scraping.infoobras import seleccionar_obra
+        return seleccionar_obra(obras, cert_ini, cert_fin) or obras[0]
+    except Exception:  # noqa: BLE001 — entorno sin el scraper
+        return obras[0]
+
+
 # ── resolución ───────────────────────────────────────────────────────────────
 
 def resolver(exp: dict, consulta: Consulta) -> dict:
@@ -283,7 +303,10 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
     if codigo:
         obras = consulta.por_codigo(codigo)
         if obras:
-            o = obras[0]
+            # un CUI puede traer varias obras: preferir la finalizada que cubre
+            # el periodo del certificado (de ahí salen los hitos correctos)
+            ci, cf = _fecha_cert(exp.get("fecha_inicial")), _fecha_cert(exp.get("fecha_final"))
+            o = _elegir_obra(obras, ci, cf)
             full = norm(o.get("nombrObra") or "")
             toks = _tokens_clave(establecimiento(proyecto))
             n_hit = len(toks & _palabras(full))

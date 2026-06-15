@@ -151,11 +151,11 @@ class EtapaInfoObrasReal:
         self._descargar = descargar
         self.max_descargas = int(os.getenv("PIVOTE_MAX_DESCARGAS", "0"))
 
-    def _fetch(self, cui: str):
+    def _fetch(self, cui: str, cert_ini=None, cert_fin=None):
         if self._fetcher:
             return self._fetcher(cui)
         from scraping.infoobras import fetch_by_cui
-        return fetch_by_cui(cui)
+        return fetch_by_cui(cui, cert_ini, cert_fin)
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
         ok = err = 0
@@ -169,8 +169,13 @@ class EtapaInfoObrasReal:
             cui = enr.get("cui")
             if not cui:
                 continue  # sin obra identificada: nada que consultar
+            # ventana del certificado: cuando un CUI tiene varias obras, sirve
+            # para elegir la que cubre el periodo que el profesional supervisó
+            cert_ini, cert_fin = _fecha_iso(_e.get("fecha_inicial")), _fecha_iso(_e.get("fecha_final"))
+            ckey = (cui, cert_ini, cert_fin)
             try:
-                obra = cache[cui] if cui in cache else cache.setdefault(cui, self._fetch(cui))
+                obra = (cache[ckey] if ckey in cache
+                        else cache.setdefault(ckey, self._fetch(cui, cert_ini, cert_fin)))
             except Exception as ex:  # noqa: BLE001 — portal intermitente
                 logger.warning("InfoObras CUI %s: %r", cui, ex)
                 obra = None
@@ -190,6 +195,24 @@ class EtapaInfoObrasReal:
             ]
             enr["codigo_infobras"] = getattr(obra, "codigo_infobras", None)
             enr["obra_nombre"] = getattr(obra, "nombre", None)
+            # ficha de la obra + todas las valorizaciones (para la hoja Excel)
+            fi, ff = getattr(obra, "fecha_inicio", None), getattr(obra, "fecha_fin", None)
+            enr["obra_ficha"] = {
+                "cui": cui,
+                "codigo_infobras": getattr(obra, "codigo_infobras", None),
+                "estado": getattr(obra, "estado", None),
+                "monto": getattr(obra, "monto_ejecutado_acumulado", None)
+                         or getattr(obra, "monto_contrato", None),
+                "fecha_inicio": fi.isoformat() if fi else None,
+                "fecha_fin": ff.isoformat() if ff else None,
+            }
+            enr["valorizaciones"] = [
+                {"anio": a.anio, "mes": a.mes, "estado": getattr(a, "estado", None),
+                 "fisico_real": getattr(a, "avance_fisico_real", None),
+                 "valorizado_real": getattr(a, "valorizado_real", None)}
+                for a in (getattr(obra, "avances", []) or [])
+                if getattr(a, "anio", 0) and getattr(a, "mes", 0)
+            ]
             ctx.enriquecimiento[k] = enr
             ok += 1
             if periodos:
@@ -355,14 +378,23 @@ class EtapaExcelReal:
         # pasa los periodos CON su tipo (paralizado / sin valorización) para que
         # el Excel los muestre diferenciados; el generador normaliza las fechas.
         paral: dict[tuple[int, int], list] = {}
+        cuis: dict[tuple[int, int], str] = {}
+        fichas: dict[tuple[int, int], dict] = {}
         for k, enr in ctx.enriquecimiento.items():
-            if ":" in k and not k.startswith("prof:") and enr.get("paralizaciones"):
-                np_, ne = (int(x) for x in k.split(":"))
+            if ":" not in k or k.startswith("prof:"):
+                continue
+            np_, ne = (int(x) for x in k.split(":"))
+            if enr.get("paralizaciones"):
                 paral[(np_, ne)] = enr["paralizaciones"]
+            if enr.get("cui"):
+                cuis[(np_, ne)] = enr["cui"]
+            if enr.get("obra_ficha") or enr.get("valorizaciones"):
+                fichas[(np_, ne)] = {**(enr.get("obra_ficha") or {}),
+                                     "valorizaciones": enr.get("valorizaciones") or []}
         ruta = self.dir_salida / f"{ctx.job.job_id}.final.xlsx"
         if ruta.exists():
             ruta.unlink()  # regenerar (re-disparo tras revisión humana)
-        generar_excel_final(ctx.espejo, ruta, paral)
+        generar_excel_final(ctx.espejo, ruta, paral, cuis, fichas)
         ctx.job.excel_final = f"/api/pivote/jobs/{ctx.job.job_id}/excel"
         ctx.job.zip_infoobras = f"/api/pivote/jobs/{ctx.job.job_id}/zip"
         zip_previo = self.dir_salida / f"{ctx.job.job_id}.infoobras.zip"

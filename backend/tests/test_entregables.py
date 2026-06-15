@@ -113,6 +113,52 @@ def test_excel_final_muestra_periodos_sin_valorizacion(tmp_path):
     assert "Sin valorización 1 — obra parada (InfoObras)" in texto
 
 
+def test_excel_final_valorizaciones_resalta_solo_meses_del_certificado(tmp_path):
+    # datos reales de la captura del ingeniero: Hospital Ernesto Guzman (CUI
+    # 2198319, código 102951, finalizado). Certificado 01/05/19–31/10/19 → solo
+    # las valorizaciones de may–oct 2019 deben quedar en amarillo.
+    espejo = {
+        "_meta": {"analisis_id": "v", "concurso": "CP-V/2026", "postor": "P"},
+        "postor": {},
+        "profesionales": [{
+            "n_prof": 1, "cargo": "JEFE", "nombre": "N",
+            "experiencias": [{"n": 1, "proyecto": "Hospital Ernesto Guzman", "folio": "600",
+                              "fecha_inicial": "2019-05-01", "fecha_final": "2019-10-31"}],
+        }],
+        "resumen_evaluacion": {"factores": []},
+    }
+    fichas = {(1, 1): {
+        "codigo_infobras": "102951", "cui": "2198319", "estado": "Finalizado",
+        "monto": 11131864.36, "fecha_inicio": "2019-03-25", "fecha_fin": "2019-07-23",
+        "valorizaciones": [
+            {"anio": 2020, "mes": 2, "estado": "En ejecución", "fisico_real": 1.0, "valorizado_real": 11131864.36},
+            {"anio": 2019, "mes": 10, "estado": "En ejecución", "fisico_real": 0.5172, "valorizado_real": 4974255.19},
+            {"anio": 2019, "mes": 5, "estado": "En ejecución", "fisico_real": 0.1564, "valorizado_real": 1738809.21},
+            {"anio": 2019, "mes": 3, "estado": "En ejecución", "fisico_real": 0.0216, "valorizado_real": 240053.31},
+        ],
+    }}
+    salida = generar_excel_final(espejo, tmp_path / "v.xlsx", fichas=fichas)
+    ws = openpyxl.load_workbook(salida)["P1 JEFE"]
+
+    color = {}
+    for fila in ws.iter_rows():
+        for c in fila:
+            if c.value and " / " in str(c.value):
+                color[str(c.value)] = (c.fill.fgColor.rgb or "")
+
+    # may y oct 2019 → dentro del certificado → amarillo
+    assert color["2019 / MAYO"].endswith("FFFF00")
+    assert color["2019 / OCTUBRE"].endswith("FFFF00")
+    # mar 2019 y feb 2020 → fuera → sin resaltar
+    assert not color["2019 / MARZO"].endswith("FFFF00")
+    assert not color["2020 / FEBRERO"].endswith("FFFF00")
+
+    # la ficha de la obra (código, CUI, estado) aparece en la hoja
+    texto = "\n".join(str(c.value) for f in ws.iter_rows() for c in f if c.value)
+    assert "102951" in texto and "2198319" in texto and "Finalizado" in texto
+    assert "VALORIZACIONES" in texto
+
+
 def test_excel_final_fechas_no_computables_quedan_anotadas(tmp_path):
     salida = generar_excel_final(ESPEJO, tmp_path / "final.xlsx", PARALIZACIONES)
     ws = openpyxl.load_workbook(salida)["P2 ESP. ESTRUCTURAS"]

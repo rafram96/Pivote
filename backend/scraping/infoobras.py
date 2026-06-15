@@ -786,7 +786,55 @@ def periodos_inactividad(avances: list[AvanceMensual]) -> list[dict]:
 # API pública
 # ---------------------------------------------------------------------------
 
-def fetch_by_cui(cui: str) -> Optional[WorkInfo]:
+def _estado_obra(o: dict) -> str:
+    return (o.get("estObra") or o.get("estadoObra") or "").strip().upper()
+
+
+def seleccionar_obra(
+    obras: list[dict],
+    cert_inicio: Optional[date] = None,
+    cert_fin: Optional[date] = None,
+) -> Optional[dict]:
+    """Elige la obra correcta cuando un CUI devuelve varias (caso real: CUI con
+    7 registros y solo 1 finalizado).
+
+    Criterio, en orden:
+      1. Si hay obras FINALIZADAS, solo se consideran esas (una obra en curso
+         aún no tiene todas sus valorizaciones/hitos).
+      2. Entre las candidatas, la que más solapa con el periodo del certificado
+         [cert_inicio, cert_fin]; sin solape, la de fecha de inicio más cercana.
+      3. Sin fechas del certificado, la primera de las candidatas.
+    """
+    if not obras:
+        return None
+    if len(obras) == 1:
+        return obras[0]
+
+    finalizadas = [o for o in obras if "FINALIZAD" in _estado_obra(o)]
+    candidatas = finalizadas or list(obras)
+    if len(candidatas) == 1:
+        return candidatas[0]
+
+    if cert_inicio and cert_fin:
+        def _solape(o: dict) -> int:
+            oi = _parse_timestamp_json(o.get("fechaIniObra"))
+            of = _parse_timestamp_json(o.get("fechaFinObra")) or oi
+            if not oi:
+                return -10 ** 9  # sin fecha → al fondo
+            ini, fin = max(oi, cert_inicio), min(of, cert_fin)
+            if fin >= ini:
+                return (fin - ini).days            # días de solape (más = mejor)
+            return -abs((oi - cert_inicio).days)   # sin solape: penaliza distancia
+
+        candidatas = sorted(candidatas, key=_solape, reverse=True)
+    return candidatas[0]
+
+
+def fetch_by_cui(
+    cui: str,
+    cert_inicio: Optional[date] = None,
+    cert_fin: Optional[date] = None,
+) -> Optional[WorkInfo]:
     """
     Consulta InfoObras por CUI y retorna datos completos de la obra.
 
@@ -807,8 +855,16 @@ def fetch_by_cui(cui: str) -> Optional[WorkInfo]:
             logger.info("InfoObras: CUI %s no encontrado", cui)
             return None
 
-        # Tomar la primera obra (si hay múltiples, es desambiguación futura)
-        obra_raw = obras[0]
+        # Un CUI puede tener varias obras (ej.: ejecución, obras complementarias,
+        # supervisión, re-registros). Se elige la FINALIZADA que cubre el periodo
+        # del certificado — de ahí salen los hitos de valorización correctos.
+        if len(obras) > 1:
+            logger.info(
+                "InfoObras: CUI %s devolvió %d obras (estados: %s) — seleccionando",
+                cui, len(obras),
+                ", ".join(sorted({_estado_obra(o) or "?" for o in obras})),
+            )
+        obra_raw = seleccionar_obra(obras, cert_inicio, cert_fin)
         obra_id = obra_raw.get("codigoObra")
 
         # InfoObras a veces devuelve la obra sin codigoObra en el 1er request
@@ -821,7 +877,7 @@ def fetch_by_cui(cui: str) -> Optional[WorkInfo]:
             time.sleep(2.0)
             obras_retry = _buscar_por_cui(session, cui)
             if obras_retry:
-                obra_raw = obras_retry[0]
+                obra_raw = seleccionar_obra(obras_retry, cert_inicio, cert_fin)
                 obra_id = obra_raw.get("codigoObra")
 
         if not obra_id:
@@ -897,12 +953,10 @@ def fetch_by_cui(cui: str) -> Optional[WorkInfo]:
             fecha_inicio=_parse_timestamp_json(obra_raw.get("fechaIniObra")),
             fecha_fin=_parse_timestamp_json(obra_raw.get("fechaFinObra")),
             plazo_dias=obra_raw.get("plazoObra"),
-            codigo_infobras=str(
-                obra_raw.get("codigoInfobras")
-                or obra_raw.get("codInfobras")
-                or obra_raw.get("CodigoInfobras")
-                or ""
-            ).strip() or None,
+            # El "Código InfoObras" de la ficha es `codigoObra` (= obra_id); la
+            # búsqueda no trae ninguna clave `codigo(I|i)nfobras`. Verificado en
+            # vivo con el CUI 133630 (devolvía None → Excel mostraba "—").
+            codigo_infobras=str(obra_id).strip() or None,
             porcentaje_avance_fisico=avance_pct_real,
             monto_ejecutado_acumulado=monto_ejecutado,
             supervisores=supervisores,

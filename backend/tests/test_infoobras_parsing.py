@@ -197,3 +197,43 @@ def test_periodos_inactividad_combina_paralizado_y_hueco_ordenados():
     # ordenados por inicio: el hueco (ene) va antes que la paralización (abr)
     assert per[0]["tipo"] == "sin_valorizacion"
     assert per[0]["inicio"] == date(2018, 1, 1)
+
+
+# ── selección de obra cuando un CUI devuelve varias ──────────────────────────
+
+def _obra(estado="", ini=None, fin=None, **extra):
+    def ts(d):
+        if not d:
+            return None
+        import calendar
+        epoch = calendar.timegm(d.timetuple()) * 1000
+        return f"/Date({epoch})/"
+    return {"estObra": estado, "fechaIniObra": ts(ini), "fechaFinObra": ts(fin), **extra}
+
+
+def test_seleccionar_obra_unica_la_devuelve():
+    o = _obra("En ejecución", codigoObra=1)
+    assert infoobras.seleccionar_obra([o]) is o
+
+
+def test_seleccionar_obra_prefiere_finalizada():
+    # caso real: 7 registros del mismo CUI, solo 1 finalizado
+    obras = [_obra("En ejecución", codigoObra=i) for i in range(6)]
+    fin = _obra("Finalizado", codigoObra=99)
+    obras.insert(3, fin)
+    assert infoobras.seleccionar_obra(obras)["codigoObra"] == 99
+
+
+def test_seleccionar_obra_por_solape_con_el_certificado():
+    # dos finalizadas; gana la que cubre el periodo del certificado
+    lejana = _obra("Finalizado", date(2010, 1, 1), date(2011, 1, 1), codigoObra=1)
+    cubre = _obra("Finalizado", date(2021, 1, 1), date(2023, 12, 31), codigoObra=2)
+    elegida = infoobras.seleccionar_obra(
+        [lejana, cubre], date(2021, 5, 13), date(2023, 5, 6))
+    assert elegida["codigoObra"] == 2
+
+
+def test_seleccionar_obra_sin_fechas_cae_a_la_primera_finalizada():
+    a = _obra("Finalizado", codigoObra=7)
+    b = _obra("Finalizado", codigoObra=8)
+    assert infoobras.seleccionar_obra([a, b])["codigoObra"] == 7
