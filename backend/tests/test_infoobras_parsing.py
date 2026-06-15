@@ -276,6 +276,20 @@ def test_seleccionar_obra_sin_solape_principal_paralizada_gana_a_contingencia():
     assert elegida["codigoObra"] == 66057
 
 
+def test_seleccionar_obra_cabecera_no_da_solape_falso():
+    # caso 3:1 Tacna: 41414 figura en cabecera hasta 2019-07 pero sus
+    # valorizaciones pararon en 2017-03; 83130 valoriza durante el certificado.
+    # La cabecera NO debe darle a 41414 un solape falso que le robe el match.
+    a = _obra("Finalizado", date(2016, 10, 1), date(2019, 7, 29), codigoObra=41414)
+    b = _obra("Paralizada", date(2017, 12, 1), date(2019, 7, 25), codigoObra=83130)
+    rangos = {41414: (date(2016, 10, 1), date(2017, 3, 1)),
+              83130: (date(2017, 12, 1), date(2025, 9, 1))}
+    elegida = infoobras.seleccionar_obra(
+        [a, b], date(2018, 3, 5), date(2019, 4, 30),
+        rango_valorizaciones=lambda oid: rangos[oid])
+    assert elegida["codigoObra"] == 83130
+
+
 def test_coincide_codigo_filtra_colision_por_substring():
     # buscar '95555' no debe traer '2595555' (substring): solo match exacto
     real = _obra("Finalizado", codSnip="95555", codUniqInv="2157301")
@@ -346,3 +360,32 @@ def test_consulta_query_reintenta_con_backoff(monkeypatch):
     monkeypatch.setattr(c, "_ses", lambda: Ses())
     res = c.por_codigo("123456")
     assert estado["n"] == 3 and len(res) == 1
+
+
+def test_fetch_by_cui_con_bypass_obra_id(monkeypatch):
+    # Simula que buscar CUI devuelve 2 obras (por ejemplo, contingencia y principal).
+    # Si le pasamos un obra_id específico, debe seleccionar esa obra y saltarse seleccionar_obra.
+    import scraping.infoobras as infoobras_mod
+    class FakeSession:
+        headers = {}
+        def get(self, *a, **k):
+            class R:
+                text = "var lAvances = [];"
+                def raise_for_status(self_inner):
+                    return None
+            return R()
+
+    monkeypatch.setattr(infoobras_mod, "_crear_session", lambda: FakeSession())
+
+    obras = [
+        {"codigoObra": 111, "nombrObra": "OBRA 1 CONTINGENCIA", "codSnip": "133630", "codUniqInv": "2130855", "estObra": "Finalizado"},
+        {"codigoObra": 222, "nombrObra": "OBRA 2 PRINCIPAL", "codSnip": "133630", "codUniqInv": "2130855", "estObra": "Paralizada"}
+    ]
+    monkeypatch.setattr(infoobras_mod, "_buscar_por_cui", lambda *_: obras)
+    monkeypatch.setattr(infoobras_mod.time, "sleep", lambda *_: None)
+
+    # Si llamamos con obra_id=222, debe elegir la de ID 222 (aunque sea paralizada y sin solape)
+    res = infoobras_mod.fetch_by_cui("133630", obra_id=222)
+    assert res is not None
+    assert res.obra_id == 222
+    assert res.nombre == "OBRA 2 PRINCIPAL"
