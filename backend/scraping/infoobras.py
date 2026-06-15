@@ -910,6 +910,36 @@ def seleccionar_obra(
     return sorted(obras, key=lambda o: (_dist(o), -_fin(o)))[0]
 
 
+def elegir_obra_raw(
+    obras: list[dict],
+    cert_inicio: Optional[date],
+    cert_fin: Optional[date],
+    obra_id: Optional[int],
+    rango_valorizaciones: Optional[Callable[[object], tuple]] = None,
+) -> Optional[dict]:
+    """Elige el registro de obra. Respeta el bypass por `obra_id` (la obra que
+    eligió el resolver por nombre/RUC) SOLO si esa obra cubre el certificado; si
+    no cubre —o no se pasó obra_id— delega en `seleccionar_obra` (solape real).
+
+    El resolver puede caer en una obra con 0% de solape: Valdizán por nombre
+    idéntico (33900 vs 71173), o re-registros del mismo CUI. La validación por
+    cobertura evita que el bypass fuerce una obra equivocada. Sin fechas del
+    certificado no hay con qué validar → se respeta el bypass."""
+    if not obras:
+        return None
+    if obra_id:
+        cand = next((o for o in obras
+                     if (o.get("codigoObra") or o.get("obraId")) == obra_id), None)
+        if cand is not None:
+            if not (cert_inicio and cert_fin):
+                return cand  # sin fechas no se puede validar → respetar bypass
+            oi, of = _ventana_obra(cand, rango_valorizaciones)
+            if oi and (min(of, cert_fin) - max(oi, cert_inicio)).days > 0:
+                return cand  # cubre el certificado → respetar bypass
+            # no cubre → cae a selección por solape (puede haber un hermano que sí)
+    return seleccionar_obra(obras, cert_inicio, cert_fin, rango_valorizaciones)
+
+
 def fetch_by_cui(
     cui: str,
     cert_inicio: Optional[date] = None,
@@ -932,63 +962,53 @@ def fetch_by_cui(
         logger.info("InfoObras: buscando CUI %s", cui)
         obras = _buscar_por_cui(session, cui)
 
-        obra_raw = None
-        if obra_id:
-            matching = [o for o in obras if (o.get("codigoObra") or o.get("obraId")) == obra_id]
-            if matching:
-                obra_raw = matching[0]
-                logger.info("InfoObras: ObraId %s seleccionado por bypass directo", obra_id)
+        if not obras:
+            logger.info("InfoObras: CUI %s no encontrado", cui)
+            return None
 
-        if not obra_raw:
-            if not obras:
-                logger.info("InfoObras: CUI %s no encontrado", cui)
-                return None
+        # Rango real de valorizaciones por obra (perezoso, con cache). El solape
+        # se mide sobre la ventana real (las fechas de cabecera mienten: caso
+        # 133630/33900). Sirve para validar el bypass Y para seleccionar_obra.
+        _cache_rango: dict[object, tuple] = {}
 
-            # Un CUI puede tener varias obras (ej.: ejecución, obras complementarias,
-            # supervisión, re-registros). Se elige la FINALIZADA que cubre el periodo
-            # del certificado — de ahí salen los hitos de valorización correctos.
-            # El solape se mide sobre la ventana real de valorizaciones (las fechas
-            # de cabecera mienten: caso 133630/33900). El rango se consulta perezoso
-            # y con cache, solo cuando hay que desempatar entre varias finalizadas.
-            _cache_rango: dict[object, tuple] = {}
+        def _rango_val(oid):
+            if oid in _cache_rango:
+                return _cache_rango[oid]
+            rango = (None, None)
+            try:
+                avs = _procesar_avances(
+                    _extraer_datos_ejecucion(session, oid).get("lAvances", []))
+                meses = [date(a.anio, a.mes, 1) for a in avs
+                         if getattr(a, "anio", 0) and getattr(a, "mes", 0)]
+                if meses:
+                    rango = (min(meses), max(meses))
+            except Exception as e:  # noqa: BLE001 — portal intermitente
+                logger.warning("InfoObras: rango valorizaciones ObraId %s: %r", oid, e)
+            _cache_rango[oid] = rango
+            return rango
 
-            def _rango_val(oid):
-                if oid in _cache_rango:
-                    return _cache_rango[oid]
-                rango = (None, None)
-                try:
-                    avs = _procesar_avances(
-                        _extraer_datos_ejecucion(session, oid).get("lAvances", []))
-                    meses = [date(a.anio, a.mes, 1) for a in avs
-                             if getattr(a, "anio", 0) and getattr(a, "mes", 0)]
-                    if meses:
-                        rango = (min(meses), max(meses))
-                except Exception as e:  # noqa: BLE001 — portal intermitente
-                    logger.warning("InfoObras: rango valorizaciones ObraId %s: %r", oid, e)
-                _cache_rango[oid] = rango
-                return rango
+        # Un CUI puede traer varias obras (ejecución, contingencia, supervisión,
+        # re-registros). Se respeta el bypass por obra_id del resolver solo si esa
+        # obra cubre el certificado; si no, se elige por solape real.
+        if len(obras) > 1:
+            logger.info(
+                "InfoObras: CUI %s devolvió %d obras (estados: %s) — seleccionando",
+                cui, len(obras),
+                ", ".join(sorted({_estado_obra(o) or "?" for o in obras})),
+            )
+        obra_raw = elegir_obra_raw(obras, cert_inicio, cert_fin, obra_id, _rango_val)
+        obra_id = obra_raw.get("codigoObra")
 
-            if len(obras) > 1:
-                logger.info(
-                    "InfoObras: CUI %s devolvió %d obras (estados: %s) — seleccionando",
-                    cui, len(obras),
-                    ", ".join(sorted({_estado_obra(o) or "?" for o in obras})),
-                )
-            obra_raw = seleccionar_obra(obras, cert_inicio, cert_fin, _rango_val)
-            obra_id = obra_raw.get("codigoObra")
-
-            # InfoObras a veces devuelve la obra sin codigoObra en el 1er request
-            # (warmup de session). Reintentar 1 vez con un pequeno delay.
-            if not obra_id:
-                logger.info(
-                    "InfoObras: 1er request sin codigoObra para CUI %s, reintentando",
-                    cui,
-                )
-                time.sleep(2.0)
-                obras_retry = _buscar_por_cui(session, cui)
-                if obras_retry:
-                    obra_raw = seleccionar_obra(obras_retry, cert_inicio, cert_fin, _rango_val)
-                    obra_id = obra_raw.get("codigoObra")
+        # InfoObras a veces devuelve la obra sin codigoObra en el 1er request
+        # (warmup de session). Reintentar 1 vez con un pequeno delay.
+        if not obra_id:
+            logger.info(
+                "InfoObras: 1er request sin codigoObra para CUI %s, reintentando", cui)
+            time.sleep(2.0)
+            obras_retry = _buscar_por_cui(session, cui)
+            if obras_retry:
+                obra_raw = seleccionar_obra(obras_retry, cert_inicio, cert_fin, _rango_val)
+                obra_id = obra_raw.get("codigoObra")
 
         if not obra_id:
             logger.warning(

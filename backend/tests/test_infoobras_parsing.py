@@ -290,6 +290,25 @@ def test_seleccionar_obra_cabecera_no_da_solape_falso():
     assert elegida["codigoObra"] == 83130
 
 
+def test_elegir_obra_raw_valida_el_bypass_por_cobertura():
+    # Valdizán: el resolver puede pasar 71173 (no cubre el cert); el bypass debe
+    # corregir a 33900 (la que cubre). Si pasa 33900, se respeta.
+    a = _obra("Finalizado", date(2014, 10, 30), date(2015, 2, 27), codigoObra=33900)
+    b = _obra("Finalizado", date(2017, 6, 1), date(2018, 12, 1), codigoObra=71173)
+    rangos = {33900: (date(2015, 1, 1), date(2016, 7, 1)),
+              71173: (date(2017, 6, 1), date(2021, 4, 1))}
+    ci, cf, rv = date(2016, 6, 10), date(2017, 5, 15), lambda oid: rangos[oid]
+
+    # bypass con obra que NO cubre → corrige por solape a 33900
+    assert infoobras.elegir_obra_raw([a, b], ci, cf, 71173, rv)["codigoObra"] == 33900
+    # bypass con obra que SÍ cubre → se respeta
+    assert infoobras.elegir_obra_raw([a, b], ci, cf, 33900, rv)["codigoObra"] == 33900
+    # sin obra_id → selección por solape
+    assert infoobras.elegir_obra_raw([a, b], ci, cf, None, rv)["codigoObra"] == 33900
+    # sin fechas de certificado → no se puede validar, se respeta el bypass
+    assert infoobras.elegir_obra_raw([a, b], None, None, 71173, rv)["codigoObra"] == 71173
+
+
 def test_coincide_codigo_filtra_colision_por_substring():
     # buscar '95555' no debe traer '2595555' (substring): solo match exacto
     real = _obra("Finalizado", codSnip="95555", codUniqInv="2157301")
