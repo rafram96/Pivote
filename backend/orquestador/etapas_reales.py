@@ -303,6 +303,15 @@ class EtapaInfoObrasReal:
                 for a in (getattr(obra, "avances", []) or [])
                 if getattr(a, "anio", 0) and getattr(a, "mes", 0)
             ]
+            # modificaciones de plazo (ampliaciones/suspensiones): explican el
+            # hueco entre valorizaciones y la vida oficial de la obra. Solo para
+            # mostrar al evaluador — NO cuentan como experiencia (sin valorización).
+            enr["modificaciones_plazo"] = [
+                {"tipo": m.tipo, "causal": m.causal, "dias": m.dias_aprobados,
+                 "fecha_aprobacion": m.fecha_aprobacion.isoformat() if m.fecha_aprobacion else None,
+                 "fecha_fin": m.fecha_fin.isoformat() if m.fecha_fin else None}
+                for m in (getattr(obra, "modificaciones_plazo", []) or [])
+            ]
             ctx.enriquecimiento[k] = enr
             cont["ok"] += 1
             if periodos:
@@ -596,7 +605,8 @@ class EtapaExcelReal:
                 cuis[(np_, ne)] = enr["cui"]
             if enr.get("obra_ficha") or enr.get("valorizaciones"):
                 fichas[(np_, ne)] = {**(enr.get("obra_ficha") or {}),
-                                     "valorizaciones": enr.get("valorizaciones") or []}
+                                     "valorizaciones": enr.get("valorizaciones") or [],
+                                     "modificaciones_plazo": enr.get("modificaciones_plazo") or []}
         # experiencias en revisión → su motivo, para que la hoja del profesional
         # muestre "EN REVISIÓN" + la razón en vez de una columna vacía.
         revisiones: dict[tuple[int, int], str] = {}

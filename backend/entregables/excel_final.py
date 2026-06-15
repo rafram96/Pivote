@@ -236,6 +236,31 @@ def construir_hoja_profesional(
         if not vals:
             ws.cell(rr, 6, "Sin valorizaciones registradas en InfoObras").font = F_CELL
             rr += 1
+
+        # modificaciones de plazo: contexto para el evaluador (explican por qué la
+        # obra siguió "viva" más allá de sus valorizaciones). NO cuentan como avance.
+        mods = fx.get("modificaciones_plazo") or []
+        if mods:
+            rr += 1
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=10)
+            c = ws.cell(rr, 6, "MODIFICACIONES DE PLAZO — ampliaciones/suspensiones "
+                               "(contexto: NO cuentan como avance, no hay valorización que las respalde)")
+            c.font, c.fill = F_PARTE, FILL_PARTE
+            c.alignment = Alignment(vertical="center", wrap_text=True)
+            rr += 1
+            for i, h in enumerate(["N°", "TIPO", "DÍAS", "APROBACIÓN", "NUEVO FIN"], start=6):
+                cc = ws.cell(rr, i, h)
+                cc.font, cc.fill, cc.border, cc.alignment = F_HEAD, FILL_HEAD, BORDER, AL_HEAD
+            rr += 1
+            for n, m in enumerate(mods, start=1):
+                celdas = [n, m.get("tipo") or "", m.get("dias"),
+                          _fecha_iso(m.get("fecha_aprobacion")), _fecha_iso(m.get("fecha_fin"))]
+                for i, val in enumerate(celdas, start=6):
+                    cc = ws.cell(rr, i, val)
+                    cc.font, cc.border, cc.alignment = F_CELL, BORDER, AL_WRAP
+                    if i in (9, 10) and isinstance(val, date):
+                        cc.number_format = FMT_FECHA
+                rr += 1
         return rr - 1
 
     def render_revision(top: int, motivo: str) -> int:
