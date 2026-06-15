@@ -179,36 +179,31 @@ class EtapaInfoObrasReal:
         return fetch_by_cui(cui, cert_ini, cert_fin)
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
-        ok = err = rev = 0
         obs: list[pipeline.Observacion] = []
-        descargadas = 0
-        cache: dict[str, object] = {}
+        cache: dict[tuple, object] = {}
+        cont = {"ok": 0, "rev": 0, "err": 0, "descargadas": 0}
 
-        for _e, (np_, ne) in ctx.items_experiencia():
-            k = _clave(np_, ne)
-            enr = ctx.enriquecimiento.get(k) or {}
-            cui = enr.get("cui")
-            if not cui:
-                continue  # sin obra identificada: nada que consultar
-            # ventana del certificado: cuando un CUI tiene varias obras, sirve
-            # para elegir la que cubre el periodo que el profesional supervisó
-            cert_ini, cert_fin = _fecha_iso(_e.get("fecha_inicial")), _fecha_iso(_e.get("fecha_final"))
+        def _fetch_obra(cui, cert_ini, cert_fin):
+            # Cachea SOLO éxitos: si la obra cae por flakiness no se memoriza el
+            # None, para que la 2da pasada (o un hermano con el mismo CUI) pueda
+            # reintentar. La ventana del certificado desambigua si el CUI trae
+            # varias obras.
             ckey = (cui, cert_ini, cert_fin)
+            if ckey in cache:
+                return cache[ckey]
             try:
-                obra = (cache[ckey] if ckey in cache
-                        else cache.setdefault(ckey, self._fetch(cui, cert_ini, cert_fin)))
+                obra = self._fetch(cui, cert_ini, cert_fin)
             except Exception as ex:  # noqa: BLE001 — portal intermitente
                 logger.warning("InfoObras CUI %s: %r", cui, ex)
-                obra = None
-            if obra is None:
-                err += 1
-                obs.append(pipeline.Observacion(
-                    codigo="INFOOBRAS", severidad=pipeline.Severidad.ADVERTENCIA,
-                    mensaje=f"la obra CUI {cui} no respondió en InfoObras — sin paralizaciones que descontar",
-                    origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
-                continue
+                return None
+            if obra is not None:
+                cache[ckey] = obra
+            return obra
 
+        def _procesar(_e, np_, ne, cui, cert_ini, cert_fin, obra):
             from scraping.infoobras import periodos_inactividad
+            k = _clave(np_, ne)
+            enr = ctx.enriquecimiento.get(k) or {}
             periodos = periodos_inactividad(getattr(obra, "avances", []) or [])
             enr["paralizaciones"] = [
                 {"inicio": p["inicio"].isoformat(), "fin": p["fin"].isoformat(),
@@ -235,7 +230,7 @@ class EtapaInfoObrasReal:
                 if getattr(a, "anio", 0) and getattr(a, "mes", 0)
             ]
             ctx.enriquecimiento[k] = enr
-            ok += 1
+            cont["ok"] += 1
             if periodos:
                 dias_p = sum((p["fin"] - p["inicio"]).days + 1 for p in periodos)
                 n_par = sum(1 for p in periodos if p["tipo"] == "paralizado")
@@ -277,10 +272,10 @@ class EtapaInfoObrasReal:
                         proyecto=_e.get("proyecto"),
                         fechas=f"{_e.get('fecha_inicial')} → {_e.get('fecha_final')}",
                     ))
-                    rev += 1
+                    cont["rev"] += 1
 
             # descarga de documentos (acotada para la demo)
-            if (self.dir_descargas and descargadas < self.max_descargas
+            if (self.dir_descargas and cont["descargadas"] < self.max_descargas
                     and getattr(obra, "obra_id", None)):
                 destino = self.dir_descargas / f"{ctx.job.job_id}.descargas" / f"P{np_}_E{ne}"
                 try:
@@ -289,13 +284,45 @@ class EtapaInfoObrasReal:
                         from entregables.zip_infoobras import descargar_documentos_obra
                         descargar = descargar_documentos_obra
                     descargar(obra.obra_id, destino)
-                    descargadas += 1
+                    cont["descargadas"] += 1
                 except Exception as ex:  # noqa: BLE001
                     logger.warning("descarga obra %s: %r", cui, ex)
 
+        # 1ª pasada: procesar lo que responda; lo que cae por flakiness se aparta
+        # (todavía NO se marca error) para reintentarlo al final.
+        fallidos: list[tuple] = []
+        for _e, (np_, ne) in ctx.items_experiencia():
+            cui = (ctx.enriquecimiento.get(_clave(np_, ne)) or {}).get("cui")
+            if not cui:
+                continue  # sin obra identificada: nada que consultar
+            cert_ini, cert_fin = _fecha_iso(_e.get("fecha_inicial")), _fecha_iso(_e.get("fecha_final"))
+            obra = _fetch_obra(cui, cert_ini, cert_fin)
+            if obra is None:
+                fallidos.append((_e, np_, ne, cui, cert_ini, cert_fin))
+            else:
+                _procesar(_e, np_, ne, cui, cert_ini, cert_fin, obra)
+
+        # 2ª pasada: reintentar las caídas. Ya pasaron minutos procesando el
+        # resto → el bache transitorio del portal suele haberse disipado. Solo
+        # las que SIGUEN sin responder se marcan como error honesto.
+        if fallidos:
+            logger.info("InfoObras: 2da pasada para %d obra(s) caídas por flakiness", len(fallidos))
+            for _e, np_, ne, cui, cert_ini, cert_fin in fallidos:
+                obra = _fetch_obra(cui, cert_ini, cert_fin)
+                if obra is None:
+                    cont["err"] += 1
+                    obs.append(pipeline.Observacion(
+                        codigo="INFOOBRAS", severidad=pipeline.Severidad.ADVERTENCIA,
+                        mensaje=f"la obra CUI {cui} no respondió en InfoObras (tras 2 pasadas) "
+                                f"— sin paralizaciones que descontar",
+                        origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+                else:
+                    _procesar(_e, np_, ne, cui, cert_ini, cert_fin, obra)
+
         total = sum(1 for _ in ctx.items_experiencia())
-        estado = EE.ERROR_PARCIAL if err else (EE.OK_CON_REVISION if rev else EE.OK)
-        return _res(self.nombre, estado, _met(total, ok, rev, err), obs)
+        estado = (EE.ERROR_PARCIAL if cont["err"]
+                  else (EE.OK_CON_REVISION if cont["rev"] else EE.OK))
+        return _res(self.nombre, estado, _met(total, cont["ok"], cont["rev"], cont["err"]), obs)
 
 
 # ── 3b · Consulta a SUNAT (ALT04) ────────────────────────────────────────────

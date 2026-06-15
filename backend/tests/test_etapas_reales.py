@@ -249,6 +249,45 @@ def test_cobertura_baja_marca_revision(tmp_path):
     assert len(items) == 1 and items[0].etapa == Etapa.INFOOBRAS
     obs_cob = [o for e in job.etapas for o in e.observaciones if o.codigo == "COBERTURA"]
     assert len(obs_cob) == 1
+
+
+def test_infoobras_segunda_pasada_recupera_obra_transitoria(tmp_path):
+    """Una obra cae por flakiness en la 1ra pasada y responde en la 2da → debe
+    quedar OK con sus valorizaciones, sin marcarse como error de InfoObras."""
+    espejo = {
+        "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
+        "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N",
+             "requisitos": {"tipo_experiencia": "mínimo 2 años"},
+             "experiencias": [
+                 {"n": 1, "proyecto": "Centro de Salud Pillco Marca, Huanuco", "cui": "2418877",
+                  "fecha_inicial": "2022-01-01", "fecha_final": "2022-12-31", "folio": "1"},
+             ]},
+        ],
+        "resumen_evaluacion": {"factores": []},
+    }
+    estado = {"n": 0}
+
+    def fetcher_flaky(cui):
+        estado["n"] += 1
+        if estado["n"] == 1:
+            raise ConnectionError("caída transitoria del portal")
+        return ObraFake(111, "C.S. PILLCO MARCA", avances=_meses((2022, 1), (2022, 12)))
+
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
+                                fetcher_infoobras=fetcher_flaky,
+                                consultor_sunat=lambda r: None,
+                                descargar=lambda *a, **k: None), repo)
+    job = motor.correr(motor.crear_job(espejo).job_id)
+
+    enr = repo.cargar_enriquecimiento(job.job_id)
+    assert estado["n"] == 2  # cayó en la 1ra pasada, recuperó en la 2da
+    assert len(enr["1:1"]["valorizaciones"]) == 12
+    assert enr["1:1"]["codigo_infobras"] == "INF-001"
+    # no quedó error de InfoObras (la 2da pasada la rescató)
+    assert not [o for e in job.etapas for o in e.observaciones if o.codigo == "INFOOBRAS"]
     obs = [o for e in job.etapas for o in e.observaciones if o.codigo == "PASO5"]
     assert len(obs) == 1 and "por debajo del mínimo" in obs[0].mensaje
 
