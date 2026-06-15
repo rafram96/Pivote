@@ -118,7 +118,7 @@ con el motivo correcto, sin candidatos basura.
 
 ---
 
-## Fase 3 — Cola de revisión accionable (usuario no técnico) ⏳
+## Fase 3 — Cola de revisión accionable (usuario no técnico) ✓ (4d38cfc)
 
 Encaja con [[usuarios-no-tecnicos-ui-simple]]: el evaluador debe entender y
 accionar cada pendiente sin jerga.
@@ -146,7 +146,9 @@ bloque "OBRA EN INFOOBRAS" vacío.
 
 ---
 
-## Fase 4 — Secundario ⏳
+## Fase 4 — Secundario ✓ (4a ya existía · 4b c0a5a0f/4d38cfc)
+## Fase 5 — Robustez de scrapers ✓ (c0a5a0f): warmup InfoObras con reintentos +
+   SUNAT clasifica RUC inexistente (info, no alerta)
 
 ### 4a · Robustez SUNAT
 El run dejó `err` en SUNAT (RUC 20607105615, `estructura_desconocida`). Aplicar
