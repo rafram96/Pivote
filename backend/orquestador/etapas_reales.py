@@ -453,10 +453,15 @@ class EtapaReglasReal:
             total += 1
             periodos: list[tuple[date, date]] = []
             paral_por_idx: dict[int, list[tuple[date, date]]] = {}
-            sin_verificar: list[int] = []  # experiencias sin ventana conocida
+            sin_verificar: list[int] = []   # experiencias sin ventana conocida
+            fechas_invalidas: list[int] = []  # fecha sin leer (ej. "POR VERIFICAR")
             for e in p.get("experiencias", []):
                 ini, fin = _fecha_iso(e.get("fecha_inicial")), _fecha_iso(e.get("fecha_final"))
                 if not (ini and fin) or fin < ini:
+                    # no se puede contar; si tenía algún dato de fecha, marcarla
+                    # (Claude no la leyó) para que el humano la confirme.
+                    if e.get("fecha_inicial") or e.get("fecha_final"):
+                        fechas_invalidas.append(e.get("n"))
                     continue
                 idx = len(periodos)
                 periodos.append((ini, fin))
@@ -509,6 +514,24 @@ class EtapaReglasReal:
                         motivo=f"no se pudo verificar en InfoObras la(s) experiencia(s) "
                                f"{', '.join(map(str, sin_verificar))} — veredicto provisional",
                         accion_sugerida="reintentar la consulta o verificar la obra a mano",
+                        candidatos=[], profesional=p.get("nombre"), cargo=p.get("cargo"),
+                        proyecto=exp0.get("proyecto"),
+                        fechas=f"{exp0.get('fecha_inicial')} → {exp0.get('fecha_final')}"))
+            # NO CUMPLE con una experiencia descartada por fecha sin leer: al
+            # confirmar la fecha el veredicto podría cambiar a CUMPLE → revisión.
+            if fechas_invalidas and datos.get("cumple_backend"):
+                datos["veredicto_provisional"] = (
+                    datos.get("veredicto_provisional", []) + fechas_invalidas)
+                ne0 = fechas_invalidas[0]
+                exp0 = next((x for x in p.get("experiencias", []) if x.get("n") == ne0), {})
+                ya = any(it.n_prof == np_ and it.n_exp == ne0 and not it.resuelto
+                         for it in ctx.job.items_revision)
+                if not ya:
+                    ctx.job.items_revision.append(pipeline.ItemRevision(
+                        n_prof=np_, n_exp=ne0, etapa=self.nombre,
+                        motivo=f"NO CUMPLE pero la(s) experiencia(s) {', '.join(map(str, fechas_invalidas))} "
+                               f"no se contó por una fecha sin verificar — confirmarla puede cambiar el veredicto",
+                        accion_sugerida="verificar la fecha de fin del certificado",
                         candidatos=[], profesional=p.get("nombre"), cargo=p.get("cargo"),
                         proyecto=exp0.get("proyecto"),
                         fechas=f"{exp0.get('fecha_inicial')} → {exp0.get('fecha_final')}"))

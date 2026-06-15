@@ -424,3 +424,37 @@ def test_fetch_fallido_no_se_clampa_y_marca_veredicto_provisional(tmp_path):
     assert job.estado == JobEstado.REQUIERE_REVISION
     assert any(it.n_prof == 1 and not it.resuelto and "provisional" in it.motivo
                for it in job.items_revision)
+
+
+def test_fecha_por_verificar_en_no_cumple_va_a_revision(tmp_path):
+    # prof con 2 experiencias; la 2da resuelve pero su fecha_final no se leyó
+    # ("POR VERIFICAR") → se excluye del cálculo. Solo con la 1ra queda NO CUMPLE
+    # → debe flaguearse (confirmar la fecha podría cambiar el veredicto).
+    espejo = {
+        "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
+        "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N",
+             "requisitos": {"tipo_experiencia": "mínimo 2 años"},
+             "experiencias": [
+                 {"n": 1, "proyecto": "Centro de Salud Pillco Marca, Huanuco", "cui": "2418877",
+                  "fecha_inicial": "2022-01-01", "fecha_final": "2022-12-31", "folio": "1"},
+                 {"n": 2, "proyecto": "Centro de Salud Pillco Marca II, Huanuco", "cui": "2418877",
+                  "fecha_inicial": "2023-01-01", "fecha_final": "POR VERIFICAR", "folio": "2"},
+             ]},
+        ],
+        "resumen_evaluacion": {"factores": []},
+    }
+
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
+                                fetcher_infoobras=fetcher_fake,
+                                consultor_sunat=lambda r: None,
+                                descargar=lambda *a, **k: None), repo)
+    job = motor.correr(motor.crear_job(espejo).job_id)
+
+    enr = repo.cargar_enriquecimiento(job.job_id)
+    assert "NO CUMPLE" in enr["prof:1"]["cumple_backend"]   # solo cuenta exp 1 (~1 año)
+    assert enr["prof:1"].get("veredicto_provisional") == [2]
+    assert any(it.n_prof == 1 and it.n_exp == 2 and not it.resuelto
+               and "fecha sin verificar" in it.motivo for it in job.items_revision)
