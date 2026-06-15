@@ -365,8 +365,8 @@ class EtapaInfoObrasReal:
                 try:
                     descargar = self._descargar
                     if descargar is None:
-                        from entregables.zip_infoobras import descargar_documentos_obra
-                        descargar = descargar_documentos_obra
+                        from entregables.zip_infoobras import descargar_documentos_obra_por_hito
+                        descargar = descargar_documentos_obra_por_hito
                     descargar(obra.obra_id, destino)
                     cont["descargadas"] += 1
                 except Exception as ex:  # noqa: BLE001

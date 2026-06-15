@@ -239,3 +239,35 @@ def test_inventariar_distingue_documentos_de_imagenes():
     assert "Img/foto1.jpg" in imgs            # imagen excluida de documentos
     # una imagen NUNCA se cuela como documento aunque fuera .pdf
     assert not docs & imgs
+
+
+HTML_POR_AVANCE = """
+<html><script>
+var lAvances = [
+  {"Anio": "2025", "Mes": "FEBRERO",
+   "lImgValorizacion": [{"UrlImg": "doc/val12.pdf", "nombreArchivo": "VALORIZACION DE OBRA Nº 0012",
+     "Extension": "pdf", "EsFisico": 0}], "lImgFisico": []},
+  {"Anio": "2025", "Mes": "ENERO",
+   "lImgValorizacion": [{"UrlImg": "doc/val11.pdf", "nombreArchivo": "VALORIZACION Nº 0011",
+     "Extension": "pdf", "EsFisico": 0}], "lImgFisico": []}
+];
+</script>
+<body>
+<button data-download-url="/InfobrasWeb/Mapa/DownloadFile?filename=expediente%2Fet.pdf&amp;name=expediente&amp;extension=.pdf"></button>
+</body></html>
+"""
+
+
+def test_inventariar_por_avance_agrupa_por_hito():
+    from entregables.zip_infoobras import inventariar_por_avance, _etiqueta_hito
+    inv = inventariar_por_avance(HTML_POR_AVANCE)
+    assert len(inv["avances"]) == 2
+    feb = next(a for a in inv["avances"] if a["mes"] == "FEBRERO")
+    assert feb["anio"] == 2025
+    assert feb["documentos"][0]["nombre"] == "VALORIZACION DE OBRA Nº 0012"
+    # carpeta del hito, ordenable cronológicamente
+    assert _etiqueta_hito(2025, "FEBRERO") == "2025-02 FEBRERO"
+    # el expediente es obra-level (no por avance)
+    assert any(d["nombre"] == "expediente" for d in inv["obra"]["documentos"])
+    assert all(not a_doc["filename"].startswith("expediente")
+               for a in inv["avances"] for a_doc in a["documentos"])

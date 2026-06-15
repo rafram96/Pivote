@@ -108,6 +108,88 @@ def inventariar(html: str) -> dict[str, list[dict[str, Any]]]:
     return {"documentos": documentos, "imagenes": imagenes}
 
 
+_MES_NUM = {
+    "ENERO": 1, "FEBRERO": 2, "MARZO": 3, "ABRIL": 4, "MAYO": 5, "JUNIO": 6,
+    "JULIO": 7, "AGOSTO": 8, "SEPTIEMBRE": 9, "SETIEMBRE": 9, "OCTUBRE": 10,
+    "NOVIEMBRE": 11, "DICIEMBRE": 12,
+}
+
+
+def _etiqueta_hito(anio: int, mes_nombre: str) -> str:
+    """Nombre de carpeta del hito/valorización: 'AAAA-MM MES' (ordena cronológico)."""
+    mes = (mes_nombre or "").upper().strip()
+    mes_n = _MES_NUM.get(mes, 0)
+    if anio and mes_n:
+        return f"{anio:04d}-{mes_n:02d} {mes}"
+    return mes or "sin fecha"
+
+
+def inventariar_por_avance(html: str) -> dict[str, Any]:
+    """Inventario LIGADO a cada avance: por cada valorización (mes/año) sus
+    documentos. Más los documentos obra-level (expediente, cronograma, …) que NO
+    pertenecen a un mes. Para descargar agrupando por hito/valorización.
+
+    Devuelve {avances:[{anio,mes,documentos[],imagenes[]}], obra:{documentos,imagenes}}.
+    """
+    vistos: set[str] = set()
+
+    def _mk(it: dict, es_fisico_default: int) -> Optional[dict]:
+        url_img = (it.get("UrlImg") or "").strip()
+        if not url_img or url_img in vistos:
+            return None
+        vistos.add(url_img)
+        seccion, tipo = _seccion(url_img, it.get("EsFisico", es_fisico_default))
+        return {
+            "filename": url_img,
+            "nombre": it.get("nombreArchivo") or url_img.rsplit("/", 1)[-1],
+            "extension": (it.get("Extension") or url_img.rsplit(".", 1)[-1]).lstrip("."),
+            "seccion": seccion, "tipo": tipo,
+        }
+
+    avances_out: list[dict] = []
+    m = re.search(r"var\s+lAvances\s*=\s*(\[.*?\]);", html, re.S)
+    avances = []
+    if m:
+        try:
+            avances = json.loads(m.group(1))
+        except json.JSONDecodeError:
+            logger.warning("InfoObras: lAvances no parseable (por_avance)")
+    for av in avances:
+        anio_str = str(av.get("Anio") or "")
+        anio = int(anio_str) if anio_str.isdigit() else 0
+        docs: list[dict] = []
+        imgs: list[dict] = []
+        for it in (av.get("lImgValorizacion") or []):
+            d = _mk(it, 0)
+            if d:
+                (docs if d["tipo"] == "documento" else imgs).append(d)
+        for it in (av.get("lImgFisico") or []):
+            d = _mk(it, 1)
+            if d:
+                (docs if d["tipo"] == "documento" else imgs).append(d)
+        if docs or imgs:
+            avances_out.append({"anio": anio, "mes": (av.get("Mes") or "").strip(),
+                                "documentos": docs, "imagenes": imgs})
+
+    # obra-level (data-download-url), excluyendo los ya vistos en los avances
+    obra_docs: list[dict] = []
+    obra_imgs: list[dict] = []
+    for raw in re.findall(r'data-download-url="([^"]+)"', html):
+        qs = parse_qs(urlsplit(unquote(raw.replace("&amp;", "&"))).query)
+        fn = (qs.get("filename", [""])[0] or "").strip()
+        if not fn or fn in vistos:
+            continue
+        vistos.add(fn)
+        seccion, tipo = _seccion(fn, None)
+        item = {"filename": fn,
+                "nombre": qs.get("name", [""])[0] or fn.rsplit("/", 1)[-1],
+                "extension": (qs.get("extension", [""])[0] or fn.rsplit(".", 1)[-1]).lstrip("."),
+                "seccion": seccion, "tipo": tipo}
+        (obra_docs if tipo == "documento" else obra_imgs).append(item)
+
+    return {"avances": avances_out, "obra": {"documentos": obra_docs, "imagenes": obra_imgs}}
+
+
 def descargar_documentos_obra(
     obra_id: int | str,
     destino: Path,
@@ -153,6 +235,63 @@ def descargar_documentos_obra(
         (carpeta / _ruta_segura(nombre)).write_bytes(resp.content)
         ok += 1
     return {"descargados": ok, "fallidos": fail, "inventario": inv}
+
+
+def descargar_documentos_obra_por_hito(
+    obra_id: int | str,
+    destino: Path,
+    *,
+    session: Optional[requests.Session] = None,
+    incluir_imagenes: bool = False,
+    timeout: float = 90.0,
+) -> dict[str, Any]:
+    """Como `descargar_documentos_obra`, pero los documentos de cada valorización
+    van a una carpeta POR HITO:  destino/Valorizaciones/<AAAA-MM MES>/<documento>.
+    Los documentos obra-level (expediente, cronograma, …) van a su sección.
+    Devuelve {descargados, fallidos, inventario}. NO corre en tests offline."""
+    sess = session or requests.Session()
+    sess.headers.setdefault(
+        "User-Agent",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+    )
+    r = sess.get(PAGINA, params={"obraId": obra_id}, timeout=timeout)
+    r.raise_for_status()
+    inv = inventariar_por_avance(r.text)
+    destino.mkdir(parents=True, exist_ok=True)
+    cont = {"ok": 0, "fail": 0}
+
+    def _bajar(it: dict, carpeta: Path) -> None:
+        ext = it["extension"]
+        try:
+            resp = sess.get(DESCARGA, params={
+                "filename": it["filename"], "name": it["nombre"],
+                "contentType": "application/pdf" if ext == "pdf" else "application/octet-stream",
+                "extension": "." + ext,
+            }, timeout=timeout)
+        except requests.RequestException as e:
+            logger.warning("InfoObras descarga %s: %s", it["nombre"], e)
+            cont["fail"] += 1
+            return
+        if resp.status_code != 200 or not resp.content:
+            cont["fail"] += 1
+            return
+        nombre = it["nombre"]
+        if not nombre.lower().endswith("." + ext.lower()):
+            nombre = f"{nombre}.{ext}"
+        carpeta.mkdir(parents=True, exist_ok=True)
+        (carpeta / _ruta_segura(nombre)).write_bytes(resp.content)
+        cont["ok"] += 1
+
+    # valorizaciones agrupadas por hito (mes/año)
+    for av in inv["avances"]:
+        carpeta = destino / "Valorizaciones" / _ruta_segura(_etiqueta_hito(av["anio"], av["mes"]))
+        for it in av["documentos"] + (av["imagenes"] if incluir_imagenes else []):
+            _bajar(it, carpeta)
+    # documentos obra-level → su sección
+    for it in inv["obra"]["documentos"] + (inv["obra"]["imagenes"] if incluir_imagenes else []):
+        _bajar(it, destino / _ruta_segura(it["seccion"]))
+
+    return {"descargados": cont["ok"], "fallidos": cont["fail"], "inventario": inv}
 
 
 # ── Construcción del ZIP (árbol de 4 niveles) ────────────────────────────────
