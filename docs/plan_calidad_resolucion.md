@@ -10,9 +10,11 @@ Status: ✓ hecho · ⏳ pendiente · ⚠ requiere decisión
 
 ---
 
-## Fase 1 — Días efectivos (Paso 5): clamp a la ventana de valorizaciones ⏳
+## Fase 1 — Días efectivos (Paso 5): clamp a la ventana de valorizaciones ✓ (b580fd6, 377dc98)
 
-**Es la fase de mayor impacto: decide el veredicto.**
+**Es la fase de mayor impacto: decide el veredicto.** Validado contra la
+auditoría: prof 1 → 1.64, prof 5 → 0.80 (exactos). Las tres guardas en su sitio
+(clamp genuino / obra sin valoriz / fetch fallido) + flag de fecha POR VERIFICAR.
 
 ### Problema (hallazgo concreto)
 `dias_efectivos_profesional` ([backend/reglas/calculo.py:119](backend/reglas/calculo.py:119))
@@ -76,7 +78,13 @@ dentro) → test que lo verifique.
 
 ---
 
-## Fase 2 — Cerrar los 2 residuales de correctitud ⏳
+## Fase 2 — Cerrar los 2 residuales de correctitud ✓ (ece2900, efcfe9d)
+
+> Hallazgo nuevo (no cubierto por 2a): la resolución por NOMBRE puede dar **CUIs
+> distintos entre corridas** (prof 10: 2160319 que cubre vs 2193936 que no), por
+> el límite de 20 resultados del portal. Lo atrapa el flag de cobertura (0% →
+> revisión), así que es seguro, pero es **no-determinístico**. Tratamiento
+> propio pendiente (búsqueda más estable, o flag de "match por nombre ambiguo").
 
 ### 2a · Bypass por `obra_id` validado por cobertura
 **Problema:** el bypass ([fetch_by_cui](backend/scraping/infoobras.py)) confía en
