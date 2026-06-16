@@ -23,7 +23,7 @@ Leyenda: ✅ probado empíricamente · 📐 diseñado/decidido · 🔨 por const
 | InfoObras por nombre | ⚠ funciona c/ ajuste | endpoint OK; extractor de keywords falla con nombre de *concurso* (~0.5 día) + bug CUI con 2 obras |
 | Contrato Excel + JSON espejo | 📐 diseñado | §3 |
 | Transporte dropzone (Camino B, MVP) | 📐 diseñado | §4 |
-| Transporte MCP local (Camino A, fase 2) | 📐 diseñado | §4; verificar alcance LAN |
+| Transporte MCP local (Camino A, fase 2) | ✅ construido | tools reales (subir_analisis → multipart /api/pivote/analizar), probado e2e local; falta verificar alcance LAN en la PC de Manuel |
 | Backend API HTTP desacoplada | 📐 decidido | sirve a dropzone + MCP |
 | Skill `/analisis-propuesta` (3 subagentes: bases, propuesta, evaluador) | 🔨 por construir | Claude evalúa (agent-evaluador) → reemplaza el diseño viejo de 2 subagentes de `skill_design.md`. Subagentes = esenciales (propuestas grandes son lo normal, confirmado 2026-05-30) |
 | Validador determinístico (15 notas) | 🔨 por construir | pieza central |
