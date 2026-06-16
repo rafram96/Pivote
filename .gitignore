@@ -37,6 +37,10 @@ Thumbs.db
 .idea/
 *.swp
 
+# Variables de entorno locales (config/secrets). La plantilla .env.example SÍ se versiona.
+.env
+!.env.example
+
 # HTML y JSON crudos: ignorados por defecto. Los dumps de scraping
 # (backend/exploracion/_sunat_dump/) traen RUCs reales, y los renders de
 # presentaciones son pesados. Excepciones de código abajo.

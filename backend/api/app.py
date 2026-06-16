@@ -20,7 +20,14 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+# Carga el .env de la raíz del repo ANTES de leer el entorno o importar módulos
+# que fijan constantes desde os.getenv (retries, throttle…). override=False → el
+# entorno real y los tests (que setean su propio PIVOTE_ETAPAS) siempre ganan.
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile  # noqa: E402
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
