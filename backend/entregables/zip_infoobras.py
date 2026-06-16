@@ -206,20 +206,24 @@ def _descargar_a_carpeta(
     *,
     timeout: float,
     intentos: int = _DL_RETRIES,
+    prefijo_nombre: str = "",
 ) -> bool:
-    """Descarga `it` a `carpeta/<nombre>` con streaming a disco + reintentos.
+    """Descarga `it` a `carpeta/<prefijo_nombre><nombre>` con streaming a disco +
+    reintentos.
 
-    Robusto ante los cortes del portal en archivos grandes (IncompleteRead /
-    ConnectionError): baja a un `.part`, verifica Content-Length y reintenta con
-    backoff exponencial. Devuelve True si quedó un archivo íntegro; False si se
-    agotaron los intentos o el archivo no está disponible (4xx). No relanza: el
-    llamador cuenta ok/fallido.
+    `prefijo_nombre` se antepone al nombre del archivo (p.ej. "2025-09 SEPTIEMBRE · ")
+    para que un documento de valorización se identifique por su fecha aunque se
+    saque de su carpeta. Robusto ante los cortes del portal en archivos grandes
+    (IncompleteRead / ConnectionError): baja a un `.part`, verifica Content-Length
+    y reintenta con backoff exponencial. Devuelve True si quedó un archivo íntegro;
+    False si se agotaron los intentos o el archivo no está disponible (4xx). No
+    relanza: el llamador cuenta ok/fallido.
     """
     ext = it["extension"]
     nombre = it["nombre"]
     if not nombre.lower().endswith("." + ext.lower()):
         nombre = f"{nombre}.{ext}"
-    destino = carpeta / _ruta_segura(nombre)
+    destino = carpeta / _ruta_segura(f"{prefijo_nombre}{nombre}")
     tmp = destino.with_name(destino.name + ".part")
     params = {
         "filename": it["filename"], "name": it["nombre"],
@@ -303,8 +307,10 @@ def descargar_documentos_obra_por_hito(
     timeout: float = 90.0,
 ) -> dict[str, Any]:
     """Como `descargar_documentos_obra`, pero los documentos de cada valorización
-    van a una carpeta POR HITO:  destino/Valorizaciones/<AAAA-MM MES>/<documento>.
-    Los documentos obra-level (expediente, cronograma, …) van a su sección.
+    van a una carpeta POR HITO:  destino/Valorizaciones/<AAAA-MM MES>/<documento>,
+    y el archivo se PREFIJA con la fecha del hito ("<AAAA-MM MES> · <nombre>") para
+    identificarse aunque se saque de su carpeta. Los documentos obra-level
+    (expediente, cronograma, …) van a su sección, sin prefijo.
     Devuelve {descargados, fallidos, inventario}. NO corre en tests offline."""
     sess = session or requests.Session()
     sess.headers.setdefault(
@@ -317,18 +323,19 @@ def descargar_documentos_obra_por_hito(
     destino.mkdir(parents=True, exist_ok=True)
     cont = {"ok": 0, "fail": 0}
 
-    def _bajar(it: dict, carpeta: Path) -> None:
-        if _descargar_a_carpeta(sess, it, carpeta, timeout=timeout):
+    def _bajar(it: dict, carpeta: Path, prefijo: str = "") -> None:
+        if _descargar_a_carpeta(sess, it, carpeta, timeout=timeout, prefijo_nombre=prefijo):
             cont["ok"] += 1
         else:
             cont["fail"] += 1
 
-    # valorizaciones agrupadas por hito (mes/año)
+    # valorizaciones agrupadas por hito (mes/año), con la fecha en el nombre
     for av in inv["avances"]:
-        carpeta = destino / "Valorizaciones" / _ruta_segura(_etiqueta_hito(av["anio"], av["mes"]))
+        etiqueta = _etiqueta_hito(av["anio"], av["mes"])
+        carpeta = destino / "Valorizaciones" / _ruta_segura(etiqueta)
         for it in av["documentos"] + (av["imagenes"] if incluir_imagenes else []):
-            _bajar(it, carpeta)
-    # documentos obra-level → su sección
+            _bajar(it, carpeta, prefijo=f"{etiqueta} · ")
+    # documentos obra-level → su sección (sin prefijo: no pertenecen a un mes)
     for it in inv["obra"]["documentos"] + (inv["obra"]["imagenes"] if incluir_imagenes else []):
         _bajar(it, destino / _ruta_segura(it["seccion"]))
 

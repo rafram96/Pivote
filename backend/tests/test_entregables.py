@@ -271,3 +271,35 @@ def test_inventariar_por_avance_agrupa_por_hito():
     assert any(d["nombre"] == "expediente" for d in inv["obra"]["documentos"])
     assert all(not a_doc["filename"].startswith("expediente")
                for a in inv["avances"] for a_doc in a["documentos"])
+
+
+def test_descargar_a_carpeta_prefija_nombre_con_fecha(tmp_path):
+    """El documento de valorización se guarda con la fecha del hito prefijada en
+    el nombre (para identificarlo aunque salga de su carpeta); el obra-level
+    conserva su nombre. Sin red: session falsa con contenido fijo."""
+    from entregables.zip_infoobras import _descargar_a_carpeta
+
+    class _Resp:
+        status_code = 200
+        headers: dict = {}
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def iter_content(self, chunk_size=1):
+            yield b"%PDF-1.4 contenido de prueba"
+
+    class _Sess:
+        def get(self, url, params=None, timeout=None, stream=False):
+            return _Resp()
+
+    it = {"filename": "doc/val.pdf", "nombre": "documento20250911", "extension": "pdf"}
+    ok = _descargar_a_carpeta(_Sess(), it, tmp_path, timeout=5,
+                              prefijo_nombre="2025-09 SEPTIEMBRE · ")
+    assert ok
+    assert [p.name for p in tmp_path.iterdir()] == [
+        "2025-09 SEPTIEMBRE · documento20250911.pdf"]
+
+    # obra-level (sin prefijo) conserva su nombre tal cual
+    ok2 = _descargar_a_carpeta(
+        _Sess(), {"filename": "exp/et.pdf", "nombre": "expediente", "extension": "pdf"},
+        tmp_path / "sec", timeout=5)
+    assert ok2 and (tmp_path / "sec" / "expediente.pdf").exists()

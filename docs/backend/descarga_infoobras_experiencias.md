@@ -44,8 +44,8 @@ y cachea el resultado. La etapa Excel solo setea la **URL de referencia**
 └── {nn} - {cargo}/                      ← Profesional
     └── Exp {n} - {proyecto[:60]}/       ← Experiencia
         ├── Valorizaciones/
-        │   ├── 2025-12 DICIEMBRE/<doc>.pdf   ← por HITO/valorización
-        │   └── 2025-11 NOVIEMBRE/<doc>.pdf
+        │   ├── 2025-12 DICIEMBRE/2025-12 DICIEMBRE · <doc>.pdf   ← carpeta Y nombre con fecha
+        │   └── 2025-11 NOVIEMBRE/2025-11 NOVIEMBRE · <doc>.pdf
         ├── Expediente técnico/<doc>.pdf      ← obra-level (no por mes)
         ├── Cronograma/<doc>.pdf
         └── …
