@@ -61,8 +61,17 @@ PREFIJOS = [
     r"ejecuci[oó]n de (?:la )?obra\s*:?",
     r"supervisi[oó]n\s*:?",
 ]
-DEPTOS = ["HUANUCO", "PASCO", "LIMA", "CUSCO", "PIURA", "JUNIN", "ANCASH", "LA LIBERTAD",
-          "AMAZONAS", "LORETO", "UCAYALI", "APURIMAC", "PUNO", "CAJAMARCA", "AYACUCHO"]
+DEPTOS = [
+    "AMAZONAS", "ANCASH", "APURIMAC", "AREQUIPA", "AYACUCHO", "CAJAMARCA",
+    "CALLAO", "CUSCO", "HUANCAVELICA", "HUANUCO", "ICA", "JUNIN", "LA LIBERTAD",
+    "LAMBAYEQUE", "LIMA", "LORETO", "MADRE DE DIOS", "MOQUEGUA", "PASCO",
+    "PIURA", "PUNO", "SAN MARTIN", "TACNA", "TUMBES", "UCAYALI"
+]
+
+# Abreviaturas de departamento que aparecen en certificados / nomenclatura OSCE
+# (p.ej. "GOB.REG.HVCA"). Se expanden al nombre completo antes de detectar el
+# departamento, para que "Lircay - HVCA" cuente como Huancavelica.
+DEPTO_ALIAS = {"HVCA": "HUANCAVELICA"}
 
 ABREV = [
     (re.compile(r"\bEE\.?\s?SS\.?\b", re.I), "Establecimientos de Salud"),
@@ -127,7 +136,10 @@ def ubicacion(proyecto: str) -> set[str]:
         cola = tn[i + len(est):] if i >= 0 else tn
     else:
         cola = tn
-    return {d for d in DEPTOS if d in cola}
+    for ab, full in DEPTO_ALIAS.items():
+        cola = re.sub(rf"\b{ab}\b", full, cola)
+    # límite de palabra: evita que "ICA" matchee dentro de "HUANCAVELICA"
+    return {d for d in DEPTOS if re.search(rf"\b{d}\b", cola)}
 
 
 _LEAD = re.compile(
@@ -211,7 +223,11 @@ def _puntuar(cand: dict, proyecto_norm: str, deptos_hint: set[str], anio_cert: O
         if dep and dep in deptos_hint:
             score += 15
         elif dep:
-            score -= 20
+            # penalización SUAVE: el MEF a veces registra la obra bajo el
+            # departamento de la sede/entidad ejecutora, no el de la obra física,
+            # así que un mismatch no debe enterrar a la obra correcta. El veredicto
+            # final lo protegen la cobertura de valorizaciones y `loc_contra`.
+            score -= 10
     if "SALUD" in nombre or "HOSPITAL" in nombre or "ESTABLECIMIENTO" in nombre:
         score += 5
     a = _anio_de(cand.get("fechaIniObra"))
