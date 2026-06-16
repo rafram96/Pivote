@@ -60,7 +60,9 @@ Thumbs.db
 /plugin/skills/
 /plugin/mcp-server/
 
-# Datos locales de la API del pivote (jobs, espejos, entregables)
+# Datos locales de la API del pivote (jobs, espejos, entregables, muestras) —
+# contienen nombres/RUCs reales del cliente, NO se versionan.
 /backend/datos_pivote/
+/datos_pivote/
 
 /.pytest_cache
