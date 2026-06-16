@@ -1,11 +1,12 @@
 {
-  "name": "infoobras-mcp-prueba",
-  "version": "0.1.0",
-  "description": "MCP local de prueba (stdio) que hace de puente entre Cowork y el servidor on-prem de InfoObras. Valida que un proceso local alcanza la LAN.",
+  "name": "infoobras-mcp-bridge",
+  "version": "0.2.0",
+  "description": "MCP local (stdio) que cablea Cowork con el backend on-prem REAL de InfoObras (Camino A): crea/usa concurso, sube el espejo+Excel por multipart a /api/pivote/analizar y consulta el estado del job.",
   "type": "module",
   "main": "mcp.js",
   "scripts": {
-    "start": "node mcp.js"
+    "start": "node mcp.js",
+    "probar:backend": "node probar_contra_backend.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

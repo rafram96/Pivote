@@ -1,37 +1,38 @@
 /**
- * MCP local de prueba — puente Cowork ⇄ servidor on-prem (LAN).
+ * MCP local — puente Cowork ⇄ backend on-prem (LAN) del pivote InfoObras.
  *
- * Propósito: validar de punta a punta el "Camino A" del refactor InfoObras:
- *   Claude (Cowork) ──tool call──▶ este MCP (stdio) ──HTTP──▶ servidor LAN
+ *   Claude (Cowork) ──tool call──▶ este MCP (stdio) ──HTTP──▶ backend real
  *                    ◀──response──                  ◀──HTTP──
  *
- * Es un proceso normal en la máquina del usuario, así que dentro de cada tool
- * puede hacer fetch() a cualquier IP/host que su red resuelva — incluido el
- * servidor on-prem NO expuesto a internet.
+ * Es un proceso normal en la máquina del usuario, así que puede hacer fetch() al
+ * backend on-prem aunque NO esté expuesto a internet. Cablea el "Camino A" del
+ * refactor contra los endpoints REALES (backend/api/app.py) — ya no el server de
+ * juguete: crea/usa el concurso, sube el espejo+Excel como multipart a
+ * /api/pivote/analizar, y consulta el estado del job.
  *
  * Transporte: stdio (Cowork lo lanza como subproceso). Por eso:
  *   ⚠ NUNCA usar console.log — stdout es el canal del protocolo MCP.
  *     Todo log va a stderr (console.error) y, opcional, a un archivo.
  *
- * Config por variables de entorno (se setean en el `env` del MCP en Cowork):
- *   SERVER_URL      base del servidor (default http://localhost:8090)
+ * Config por variables de entorno (en el `env` del MCP en Cowork):
+ *   SERVER_URL      base del backend (default http://localhost:8001)
  *   ONPREM_TOKEN    token Bearer opcional (no hardcodear credenciales)
- *   REQUEST_TIMEOUT timeout HTTP en ms (default 30000)
+ *   REQUEST_TIMEOUT timeout HTTP en ms (default 60000)
  *   LOG_FILE        ruta opcional de archivo de log
- *   NODE_EXTRA_CA_CERTS  (nativo de Node) ruta a CA bundle si el server usa
- *                        HTTPS con certificado interno
+ *   NODE_EXTRA_CA_CERTS  (nativo de Node) CA bundle si el backend usa HTTPS interno
  *
- * Requiere: Node 18+ (usa fetch global) + `npm install`.
+ * Requiere: Node 18+ (fetch/FormData/Blob globales) + `npm install`.
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { appendFileSync } from "node:fs";
+import { crearCliente } from "./cliente.js";
 
 // ── Config ───────────────────────────────────────────────────────────────────
-const SERVER_URL = (process.env.SERVER_URL || "http://localhost:8090").replace(/\/$/, "");
+const SERVER_URL = (process.env.SERVER_URL || "http://localhost:8001").replace(/\/$/, "");
 const ONPREM_TOKEN = process.env.ONPREM_TOKEN || null;
-const REQUEST_TIMEOUT = parseInt(process.env.REQUEST_TIMEOUT || "30000", 10);
+const REQUEST_TIMEOUT = parseInt(process.env.REQUEST_TIMEOUT || "60000", 10);
 const LOG_FILE = process.env.LOG_FILE || null;
 
 // ── Logging (stderr + archivo opcional, NUNCA stdout) ────────────────────────
@@ -47,97 +48,71 @@ function log(...args) {
   }
 }
 
-// ── Helper HTTP con timeout finito ───────────────────────────────────────────
-async function pedir(metodo, ruta, body) {
-  const url = `${SERVER_URL}/${ruta.replace(/^\//, "")}`;
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT);
-  const headers = { "Content-Type": "application/json" };
-  if (ONPREM_TOKEN) headers["Authorization"] = `Bearer ${ONPREM_TOKEN}`;
-
-  log(`→ ${metodo} ${url}`);
-  try {
-    const resp = await fetch(url, {
-      method: metodo,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: ctrl.signal,
-    });
-    const texto = await resp.text();
-    let data;
-    try {
-      data = JSON.parse(texto);
-    } catch {
-      data = { _raw: texto };
-    }
-    log(`← ${resp.status} (${texto.length} bytes)`);
-    return { status: resp.status, ok: resp.ok, data };
-  } catch (err) {
-    const msg = err?.name === "AbortError"
-      ? `timeout tras ${REQUEST_TIMEOUT}ms`
-      : String(err?.message || err);
-    log(`✗ error: ${msg}`);
-    return { status: 0, ok: false, data: { error: msg } };
-  } finally {
-    clearTimeout(t);
-  }
-}
+const cli = crearCliente({
+  serverUrl: SERVER_URL,
+  token: ONPREM_TOKEN,
+  timeoutMs: REQUEST_TIMEOUT,
+  log,
+});
 
 function comoTexto(obj) {
   return { content: [{ type: "text", text: JSON.stringify(obj, null, 2) }] };
 }
 
 // ── Servidor MCP ─────────────────────────────────────────────────────────────
-const server = new McpServer({ name: "infoobras-onprem-bridge", version: "0.1.0" });
+const server = new McpServer({ name: "infoobras-onprem-bridge", version: "0.2.0" });
 
-// Tool 1 — test de conectividad puro
 server.tool(
   "probar_conexion",
-  "Verifica que el servidor on-prem de InfoObras está accesible desde esta máquina (GET /health). Úsalo para confirmar que el puente Cowork→LAN funciona.",
+  "Verifica que el backend on-prem de InfoObras responde (GET /api/pivote/salud) y devuelve el estado de los portales SUNAT/InfoObras. Úsalo para confirmar que el puente Cowork→LAN funciona.",
   {},
-  async () => {
-    const r = await pedir("GET", "/health");
-    return comoTexto({
-      conexion_exitosa: r.ok,
-      server_url: SERVER_URL,
-      status_http: r.status,
-      respuesta_servidor: r.data,
-    });
-  }
+  async () => comoTexto(await cli.probarConexion())
 );
 
-// Tool 2 — eco (ida y vuelta de datos)
 server.tool(
-  "eco",
-  "Envía un mensaje al servidor on-prem y devuelve lo que el servidor responde (POST /echo). Sirve para probar que los datos viajan ida y vuelta.",
-  { mensaje: z.string().describe("Texto o dato a enviar como prueba") },
-  async ({ mensaje }) => {
-    const r = await pedir("POST", "/echo", { mensaje });
-    return comoTexto({ ok: r.ok, status_http: r.status, respuesta_servidor: r.data });
-  }
+  "listar_concursos",
+  "Lista los concursos registrados en el backend, para elegir uno existente antes de subir un análisis o para ver el histórico.",
+  {},
+  async () => comoTexto(await cli.listarConcursos())
 );
 
-// Tool 3 — flujo realista simulado
 server.tool(
-  "subir_y_validar",
-  "Sube el Excel (base64) y el JSON espejo al servidor on-prem para validación y cruces SUNAT/InfoObras (POST /subir_y_validar). En el prototipo el servidor devuelve un reporte simulado.",
+  "subir_analisis",
+  "Sube el análisis de Claude (JSON espejo v1.2.0 + Excel) al backend on-prem, que hace los cruces SUNAT/InfoObras y calcula los días efectivos. Si no pasas concurso_id, crea el concurso (nomenclatura = _meta.concurso). Devuelve el job_id para seguir el estado y los enlaces de descarga.",
   {
-    excel_base64: z.string().optional().describe("Excel codificado en base64 (opcional en prueba)"),
-    json_espejo: z.record(z.any()).describe("Objeto JSON espejo con los datos extraídos por Claude"),
+    json_espejo: z.record(z.any()).describe("Objeto JSON espejo (contrato v1.2.0) producido por la skill."),
+    excel_base64: z
+      .string()
+      .optional()
+      .describe("Excel 'Formato de Evaluación' en base64 (el backend lo guarda como referencia y regenera el enriquecido)."),
+    concurso_id: z
+      .string()
+      .optional()
+      .describe("ID de un concurso existente (de listar_concursos). Si se omite, se crea uno."),
+    concurso: z
+      .object({
+        nomenclatura: z.string().optional(),
+        entidad: z.string().optional(),
+        fecha_presentacion: z.string().optional(),
+      })
+      .partial()
+      .optional()
+      .describe("Datos para crear el concurso si no hay concurso_id; nomenclatura por defecto = _meta.concurso."),
   },
-  async ({ excel_base64, json_espejo }) => {
-    const r = await pedir("POST", "/subir_y_validar", {
-      excel: excel_base64 || null,
-      json: json_espejo,
-    });
-    return comoTexto({ ok: r.ok, status_http: r.status, reporte: r.data });
-  }
+  async (args) => comoTexto(await cli.subirAnalisis(args))
+);
+
+server.tool(
+  "consultar_estado",
+  "Consulta el estado de un análisis subido (GET /api/pivote/jobs/{job_id}): estado, etapa actual, cuántos items requieren revisión humana, y enlaces de descarga del Excel/ZIP.",
+  { job_id: z.string().describe("job_id que devolvió subir_analisis.") },
+  async ({ job_id }) => comoTexto(await cli.consultarEstado(job_id))
 );
 
 // ── Arranque ─────────────────────────────────────────────────────────────────
 async function main() {
   log("─".repeat(50));
-  log("MCP infoobras-onprem-bridge arrancando (stdio)");
+  log("MCP infoobras-onprem-bridge v0.2.0 (stdio) → backend real");
   log(`SERVER_URL = ${SERVER_URL}`);
   log(`auth = ${ONPREM_TOKEN ? "Bearer (configurado)" : "ninguna"}`);
   log(`timeout = ${REQUEST_TIMEOUT}ms`);
