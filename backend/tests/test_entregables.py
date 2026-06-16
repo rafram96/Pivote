@@ -303,3 +303,35 @@ def test_descargar_a_carpeta_prefija_nombre_con_fecha(tmp_path):
         _Sess(), {"filename": "exp/et.pdf", "nombre": "expediente", "extension": "pdf"},
         tmp_path / "sec", timeout=5)
     assert ok2 and (tmp_path / "sec" / "expediente.pdf").exists()
+
+
+def test_get_inventario_reintenta_503_pero_no_4xx(monkeypatch):
+    """La página de inventario reintenta ante 503 transitorio y devuelve el HTML
+    en el intento que responde 200; un 4xx es permanente (no reintenta)."""
+    from entregables import zip_infoobras as z
+
+    class _Resp:
+        def __init__(self, code, text=""):
+            self.status_code, self.text = code, text
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise z.requests.HTTPError(f"HTTP {self.status_code}")
+
+    monkeypatch.setattr(z.time, "sleep", lambda *a: None)  # no esperar en el test
+
+    estado = {"n": 0}
+    class _Sess503:
+        def get(self, url, params=None, timeout=None):
+            estado["n"] += 1
+            return _Resp(503) if estado["n"] == 1 else _Resp(200, "<html>ok</html>")
+    assert z._get_inventario(_Sess503(), 72056, timeout=5, intentos=3) == "<html>ok</html>"
+    assert estado["n"] == 2  # cayó la 1ra, respondió la 2da
+
+    estado2 = {"n": 0}
+    class _Sess404:
+        def get(self, url, params=None, timeout=None):
+            estado2["n"] += 1
+            return _Resp(404)
+    with pytest.raises(z.requests.HTTPError):
+        z._get_inventario(_Sess404(), 1, timeout=5, intentos=3)
+    assert estado2["n"] == 1  # un 4xx no se reintenta

@@ -267,6 +267,40 @@ def _descargar_a_carpeta(
     return False
 
 
+def _get_inventario(
+    sess: requests.Session,
+    obra_id: int | str,
+    *,
+    timeout: float,
+    intentos: int = _DL_RETRIES,
+) -> str:
+    """GET de la página `DatosEjecucion` con reintento + backoff.
+
+    El portal devuelve 503 transitorios (y a veces corta la conexión) también en
+    esta página; sin reintento, un fallo pasajero abortaba la descarga de TODA la
+    obra. Devuelve el HTML. Reintenta en 5xx/ConnectionError/Timeout; un 4xx es
+    permanente (relanza de inmediato). Si agota los intentos, relanza el último
+    error para que el llamador lo trate como obra no disponible.
+    """
+    ultima: Optional[Exception] = None
+    for intento in range(max(1, intentos)):
+        try:
+            r = sess.get(PAGINA, params={"obraId": obra_id}, timeout=timeout)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            ultima = e
+        else:
+            if r.status_code < 500:
+                r.raise_for_status()   # 2xx → no-op · 4xx → error permanente
+                return r.text
+            ultima = requests.HTTPError(f"HTTP {r.status_code}", response=r)
+        if intento < intentos - 1:
+            delay = _DL_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.5)
+            logger.warning("InfoObras inventario obra %s intento %d/%d: %s — reintento en %.1fs",
+                           obra_id, intento + 1, intentos, ultima, delay)
+            time.sleep(delay)
+    raise ultima or requests.HTTPError("inventario no disponible")
+
+
 def descargar_documentos_obra(
     obra_id: int | str,
     destino: Path,
@@ -282,9 +316,7 @@ def descargar_documentos_obra(
         "User-Agent",
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
     )
-    r = sess.get(PAGINA, params={"obraId": obra_id}, timeout=timeout)
-    r.raise_for_status()
-    inv = inventariar(r.text)
+    inv = inventariar(_get_inventario(sess, obra_id, timeout=timeout))
     objetivos = inv["documentos"] + (inv["imagenes"] if incluir_imagenes else [])
 
     destino.mkdir(parents=True, exist_ok=True)
@@ -317,9 +349,7 @@ def descargar_documentos_obra_por_hito(
         "User-Agent",
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
     )
-    r = sess.get(PAGINA, params={"obraId": obra_id}, timeout=timeout)
-    r.raise_for_status()
-    inv = inventariar_por_avance(r.text)
+    inv = inventariar_por_avance(_get_inventario(sess, obra_id, timeout=timeout))
     destino.mkdir(parents=True, exist_ok=True)
     cont = {"ok": 0, "fail": 0}
 
