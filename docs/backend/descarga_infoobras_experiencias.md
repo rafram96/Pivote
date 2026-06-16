@@ -87,10 +87,11 @@ Medido en vivo con `tools/medir_descargas.py` sobre las obras pesadas del demo:
   `INFOOBRAS_DOWNLOAD_RETRIES` (def 3), `INFOOBRAS_DOWNLOAD_BASE_DELAY` (def 1.0).
 
 ## Pendiente / riesgos conocidos
-- Un ZIP por concurso puede pesar **varios GB** (711 MB es UNA obra; un concurso
-  tiene 40+). No es un bug, pero conviene decidir con Manuel: ¿se descargan todas
-  las obras siempre, o se acota por tamaño/relevancia? Hoy lo gobierna
-  `PIVOTE_MAX_DESCARGAS` (nº de obras), no el tamaño.
+- **Tamaño del ZIP: sin límite (decisión cliente 2026-06-16).** Un ZIP por
+  concurso puede pesar **varios GB** (711 MB es UNA obra; un concurso tiene 40+) y
+  está bien — se descargan todas las obras, tan grande como deba ser. No se acota
+  por tamaño. `PIVOTE_MAX_DESCARGAS` (nº de obras) queda solo como tope operativo
+  para acotar corridas de prueba, no como política de producción.
 - Otras secciones de "Información complementaria" (cronograma, adendas,
   controversias, etc.) hoy salen vacías en los datos estructurados — ver
   [[infoobras-secciones-tabla-html]].
