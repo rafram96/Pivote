@@ -18,7 +18,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import random
 import re
+import time
 import zipfile
 from pathlib import Path
 from typing import Any, Optional
@@ -27,6 +30,12 @@ from urllib.parse import parse_qs, unquote, urlsplit
 import requests
 
 logger = logging.getLogger(__name__)
+
+# El portal corta la conexión en archivos grandes (IncompleteRead): obras
+# pesadas tienen PDFs de ~50 MB y >700 MB en total. Sin reintento + streaming,
+# esos sustentos (los más importantes) se perdían en silencio del ZIP.
+_DL_RETRIES = int(os.getenv("INFOOBRAS_DOWNLOAD_RETRIES", "3"))
+_DL_BASE_DELAY = float(os.getenv("INFOOBRAS_DOWNLOAD_BASE_DELAY", "1.0"))
 
 BASE = "https://infobras.contraloria.gob.pe/InfobrasWeb"
 PAGINA = BASE + "/Mapa/DatosEjecucion"
@@ -190,6 +199,70 @@ def inventariar_por_avance(html: str) -> dict[str, Any]:
     return {"avances": avances_out, "obra": {"documentos": obra_docs, "imagenes": obra_imgs}}
 
 
+def _descargar_a_carpeta(
+    sess: requests.Session,
+    it: dict,
+    carpeta: Path,
+    *,
+    timeout: float,
+    intentos: int = _DL_RETRIES,
+) -> bool:
+    """Descarga `it` a `carpeta/<nombre>` con streaming a disco + reintentos.
+
+    Robusto ante los cortes del portal en archivos grandes (IncompleteRead /
+    ConnectionError): baja a un `.part`, verifica Content-Length y reintenta con
+    backoff exponencial. Devuelve True si quedó un archivo íntegro; False si se
+    agotaron los intentos o el archivo no está disponible (4xx). No relanza: el
+    llamador cuenta ok/fallido.
+    """
+    ext = it["extension"]
+    nombre = it["nombre"]
+    if not nombre.lower().endswith("." + ext.lower()):
+        nombre = f"{nombre}.{ext}"
+    destino = carpeta / _ruta_segura(nombre)
+    tmp = destino.with_name(destino.name + ".part")
+    params = {
+        "filename": it["filename"], "name": it["nombre"],
+        "contentType": "application/pdf" if ext == "pdf" else "application/octet-stream",
+        "extension": "." + ext,
+    }
+    for intento in range(max(1, intentos)):
+        try:
+            with sess.get(DESCARGA, params=params, timeout=timeout, stream=True) as resp:
+                if resp.status_code >= 500:
+                    raise OSError(f"HTTP {resp.status_code}")   # transitorio → reintentar
+                if resp.status_code != 200:
+                    return False                                 # 4xx → no disponible
+                carpeta.mkdir(parents=True, exist_ok=True)
+                n = 0
+                with open(tmp, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=1 << 16):
+                        if chunk:
+                            f.write(chunk)
+                            n += len(chunk)
+                cl = resp.headers.get("Content-Length")
+                if cl and cl.isdigit() and n < int(cl):
+                    raise OSError(f"descarga incompleta {n}/{cl} bytes")
+                if n == 0:
+                    raise OSError("respuesta vacía")
+            tmp.replace(destino)
+            return True
+        except (requests.RequestException, OSError) as e:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            if intento < intentos - 1:
+                delay = _DL_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.5)
+                logger.warning("InfoObras descarga %s intento %d/%d: %s — reintento en %.1fs",
+                               it["nombre"], intento + 1, intentos, e, delay)
+                time.sleep(delay)
+            else:
+                logger.warning("InfoObras descarga %s falló tras %d intentos: %s",
+                               it["nombre"], intentos, e)
+    return False
+
+
 def descargar_documentos_obra(
     obra_id: int | str,
     destino: Path,
@@ -213,27 +286,11 @@ def descargar_documentos_obra(
     destino.mkdir(parents=True, exist_ok=True)
     ok, fail = 0, 0
     for it in objetivos:
-        ext = it["extension"]
-        try:
-            resp = sess.get(DESCARGA, params={
-                "filename": it["filename"], "name": it["nombre"],
-                "contentType": "application/pdf" if ext == "pdf" else "application/octet-stream",
-                "extension": "." + ext,
-            }, timeout=timeout)
-        except requests.RequestException as e:
-            logger.warning("InfoObras descarga %s: %s", it["nombre"], e)
-            fail += 1
-            continue
-        if resp.status_code != 200 or not resp.content:
-            fail += 1
-            continue
-        nombre = it["nombre"]
-        if not nombre.lower().endswith("." + ext.lower()):
-            nombre = f"{nombre}.{ext}"
         carpeta = destino / _ruta_segura(it["seccion"])
-        carpeta.mkdir(parents=True, exist_ok=True)
-        (carpeta / _ruta_segura(nombre)).write_bytes(resp.content)
-        ok += 1
+        if _descargar_a_carpeta(sess, it, carpeta, timeout=timeout):
+            ok += 1
+        else:
+            fail += 1
     return {"descargados": ok, "fallidos": fail, "inventario": inv}
 
 
@@ -261,26 +318,10 @@ def descargar_documentos_obra_por_hito(
     cont = {"ok": 0, "fail": 0}
 
     def _bajar(it: dict, carpeta: Path) -> None:
-        ext = it["extension"]
-        try:
-            resp = sess.get(DESCARGA, params={
-                "filename": it["filename"], "name": it["nombre"],
-                "contentType": "application/pdf" if ext == "pdf" else "application/octet-stream",
-                "extension": "." + ext,
-            }, timeout=timeout)
-        except requests.RequestException as e:
-            logger.warning("InfoObras descarga %s: %s", it["nombre"], e)
+        if _descargar_a_carpeta(sess, it, carpeta, timeout=timeout):
+            cont["ok"] += 1
+        else:
             cont["fail"] += 1
-            return
-        if resp.status_code != 200 or not resp.content:
-            cont["fail"] += 1
-            return
-        nombre = it["nombre"]
-        if not nombre.lower().endswith("." + ext.lower()):
-            nombre = f"{nombre}.{ext}"
-        carpeta.mkdir(parents=True, exist_ok=True)
-        (carpeta / _ruta_segura(nombre)).write_bytes(resp.content)
-        cont["ok"] += 1
 
     # valorizaciones agrupadas por hito (mes/año)
     for av in inv["avances"]:
