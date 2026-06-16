@@ -296,14 +296,17 @@ def construir_hoja_profesional(
         c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
         rr += 1
 
-        def kv(label, value, fill=None):
+        def kv(label, value, fill=None, height=None):
             nonlocal rr
             ws.merge_cells(start_row=rr, start_column=13, end_row=rr, end_column=14)
             cl = ws.cell(rr, 13, label); cl.font, cl.border = F_BOLD, BORDER
+            cl.alignment = Alignment(vertical="top", wrap_text=True)
             ws.merge_cells(start_row=rr, start_column=15, end_row=rr, end_column=16)
             cv = ws.cell(rr, 15, value); cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
             if fill:
                 cv.fill = fill
+            if height:
+                ws.row_dimensions[rr].height = height
             rr += 1
 
         creacion = _fecha_iso(s.get("fecha_inscripcion")) if s else None
@@ -314,14 +317,13 @@ def construir_hoja_profesional(
                 kv("Tipo", s.get("tipo_contribuyente"))
             acts = s.get("actividades_economicas") or []
             objeto = re.sub(r"^\s*Principal\s*-\s*", "", acts[0]) if acts else "—"
-            kv("Objeto social", objeto)
+            kv("Objeto social", objeto, height=58)  # CIIU largo → más alto, envuelve
             # estado/condición: rojo si no es ACTIVO + HABIDO (baja, no habido…)
             estado, cond = s.get("estado"), s.get("condicion")
             mal = (estado and not str(estado).upper().startswith("ACTIVO")) or \
                   (cond and str(cond).upper() != "HABIDO")
             kv("Estado / Condición", f"{estado or '—'} / {cond or '—'}",
                fill=FILL_ALERTA if mal else None)
-            kv("Creación (SUNAT)", creacion.strftime("%d/%m/%Y") if creacion else "—")
             ini_act = _fecha_iso(s.get("fecha_inicio_actividades"))
             if ini_act:
                 kv("Inicio actividades", ini_act.strftime("%d/%m/%Y"))
