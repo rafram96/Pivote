@@ -19,8 +19,6 @@ export function crearCliente({ serverUrl, token = null, timeoutMs = 60000, log =
 
   async function pedir(metodo, ruta, { json, form } = {}) {
     const url = `${base}/${ruta.replace(/^\//, "")}`;
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), timeoutMs);
     const headers = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
     let body;
@@ -30,23 +28,31 @@ export function crearCliente({ serverUrl, token = null, timeoutMs = 60000, log =
       headers["Content-Type"] = "application/json";
       body = JSON.stringify(json);
     }
-    log(`→ ${metodo} ${url}`);
-    try {
-      const resp = await fetch(url, { method: metodo, headers, body, signal: ctrl.signal });
-      const texto = await resp.text();
-      let data;
-      try { data = JSON.parse(texto); } catch { data = { _raw: texto }; }
-      log(`← ${resp.status} (${texto.length} bytes)`);
-      return { status: resp.status, ok: resp.ok, data };
-    } catch (err) {
-      const msg = err?.name === "AbortError"
-        ? `timeout tras ${timeoutMs}ms`
-        : String(err?.message || err);
-      log(`✗ error: ${msg}`);
-      return { status: 0, ok: false, data: { error: msg } };
-    } finally {
-      clearTimeout(t);
+    // GET es idempotente → se reintenta ante fallos transitorios de conexión
+    // (p.ej. el primer fetch que tropieza con IPv6 ::1 en Windows). POST NO se
+    // reintenta, para no arriesgar un doble envío.
+    const intentos = metodo === "GET" ? 3 : 1;
+    let ultimo = "sin respuesta";
+    for (let i = 0; i < intentos; i++) {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      log(`→ ${metodo} ${url}${i ? ` (intento ${i + 1})` : ""}`);
+      try {
+        const resp = await fetch(url, { method: metodo, headers, body, signal: ctrl.signal });
+        const texto = await resp.text();
+        let data;
+        try { data = JSON.parse(texto); } catch { data = { _raw: texto }; }
+        log(`← ${resp.status} (${texto.length} bytes)`);
+        return { status: resp.status, ok: resp.ok, data };
+      } catch (err) {
+        ultimo = err?.name === "AbortError" ? `timeout tras ${timeoutMs}ms` : String(err?.message || err);
+        log(`✗ error: ${ultimo}`);
+      } finally {
+        clearTimeout(t);
+      }
+      if (i < intentos - 1) await new Promise((r) => setTimeout(r, 300));
     }
+    return { status: 0, ok: false, data: { error: ultimo } };
   }
 
   return {

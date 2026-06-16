@@ -13,7 +13,7 @@
 import { readFileSync } from "node:fs";
 import { crearCliente } from "./cliente.js";
 
-const serverUrl = process.argv[2] || "http://localhost:8001";
+const serverUrl = process.argv[2] || "http://127.0.0.1:8001";
 const rutaEspejo = process.argv[3] || "../fixtures/new_format/libertador_espejo.json";
 
 const cli = crearCliente({ serverUrl, log: (...a) => console.error(...a) });

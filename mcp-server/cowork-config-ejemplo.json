@@ -7,7 +7,7 @@
         "C:\\Users\\Holbi\\Documents\\Freelance\\proyectos\\InfoObras\\Pivote\\mcp-server\\mcp.js"
       ],
       "env": {
-        "SERVER_URL": "http://localhost:8001",
+        "SERVER_URL": "http://127.0.0.1:8001",
         "REQUEST_TIMEOUT": "60000",
         "LOG_FILE": "C:\\Users\\Holbi\\Documents\\Freelance\\proyectos\\InfoObras\\Pivote\\mcp-server\\mcp.log"
       }

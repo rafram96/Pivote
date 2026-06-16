@@ -30,7 +30,7 @@ import { appendFileSync } from "node:fs";
 import { crearCliente } from "./cliente.js";
 
 // ── Config ───────────────────────────────────────────────────────────────────
-const SERVER_URL = (process.env.SERVER_URL || "http://localhost:8001").replace(/\/$/, "");
+const SERVER_URL = (process.env.SERVER_URL || "http://127.0.0.1:8001").replace(/\/$/, "");
 const ONPREM_TOKEN = process.env.ONPREM_TOKEN || null;
 const REQUEST_TIMEOUT = parseInt(process.env.REQUEST_TIMEOUT || "60000", 10);
 const LOG_FILE = process.env.LOG_FILE || null;
