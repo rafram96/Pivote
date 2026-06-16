@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "infoobras-onprem-bridge": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server/mcp.js"],
+      "env": {
+        "SERVER_URL": "http://127.0.0.1:8001",
+        "REQUEST_TIMEOUT": "60000"
+      }
+    }
+  }
+}

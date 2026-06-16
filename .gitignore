@@ -52,6 +52,13 @@ Thumbs.db
 !**/package-lock.json
 !**/tsconfig.json
 !mcp-server/cowork-config-ejemplo.json
+!/plugin/.claude-plugin/plugin.json
+!/plugin/.mcp.json
+
+# Plugin Cowork: se versiona el manifiesto + build.ps1 + README; las copias de
+# la skill y el MCP son build output (regenéralas con plugin/build.ps1).
+/plugin/skills/
+/plugin/mcp-server/
 
 # Datos locales de la API del pivote (jobs, espejos, entregables)
 /backend/datos_pivote/

@@ -1,0 +1,6 @@
+{
+  "name": "infoobras-pivote",
+  "description": "Evaluación de propuestas técnicas OSCE: la skill analizar-licitacion-osce (lee bases+propuesta, orquesta subagentes, emite Excel + JSON espejo) más el MCP puente al backend on-prem (subir_analisis, consultar_estado). Para usar la skill y el MCP en Cowork / Claude Desktop como un solo plugin.",
+  "version": "0.1.0",
+  "author": { "name": "Indeconsult / Alpamayo" }
+}
