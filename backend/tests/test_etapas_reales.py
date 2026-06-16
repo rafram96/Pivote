@@ -80,7 +80,7 @@ class AvanceFake:
 class ObraFake:
     obra_id: int
     nombre: str
-    codigo_infobras: str = "INF-001"
+    codigo_infoobras: str = "INF-001"
     avances: list = field(default_factory=list)
 
 
@@ -289,7 +289,7 @@ def test_infoobras_segunda_pasada_recupera_obra_transitoria(tmp_path):
     enr = repo.cargar_enriquecimiento(job.job_id)
     assert estado["n"] == 2  # cayó en la 1ra pasada, recuperó en la 2da
     assert len(enr["1:1"]["valorizaciones"]) == 12
-    assert enr["1:1"]["codigo_infobras"] == "INF-001"
+    assert enr["1:1"]["codigo_infoobras"] == "INF-001"
     # no quedó error de InfoObras (la 2da pasada la rescató)
     assert not [o for e in job.etapas for o in e.observaciones if o.codigo == "INFOOBRAS"]
     obs = [o for e in job.etapas for o in e.observaciones if o.codigo == "PASO5"]
@@ -573,7 +573,7 @@ def test_excel_muestra_modificaciones_de_plazo(tmp_path):
                  "fecha_final": "2015-12-31", "folio": "1"}]}],
     }
     fichas = {(1, 1): {
-        "cui": "123", "codigo_infobras": "33900", "estado": "Finalizado",
+        "cui": "123", "codigo_infoobras": "33900", "estado": "Finalizado",
         "valorizaciones": [{"anio": 2015, "mes": 6, "estado": "En ejecución",
                             "fisico_real": 50, "valorizado_real": 100}],
         "modificaciones_plazo": [
@@ -599,7 +599,7 @@ def test_excel_marca_valorizaciones_con_archivos(tmp_path):
                  "fecha_final": "2015-12-31", "folio": "1"}]}],
     }
     fichas = {(1, 1): {
-        "cui": "123", "codigo_infobras": "33900", "estado": "Finalizado",
+        "cui": "123", "codigo_infoobras": "33900", "estado": "Finalizado",
         "valorizaciones": [
             {"anio": 2015, "mes": 6, "estado": "En ejecución", "fisico_real": 50,
              "valorizado_real": 100, "docs": 2},

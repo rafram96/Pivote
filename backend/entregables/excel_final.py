@@ -198,7 +198,7 @@ def construir_hoja_profesional(
                 cv.number_format = fmt
             rr += 1
 
-        kv("Código InfoObras", fx.get("codigo_infobras") or "—")
+        kv("Código InfoObras", fx.get("codigo_infoobras") or "—")
         kv("CUI", fx.get("cui") or "—")
         kv("Estado de obra", fx.get("estado") or "—")
         kv("Monto ejecutado (S/)", fx.get("monto") if fx.get("monto") is not None else "—", FMT_SOLES)
@@ -397,7 +397,7 @@ def generar_excel_final(
     INFOOBRAS. Sin ellas, los cuadros muestran brutos = efectivos.
     `cuis`: {(n_prof, n_exp): "2418877"} — el CUI que el backend resolvió por
     experiencia (la etapa InfoObras). Sin él, se usa el CUI del espejo si existe.
-    `fichas`: {(n_prof, n_exp): {codigo_infobras, cui, estado, monto,
+    `fichas`: {(n_prof, n_exp): {codigo_infoobras, cui, estado, monto,
     fecha_inicio, fecha_fin, valorizaciones:[…]}} — la ficha de la obra y todas
     sus valorizaciones, para el bloque de la derecha en la hoja del profesional.
     """

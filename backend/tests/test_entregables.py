@@ -128,7 +128,7 @@ def test_excel_final_valorizaciones_resalta_solo_meses_del_certificado(tmp_path)
         "resumen_evaluacion": {"factores": []},
     }
     fichas = {(1, 1): {
-        "codigo_infobras": "102951", "cui": "2198319", "estado": "Finalizado",
+        "codigo_infoobras": "102951", "cui": "2198319", "estado": "Finalizado",
         "monto": 11131864.36, "fecha_inicio": "2019-03-25", "fecha_fin": "2019-07-23",
         "valorizaciones": [
             {"anio": 2020, "mes": 2, "estado": "En ejecución", "fisico_real": 1.0, "valorizado_real": 11131864.36},

@@ -207,7 +207,7 @@ class WorkInfo:
     fecha_fin: Optional[date] = None
     plazo_dias: Optional[int] = None
     # Campos de cabecera adicionales
-    codigo_infobras: Optional[str] = None              # ej: "169628"
+    codigo_infoobras: Optional[str] = None              # ej: "169628"
     porcentaje_avance_fisico: Optional[float] = None   # del ultimo avance real
     monto_ejecutado_acumulado: Optional[float] = None  # S/. acumulado
     # Colecciones existentes
@@ -1145,7 +1145,7 @@ def fetch_by_cui(
             # El "Código InfoObras" de la ficha es `codigoObra` (= obra_id); la
             # búsqueda no trae ninguna clave `codigo(I|i)nfobras`. Verificado en
             # vivo con el CUI 133630 (devolvía None → Excel mostraba "—").
-            codigo_infobras=str(obra_id).strip() or None,
+            codigo_infoobras=str(obra_id).strip() or None,
             porcentaje_avance_fisico=avance_pct_real,
             monto_ejecutado_acumulado=monto_ejecutado,
             supervisores=supervisores,

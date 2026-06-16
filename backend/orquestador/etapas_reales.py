@@ -9,7 +9,7 @@ Las dependencias de red (InfoObras, SUNAT) son INYECTABLES: los tests pasan
 fakes; en producción se usan los clientes en vivo con throttling.
 
 El `ctx.enriquecimiento` (persistido por el motor) acumula por experiencia:
-  "n:m" → {cui, via, obra, paralizaciones[(iso,iso)], codigo_infobras, sunat{}}
+  "n:m" → {cui, via, obra, paralizaciones[(iso,iso)], codigo_infoobras, sunat{}}
 y por profesional: "prof:n" → {dias_brutos, dias_paralizados, dias_traslape,
   dias_efectivos, anios_efectivos, minimo_anios?, cumple_backend?}
 """
@@ -283,13 +283,13 @@ class EtapaInfoObrasReal:
                 for a, b in _fuera_de_ventana(getattr(obra, "avances", []) or [], cert_ini, cert_fin)
             ]
             enr.pop("sin_verificar", None)  # se trajo OK: ya no es incierta
-            enr["codigo_infobras"] = getattr(obra, "codigo_infobras", None)
+            enr["codigo_infoobras"] = getattr(obra, "codigo_infoobras", None)
             enr["obra_nombre"] = getattr(obra, "nombre", None)
             # ficha de la obra + todas las valorizaciones (para la hoja Excel)
             fi, ff = getattr(obra, "fecha_inicio", None), getattr(obra, "fecha_fin", None)
             enr["obra_ficha"] = {
                 "cui": cui,
-                "codigo_infobras": getattr(obra, "codigo_infobras", None),
+                "codigo_infoobras": getattr(obra, "codigo_infoobras", None),
                 "estado": getattr(obra, "estado", None),
                 "monto": getattr(obra, "monto_ejecutado_acumulado", None)
                          or getattr(obra, "monto_contrato", None),
@@ -336,7 +336,7 @@ class EtapaInfoObrasReal:
             cob = _cobertura_cert(getattr(obra, "avances", []) or [], cert_ini, cert_fin)
             if cob is not None and cob < _COBERTURA_MIN:
                 pct = round(cob * 100)
-                cod = getattr(obra, "codigo_infobras", None)
+                cod = getattr(obra, "codigo_infoobras", None)
                 motivo = _motivo_cobertura(getattr(obra, "avances", []) or [],
                                            cert_ini, cert_fin, cod, pct)
                 obs.append(pipeline.Observacion(
