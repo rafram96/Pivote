@@ -99,9 +99,10 @@ Persiste ambos en `~/InfoObras/analisis/<analisis_id>/`.
 ### Paso 5 — Transporte al backend
 - **MVP (Camino B)**: deja Excel + JSON en la carpeta; el usuario los sube por el
   dropzone del panel.
-- **Fase 2 (Camino A)**: llama al MCP local `subir_y_validar(excel, json)` (ver
-  `mcp-server/`), que hace POST por LAN al backend. Devuelve un reporte de
-  verificación que Claude puede usar para corregir en la misma sesión.
+- **Camino A (MCP local)**: llama al tool `subir_analisis(json_espejo, excel_base64)`
+  del MCP `infoobras-onprem-bridge` (ver `mcp-server/`), que crea/usa el concurso y
+  hace POST multipart por LAN a `/api/pivote/analizar`. Devuelve `job_id`; sigue el
+  progreso con `consultar_estado(job_id)` y descarga el Excel/ZIP enriquecidos.
 
 ## Validación y retry
 
@@ -155,7 +156,7 @@ tres formas (ISO · parcial `"YYYY-MM (anotación)"` · `"POR VERIFICAR…"`),
 ✓ agent-propuesta-profesional ×N:  K experiencias atómicas · cross-check NOTA 1 OK
 ✓ agent-evaluador:           evaluación lista · X observaciones (Y críticas)
 📦 Excel + JSON espejo en ~/InfoObras/analisis/<analisis_id>/
-→ Próximo paso: subir_y_validar (MCP) o dropzone del panel
+→ Próximo paso: subir_analisis (MCP) o dropzone del panel
 ```
 
 ## Referencias
