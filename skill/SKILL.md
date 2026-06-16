@@ -43,8 +43,12 @@ profundidad por profesional):
 ## Flujo
 
 ### Paso 0 — OCR de la propuesta escaneada (condicional)
-Si `propuesta.pdf` **no tiene capa de texto** (escaneo de imagen), pásale OCR en
-**español** antes de mapear — enfoque heredado del flujo manual validado:
+Si `propuesta.pdf` **no tiene capa de texto** (escaneo de imagen), necesitas leer
+las páginas como imagen antes de mapear. Hay dos caminos, en orden de preferencia:
+
+**Camino A — Tesseract (si está disponible).** Enfoque heredado del flujo manual,
+determinístico y barato; ideal en propuestas de miles de folios cuando el script y
+el binario están instalados:
 - Tesseract con idioma `spa` (tessdata_fast) en un `TESSDATA_PREFIX` escribible.
 - **`OMP_THREAD_LIMIT=1`** por proceso (evita que Tesseract sobre-suscriba hilos);
   paraleliza con un `Pool` = nº de CPUs.
@@ -55,11 +59,24 @@ Si `propuesta.pdf` **no tiene capa de texto** (escaneo de imagen), pásale OCR e
 - Construye un **índice por folio** (folio = número grande del borde de la página,
   ≈ número de página) que consumen el mapa y los subagentes por profesional.
 
-> ⚠ **Entorno**: el OCR usa **Tesseract** (script `scripts/ocr_propuesta.py`,
-> portado del flujo manual). Esto **matiza la regla "solo Node"**: la PC del
-> ingeniero necesita Python + Tesseract **solo** para este paso de OCR; el resto
-> del código client-side sigue siendo Node (`exceljs`, `zod`). Si el PDF ya trae
-> texto, **omite el Paso 0** por completo.
+**Camino B — OCR nativo de Claude (fallback por defecto si NO hay Tesseract).**
+Si en la máquina **no está** `scripts/ocr_propuesta.py` ni el binario de Tesseract,
+**no falles ni pidas instalar nada**: lee el `propuesta.pdf` **directamente con tu
+propia visión** — ves cada página como imagen y la transcribes. Es el camino que ya
+se validó en producción (corrida ESSALUD-Vitarte: 14 profesionales / 51
+experiencias mapeadas **sin Tesseract**). Reglas para que el fallback sea fiable:
+- Lee el PDF por **rangos de páginas** (no todo de golpe) para no omitir folios.
+- El **folio** = número grande del borde de la página (≈ nº de página); arma el
+  **mismo índice por folio** que produciría el Camino A, para que el mapa y los
+  subagentes por profesional citen folios igual que con Tesseract.
+- Transcribe **literal**: nombres, fechas, montos, RUC y razón social del emisor
+  tal cual aparecen — no normalices ni "corrijas" el texto fuente.
+
+> ⚠ **Entorno**: el Camino A (Tesseract) **matiza la regla "solo Node"** — la PC
+> del ingeniero necesitaría Python + Tesseract **solo** para ese paso. El Camino B
+> (OCR nativo) **no requiere instalar nada** y es el comportamiento por defecto
+> cuando Tesseract no está. Si el PDF **ya trae capa de texto**, **omite el Paso 0**
+> por completo (ningún OCR) y lee el texto directo.
 
 ### Paso 1 — `agent-bases` ‖ `agent-propuesta-mapa` EN PARALELO
 Lanza los dos en el **mismo turno** (dos llamadas a la herramienta de subagentes)
@@ -148,10 +165,11 @@ tres formas (ISO · parcial `"YYYY-MM (anotación)"` · `"POR VERIFICAR…"`),
 `puntaje` numérico o `"NO APLICA…"`, y `_backend` opcional (Claude lo deja vacío).
 
 > **Entorno**: el código client-side es **Node** (`exceljs`, `zod`). Instalar una
-> vez: `cd ~/.claude/skills/analizar-licitacion-osce && npm install`. La **única
-> excepción** es el **Paso 0 (OCR)**, que usa **Python + Tesseract** y solo corre
-> cuando la propuesta es un escaneo sin texto. El validador y generador en Python
-> viven en el **backend** (`backend/scripts/`), que regenera el Excel enriquecido.
+> vez: `cd ~/.claude/skills/analizar-licitacion-osce && npm install`. El **Paso 0
+> (OCR)** solo corre cuando la propuesta es un escaneo sin texto, y su Camino A usa
+> **Python + Tesseract**; si Tesseract no está, el Camino B (OCR nativo de Claude)
+> cubre ese paso **sin instalar nada**. El validador y generador en Python viven en
+> el **backend** (`backend/scripts/`), que regenera el Excel enriquecido.
 
 ## Salida esperada (reporte en chat)
 
