@@ -335,3 +335,44 @@ def test_get_inventario_reintenta_503_pero_no_4xx(monkeypatch):
     with pytest.raises(z.requests.HTTPError):
         z._get_inventario(_Sess404(), 1, timeout=5, intentos=3)
     assert estado2["n"] == 1  # un 4xx no se reintenta
+
+
+def test_hoja_profesional_cuadro_emisor_sunat_alt04():
+    """La hoja del profesional trae el cuadro EMISOR (SUNAT) al lado, y marca
+    ALT04 cuando el certificado se emitió ANTES de la creación de la empresa."""
+    import openpyxl
+    from entregables.excel_final import construir_hoja_profesional
+
+    ws = openpyxl.Workbook().active
+    prof = {"n_prof": 1, "cargo": "ESP", "nombre": "N", "experiencias": [
+        {"n": 1, "proyecto": "Obra X", "fecha_inicial": "2019-06-01",
+         "fecha_final": "2020-06-30", "fecha_emision": "2019-03-01",  # ANTES de creación
+         "ruc_emisor": "20512345678"}]}
+    fichas = {(1, 1): {"codigo_infoobras": "111", "cui": "2418877", "valorizaciones": []}}
+    sunat = {(1, 1): {"ruc": "20512345678", "razon_social": "CONSORCIO X SAC",
+                      "fecha_inscripcion": "2019-06-01", "estado": "ACTIVO"}}
+    construir_hoja_profesional(ws, prof, {}, {}, fichas, {}, sunat)
+
+    texto = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
+    assert "EMISOR DEL CERTIFICADO (SUNAT)" in texto
+    assert "CONSORCIO X SAC" in texto
+    # creación 2019-06 > emisión 2019-03 → certificado emitido antes de existir la empresa
+    assert "ALT04" in texto and "ANTES de" in texto and "creación" in texto
+
+
+def test_hoja_profesional_emisor_sin_anomalia():
+    """Emisor coherente (creado antes del inicio y de la emisión) → ALT04 en verde."""
+    import openpyxl
+    from entregables.excel_final import construir_hoja_profesional
+
+    ws = openpyxl.Workbook().active
+    prof = {"n_prof": 1, "cargo": "ESP", "nombre": "N", "experiencias": [
+        {"n": 1, "proyecto": "Obra Y", "fecha_inicial": "2020-01-01",
+         "fecha_final": "2021-01-01", "fecha_emision": "2021-02-01",
+         "ruc_emisor": "20512345678"}]}
+    fichas = {(1, 1): {"cui": "2418877", "valorizaciones": []}}
+    sunat = {(1, 1): {"ruc": "20512345678", "razon_social": "EMPRESA OK",
+                      "fecha_inscripcion": "2010-05-10", "estado": "ACTIVO"}}
+    construir_hoja_profesional(ws, prof, {}, {}, fichas, {}, sunat)
+    texto = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
+    assert "sin anomalía de antigüedad" in texto

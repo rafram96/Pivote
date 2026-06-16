@@ -634,6 +634,7 @@ class EtapaExcelReal:
         paral: dict[tuple[int, int], list] = {}
         cuis: dict[tuple[int, int], str] = {}
         fichas: dict[tuple[int, int], dict] = {}
+        sunat: dict[tuple[int, int], dict] = {}
         for k, enr in ctx.enriquecimiento.items():
             if ":" not in k or k.startswith("prof:"):
                 continue
@@ -642,6 +643,8 @@ class EtapaExcelReal:
                 paral[(np_, ne)] = enr["paralizaciones"]
             if enr.get("cui"):
                 cuis[(np_, ne)] = enr["cui"]
+            if enr.get("sunat"):
+                sunat[(np_, ne)] = enr["sunat"]
             if enr.get("obra_ficha") or enr.get("valorizaciones"):
                 fichas[(np_, ne)] = {**(enr.get("obra_ficha") or {}),
                                      "valorizaciones": enr.get("valorizaciones") or [],
@@ -655,7 +658,7 @@ class EtapaExcelReal:
         ruta = self.dir_salida / f"{ctx.job.job_id}.final.xlsx"
         if ruta.exists():
             ruta.unlink()  # regenerar (re-disparo tras revisión humana)
-        generar_excel_final(ctx.espejo, ruta, paral, cuis, fichas, revisiones)
+        generar_excel_final(ctx.espejo, ruta, paral, cuis, fichas, revisiones, sunat)
         ctx.job.excel_final = f"/api/pivote/jobs/{ctx.job.job_id}/excel"
         ctx.job.zip_infoobras = f"/api/pivote/jobs/{ctx.job.job_id}/zip"
         zip_previo = self.dir_salida / f"{ctx.job.job_id}.infoobras.zip"

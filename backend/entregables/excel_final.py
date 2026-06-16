@@ -45,6 +45,9 @@ _PALETA_PROF = ["FFF2CC", "DDEBF7", "E2EFDA", "FCE4D6", "EDEDED", "D9E1F2",
 
 # Amarillo para resaltar las valorizaciones que caen dentro del certificado
 FILL_VALOR = PatternFill("solid", fgColor="FFFF00")
+# Semántico para el cuadro del emisor (SUNAT): rojo = anomalía (ALT04), verde = ok.
+FILL_ALERTA = PatternFill("solid", fgColor="F4CCCC")
+FILL_OK = PatternFill("solid", fgColor="D9EAD3")
 FMT_SOLES = '#,##0.00'
 FMT_PCT = '0.00%'
 
@@ -136,13 +139,16 @@ def construir_hoja_profesional(
     cuis: Optional[dict] = None,
     fichas: Optional[dict] = None,
     revisiones: Optional[dict] = None,
+    sunat: Optional[dict] = None,
 ) -> None:
     cuis = cuis or {}
     fichas = fichas or {}
     revisiones = revisiones or {}
-    # A:D = cuadro de hitos (izquierda) · F:J = ficha de obra + valorizaciones
+    sunat = sunat or {}
+    # A:D = hitos (izq) · F:K = obra + valorizaciones (centro) · M:P = emisor SUNAT (der)
     anchos = {"A": 52, "B": 14, "C": 14, "D": 10, "E": 2,
-              "F": 5, "G": 18, "H": 14, "I": 18, "J": 14, "K": 13}
+              "F": 5, "G": 18, "H": 14, "I": 18, "J": 14, "K": 13, "L": 2,
+              "M": 16, "N": 12, "O": 18, "P": 12}
     for col, w in anchos.items():
         ws.column_dimensions[col].width = w
     n_prof = prof.get("n_prof")
@@ -280,6 +286,56 @@ def construir_hoja_profesional(
         rr += 4
         return rr - 1
 
+    def render_emisor(top: int, s: Optional[dict], fecha_emision, ini, ruc_espejo) -> int:
+        """Cuadro del EMISOR del certificado (datos SUNAT) en columnas M:P desde
+        `top`, al lado de las valorizaciones. Señala ALT04 (anomalía de antigüedad
+        del emisor) en rojo/verde. Devuelve la última fila usada."""
+        rr = top
+        ws.merge_cells(start_row=rr, start_column=13, end_row=rr, end_column=16)
+        c = ws.cell(rr, 13, "EMISOR DEL CERTIFICADO (SUNAT)")
+        c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
+        rr += 1
+
+        def kv(label, value):
+            nonlocal rr
+            ws.merge_cells(start_row=rr, start_column=13, end_row=rr, end_column=14)
+            cl = ws.cell(rr, 13, label); cl.font, cl.border = F_BOLD, BORDER
+            ws.merge_cells(start_row=rr, start_column=15, end_row=rr, end_column=16)
+            cv = ws.cell(rr, 15, value); cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
+            rr += 1
+
+        creacion = _fecha_iso(s.get("fecha_inscripcion")) if s else None
+        kv("RUC", (s.get("ruc") if s else None) or ruc_espejo or "—")
+        if s:
+            kv("Razón social", s.get("razon_social") or "—")
+            kv("Creación (SUNAT)", creacion.strftime("%d/%m/%Y") if creacion else "—")
+            kv("Estado", s.get("estado") or "—")
+        else:
+            kv("Verificación", "no verificado en SUNAT")
+
+        emision = _fecha_iso(fecha_emision)
+        if creacion and emision and creacion > emision:
+            txt = (f"🔴 ALT04 — certificado emitido ({emision.strftime('%d/%m/%y')}) ANTES de "
+                   f"la creación de la empresa ({creacion.strftime('%d/%m/%y')}): imposible, revisar.")
+            fill = FILL_ALERTA
+        elif creacion and ini and creacion > ini:
+            txt = (f"🔴 ALT04 — empresa creada ({creacion.strftime('%d/%m/%y')}) DESPUÉS del "
+                   f"inicio de la experiencia ({ini.strftime('%d/%m/%y')}).")
+            fill = FILL_ALERTA
+        elif creacion:
+            txt = "✔ ALT04 — sin anomalía de antigüedad del emisor."
+            fill = FILL_OK
+        else:
+            txt = "ALT04 — sin fecha de creación SUNAT (no verificable)."
+            fill = None
+        ws.merge_cells(start_row=rr, start_column=13, end_row=rr + 1, end_column=16)
+        c = ws.cell(rr, 13, txt)
+        c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
+        if fill:
+            c.fill = fill
+        rr += 2
+        return rr - 1
+
     banda(f"PROFESIONAL {n_prof}: {prof.get('cargo', '')}")
     ws.cell(r, 1, f"Nombre: {prof.get('nombre') or '—'}").font = F_BOLD; r += 1
     ws.cell(r, 1, f"Colegiatura: {prof.get('colegiatura') or '—'}").font = F_CELL; r += 1
@@ -363,6 +419,11 @@ def construir_hoja_profesional(
             r_right = render_revision(r_top, revisiones[(n_prof, n_exp)])
             r = max(r, r_right + 1)
 
+        # 3ª banda (M:P): emisor del certificado (SUNAT) + ALT04, al lado de valorizaciones
+        r_emi = render_emisor(r_top, sunat.get((n_prof, n_exp)),
+                              e.get("fecha_emision"), ini, e.get("ruc_emisor"))
+        r = max(r, r_emi + 1)
+
     # Resumen del profesional (Paso 5 completo, con fusión de traslapes ALT11)
     if periodos_validos:
         res = dias_efectivos_profesional(periodos_validos, paral_por_idx)
@@ -389,6 +450,7 @@ def generar_excel_final(
     cuis: Optional[dict] = None,
     fichas: Optional[dict] = None,
     revisiones: Optional[dict] = None,
+    sunat: Optional[dict] = None,
 ) -> Path:
     """Construye el Excel final: CLAUDE + Base de Datos + 1 hoja por profesional.
 
@@ -405,6 +467,7 @@ def generar_excel_final(
     cuis = cuis or {}
     fichas = fichas or {}
     revisiones = revisiones or {}
+    sunat = sunat or {}
     wb = openpyxl.Workbook()
 
     ws = wb.active
@@ -416,7 +479,7 @@ def generar_excel_final(
     for prof in espejo.get("profesionales", []):
         nombre = _nombre_hoja(prof.get("n_prof", 0), prof.get("cargo", ""))
         construir_hoja_profesional(wb.create_sheet(nombre), prof, paralizaciones,
-                                   cuis, fichas, revisiones)
+                                   cuis, fichas, revisiones, sunat)
 
     salida.parent.mkdir(parents=True, exist_ok=True)
     wb.save(salida)
