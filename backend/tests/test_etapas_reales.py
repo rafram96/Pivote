@@ -390,6 +390,61 @@ def test_clamp_descuenta_cert_fuera_de_la_ventana(tmp_path):
     assert p1["dias_efectivos"] == 182     # solo ene-jun 2016 (lo valorizado)
 
 
+def test_rucs_postor_excluye_experiencia_postor():
+    """_rucs_postor toma RUCs de formularios/consorciados/meta, NO de
+    experiencia_postor (esos son clientes terceros → falsos positivos)."""
+    from orquestador.etapas_reales import _rucs_postor
+    espejo = {
+        "_meta": {"postor": "CONSORCIO (RUC 20111111111)"},
+        "postor": {
+            "formularios": [{"documento": "Promesa de consorcio — miembro RUC 20222222222"}],
+            "consorciados": [{"ruc": "20333333333"}],
+            "experiencia_postor": [{"cliente": "GORE Huánuco (RUC 20999999999)"}],  # NO entra
+        },
+    }
+    rucs = _rucs_postor(espejo)
+    assert rucs == {"20111111111", "20222222222", "20333333333"}
+    assert "20999999999" not in rucs
+
+
+def test_vinculacion_postor_emisor_dispara_alerta(tmp_path):
+    """Auto-certificación: el RUC que emitió el certificado es el del propio
+    postor / un consorciado (declarado en los formularios) → alerta VINCULACION.
+    El otro emisor (RUC ajeno) no dispara. Determinístico, no usa SUNAT."""
+    espejo = {
+        "_meta": {"analisis_id": "x", "concurso": "c", "postor": "CONSORCIO X + Y"},
+        "postor": {"formularios": [
+            {"anexo": "Anexo 2",
+             "documento": "Promesa de consorcio — JOGAMA (RUC 20512345678) + Bisbal"}]},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N",
+             "experiencias": [
+                 {"n": 1, "proyecto": "Edificio corporativo Lima",
+                  "entidad_emisora": "JOGAMA Consultorías E.I.R.L. (RUC 20512345678)",
+                  "fecha_inicial": "2021-01-01", "fecha_final": "2022-01-01", "folio": "1"},
+                 {"n": 2, "proyecto": "Edificio corporativo Trujillo",
+                  "entidad_emisora": "Entidad Ajena S.A. (RUC 20999999999)",
+                  "fecha_inicial": "2021-01-01", "fecha_final": "2022-01-01", "folio": "2"},
+             ]},
+        ],
+        "resumen_evaluacion": {"factores": []},
+    }
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
+                                fetcher_infoobras=fetcher_fake,
+                                consultor_sunat=lambda r: EmpresaFake(r, "EMP", date(2000, 1, 1)),
+                                descargar=lambda *a, **k: None), repo)
+    job = motor.correr(motor.crear_job(espejo).job_id)
+
+    vinc = [o for e in job.etapas for o in e.observaciones if o.codigo == "VINCULACION"]
+    assert len(vinc) == 1 and vinc[0].referencia == "prof=1 exp=1"
+    enr = repo.cargar_enriquecimiento(job.job_id)
+    assert enr["1:1"].get("vinculacion_postor_emisor") is True
+    assert not enr["1:2"].get("vinculacion_postor_emisor")
+    # los emisores se inscribieron en 2000 (antes del inicio) → ningún ALT04
+    assert not [o for e in job.etapas for o in e.observaciones if o.codigo == "ALT04"]
+
+
 def test_fetch_fallido_no_se_clampa_y_marca_veredicto_provisional(tmp_path):
     # el portal cae en ambas pasadas → ventana DESCONOCIDA: no clampar a 0 (sería
     # NO CUMPLE falso). El profesional queda con veredicto provisional + revisión.

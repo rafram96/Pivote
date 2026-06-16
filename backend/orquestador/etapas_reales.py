@@ -421,7 +421,28 @@ class EtapaInfoObrasReal:
         return _res(self.nombre, estado, _met(total, cont["ok"], cont["rev"], cont["err"]), obs)
 
 
-# ── 3b · Consulta a SUNAT (ALT04) ────────────────────────────────────────────
+# ── 3b · Consulta a SUNAT (ALT04) + vinculación postor↔emisor ────────────────
+
+_RE_RUC = re.compile(r"\b(\d{11})\b")
+
+
+def _rucs_postor(espejo: dict) -> set[str]:
+    """RUCs de IDENTIDAD del postor/consorcio: de los formularios/anexos
+    declarados, la composición del consorcio (`consorciados`, NOTA 14) y la meta.
+
+    **No** mira `experiencia_postor`: esos RUCs son de los clientes/entidades
+    contratantes del postor (terceros) → incluirlos daría falsos positivos de
+    auto-certificación.
+    """
+    meta = espejo.get("_meta") or {}
+    postor = espejo.get("postor") or {}
+    fuentes = [
+        meta.get("postor"), meta.get("representante_comun"),
+        postor.get("detalle"), postor.get("consorciados"),
+        postor.get("formularios"),
+    ]
+    return set(_RE_RUC.findall(str(fuentes)))
+
 
 class EtapaSunatReal:
     nombre = E.SUNAT
@@ -440,14 +461,32 @@ class EtapaSunatReal:
         obs: list[pipeline.Observacion] = []
         cache: dict[str, object] = {}
         total = 0
+        postor_rucs = _rucs_postor(ctx.espejo)
 
         for e, (np_, ne) in ctx.items_experiencia():
             texto = f"{e.get('ruc_emisor') or ''} {e.get('entidad_emisora') or ''}"
-            m = re.search(r"\b(\d{11})\b", texto)
-            if not m:
+            rucs_e = _RE_RUC.findall(texto)
+            if not rucs_e:
                 continue
             total += 1
-            ruc = m.group(1)
+            ruc = rucs_e[0]
+            k = _clave(np_, ne)
+
+            # Vinculación postor↔emisor — determinística (RUC vs RUC), NO usa SUNAT:
+            # el certificado lo emitió el propio postor o un consorciado
+            # (auto-certificación). Se evalúa aunque la consulta SUNAT falle.
+            vinc = sorted(set(rucs_e) & postor_rucs)
+            if vinc:
+                enr = ctx.enriquecimiento.get(k) or {}
+                enr["vinculacion_postor_emisor"] = True
+                ctx.enriquecimiento[k] = enr
+                obs.append(pipeline.Observacion(
+                    codigo="VINCULACION", severidad=pipeline.Severidad.ALERTA,
+                    mensaje=f"el emisor del certificado (RUC {vinc[0]}) es el propio "
+                            f"postor o un consorciado — posible auto-certificación de "
+                            f"la experiencia",
+                    origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+
             try:
                 emp = cache[ruc] if ruc in cache else cache.setdefault(ruc, self._consultar(ruc))
             except Exception as ex:  # noqa: BLE001
@@ -457,7 +496,6 @@ class EtapaSunatReal:
                 err += 1
                 continue
             ok += 1
-            k = _clave(np_, ne)
             enr = ctx.enriquecimiento.get(k) or {}
             fins = getattr(emp, "fecha_inscripcion", None)
             enr["sunat"] = {

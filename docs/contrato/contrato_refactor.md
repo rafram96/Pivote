@@ -27,8 +27,8 @@ Leyenda: ✅ probado empíricamente · 📐 diseñado/decidido · 🔨 por const
 | Backend API HTTP desacoplada | 📐 decidido | sirve a dropzone + MCP |
 | Skill `/analisis-propuesta` (3 subagentes: bases, propuesta, evaluador) | 🔨 por construir | Claude evalúa (agent-evaluador) → reemplaza el diseño viejo de 2 subagentes de `skill_design.md`. Subagentes = esenciales (propuestas grandes son lo normal, confirmado 2026-05-30) |
 | Validador determinístico (15 notas) | 🔨 por construir | pieza central |
-| Tabla equivalencias de cargos (ALT12) | 🔨 por construir | lógica de negocio, no scraping |
-| Detección vinculación postor↔emisor | 🔨 por construir | capacidad nueva |
+| Tabla equivalencias de cargos (ALT12) | ❌ descartado | firmante de constancia ≠ rep. legal SUNAT (funcionario de área) → falsos positivos; decisión cliente 2026-06-15 |
+| Detección vinculación postor↔emisor | ✅ construido | RUC emisor ∈ RUCs del postor (formularios/consorciados) → alerta `VINCULACION`; determinístico, sin SUNAT |
 | Excel final enriquecido | 🔨 por construir | servidor regenera |
 | OCR local / Qwen14B / 3 JSONs / MCP remoto | ❌ descartado | §6 |
 
