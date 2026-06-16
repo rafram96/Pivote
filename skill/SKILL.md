@@ -96,13 +96,18 @@ El orquestador une todas las salidas (bases + mapa + N profesionales + evaluador
 
 Persiste ambos en `~/InfoObras/analisis/<analisis_id>/`.
 
-### Paso 5 — Transporte al backend
-- **MVP (Camino B)**: deja Excel + JSON en la carpeta; el usuario los sube por el
-  dropzone del panel.
-- **Camino A (MCP local)**: llama al tool `subir_analisis(json_espejo, excel_base64)`
-  del MCP `infoobras-onprem-bridge` (ver `mcp-server/`), que crea/usa el concurso y
-  hace POST multipart por LAN a `/api/pivote/analizar`. Devuelve `job_id`; sigue el
-  progreso con `consultar_estado(job_id)` y descarga el Excel/ZIP enriquecidos.
+### Paso 5 — Transporte al backend (POR DEFECTO: MCP, automático)
+**El default es subir por el MCP, sin preguntar.** Tras consolidar y validar:
+1. `probar_conexion` del MCP `infoobras-onprem-bridge` (ver `mcp-server/`). Si
+   responde, continúa; si no, ve al fallback.
+2. `subir_analisis(json_espejo, excel_base64)` — crea/usa el concurso y hace POST
+   multipart por LAN a `/api/pivote/analizar`. Devuelve `job_id`.
+3. `consultar_estado(job_id)` — reporta el estado + los enlaces de descarga del
+   Excel/ZIP enriquecidos.
+
+**Fallback (Camino B, solo si el MCP/backend NO responde):** deja Excel + JSON en
+la carpeta del análisis y dile al usuario que los suba por el dropzone del panel.
+No te quedes esperando: si el backend está apagado, reporta el fallback y termina.
 
 ## Validación y retry
 
@@ -156,7 +161,7 @@ tres formas (ISO · parcial `"YYYY-MM (anotación)"` · `"POR VERIFICAR…"`),
 ✓ agent-propuesta-profesional ×N:  K experiencias atómicas · cross-check NOTA 1 OK
 ✓ agent-evaluador:           evaluación lista · X observaciones (Y críticas)
 📦 Excel + JSON espejo en ~/InfoObras/analisis/<analisis_id>/
-→ Próximo paso: subir_analisis (MCP) o dropzone del panel
+→ Transporte: subir_analisis (MCP, por defecto) → job_id · fallback dropzone si el backend no responde
 ```
 
 ## Referencias
