@@ -128,7 +128,8 @@ def hacer_motor(tmp_path):
     repo = RepositorioMemoria()
     etapas = etapas_reales(
         tmp_path, consulta_cui=ConsultaFake(), fetcher_infoobras=fetcher_fake,
-        consultor_sunat=consultor_fake, descargar=lambda *a, **k: None)
+        consultor_sunat=consultor_fake, buscador_sunat=lambda n: [],
+        descargar=lambda *a, **k: None)
     return Motor(etapas, repo), repo
 
 
@@ -615,3 +616,45 @@ def test_excel_marca_valorizaciones_con_archivos(tmp_path):
     assert "ARCHIVOS (ZIP)" in texto   # nueva columna
     assert "Sí (2)" in texto           # valorización con 2 documentos
     assert "—" in texto                # valorización sin documentos
+
+
+def test_sunat_por_nombre_cuando_no_hay_ruc():
+    """Sin RUC en el cert: nombre distintivo → 1 match → se cruza (via nombre);
+    nombre genérico → varios → 'ambiguo'; entidad pública → se salta."""
+    from orquestador.etapas import Contexto
+    from orquestador.etapas_reales import EtapaSunatReal
+
+    espejo = {
+        "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
+        "postor": {},
+        "profesionales": [{"n_prof": 1, "cargo": "ESP", "experiencias": [
+            {"n": 1, "entidad_emisora": "Consorcio Hospital Tacna",
+             "fecha_inicial": "2020-01-01", "fecha_final": "2021-01-01"},
+            {"n": 2, "entidad_emisora": "Consorcio Supervisor (Bisbal, Estela)",
+             "fecha_inicial": "2020-01-01", "fecha_final": "2021-01-01"},
+            {"n": 3, "entidad_emisora": "Gobierno Regional de Huánuco",
+             "fecha_inicial": "2020-01-01", "fecha_final": "2021-01-01"},
+        ]}],
+        "resumen_evaluacion": {"factores": []},
+    }
+
+    def buscador(nombre):
+        u = nombre.upper()
+        if "TACNA" in u:
+            return [{"ruc": "20600789911", "razon_social": "CONSORCIO HOSPITAL TACNA"}]
+        if "SUPERVISOR" in u:  # genérico → varios
+            return [{"ruc": "1" * 11, "razon_social": "A"}, {"ruc": "2" * 11, "razon_social": "B"}]
+        return []
+
+    consultor = lambda r: EmpresaFake(r, "CONSORCIO HOSPITAL TACNA", date(2015, 11, 6))
+    ctx = Contexto(job=None, espejo=espejo, enriquecimiento={})
+    EtapaSunatReal(consultor=consultor, buscador=buscador).correr(ctx)
+
+    # exp 1: nombre distintivo → 1 match → cruzado por nombre
+    assert ctx.enriquecimiento["1:1"]["sunat"]["ruc"] == "20600789911"
+    assert ctx.enriquecimiento["1:1"]["sunat"]["via"] == "nombre"
+    # exp 2: genérico → varios → ambiguo (no se cruza; deja candidatos)
+    assert ctx.enriquecimiento["1:2"]["sunat"]["ambiguo"] == 2
+    assert "ruc" not in ctx.enriquecimiento["1:2"]["sunat"]
+    # exp 3: entidad pública → se salta (sin bloque sunat)
+    assert "sunat" not in ctx.enriquecimiento.get("1:3", {})

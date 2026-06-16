@@ -310,15 +310,14 @@ def construir_hoja_profesional(
             rr += 1
 
         creacion = _fecha_iso(s.get("fecha_inscripcion")) if s else None
-        kv("RUC", (s.get("ruc") if s else None) or ruc_espejo or "—")
-        if s:
+        if s and s.get("ruc"):                       # datos completos del emisor
+            kv("RUC", s.get("ruc"))
             kv("Razón social", s.get("razon_social") or "—")
             if s.get("tipo_contribuyente"):
                 kv("Tipo", s.get("tipo_contribuyente"))
             acts = s.get("actividades_economicas") or []
             objeto = re.sub(r"^\s*Principal\s*-\s*", "", acts[0]) if acts else "—"
-            kv("Objeto social", objeto, height=58)  # CIIU largo → más alto, envuelve
-            # estado/condición: rojo si no es ACTIVO + HABIDO (baja, no habido…)
+            kv("Objeto social", objeto, height=58)   # CIIU largo → más alto, envuelve
             estado, cond = s.get("estado"), s.get("condicion")
             mal = (estado and not str(estado).upper().startswith("ACTIVO")) or \
                   (cond and str(cond).upper() != "HABIDO")
@@ -329,24 +328,37 @@ def construir_hoja_profesional(
                 kv("Inicio actividades", ini_act.strftime("%d/%m/%Y"))
             if s.get("domicilio_fiscal"):
                 kv("Domicilio fiscal", s.get("domicilio_fiscal"))
-        else:
-            kv("Verificación", "no verificado en SUNAT")
-
-        emision = _fecha_iso(fecha_emision)
-        if creacion and emision and creacion > emision:
-            txt = (f"🔴 ALT04 — certificado emitido ({emision.strftime('%d/%m/%y')}) ANTES de "
-                   f"la creación de la empresa ({creacion.strftime('%d/%m/%y')}): imposible, revisar.")
+            if s.get("via") == "nombre":
+                kv("Cruce", "por nombre (el cert no traía RUC)")
+            emision = _fecha_iso(fecha_emision)
+            if creacion and emision and creacion > emision:
+                txt = (f"🔴 ALT04 — certificado emitido ({emision.strftime('%d/%m/%y')}) ANTES de "
+                       f"la creación de la empresa ({creacion.strftime('%d/%m/%y')}): imposible, revisar.")
+                fill = FILL_ALERTA
+            elif creacion and ini and creacion > ini:
+                txt = (f"🔴 ALT04 — empresa creada ({creacion.strftime('%d/%m/%y')}) DESPUÉS del "
+                       f"inicio de la experiencia ({ini.strftime('%d/%m/%y')}).")
+                fill = FILL_ALERTA
+            elif creacion:
+                txt = "✔ ALT04 — sin anomalía de antigüedad del emisor."
+                fill = FILL_OK
+            else:
+                txt = "ALT04 — sin fecha de creación SUNAT (no verificable)."
+                fill = None
+        elif s and s.get("ambiguo"):                 # varias empresas con ese nombre
+            kv("Emisor (cert)", s.get("nombre") or "—")
+            txt = (f"⚠ Por verificar — {s.get('ambiguo')} empresas en SUNAT con ese nombre; "
+                   f"elegir el RUC correcto en el panel.")
             fill = FILL_ALERTA
-        elif creacion and ini and creacion > ini:
-            txt = (f"🔴 ALT04 — empresa creada ({creacion.strftime('%d/%m/%y')}) DESPUÉS del "
-                   f"inicio de la experiencia ({ini.strftime('%d/%m/%y')}).")
-            fill = FILL_ALERTA
-        elif creacion:
-            txt = "✔ ALT04 — sin anomalía de antigüedad del emisor."
-            fill = FILL_OK
-        else:
-            txt = "ALT04 — sin fecha de creación SUNAT (no verificable)."
+        elif s and s.get("no_encontrado"):           # buscado por nombre, sin match
+            kv("Emisor (cert)", s.get("nombre") or "—")
+            txt = "Sin coincidencia en SUNAT por ese nombre — verificar."
             fill = None
+        else:                                        # sin RUC ni nombre cruzable
+            kv("RUC declarado", ruc_espejo or "—")
+            txt = "Emisor no verificado en SUNAT (sin datos / consulta fallida)."
+            fill = None
+
         ws.merge_cells(start_row=rr, start_column=13, end_row=rr + 1, end_column=16)
         c = ws.cell(rr, 13, txt)
         c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP

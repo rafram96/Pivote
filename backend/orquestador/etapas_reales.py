@@ -444,11 +444,33 @@ def _rucs_postor(espejo: dict) -> set[str]:
     return set(_RE_RUC.findall(str(fuentes)))
 
 
+# Entidades públicas: tienen RUC pero NO se cruzan (ALT04 no aplica — existen
+# desde siempre; el emisor relevante a verificar son las empresas/consorcios).
+_PUBLICO_RE = re.compile(
+    r"\b(gobierno\s+regional|gobierno\s+local|municipal|ministerio|essalud|"
+    r"es\s?salud|seguro\s+social|gerencia\s+regional|direcci[oó]n\s+regional|"
+    r"proyecto\s+especial|unidad\s+ejecutora|instituto\s+nacional)\b", re.I)
+
+
+def _es_publica(entidad: str) -> bool:
+    return bool(_PUBLICO_RE.search(entidad or ""))
+
+
+def _nombre_emisor_limpio(entidad: str) -> str:
+    """Nombre del emisor para buscar en SUNAT: sin paréntesis (miembros del
+    consorcio) ni la cola 'RUC …'."""
+    s = re.sub(r"\(.*?\)", " ", entidad or "")
+    s = re.sub(r"\bRUC\b.*$", " ", s, flags=re.I)
+    return re.sub(r"\s+", " ", s).strip()
+
+
 class EtapaSunatReal:
     nombre = E.SUNAT
 
-    def __init__(self, consultor: Optional[Callable] = None):
+    def __init__(self, consultor: Optional[Callable] = None,
+                 buscador: Optional[Callable] = None):
         self._consultor = consultor
+        self._buscador = buscador
 
     def _consultar(self, ruc: str):
         if self._consultor:
@@ -456,26 +478,60 @@ class EtapaSunatReal:
         from scraping.sunat import consultar_ruc
         return consultar_ruc(ruc)
 
+    def _buscar(self, nombre: str):
+        if self._buscador:
+            return self._buscador(nombre)
+        from scraping.sunat import buscar_por_razon_social
+        return buscar_por_razon_social(nombre)
+
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
-        ok = err = 0
+        ok = err = rev = 0
         obs: list[pipeline.Observacion] = []
         cache: dict[str, object] = {}
         total = 0
         postor_rucs = _rucs_postor(ctx.espejo)
 
         for e, (np_, ne) in ctx.items_experiencia():
-            texto = f"{e.get('ruc_emisor') or ''} {e.get('entidad_emisora') or ''}"
-            rucs_e = _RE_RUC.findall(texto)
-            if not rucs_e:
+            entidad = str(e.get("entidad_emisora") or "")
+            rucs_e = _RE_RUC.findall(f"{e.get('ruc_emisor') or ''} {entidad}")
+            k = _clave(np_, ne)
+            ini = _fecha_iso(e.get("fecha_inicial"))
+
+            # ¿hay un emisor verificable? Sin RUC y (sin nombre o entidad pública)
+            # → no se cruza (las públicas tienen RUC pero ALT04 no aplica).
+            if not rucs_e and (not entidad.strip() or _es_publica(entidad)):
                 continue
             total += 1
-            ruc = rucs_e[0]
-            k = _clave(np_, ne)
 
-            # Vinculación postor↔emisor — determinística (RUC vs RUC), NO usa SUNAT:
-            # el certificado lo emitió el propio postor o un consorciado
-            # (auto-certificación). Se evalúa aunque la consulta SUNAT falle.
-            vinc = sorted(set(rucs_e) & postor_rucs)
+            # Resolver el RUC del emisor: 1) del certificado · 2) por nombre en SUNAT
+            # (la mayoría de certs traen solo el nombre de la empresa/consorcio).
+            ruc = via = None
+            if rucs_e:
+                ruc, via = rucs_e[0], "cert"
+            else:
+                nombre = _nombre_emisor_limpio(entidad)
+                try:
+                    matches = self._buscar(nombre) if nombre else []
+                except Exception as ex:  # noqa: BLE001
+                    logger.warning("SUNAT buscar %r: %r", nombre, ex)
+                    matches = []
+                if len(matches) == 1:
+                    ruc, via = matches[0].get("ruc"), "nombre"
+                else:
+                    rev += 1
+                    enr = ctx.enriquecimiento.get(k) or {}
+                    if len(matches) > 1:
+                        enr["sunat"] = {"nombre": nombre, "ambiguo": len(matches),
+                                        "candidatos": [{"ruc": m.get("ruc"),
+                                                        "razon_social": m.get("razon_social")}
+                                                       for m in matches[:5]]}
+                    else:
+                        enr["sunat"] = {"nombre": nombre, "no_encontrado": True}
+                    ctx.enriquecimiento[k] = enr
+                    continue
+
+            # Vinculación postor↔emisor — RUC del cert o el resuelto por nombre.
+            vinc = sorted((set(rucs_e) | {ruc}) & postor_rucs)
             if vinc:
                 enr = ctx.enriquecimiento.get(k) or {}
                 enr["vinculacion_postor_emisor"] = True
@@ -483,8 +539,7 @@ class EtapaSunatReal:
                 obs.append(pipeline.Observacion(
                     codigo="VINCULACION", severidad=pipeline.Severidad.ALERTA,
                     mensaje=f"el emisor del certificado (RUC {vinc[0]}) es el propio "
-                            f"postor o un consorciado — posible auto-certificación de "
-                            f"la experiencia",
+                            f"postor o un consorciado — posible auto-certificación de la experiencia",
                     origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
 
             try:
@@ -500,7 +555,7 @@ class EtapaSunatReal:
             fins = getattr(emp, "fecha_inscripcion", None)
             ini_act = getattr(emp, "fecha_inicio_actividades", None)
             enr["sunat"] = {
-                "ruc": ruc,
+                "ruc": ruc, "via": via,
                 "razon_social": getattr(emp, "razon_social", None),
                 "fecha_inscripcion": fins.isoformat() if fins else None,
                 "estado": getattr(emp, "estado", None),
@@ -512,7 +567,6 @@ class EtapaSunatReal:
                 "actividades_economicas": getattr(emp, "actividades_economicas", None) or [],
             }
             ctx.enriquecimiento[k] = enr
-            ini = _fecha_iso(e.get("fecha_inicial"))
             if fins and ini and fins > ini:
                 obs.append(pipeline.Observacion(
                     codigo="ALT04", severidad=pipeline.Severidad.ALERTA,
@@ -521,7 +575,7 @@ class EtapaSunatReal:
                     origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
 
         return _res(self.nombre, EE.OK if err == 0 else EE.ERROR_PARCIAL,
-                    _met(total, ok, 0, err), obs)
+                    _met(total, ok, rev, err), obs)
 
 
 # ── 4 · Cálculo de días efectivos (Paso 5 + mínimo de las bases) ─────────────
@@ -678,7 +732,7 @@ class EtapaExcelReal:
 # ── juego completo ───────────────────────────────────────────────────────────
 
 def etapas_reales(dir_datos: Path, *, consulta_cui=None, fetcher_infoobras=None,
-                  consultor_sunat=None, descargar=None):
+                  consultor_sunat=None, buscador_sunat=None, descargar=None):
     """Las 8 etapas de la demo. Los parámetros inyectables son para tests;
     en producción quedan los clientes en vivo."""
     return [
@@ -687,7 +741,7 @@ def etapas_reales(dir_datos: Path, *, consulta_cui=None, fetcher_infoobras=None,
         EtapaResolucionCuiReal(consulta=consulta_cui),
         EtapaInfoObrasReal(fetcher=fetcher_infoobras, dir_descargas=Path(dir_datos),
                            descargar=descargar),
-        EtapaSunatReal(consultor=consultor_sunat),
+        EtapaSunatReal(consultor=consultor_sunat, buscador=buscador_sunat),
         EtapaReglasReal(),
         EtapaExcelReal(Path(dir_datos)),
         EtapaStub(E.PERSISTENCIA),
