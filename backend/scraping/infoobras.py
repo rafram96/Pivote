@@ -19,6 +19,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
+from html import unescape as _unescape
 from typing import Callable, Optional
 
 import requests
@@ -397,7 +398,10 @@ def _extraer_datos_ejecucion(session: requests.Session, obra_id: int) -> dict[st
         try:
             r = session.get(url, params={"ObraId": obra_id}, timeout=30)
             r.raise_for_status()
-            return _parse_js_vars(r.text)
+            variables = _parse_js_vars(r.text)
+            # las modificaciones de plazo van como tabla HTML, no como var JS
+            variables["_modificaciones_plazo"] = _parsear_modificaciones_html(r.text)
+            return variables
         except requests.RequestException as e:
             ultimo_err = e
             logger.warning("InfoObras: DatosEjecucion ObraId %s intento %d/3: %s",
@@ -599,6 +603,34 @@ def _procesar_modificaciones_plazo(raw_list: list[dict]) -> list[ModificacionPla
             fecha_fin=_parse_fecha_ddmmyyyy(r.get("FechaFin")),
         ))
     return modificaciones
+
+
+_RE_TR = re.compile(r"<tr[^>]*>(.*?)</tr>", re.S)
+_RE_TD = re.compile(r"<td[^>]*>(.*?)</td>", re.S)
+_RE_TAGS = re.compile(r"<[^>]+>")
+
+
+def _parsear_modificaciones_html(html_txt: str) -> list[ModificacionPlazoInfo]:
+    """Las modificaciones de plazo NO vienen como var JS (lModificacionPlazo está
+    vacío en la mayoría de obras) — vienen como TABLA HTML en DatosEjecucion.
+    8 columnas: N° · tipo · número · causal · días · fecha aprobación · fecha fin
+    · documento. Se identifican las filas cuyo 'tipo' es ampliación/suspensión."""
+    out: list[ModificacionPlazoInfo] = []
+    for tr in _RE_TR.findall(html_txt or ""):
+        celdas = _RE_TD.findall(tr)
+        if len(celdas) != 8:
+            continue
+        txt = [_unescape(_RE_TAGS.sub(" ", c)).strip() for c in celdas]
+        if not re.search(r"(Ampliaci|Suspensi)", txt[1], re.I):
+            continue
+        out.append(ModificacionPlazoInfo(
+            tipo=txt[1],
+            causal=txt[3] or None,
+            dias_aprobados=int(txt[4]) if txt[4].isdigit() else 0,
+            fecha_aprobacion=_parse_fecha_ddmmyyyy(txt[5]),
+            fecha_fin=_parse_fecha_ddmmyyyy(txt[6]),
+        ))
+    return out
 
 
 def _procesar_entregas_terreno(raw_list: list[dict]) -> list[EntregaTerrenoInfo]:
@@ -1073,7 +1105,7 @@ def fetch_by_cui(
                     "InfoObras: lContratista vacio, sintetizado desde busqueda: %s",
                     sint.nombre_empresa,
                 )
-        modificaciones_plazo = _procesar_modificaciones_plazo(datos.get("lModificacionPlazo", []))
+        modificaciones_plazo = (_procesar_modificaciones_plazo(datos.get("lModificacionPlazo", [])) or datos.get("_modificaciones_plazo", []))
         entregas_terreno = _procesar_entregas_terreno(datos.get("lEntregaTerreno", []))
         adendas = _procesar_adendas(datos.get("lAdenda", []))
         transferencias = _procesar_transferencias(datos.get("lTransferenciaFinanciera", []))
@@ -1582,7 +1614,7 @@ def buscar_obra_por_certificado(
             residentes = _procesar_residentes(datos.get("lResidente", []))
             avances = _procesar_avances(datos.get("lAvances", []))
             contratistas = _procesar_contratistas(datos.get("lContratista", []))
-            modificaciones_plazo = _procesar_modificaciones_plazo(datos.get("lModificacionPlazo", []))
+            modificaciones_plazo = (_procesar_modificaciones_plazo(datos.get("lModificacionPlazo", [])) or datos.get("_modificaciones_plazo", []))
             entregas_terreno = _procesar_entregas_terreno(datos.get("lEntregaTerreno", []))
             adendas = _procesar_adendas(datos.get("lAdenda", []))
             transferencias = _procesar_transferencias(datos.get("lTransferenciaFinanciera", []))

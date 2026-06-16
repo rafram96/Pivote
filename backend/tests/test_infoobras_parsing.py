@@ -290,6 +290,26 @@ def test_seleccionar_obra_cabecera_no_da_solape_falso():
     assert elegida["codigoObra"] == 83130
 
 
+def test_parsear_modificaciones_html():
+    # las modificaciones de plazo vienen como tabla HTML (8 columnas), no como
+    # var JS. El parser toma las filas cuyo 'tipo' es ampliación/suspensión.
+    html = (
+        '<table class="table table-bordered text-center"><tbody>'
+        '<tr><td>1</td><td>Ampliación del plazo</td><td>0</td><td>mayores metrados</td>'
+        '<td>88</td><td>05/03/2015</td><td>26/05/2015</td><td>Ver documento</td></tr>'
+        '<tr><td>2</td><td>Suspensión del plazo</td><td>0</td><td>caso fortuito</td>'
+        '<td>10</td><td>01/06/2015</td><td>11/06/2015</td><td>Ver documento</td></tr>'
+        '</tbody></table>'
+        '<table><tr><td>otra</td><td>tabla</td><td>sin</td><td>modif</td></tr></table>'
+    )
+    mods = infoobras._parsear_modificaciones_html(html)
+    assert len(mods) == 2                                  # ignora la otra tabla
+    assert mods[0].tipo == "Ampliación del plazo" and mods[0].dias_aprobados == 88
+    assert mods[0].fecha_aprobacion == date(2015, 3, 5)
+    assert mods[0].fecha_fin == date(2015, 5, 26)
+    assert mods[1].tipo == "Suspensión del plazo"
+
+
 def test_seleccionar_obra_desempate_deterministico_sin_solape():
     # dos obras con MISMA ventana (mismo _dist) y mismo estado, ninguna solapa
     # el cert → el desempate debe ser estable (menor codigoObra), independiente
