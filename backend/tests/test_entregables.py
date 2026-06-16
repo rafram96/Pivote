@@ -372,7 +372,14 @@ def test_hoja_profesional_emisor_sin_anomalia():
          "ruc_emisor": "20512345678"}]}
     fichas = {(1, 1): {"cui": "2418877", "valorizaciones": []}}
     sunat = {(1, 1): {"ruc": "20512345678", "razon_social": "EMPRESA OK",
-                      "fecha_inscripcion": "2010-05-10", "estado": "ACTIVO"}}
+                      "fecha_inscripcion": "2010-05-10", "estado": "ACTIVO",
+                      "condicion": "HABIDO", "tipo_contribuyente": "SOCIEDAD ANONIMA CERRADA",
+                      "actividades_economicas": ["Principal - 7110 - ARQUITECTURA E INGENIERIA"],
+                      "domicilio_fiscal": "AV X 123, LIMA"}}
     construir_hoja_profesional(ws, prof, {}, {}, fichas, {}, sunat)
     texto = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
     assert "sin anomalía de antigüedad" in texto
+    # objeto social (CIIU) mostrado, con el prefijo "Principal -" limpiado
+    assert "Objeto social" in texto and "7110" in texto and "ARQUITECTURA E INGENIERIA" in texto
+    assert "Principal -" not in texto
+    assert "HABIDO" in texto and "SOCIEDAD ANONIMA CERRADA" in texto

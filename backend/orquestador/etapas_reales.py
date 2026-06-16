@@ -498,11 +498,18 @@ class EtapaSunatReal:
             ok += 1
             enr = ctx.enriquecimiento.get(k) or {}
             fins = getattr(emp, "fecha_inscripcion", None)
+            ini_act = getattr(emp, "fecha_inicio_actividades", None)
             enr["sunat"] = {
                 "ruc": ruc,
                 "razon_social": getattr(emp, "razon_social", None),
                 "fecha_inscripcion": fins.isoformat() if fins else None,
                 "estado": getattr(emp, "estado", None),
+                "condicion": getattr(emp, "condicion", None),
+                "tipo_contribuyente": getattr(emp, "tipo_contribuyente", None),
+                "nombre_comercial": getattr(emp, "nombre_comercial", None),
+                "domicilio_fiscal": getattr(emp, "domicilio_fiscal", None),
+                "fecha_inicio_actividades": ini_act.isoformat() if ini_act else None,
+                "actividades_economicas": getattr(emp, "actividades_economicas", None) or [],
             }
             ctx.enriquecimiento[k] = enr
             ini = _fecha_iso(e.get("fecha_inicial"))
