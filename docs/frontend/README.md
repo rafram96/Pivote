@@ -6,6 +6,54 @@
 > (Job, ResultadoEtapa, ItemRevision, Observacion, ProgresoJob) y
 > `backend/schemas/enriquecimiento.py`.
 
+## ⏳ Estado de implementación y alcance pendiente (2026-06-15)
+
+> **El panel está SIN CONSTRUIR.** El backend ya expone casi toda la API que
+> necesita (ver tabla); lo que falta es el código Next.js que la consuma, en el
+> repo `Panel-InfoObras`. Esto es la **pieza grande pendiente del pivote** — el
+> backend produce Excel + ZIP correctos, pero hoy se operan por API/CLI, no por
+> una UI que un evaluador no técnico pueda usar.
+
+**Backend listo vs. panel pendiente** (endpoints reales bajo `/api/pivote/…`):
+
+| Pantalla | Endpoint backend | ¿Backend? | ¿Panel? |
+|---|---|---|---|
+| P1 Expediente de concursos | `GET/POST /concursos`, `GET /concursos/{id}` | ✅ | ❌ |
+| P2 Análisis nuevo (dropzone) | `POST /analizar` | ✅ | ❌ |
+| P3 Job en vivo | `GET /jobs/{id}` (polling) | ✅ | ❌ |
+| P3 progreso en vivo | `WS /ws/jobs/{id}` | ❌ **falta** | ❌ |
+| P4 Cola de revisión ⭐ | `POST /jobs/{id}/revision` | ✅ | ❌ |
+| P5 Resumen + diff | `GET /jobs/{id}/resumen`, `/espejo` | ✅ | ❌ |
+| P5 decidir alertas | `POST /jobs/{id}/alertas` | ✅ | ❌ |
+| P5 descargar Excel | `GET /jobs/{id}/excel` | ✅ | ❌ |
+| P5 descargar ZIP sustentos | `GET /jobs/{id}/zip` | ✅ (on-demand) | ❌ |
+| Banner salud portales | `GET /salud` | ✅ | ❌ |
+
+**Alcance objetivo extendido** — capacidades nuevas (sesión 2026-06-15) que el
+panel debe superficiar y que el spec original no contemplaba:
+
+1. **Veredicto provisional / EN REVISIÓN como estado de primera clase.** El
+   backend ya marca `veredicto_provisional` cuando el clamp de Paso 5 invierte a
+   NO CUMPLE, cuando una obra no se pudo verificar (`sin_verificar`), o cuando hay
+   fechas POR VERIFICAR (`fechas_invalidas`). P4/P5 deben distinguir visualmente
+   *"NO CUMPLE confirmado"* de *"NO CUMPLE provisional — falta confirmar dato de
+   InfoObras"* (un rechazo provisional es impugnable; no debe verse como final).
+2. **Descarga del ZIP de sustentos** (P5): botón *"Descargar sustentos (ZIP)"* —
+   se arma on-demand la primera vez (puede tardar: descarga documentos del portal
+   flaky). La UI debe mostrar progreso/estado, no congelarse.
+3. **Visibilidad documental por hito** (P5 o detalle de experiencia): el Excel ya
+   trae la columna **ARCHIVOS (ZIP)** (`Sí (N)`/`—`) por valorización. El panel
+   puede reflejar lo mismo: qué hitos tienen sustento descargable antes de bajar
+   el ZIP.
+4. **Modificaciones de plazo** (ampliaciones/suspensiones): dato nuevo por
+   experiencia; mostrarlo junto al cuadro de valorizaciones en el detalle.
+5. **Progreso en vivo real** (P3): hoy el backend es polling (`GET /jobs/{id}`).
+   El `WS /ws/jobs/{id}` del spec **aún no existe** — o se implementa el websocket,
+   o el panel hace polling con backoff. Decidir antes de construir P3.
+
+El resto del spec (abajo) sigue vigente como objetivo; las pantallas no cambian,
+se enriquecen con lo de arriba.
+
 ## Principios (por qué el panel es así y no de otra forma)
 
 1. **Un solo usuario** (Manuel, 100–200 análisis/mes). Nada de roles, multi-tenant
@@ -99,19 +147,27 @@ si el sistema se siente fluido o roto.
 
 ---
 
-## API que el backend debe exponer (alinear con `docs/backend/orquestador.md`)
+## API que el backend expone (prefijo real `/api/pivote/`)
+
+✅ = implementado en [backend/api/app.py](../../backend/api/app.py) · ❌ = pendiente
 
 ```
-POST /api/concursos                         · GET /api/concursos?q=&entidad=&desde=
-POST /api/analizar                          (multipart excel+json+concurso_id) → {job_id}
-GET  /api/jobs/{id}                         → Job (etapas, observaciones, items_revision)
-WS   /ws/jobs/{id}                          → ProgresoJob
-POST /api/jobs/{id}/revision/{n_prof}/{n_exp}  {cui | accion} → re-dispara aguas abajo
-POST /api/jobs/{id}/alertas/{ref}/decision  {relevante: bool, razon} (auditoría)
-POST /api/jobs/{id}/rerun
-GET  /api/jobs/{id}/excel · GET /api/jobs/{id}/espejo
-GET  /api/salud-portales                    → diagnóstico sunat/infoobras (banner P3)
+✅ GET  /api/pivote/concursos?q=&entidad=&desde=  · POST /api/pivote/concursos
+✅ GET  /api/pivote/concursos/{id}
+✅ POST /api/pivote/analizar                 (multipart excel+json+concurso_id) → {job_id}
+✅ GET  /api/pivote/jobs/{id}                → Job (etapas, observaciones, items_revision)
+❌ WS   /ws/jobs/{id}                         → ProgresoJob   ← NO existe aún; hoy es polling
+✅ POST /api/pivote/jobs/{id}/revision        {n_prof, n_exp, cui|accion} → re-dispara aguas abajo
+✅ POST /api/pivote/jobs/{id}/alertas         {ref, relevante, razon} (auditoría)
+✅ GET  /api/pivote/jobs/{id}/resumen         → veredictos + diff + alertas (P5)
+✅ GET  /api/pivote/jobs/{id}/excel · GET …/espejo
+✅ GET  /api/pivote/jobs/{id}/zip             → ZIP de sustentos (se arma on-demand)
+✅ GET  /api/pivote/salud                     → diagnóstico sunat/infoobras (banner P3)
 ```
+
+> Nota: el spec original usaba `/api/jobs/…` y rutas con `{n_prof}/{n_exp}` en el
+> path; la implementación real las lleva en el body bajo el prefijo `/api/pivote/`.
+> El único hueco de backend es el **websocket de progreso** (P3 va por polling).
 
 ## Nivel 3 — lo que lo hace *realmente* útil (fase 2, ⚠ comercial)
 

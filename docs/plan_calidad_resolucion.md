@@ -171,6 +171,61 @@ Así un profesional a 46% que **sigue CUMPLE** tras prorratear no genera revisi�
 
 ---
 
+## Fase 6 — No-determinismo de la resolución por nombre ⏳ (PENDIENTE)
+
+> Mencionado como callout en la Fase 2; aquí queda como trabajo propio con
+> alcance objetivo. **No bloquea el entregable** (hoy se atrapa solo), pero es la
+> última fuente de ruido en la resolución.
+
+### Problema (hallazgo concreto)
+La resolución por NOMBRE (`ConsultaInfoObras._query` →
+[backend/resolucion/cui.py](backend/resolucion/cui.py)) puede devolver **CUIs
+distintos entre corridas** para la misma experiencia. Caso prof 10: una corrida
+resuelve a `2160319` (que cubre el certificado), otra a `2193936` (que no). Causa
+raíz: el portal **limita a 20 resultados** por búsqueda y no garantiza orden
+estable; si el fragmento de nombre es poco específico, la obra correcta puede caer
+fuera del top-20 o cambiar de posición.
+
+### Por qué es seguro hoy (no urgente)
+Lo atrapa el **flag de cobertura**: si la corrida cae en el CUI que no cubre, la
+cobertura da ~0% → la experiencia va a **revisión** en vez de producir un veredicto
+falso. Es decir, el peor caso es *ruido* (una revisión de más, no determinística
+entre corridas), **no un veredicto incorrecto**. Por eso va al final de la cola.
+
+### Alcance objetivo (a dónde se quiere llegar)
+Que la resolución por nombre sea **determinística y exhaustiva**, o que declare su
+propia incertidumbre. Tres piezas, de menor a mayor esfuerzo:
+
+1. **Orden determinístico del candidato** — cuando `_query` trae varios, ordenar
+   por una llave estable (p.ej. `codUniqInv` asc, o score de similitud de nombre +
+   solape de ubicación) antes de elegir representante. Elimina la varianza
+   *entre corridas* aunque el set de 20 sea el mismo. (Barato; es lo mínimo.)
+2. **Flag explícito "match por nombre ambiguo"** — cuando hay >1 candidato con
+   nombre/ubicación plausibles y ninguno domina, marcar la experiencia a revisión
+   con motivo *"varias obras coinciden por nombre — elegir el CUI correcto"* y
+   **adjuntar los candidatos** (nombre oficial, departamento, CUI, ventana de
+   valorizaciones) para que el humano elija en P4. Mejor que resolver en silencio
+   al que salga primero.
+3. **Búsqueda más estable / exhaustiva** — paginar más allá de los 20 (si el
+   portal lo permite) o estrechar el fragmento con ubicación/entidad/monto antes de
+   consultar, para que la obra correcta entre siempre en el set. (Mayor esfuerzo;
+   depende de qué expone el portal — verificar con el navegador.)
+
+### Verificación
+- **Test de determinismo**: fake de `_query` que devuelve los mismos N candidatos
+  en orden distinto entre dos llamadas → el CUI elegido es el mismo (pieza 1).
+- **Test de ambigüedad**: dos candidatos igualmente plausibles → la experiencia va
+  a revisión con motivo "ambiguo" + ambos candidatos (pieza 2).
+- **Manual**: re-correr el concurso 2-3 veces y confirmar que prof 10 resuelve al
+  mismo CUI (o cae a revisión ambigua) en todas.
+
+### Riesgo
+Bajo. La pieza 1 es pura desambiguación de orden (no cambia qué obras se
+consideran). La pieza 2 puede **aumentar revisiones** (las ambiguas que hoy se
+resuelven en silencio) — es el comportamiento correcto, pero avisar a Manuel.
+
+---
+
 ## Orden recomendado y criterio de "listo"
 
 1. **Fase 1** — primero la auditoría manual (confirmar el bug), luego el clamp +
@@ -178,6 +233,9 @@ Así un profesional a 46% que **sigue CUMPLE** tras prorratear no genera revisi�
 2. **Fase 2** — correctitud; ambas son acotadas y de bajo riesgo.
 3. **Fase 3** — calidad del entregable para Manuel.
 4. **Fase 4** — cuando 1-3 estén estables.
+5. **Fase 5** ✓ — robustez de scrapers (warmup + SUNAT).
+6. **Fase 6** ⏳ — no-determinismo por nombre; al final (hoy se atrapa solo, es
+   solo ruido). Empezar por la pieza 1 (orden determinístico), barata.
 
 **Listo** = suite verde + re-corrida del concurso real donde: (a) los años
 efectivos de cobertura parcial reflejan solo el tramo válido, (b) ningún motivo
