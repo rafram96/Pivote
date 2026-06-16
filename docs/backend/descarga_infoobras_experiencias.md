@@ -73,14 +73,24 @@ descargar.
 7. **Decisión 2026-06-15:** se descargan **TODOS los hitos** de la obra (no solo
    el periodo del certificado), aunque infle el ZIP. Ver [[decisiones-cliente-2026-06-10]].
 
+## Validado a escala (2026-06-15) ✅
+Medido en vivo con `tools/medir_descargas.py` sobre las obras pesadas del demo:
+- **Tamaños reales:** obra 68513 = 116 docs, **711 MB**, con un PDF de **49.9 MB**;
+  obra 83130 = 208 MB. El "archivo de 48 MB" que preocupaba **existe y es común**.
+- **Bug encontrado y arreglado:** el portal corta la conexión (`IncompleteRead`)
+  en casi todos los archivos grandes. El código bajaba con `resp.content` y
+  contaba el corte como fallido **sin reintentar** → ~12 sustentos críticos se
+  perdían en silencio del ZIP. Fix (`3b1a0a7`): `_descargar_a_carpeta()` baja en
+  streaming a `.part`, verifica `Content-Length` y reintenta con backoff.
+- **Resultado:** obra 68513 pasó de **107/9 fallidos a 116/0**; los 12 cortes se
+  recuperaron en el reintento; 711 MB completos en 121 s. Config:
+  `INFOOBRAS_DOWNLOAD_RETRIES` (def 3), `INFOOBRAS_DOWNLOAD_BASE_DELAY` (def 1.0).
+
 ## Pendiente / riesgos conocidos
-- ⚠ **No validado end-to-end con descargas reales a escala** — todas las
-  re-corridas recientes usaron `PIVOTE_MAX_DESCARGAS=0`. El parseo/inventario
-  está verificado en vivo (Tambobamba: 28 hitos) y la descarga de 1 doc
-  end-to-end también, pero no un ZIP completo de 40+ obras.
-- ⚠ **Tamaño/timeouts:** un PDF de valorización midió 48 MB; timeout por archivo
-  = 90 s. Obras pesadas sobre el portal flaky podrían fallar descargas (se
-  cuentan como fallidos, no abortan). Falta medir tiempos/tamaños reales.
+- Un ZIP por concurso puede pesar **varios GB** (711 MB es UNA obra; un concurso
+  tiene 40+). No es un bug, pero conviene decidir con Manuel: ¿se descargan todas
+  las obras siempre, o se acota por tamaño/relevancia? Hoy lo gobierna
+  `PIVOTE_MAX_DESCARGAS` (nº de obras), no el tamaño.
 - Otras secciones de "Información complementaria" (cronograma, adendas,
   controversias, etc.) hoy salen vacías en los datos estructurados — ver
   [[infoobras-secciones-tabla-html]].
