@@ -25,16 +25,23 @@ const fill = (hex) => ({ type: "pattern", pattern: "solid", fgColor: { argb: _ar
 const SIDE = { style: "thin", color: { argb: _argb("999999") } };
 const BORDER = { top: SIDE, left: SIDE, right: SIDE, bottom: SIDE };
 
-const F_PARTE = { bold: true, size: 11, color: { argb: _argb("15212E") } };
-const FILL_PARTE = fill("D9D9D9");
+// Formato del ingeniero (Manuel): blanco + bandas azules + verde/rojo SOLO en
+// veredictos. Paridad con backend/scripts/generar_excel.py.
+const F_PARTE = { bold: true, size: 11, color: { argb: _argb("FFFFFF") } };
+const FILL_PARTE = fill("1F4E78");                  // azul oscuro: banda PARTE
 const F_PROF = { bold: true, size: 11, color: { argb: _argb("FFFFFF") } };
-const FILL_PROF = fill("548235");
+const FILL_PROF = fill("2E75B6");                   // azul medio: banda PROFESIONAL
 const F_HEAD = { bold: true, size: 9, color: { argb: _argb("1F3864") } };
-const FILL_HEAD = fill("BDD7EE");
+const FILL_HEAD = fill("DDEBF7");                   // azul claro: headers
 const F_CELL = { size: 9 };
 const F_BOLD = { bold: true, size: 9 };
-const FILL_CLAUDE = fill("FFFF00");
-const FILL_BACKEND = fill("FCE4D6");
+const FILL_CUMPLE = fill("C6EFCE");                 // verde: cumple / válido
+const FILL_NO_CUMPLE = fill("FFC7CE");              // rojo: no cumple / alerta
+const FILL_PEND = fill("FFF2CC");                   // amarillo suave: por verificar
+
+// Marcador sutil de dato que verifica/recalcula el backend on-prem: borde izq. azul.
+const SIDE_BE = { style: "medium", color: { argb: _argb("2E75B6") } };
+const BORDER_BACKEND = { top: SIDE, left: SIDE_BE, right: SIDE, bottom: SIDE };
 
 const AL_WRAP = { wrapText: true, vertical: "top" };
 const AL_HEAD = { wrapText: true, vertical: "middle", horizontal: "center" };
@@ -45,6 +52,24 @@ const WIDTHS = { A: 6, B: 25, C: 35, D: 30, E: 41, F: 22, G: 18, H: 18, I: 20, J
   K: 10, L: 14, M: 12, N: 10, O: 16, P: 25, Q: 18, R: 20, S: 18, T: 18, U: 18, V: 35 };
 
 const has = (v) => v !== null && v !== undefined && v !== "";
+
+// Verde/rojo de un veredicto, respetando polaridad por campo: "pos" = SÍ es bueno;
+// "neg" = SÍ es malo (¿anterior a colegiatura?, ¿emitido antes de culminar?).
+function _clasificarVeredicto(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const t = String(value).trim().replace(/\s+/g, " ").toUpperCase();
+  if (t.includes("POR VERIFICAR") || t.includes("NO APLICA") || ["-", "N/A", "?"].includes(t)) return "pend";
+  if (/^(NO|✘|✗)/.test(t)) return "no";
+  if (/^(SI|SÍ|CUMPLE|ACREDITA|VÁLIDO|VALIDO|✔|✓)/.test(t)) return "si";
+  return null; // texto libre → sin color
+}
+function _fillVeredicto(value, pol) {
+  const cl = _clasificarVeredicto(value);
+  if (cl === null) return null;
+  if (cl === "pend") return FILL_PEND;
+  const bueno = pol === "pos" ? cl === "si" : cl === "no";
+  return bueno ? FILL_CUMPLE : FILL_NO_CUMPLE;
+}
 
 const P4_HEAD = ["No", "ENTIDAD/EMPRESA QUE EMITE", "Proyecto u Obra", "TIPO DE DOCUMENTO",
   "NOMBRE DEL EMISOR", "CARGO DEL EMISOR", "¿Cargo válido para emitir?", "FECHA INICIAL",
@@ -75,50 +100,60 @@ class Builder {
   }
 
   row(vals, opts = {}) {
-    const { bold = false, fmts = {}, backendCols = new Set() } = opts;
+    const { bold = false, fmts = {}, verdicts = {}, backendCols = new Set() } = opts;
     const row = this.ws.getRow(this.r);
     vals.forEach((v, idx) => {
       const i = idx + 1;
       const c = row.getCell(i);
       c.value = (v === undefined ? null : v);
-      c.font = bold ? F_BOLD : F_CELL; c.border = BORDER; c.alignment = AL_WRAP;
+      c.font = bold ? F_BOLD : F_CELL; c.alignment = AL_WRAP;
+      c.border = backendCols.has(i) ? BORDER_BACKEND : BORDER;
       if (fmts[i] !== undefined && typeof v === "number") c.numFmt = fmts[i];
-      if (has(v)) c.fill = backendCols.has(i) ? FILL_BACKEND : FILL_CLAUDE;
+      if (verdicts[i] !== undefined) {
+        const f = _fillVeredicto(v, verdicts[i]);
+        if (f) c.fill = f;
+      }
     });
     this.r++;
   }
 
-  kv(label, value, fmt) {
+  kv(label, value, fmt, verdict) {
     const row = this.ws.getRow(this.r);
     row.getCell(1).value = label; row.getCell(1).font = F_BOLD;
     this.ws.mergeCells(this.r, 2, this.r, NCOLS);
     const c = row.getCell(2);
     c.value = (value === undefined ? null : value); c.font = F_CELL; c.alignment = AL_WRAP;
     if (fmt && typeof value === "number") c.numFmt = fmt;
-    if (has(value)) c.fill = FILL_CLAUDE;
+    if (verdict) { const f = _fillVeredicto(value, verdict); if (f) c.fill = f; }
     this.r++;
   }
 
-  bc(label, value) {
+  bc(label, value, verdict) {
     const row = this.ws.getRow(this.r);
     const a = row.getCell(2);
     a.value = label; a.font = F_BOLD; a.alignment = AL_WRAP; a.border = BORDER;
     this.ws.mergeCells(this.r, 3, this.r, NCOLS);
     const c = row.getCell(3);
     c.value = (value === undefined ? null : value); c.font = F_CELL; c.alignment = AL_WRAP; c.border = BORDER;
-    if (has(value)) c.fill = FILL_CLAUDE;
+    if (verdict) { const f = _fillVeredicto(value, verdict); if (f) c.fill = f; }
     this.r++;
   }
 
   leyenda() {
     const row = this.ws.getRow(this.r);
     row.getCell(1).value = "Leyenda:"; row.getCell(1).font = F_BOLD;
-    this.ws.mergeCells(this.r, 2, this.r, 4);
-    const a = row.getCell(2);
-    a.value = "Amarillo = llenado por Claude"; a.fill = FILL_CLAUDE; a.font = F_CELL; a.border = BORDER; a.alignment = AL_TITLE;
-    this.ws.mergeCells(this.r, 5, this.r, 9);
-    const b = row.getCell(5);
-    b.value = "Naranja = verificado/enriquecido por el backend on-prem"; b.fill = FILL_BACKEND; b.font = F_CELL; b.border = BORDER; b.alignment = AL_TITLE;
+    const swatches = [
+      [2, 3, "Verde = cumple / válido", FILL_CUMPLE, BORDER],
+      [4, 5, "Rojo = no cumple / alerta", FILL_NO_CUMPLE, BORDER],
+      [6, 8, "Amarillo = por verificar", FILL_PEND, BORDER],
+      [9, 12, "Borde azul izq. = verifica/recalcula el backend on-prem", null, BORDER_BACKEND],
+    ];
+    swatches.forEach(([ini, fin, txt, fillStyle, border]) => {
+      this.ws.mergeCells(this.r, ini, this.r, fin);
+      const c = row.getCell(ini);
+      c.value = txt; c.font = F_CELL; c.border = border; c.alignment = AL_TITLE;
+      if (fillStyle) c.fill = fillStyle;
+    });
     this.r++;
   }
 
@@ -160,24 +195,33 @@ async function generarExcel(espejo, salida) {
     "MONTO (S/)", "% POR OBJETO U CONTRATO", "LE CORRESPONDE (S/)", "ACREDITA (consorciado)", "Folio",
     "¿Últimos 20 años?", "¿Tipo solicitado en bases?", "OBSERVACIONES"]);
   const m2 = { 6: FMT_MONEY, 7: FMT_DEC, 8: FMT_MONEY };
+  // ¿últimos 20/25 años? (11) y ¿tipo solicitado? (12) son veredictos "pos";
+  // la antigüedad (11) la recalcula el backend.
+  const V2 = { 11: "pos", 12: "pos" }, BE2 = new Set([11]);
   (p.experiencia_postor || []).forEach((e) => b.row([e.n, e.cliente, e.contrato, e.proyecto, e.tipo_acreditacion,
-    e.monto, e.pct_objeto, e.le_corresponde, e.acredita, e.folio, e.ultimos_20_anios, e.tipo_solicitado, e.observaciones], { fmts: m2 }));
+    e.monto, e.pct_objeto, e.le_corresponde, e.acredita, e.folio, e.ultimos_20_anios, e.tipo_solicitado, e.observaciones],
+    { fmts: m2, verdicts: V2, backendCols: BE2 }));
   const tot = p.experiencia_postor_total || {};
   if (Object.keys(tot).length) {
     const tv = (tot.le_corresponde !== undefined ? tot.le_corresponde : tot.acredita);
     b.row(["", "", "", "", "", "", "", "TOTAL (le corresponde):", tv, "", "", "", ""], { bold: true, fmts: { 9: FMT_MONEY } });
   }
-  if (p.postor_cumple) b.bc("EL POSTOR CUMPLE EL REQUISITO 3.4:", p.postor_cumple);
+  if (p.postor_cumple) b.bc("EL POSTOR CUMPLE EL REQUISITO 3.4:", p.postor_cumple, "pos");
   b.blank();
 
   // PARTE 3 + 4 por profesional
   const m4 = { 12: FMT_INT, 13: FMT_DEC, 14: FMT_DEC };
+  // Veredictos PARTE 4: "pos" = SÍ bueno; "neg" = SÍ malo (¿anterior a
+  // colegiatura? 15, ¿emitido antes de culminar? 19). ¿COVID? (20) informativo.
+  const V4 = { 7: "pos", 15: "neg", 17: "pos", 18: "pos", 19: "neg", 21: "pos" };
+  // Backend: ¿válido emitir? (SUNAT), días/meses/años (Paso 5), ¿ant. coleg.? (ALT03).
+  const BE4 = new Set([7, 12, 13, 14, 15]);
   for (const prof of profs) {
     b.parte(`PARTE 3: INFORMACIÓN GENERAL — PROFESIONAL ${prof.n_prof} DE ${N}`);
     b.headers(["No", "CARGO", "DETALLE", "INFORMACIÓN DE LA PROPUESTA", "N° de Folio", "OBSERVACIÓN"]);
     b.row([prof.n_prof, prof.cargo, "NOMBRE DEL PROFESIONAL", prof.nombre, prof.folio_nombre, ""]);
     b.row(["", "", "TÍTULO PROFESIONAL (profesión)", prof.titulo, prof.folio_titulo || "", ""]);
-    b.row(["", "", "¿La profesión es la indicada en bases?", prof.profesion_valida, "", ""]);
+    b.row(["", "", "¿La profesión es la indicada en bases?", prof.profesion_valida, "", ""], { verdicts: { 4: "pos" } });
     b.row(["", "", "N° DE COLEGIATURA y fecha", prof.colegiatura, prof.fecha_colegiatura || prof.folio_colegiatura || "", ""]);
     b.row(["", "", "B. CERTIFICACIONES DEL PERSONAL CLAVE", prof.certificaciones, "", ""]);
     if (has(prof.experiencia_total_declarada)) {
@@ -196,16 +240,17 @@ async function generarExcel(espejo, salida) {
       b.row([e.n, e.entidad_emisora, e.proyecto, e.tipo_documento, e.nombre_emisor, e.cargo_emisor,
         e.cargo_valido_emitir, e.fecha_inicial, e.fecha_final, e.fecha_emision, e.folio,
         e.dias, e.meses, e.anios, e.anterior_colegiatura, e.cargo_ocupado, e.cargo_bases_valido,
-        e.funciones_similares, e.cert_antes_culminar, e.incluye_covid, e.tipo_obra_valido, e.observaciones], { fmts: m4 });
+        e.funciones_similares, e.cert_antes_culminar, e.incluye_covid, e.tipo_obra_valido, e.observaciones],
+        { fmts: m4, verdicts: V4, backendCols: BE4 });
     }
     const t = prof.total || {};
     b.row(["", "", "", "", "", "", "", "", "", "", "TOTAL", t.dias, t.meses, t.anios, "", "", "", "", "", "", "", ""],
-      { bold: true, fmts: m4 });
+      { bold: true, fmts: m4, backendCols: new Set([12, 13, 14]) });
     // cross-checks (new_format) o, en su defecto, cumple/años adicionales (compat)
     if (Array.isArray(prof.cross_checks) && prof.cross_checks.length) {
       prof.cross_checks.forEach((cc) => b.bc(cc.label, cc.valor));
     } else {
-      if (prof.cumple) b.bc("¿EL PROFESIONAL CUMPLE?", prof.cumple);
+      if (prof.cumple) b.bc("¿EL PROFESIONAL CUMPLE?", prof.cumple, "pos");
       if (prof.anios_adicionales) b.bc("Años adicionales (Factor A):", prof.anios_adicionales);
     }
     (prof.notas || []).forEach((n) => b.bc("Nota:", n));
