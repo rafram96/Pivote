@@ -1,0 +1,58 @@
+# Despliegue on-prem del pivote InfoObras: backend (FastAPI) + panel (Next.js).
+# Asume que los repos Pivote y Panel-InfoObras están como hermanos:
+#   .../InfoObras/Pivote            (este repo; el compose vive en deploy/)
+#   .../InfoObras/Panel-InfoObras   (el panel)
+#
+# Uso:  cd deploy && docker compose up -d --build
+# El skill y el MCP NO van aquí: corren en la máquina del ingeniero (ver docs).
+
+name: infoobras-pivote
+
+services:
+  backend:
+    build:
+      context: ..                    # raíz del repo Pivote
+      dockerfile: backend/Dockerfile
+    image: infoobras-backend
+    environment:
+      PIVOTE_ETAPAS: ${PIVOTE_ETAPAS:-real}        # real = cruces SUNAT/InfoObras
+      PIVOTE_MAX_DESCARGAS: ${PIVOTE_MAX_DESCARGAS:-2}  # nº de obras que bajan ZIP
+      PIVOTE_DATA_DIR: /datos
+      TZ: America/Lima
+    volumes:
+      - datos_pivote:/datos          # jobs/espejos/entregables (datos del cliente)
+    ports:
+      - "${BACKEND_PORT:-8001}:8001" # expón solo si necesitas llegar al API directo
+    restart: unless-stopped
+
+  panel:
+    build:
+      context: ../../Panel-InfoObras/frontend
+      dockerfile: Dockerfile
+    image: infoobras-panel
+    environment:
+      # El panel proxyea /api/pivote/* a este servicio (red interna de compose).
+      PIVOTE_API: http://backend:8001
+    ports:
+      - "${PANEL_PORT:-3002}:3002"   # la URL que abre el ingeniero
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # --- Persistencia PostgreSQL — PENDIENTE de cablear en el backend ------------
+  # Hoy el backend persiste en ARCHIVOS (volumen datos_pivote). Cuando se cablee
+  # un RepositorioPostgres (+ el caché SUNAT de sunat_cache.py), descomentar este
+  # servicio y apuntar el backend con DATABASE_URL=postgres://infoobras:...@db/infoobras
+  # db:
+  #   image: postgres:16
+  #   environment:
+  #     POSTGRES_DB: infoobras
+  #     POSTGRES_USER: infoobras
+  #     POSTGRES_PASSWORD: ${DB_PASSWORD:?define DB_PASSWORD en deploy/.env}
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+volumes:
+  datos_pivote:
+  # pgdata:

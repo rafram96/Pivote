@@ -1,0 +1,21 @@
+# El contexto de build es la raíz del repo Pivote; excluir lo pesado/sensible.
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+venv/
+.venv/
+# Datos del cliente (jobs/espejos/entregables con RUCs y nombres reales)
+datos_pivote/
+backend/datos_pivote/
+descargas_infoobras/
+**/_descargas_*/
+# Node del lado cliente (no va al backend)
+mcp-server/node_modules/
+skill/node_modules/
+plugin/
+# Git / IDE / docs
+.git/
+.idea/
+.vscode/
+docs/
+fixtures/
