@@ -3,9 +3,10 @@ Excel FINAL enriquecido — el entregable del backend (formato definitivo
 confirmado por el cliente 2026-06-10):
 
   1. Hoja **CLAUDE** — la extracción/evaluación (5 partes, igual al de la skill).
-  2. Hoja **Base de Datos** — todas las experiencias consolidadas, cargo al que
-     postula en la primera columna, con auto-filtro y un color de fondo
-     distinto por profesional (convención de la skill `propuestas` de Manuel).
+  2. Hoja **Base de Datos** — todas las experiencias consolidadas (25 columnas:
+     postor/profesional, emisor, fechas, días/Paso 5, y los veredictos), con
+     auto-filtro, color de fondo por profesional (convención de la skill
+     `propuestas` de Manuel) y verde/rojo en las columnas de pregunta.
   3. **Una hoja por profesional** con el CUADRO DE HITOS de sus experiencias:
      periodo certificado → paralizaciones de la obra (InfoObras) → tramos
      efectivos → resumen brutos/paralizados/traslapes/EFECTIVOS (Paso 5,
@@ -34,7 +35,8 @@ from reglas import (
 from scripts.generar_excel import (
     AL_HEAD, AL_WRAP, BORDER, F_BOLD, F_CELL, F_HEAD, F_PARTE, F_PROF,
     FILL_BACKEND, FILL_CLAUDE, FILL_HEAD, FILL_PARTE, FILL_PROF,
-    FMT_DEC, FMT_FECHA, FMT_INT, construir_hoja_evaluacion, fecha_excel,
+    FMT_DEC, FMT_FECHA, FMT_INT, _fill_veredicto, construir_hoja_evaluacion,
+    fecha_excel,
 )
 
 Paralizaciones = dict[tuple[int, int], list[tuple[date, date]]]
@@ -87,11 +89,18 @@ def _nombre_hoja(n_prof: int, cargo: str) -> str:
 
 # ── Hoja 2 · Base de Datos ───────────────────────────────────────────────────
 
-_BD_HEAD = ["CARGO AL QUE POSTULA", "N° PROF", "PROFESIONAL", "N° EXP",
-            "ENTIDAD / EMPRESA EMISORA", "PROYECTO U OBRA", "CUI",
-            "FECHA INICIAL", "FECHA FINAL", "DÍAS", "MESES", "AÑOS",
-            "CARGO OCUPADO", "¿COVID?", "¿TRASLAPE?", "FOLIO", "OBSERVACIONES"]
-_BD_WIDTHS = [34, 8, 28, 7, 34, 50, 10, 12, 12, 8, 8, 8, 28, 9, 11, 10, 50]
+_BD_HEAD = ["CARGO AL QUE POSTULA", "N° PROF", "PROFESIONAL", "N° COLEGIATURA",
+            "N° EXP", "ENTIDAD / EMPRESA EMISORA", "PROYECTO U OBRA", "CUI",
+            "TIPO DOC", "NOMBRE DEL EMISOR", "CARGO DEL EMISOR",
+            "FECHA INICIAL", "FECHA FINAL", "FECHA EMISIÓN", "FOLIO",
+            "DÍAS", "MESES", "AÑOS", "CARGO QUE OCUPÓ",
+            "¿CARGO EN BASES?", "¿ANT. COLEGIAT.?", "¿INCLUYE COVID?",
+            "¿TRASLAPE?", "¿TIPO DE OBRA SOLICITADO?", "OBSERVACIONES"]
+_BD_WIDTHS = [34, 8, 26, 18, 7, 32, 44, 10, 14, 24, 20, 12, 12, 12, 10,
+              8, 8, 8, 26, 12, 12, 11, 11, 16, 44]
+# Columnas de veredicto → verde/rojo semántico (pos = SÍ bueno; neg = SÍ malo).
+# ¿COVID? (22) queda informativo, sin color.
+_BD_VERDICTS = {20: "pos", 21: "neg", 23: "neg", 24: "pos"}
 
 
 def construir_hoja_base_datos(ws, espejo: dict) -> int:
@@ -109,22 +118,31 @@ def construir_hoja_base_datos(ws, espejo: dict) -> int:
         fill = PatternFill("solid", fgColor=_PALETA_PROF[idx % len(_PALETA_PROF)])
         for e in prof.get("experiencias", []):
             valores = [
-                prof.get("cargo"), prof.get("n_prof"), prof.get("nombre"), e.get("n"),
-                e.get("entidad_emisora"), e.get("proyecto"), e.get("cui"),
+                prof.get("cargo"), prof.get("n_prof"), prof.get("nombre"),
+                prof.get("colegiatura"), e.get("n"), e.get("entidad_emisora"),
+                e.get("proyecto"), e.get("cui"), e.get("tipo_documento"),
+                e.get("nombre_emisor"), e.get("cargo_emisor"),
                 fecha_excel(e.get("fecha_inicial")), fecha_excel(e.get("fecha_final")),
-                e.get("dias"), e.get("meses"), e.get("anios"),
-                e.get("cargo_ocupado"), e.get("incluye_covid"), e.get("traslape"),
-                e.get("folio"), e.get("observaciones"),
+                fecha_excel(e.get("fecha_emision")), e.get("folio"),
+                e.get("dias"), e.get("meses"), e.get("anios"), e.get("cargo_ocupado"),
+                e.get("cargo_bases_valido"), e.get("anterior_colegiatura"),
+                e.get("incluye_covid"), e.get("traslape"), e.get("tipo_obra_valido"),
+                e.get("observaciones"),
             ]
             for i, v in enumerate(valores, start=1):
                 c = ws.cell(r, i, v)
                 c.font, c.border, c.alignment, c.fill = F_CELL, BORDER, AL_WRAP, fill
-                if i in (8, 9) and isinstance(v, date):
+                if i in (12, 13, 14) and isinstance(v, date):
                     c.number_format = FMT_FECHA
-                if i == 10 and isinstance(v, (int, float)):
+                if i == 16 and isinstance(v, (int, float)):
                     c.number_format = FMT_INT
-                if i in (11, 12) and isinstance(v, (int, float)):
+                if i in (17, 18) and isinstance(v, (int, float)):
                     c.number_format = FMT_DEC
+                # veredicto: el verde/rojo pinta ENCIMA del color por profesional
+                if i in _BD_VERDICTS:
+                    vf = _fill_veredicto(v, _BD_VERDICTS[i])
+                    if vf:
+                        c.fill = vf
             r += 1
 
     ws.auto_filter.ref = f"A1:{get_column_letter(len(_BD_HEAD))}{max(r - 1, 1)}"
