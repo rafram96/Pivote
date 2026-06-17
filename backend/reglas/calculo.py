@@ -79,11 +79,14 @@ def restar_paralizaciones(
     ini, fin = periodo
     if fin < ini:
         raise ValueError(f"periodo inválido: {ini} → {fin}")
-    # Recortar cada paralización al periodo y unirlas
+    # Recortar cada paralización al periodo y unirlas. Se descartan las
+    # paralizaciones invertidas (p_fin < p_ini): son datos corruptos del portal
+    # InfoObras y no deben tumbar el cálculo de TODOS los profesionales — la
+    # etapa las marca aparte para revisión humana.
     recortadas = [
         (max(p_ini, ini), min(p_fin, fin))
         for p_ini, p_fin in paralizaciones
-        if p_fin >= ini and p_ini <= fin
+        if p_fin >= p_ini and p_fin >= ini and p_ini <= fin
     ]
     tramos: list[tuple[date, date]] = []
     cursor = ini

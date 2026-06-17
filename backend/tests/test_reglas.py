@@ -81,6 +81,17 @@ def test_restar_paralizaciones_cubre_todo_deja_cero():
     ) == []
 
 
+def test_restar_paralizaciones_invertida_se_ignora_sin_crashear():
+    # Paralización corrupta de InfoObras (inicio posterior al fin). No debe
+    # tumbar el cálculo: se descarta y el periodo queda íntegro (la etapa la
+    # marca aparte para revisión). Regresión del crash CONSORCIO SUPERVISOR CHOTA.
+    tramos = restar_paralizaciones(
+        (date(2023, 1, 1), date(2023, 12, 31)),
+        [(date(2023, 5, 12), date(2023, 4, 1))],
+    )
+    assert tramos == [(date(2023, 1, 1), date(2023, 12, 31))]
+
+
 # ── Traslapes (ALT11) ─────────────────────────────────────────────────────────
 
 def test_fusionar_traslapes_descuenta_solo_el_solape():

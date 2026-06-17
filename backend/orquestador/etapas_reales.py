@@ -609,7 +609,16 @@ class EtapaReglasReal:
                 enr = ctx.enriquecimiento.get(_clave(np_, e.get("n"))) or {}
                 if enr.get("sin_verificar"):
                     sin_verificar.append(e.get("n"))
-                paral = [periodo_fechas(p) for p in enr.get("paralizaciones", [])]
+                paral_crudo = [periodo_fechas(x) for x in enr.get("paralizaciones", [])]
+                paral = [(a, b) for (a, b) in paral_crudo if b >= a]
+                invertidas = len(paral_crudo) - len(paral)
+                if invertidas:
+                    obs.append(pipeline.Observacion(
+                        codigo="PARAL_INVALIDA", severidad=pipeline.Severidad.ALERTA,
+                        mensaje=f"{invertidas} paralización(es) de InfoObras con fechas "
+                                f"invertidas (inicio posterior al fin) — se ignoran en el "
+                                f"cálculo; verificar la obra a mano",
+                        origen=self.nombre, referencia=f"prof={np_} exp={e.get('n')}"))
                 if paral:
                     paral_por_idx[idx] = paral
             if not periodos:
