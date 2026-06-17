@@ -338,6 +338,13 @@ def _cui_de(o: dict) -> Optional[str]:
     return None
 
 
+def _num(v) -> int:
+    """Entero de un id/código para desempates DETERMINÍSTICOS. Los no numéricos
+    van al final (sentinela alto) para que el orden sea total y reproducible."""
+    s = str(v if v is not None else "").strip()
+    return int(s) if s.isdigit() else 10 ** 18
+
+
 def resolver(exp: dict, consulta: Consulta) -> dict:
     """Resuelve UNA experiencia. Devuelve:
     {estado: 'resuelto'|'revision'|'na', cui, via, decision, candidatos[], obra}
@@ -426,10 +433,19 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
                 "obra_id": o.get("codigoObra") or o.get("obraId"),
                 "ruc_match": ruc_match, "score": round(sc, 1)}
         prev = porcui.get(cui)
-        if prev is None or cand["score"] > prev["score"]:
+        # representante de cada CUI = el de mayor score; ante EMPATE, menor
+        # obra_id (el orden que devuelve la API no es estable entre corridas).
+        if (prev is None
+                or cand["score"] > prev["score"]
+                or (cand["score"] == prev["score"]
+                    and _num(cand["obra_id"]) < _num(prev["obra_id"]))):
             porcui[cui] = cand
 
-    ranked = sorted(porcui.values(), key=lambda x: x["score"], reverse=True)
+    # orden DETERMINÍSTICO: score desc y, ante empate, menor CUI y menor obra_id.
+    # Sin la clave secundaria, dos CUIs con el mismo score quedaban en el orden de
+    # inserción de `porcui` (no reproducible) → `best` variaba entre corridas.
+    ranked = sorted(porcui.values(),
+                    key=lambda x: (-x["score"], _num(x["cui"]), _num(x["obra_id"])))
     best = ranked[0] if ranked else None
 
     n_hit = len(toks & _palabras(best["full"])) if best else 0
