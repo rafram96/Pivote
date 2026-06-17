@@ -49,7 +49,10 @@ FILL_VALOR = PatternFill("solid", fgColor="FFFF00")
 FILL_ALERTA = PatternFill("solid", fgColor="F4CCCC")
 FILL_OK = PatternFill("solid", fgColor="D9EAD3")
 FMT_SOLES = '#,##0.00'
-FMT_PCT = '0.00%'
+# El avance físico de InfoObras ya viene en escala de porcentaje (38.36 = 38.36%).
+# El formato nativo '0.00%' de Excel multiplica ×100 (mostraría 3836.00%), así que
+# usamos el '%' como literal para no reescalar.
+FMT_PCT = '0.00"%"'
 
 _MES_ES = {1: "ENERO", 2: "FEBRERO", 3: "MARZO", 4: "ABRIL", 5: "MAYO",
            6: "JUNIO", 7: "JULIO", 8: "AGOSTO", 9: "SEPTIEMBRE",
