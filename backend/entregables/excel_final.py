@@ -328,8 +328,11 @@ def construir_hoja_profesional(
                 kv("Inicio actividades", ini_act.strftime("%d/%m/%Y"))
             if s.get("domicilio_fiscal"):
                 kv("Domicilio fiscal", s.get("domicilio_fiscal"))
-            if s.get("via") == "nombre":
-                kv("Cruce", "por nombre (el cert no traía RUC)")
+            if str(s.get("via") or "").startswith("nombre"):
+                detalle = ("por nombre — única idéntica entre varias en SUNAT"
+                           if s.get("via") == "nombre_exacto"
+                           else "por nombre (el cert no traía RUC)")
+                kv("Cruce", detalle)
             emision = _fecha_iso(fecha_emision)
             if creacion and emision and creacion > emision:
                 txt = (f"🔴 ALT04 — certificado emitido ({emision.strftime('%d/%m/%y')}) ANTES de "

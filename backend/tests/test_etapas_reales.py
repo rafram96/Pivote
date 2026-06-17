@@ -658,3 +658,39 @@ def test_sunat_por_nombre_cuando_no_hay_ruc():
     assert "ruc" not in ctx.enriquecimiento["1:2"]["sunat"]
     # exp 3: entidad pública → se salta (sin bloque sunat)
     assert "sunat" not in ctx.enriquecimiento.get("1:3", {})
+
+
+def test_sunat_desempate_por_nombre_exacto():
+    """Varias filas en SUNAT (búsqueda por prefijo) pero solo UNA idéntica al
+    nombre buscado → se cruza esa (via nombre_exacto), no va a ambiguo.
+    Caso real ACRUTA & TAPIA INGENIEROS S.A.C. (3 filas, 1 idéntica ACTIVA)."""
+    from orquestador.etapas import Contexto
+    from orquestador.etapas_reales import EtapaSunatReal
+
+    espejo = {
+        "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
+        "postor": {},
+        "profesionales": [{"n_prof": 1, "cargo": "ESP", "experiencias": [
+            {"n": 1, "entidad_emisora": "ACRUTA & TAPIA INGENIEROS S.A.C.",
+             "fecha_inicial": "2020-01-01", "fecha_final": "2021-01-01"},
+        ]}],
+        "resumen_evaluacion": {"factores": []},
+    }
+
+    def buscador(nombre):  # SUNAT por prefijo devuelve 3, solo 1 idéntica
+        return [
+            {"ruc": "20339231983", "razon_social": "ACRUTA-TAPIA ING. SA Y SAG. ING. CON. SA",
+             "estado": "BAJA DEFINITIVA"},
+            {"ruc": "20262241441", "razon_social": "ACRUTA & TAPIA INGENIEROS S.A.C.",
+             "estado": "ACTIVO"},
+            {"ruc": "20433090480", "razon_social": "C.ACRUTA & TAPIA ING.SAC-J.SILVA ING.SRL",
+             "estado": "BAJA DEFINITIVA"},
+        ]
+
+    consultor = lambda r: EmpresaFake(r, "ACRUTA & TAPIA INGENIEROS S.A.C.", date(2010, 1, 1))
+    ctx = Contexto(job=None, espejo=espejo, enriquecimiento={})
+    EtapaSunatReal(consultor=consultor, buscador=buscador).correr(ctx)
+
+    assert ctx.enriquecimiento["1:1"]["sunat"]["ruc"] == "20262241441"
+    assert ctx.enriquecimiento["1:1"]["sunat"]["via"] == "nombre_exacto"
+    assert "ambiguo" not in ctx.enriquecimiento["1:1"]["sunat"]

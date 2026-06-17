@@ -464,6 +464,31 @@ def _nombre_emisor_limpio(entidad: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
+def _elegir_match_exacto(nombre: str, matches: list) -> Optional[dict]:
+    """De varias coincidencias SUNAT para un nombre, elige la que tiene la MISMA
+    razón social que la buscada.
+
+    La búsqueda de SUNAT es por prefijo, así que un nombre como "ACRUTA & TAPIA
+    INGENIEROS S.A.C." trae también empresas parecidas pero distintas (la del
+    consorcio, una homónima dada de baja, etc.). Comparando con el nombre
+    normalizado (sin sufijos legales/puntuación/acentos) se puede desempatar
+    cuando solo UNA fila es idéntica. Si hay varias idénticas, prefiere la
+    ACTIVA; si sigue habiendo ambigüedad, devuelve None (revisión humana)."""
+    from scraping.sunat import normalizar_nombre_empresa
+    objetivo = normalizar_nombre_empresa(nombre)
+    if not objetivo:
+        return None
+    exactas = [m for m in matches
+               if normalizar_nombre_empresa(m.get("razon_social") or "") == objetivo]
+    if len(exactas) == 1:
+        return exactas[0]
+    if len(exactas) > 1:
+        activas = [m for m in exactas if "ACTIVO" in str(m.get("estado") or "").upper()]
+        if len(activas) == 1:
+            return activas[0]
+    return None
+
+
 class EtapaSunatReal:
     nombre = E.SUNAT
 
@@ -517,6 +542,9 @@ class EtapaSunatReal:
                     matches = []
                 if len(matches) == 1:
                     ruc, via = matches[0].get("ruc"), "nombre"
+                elif (elegido := _elegir_match_exacto(nombre, matches)):
+                    # varias filas, pero solo una idéntica → desempate por nombre
+                    ruc, via = elegido.get("ruc"), "nombre_exacto"
                 else:
                     rev += 1
                     enr = ctx.enriquecimiento.get(k) or {}
