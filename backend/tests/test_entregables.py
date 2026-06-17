@@ -383,3 +383,57 @@ def test_hoja_profesional_emisor_sin_anomalia():
     assert "Objeto social" in texto and "7110" in texto and "ARQUITECTURA E INGENIERIA" in texto
     assert "Principal -" not in texto
     assert "HABIDO" in texto and "SOCIEDAD ANONIMA CERRADA" in texto
+
+
+# ── Hoja CLAUDE: formato de Manuel (blanco + verde/rojo semántico) ─────────────
+
+def test_clasificar_veredicto_polaridad():
+    """Verde/rojo según polaridad: en campos donde "SÍ" es malo (¿anterior a
+    colegiatura?, ¿antes de culminar?) el SÍ debe salir ROJO, no verde."""
+    from scripts.generar_excel import _fill_veredicto
+
+    def color(v, pol):
+        f = _fill_veredicto(v, pol)
+        return None if f is None else f.fgColor.rgb[-6:]
+
+    assert color("SÍ", "pos") == "C6EFCE"          # verde
+    assert color("NO", "pos") == "FFC7CE"          # rojo
+    assert color("SÍ", "neg") == "FFC7CE"          # SÍ malo → rojo
+    assert color("NO", "neg") == "C6EFCE"          # NO bueno → verde
+    assert color("CUMPLE", "pos") == "C6EFCE"
+    assert color("NO CUMPLE", "pos") == "FFC7CE"
+    assert color("POR VERIFICAR (x)", "pos") == "FFF2CC"   # amarillo
+    assert color("NO APLICA", "pos") == "FFF2CC"
+    assert color("texto libre", "pos") is None     # sin color
+    assert color("", "pos") is None
+
+
+def test_hoja_claude_blanca_con_veredictos(tmp_path):
+    """La hoja CLAUDE es blanca dominante con verde/rojo SOLO en veredictos."""
+    espejo = {
+        "_meta": {"analisis_id": "t", "concurso": "C", "postor": "P"},
+        "postor": {},
+        "profesionales": [{
+            "n_prof": 1, "cargo": "ESP", "nombre": "N", "profesion_valida": "SÍ",
+            "cumple": "CUMPLE — 5 años efectivos",
+            "experiencias": [{
+                "n": 1, "proyecto": "Obra", "fecha_inicial": "2020-01-01",
+                "fecha_final": "2021-01-01", "cargo_valido_emitir": "SÍ",
+                "anterior_colegiatura": "SÍ", "cert_antes_culminar": "NO",
+                "dias": 367, "folio": "1",
+            }],
+        }],
+        "resumen_evaluacion": {"factores": [], "puntaje_total": None},
+    }
+    salida = generar_excel_final(espejo, tmp_path / "f.xlsx", {})
+    ws = openpyxl.load_workbook(salida)["CLAUDE"]
+    from collections import Counter
+    fills = Counter(c.fill.fgColor.rgb[-6:] if (c.fill and c.fill.patternType) else None
+                    for row in ws.iter_rows() for c in row)
+    # blanco dominante; verde y rojo presentes (veredictos)
+    assert fills[None] > sum(v for k, v in fills.items() if k)
+    assert fills["C6EFCE"] >= 2     # ¿profesión? + ¿válido emitir? + ¿cumple? → verde
+    assert fills["FFC7CE"] >= 1     # ¿anterior a colegiatura? SÍ → rojo
+    # ya NO se usa el amarillo de "llenado por Claude" en cada celda
+    assert "Verde = cumple" in "\n".join(
+        str(c.value) for row in ws.iter_rows() for c in row if c.value)

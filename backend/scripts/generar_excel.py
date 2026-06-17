@@ -20,6 +20,7 @@ Uso:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import date as _date
 from pathlib import Path
@@ -57,6 +58,56 @@ FMT_DEC = "0.00"
 FMT_INT = "#,##0"
 FMT_FECHA = "dd/mm/yy"   # formato de presentación pedido por el cliente
 
+# ── Estilo de la hoja CLAUDE — formato de Manuel: fondo blanco, bandas azules y
+#    verde/rojo SOLO en los veredictos (convención de conditional format de Excel).
+#    Las constantes de arriba (FILL_PARTE/PROF/CLAUDE/BACKEND…) se conservan para
+#    las OTRAS hojas del Excel final (Base de Datos, por profesional). ─────────────
+F_CL_PARTE = Font(bold=True, size=11, color="FFFFFF")
+FILL_CL_PARTE = PatternFill("solid", fgColor="1F4E78")    # azul oscuro: banda PARTE
+F_CL_PROF = Font(bold=True, size=11, color="FFFFFF")
+FILL_CL_PROF = PatternFill("solid", fgColor="2E75B6")     # azul medio: banda PROFESIONAL
+F_CL_SUB = Font(bold=True, size=10, color="1F4E78")
+FILL_CL_SUB = PatternFill("solid", fgColor="DDEBF7")      # azul claro: subtítulo PARTE 4
+FILL_CL_HEAD = PatternFill("solid", fgColor="DDEBF7")     # azul claro: headers de tabla
+
+FILL_CUMPLE = PatternFill("solid", fgColor="C6EFCE")      # verde: cumple / válido
+FILL_NO_CUMPLE = PatternFill("solid", fgColor="FFC7CE")   # rojo: no cumple / alerta
+FILL_PEND = PatternFill("solid", fgColor="FFF2CC")        # amarillo suave: por verificar
+
+# Marcador sutil de dato verificado/enriquecido por el backend on-prem: borde
+# izquierdo azul (coexiste con el verde/rojo del veredicto).
+_THICK_BE = Side(style="medium", color="2E75B6")
+BORDER_BACKEND = Border(left=_THICK_BE, right=_THIN, top=_THIN, bottom=_THIN)
+
+_RE_WS = re.compile(r"\s+")
+
+
+def _clasificar_veredicto(value):
+    """'si' | 'no' | 'pend' | None según el texto de un campo de veredicto."""
+    if value in (None, ""):
+        return None
+    t = _RE_WS.sub(" ", str(value).strip()).upper()
+    if "POR VERIFICAR" in t or "NO APLICA" in t or t in ("-", "N/A", "?"):
+        return "pend"
+    if t.startswith(("NO", "✘", "✗")):
+        return "no"
+    if t.startswith(("SI", "SÍ", "CUMPLE", "ACREDITA", "VÁLIDO", "VALIDO", "✔", "✓")):
+        return "si"
+    return None  # texto libre → sin color
+
+
+def _fill_veredicto(value, polaridad):
+    """Fill verde/rojo/amarillo de un veredicto. polaridad 'pos' → SÍ es bueno;
+    'neg' → SÍ es malo (ej. ¿anterior a colegiatura?, ¿certificado antes de
+    culminar?)."""
+    cl = _clasificar_veredicto(value)
+    if cl is None:
+        return None
+    if cl == "pend":
+        return FILL_PEND
+    bueno = (cl == "si") if polaridad == "pos" else (cl == "no")
+    return FILL_CUMPLE if bueno else FILL_NO_CUMPLE
+
 
 def fecha_excel(v):
     """ISO 'YYYY-MM-DD' → date real (NOTA 13: fechas en formato fecha, se
@@ -90,41 +141,46 @@ class Builder:
         self.r += 1
 
     def parte(self, text):
-        self._band(text, F_PARTE, FILL_PARTE, 24)
+        self._band(text, F_CL_PARTE, FILL_CL_PARTE, 24)
         self.blank()
 
     def profblock(self, text):
-        self._band(text, F_PROF, FILL_PROF, 22)
+        self._band(text, F_CL_PROF, FILL_CL_PROF, 22)
 
     def subtitle(self, text):
-        self._band(text, F_SUB, FILL_SUB, 18)
+        self._band(text, F_CL_SUB, FILL_CL_SUB, 18)
 
     def headers(self, values):
         ws = self.ws
         for i, v in enumerate(values, start=1):
             c = ws.cell(self.r, i, v)
-            c.font, c.fill, c.border, c.alignment = F_HEAD, FILL_HEAD, BORDER, AL_HEAD
+            c.font, c.fill, c.border, c.alignment = F_HEAD, FILL_CL_HEAD, BORDER, AL_HEAD
         ws.row_dimensions[self.r].height = 32
         self.r += 1
 
-    def row(self, values, bold=False, fmts=None, backend_cols=None):
-        """Escribe una fila de datos. Las celdas con valor se resaltan según
-        origen: amarillo (Claude) por defecto; naranja si la columna está en
-        `backend_cols` (la verifica/llena el backend on-prem)."""
+    def row(self, values, bold=False, fmts=None, verdicts=None, backend_cols=None):
+        """Escribe una fila. Fondo blanco; verde/rojo SOLO en las columnas de
+        veredicto (`verdicts` = {col: 'pos'|'neg'}, según si "SÍ" es bueno o malo)
+        y amarillo suave en "POR VERIFICAR". Las columnas en `backend_cols` llevan
+        un borde izquierdo azul (dato verificado/enriquecido por el backend)."""
         ws = self.ws
         fmts = fmts or {}
+        verdicts = verdicts or {}
         backend_cols = backend_cols or set()
         for i, v in enumerate(values, start=1):
             c = ws.cell(self.r, i, v)
             c.font = F_BOLD if bold else F_CELL
-            c.border, c.alignment = BORDER, AL_WRAP
+            c.alignment = AL_WRAP
+            c.border = BORDER_BACKEND if i in backend_cols else BORDER
             if i in fmts and isinstance(v, (int, float, _date)):
                 c.number_format = fmts[i]
-            if v not in (None, ""):
-                c.fill = FILL_BACKEND if i in backend_cols else FILL_CLAUDE
+            if i in verdicts:
+                fill = _fill_veredicto(v, verdicts[i])
+                if fill:
+                    c.fill = fill
         self.r += 1
 
-    def kv(self, label, value, fmt=None):
+    def kv(self, label, value, fmt=None, verdict=None):
         ws = self.ws
         ws.cell(self.r, 1, label).font = F_BOLD
         ws.merge_cells(start_row=self.r, start_column=2, end_row=self.r, end_column=NCOLS)
@@ -132,19 +188,29 @@ class Builder:
         c.font, c.alignment = F_CELL, AL_WRAP
         if fmt and isinstance(value, (int, float)):
             c.number_format = fmt
-        if value not in (None, ""):
-            c.fill = FILL_CLAUDE
+        if verdict:
+            fill = _fill_veredicto(value, verdict)
+            if fill:
+                c.fill = fill
         self.r += 1
 
     def leyenda(self):
         ws = self.ws
         ws.cell(self.r, 1, "Leyenda:").font = F_BOLD
-        ws.merge_cells(start_row=self.r, start_column=2, end_row=self.r, end_column=4)
-        a = ws.cell(self.r, 2, "Amarillo = llenado por Claude")
-        a.fill, a.font, a.border, a.alignment = FILL_CLAUDE, F_CELL, BORDER, AL_TITLE
-        ws.merge_cells(start_row=self.r, start_column=5, end_row=self.r, end_column=9)
-        b = ws.cell(self.r, 5, "Naranja = verificado/enriquecido por el backend on-prem")
-        b.fill, b.font, b.border, b.alignment = FILL_BACKEND, F_CELL, BORDER, AL_TITLE
+        swatches = [
+            (2, 3, "Verde = cumple / válido", FILL_CUMPLE, BORDER),
+            (4, 5, "Rojo = no cumple / alerta", FILL_NO_CUMPLE, BORDER),
+            (6, 8, "Amarillo = por verificar", FILL_PEND, BORDER),
+            (9, 12, "Borde azul izq. = verificado por el backend on-prem",
+             None, BORDER_BACKEND),
+        ]
+        for ini, fin, txt, fill, border in swatches:
+            ws.merge_cells(start_row=self.r, start_column=ini,
+                           end_row=self.r, end_column=fin)
+            c = ws.cell(self.r, ini, txt)
+            c.font, c.border, c.alignment = F_CELL, border, AL_TITLE
+            if fill:
+                c.fill = fill
         self.r += 1
 
     def blank(self):
@@ -185,16 +251,20 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
                "MONTO", "% OBJETO", "LE CORRESPONDE", "ACREDITA", "FOLIO",
                "¿ÚLTIMOS 20 AÑOS?", "¿TIPO SOLICITADO?", "OBSERVACIONES"])
     m2 = {6: FMT_MONEY, 7: FMT_DEC, 8: FMT_MONEY, 9: FMT_MONEY}
+    # ¿últimos 20/25 años? (11) y ¿tipo solicitado? (12) son veredictos "pos";
+    # el cómputo de antigüedad (11) lo recalcula el backend.
+    V2, BE2 = {11: "pos", 12: "pos"}, {11}
     for e in p.get("experiencia_postor", []):
         b.row([e.get("n"), e.get("cliente"), e.get("contrato"), e.get("proyecto"), e.get("tipo_acreditacion"),
                e.get("monto"), e.get("pct_objeto"), e.get("le_corresponde"), e.get("acredita"), e.get("folio"),
-               e.get("ultimos_20_anios"), e.get("tipo_solicitado"), e.get("observaciones")], fmts=m2)
+               e.get("ultimos_20_anios"), e.get("tipo_solicitado"), e.get("observaciones")],
+              fmts=m2, verdicts=V2, backend_cols=BE2)
     tot = p.get("experiencia_postor_total", {})
     if tot:
         b.row(["", "TOTAL", "", "", "", "", "", tot.get("le_corresponde"), tot.get("acredita"), "", "", "", ""],
               bold=True, fmts={8: FMT_MONEY, 9: FMT_MONEY})
     if p.get("postor_cumple"):
-        b.kv("¿POSTOR CUMPLE 3.4?", p["postor_cumple"])
+        b.kv("¿POSTOR CUMPLE 3.4?", p["postor_cumple"], verdict="pos")
     b.blank()
 
     # ── PARTE 3 + 4 ──
@@ -204,12 +274,19 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
                "DÍAS", "MESES", "AÑOS", "¿ANT. COLEG.?", "CARGO OCUPÓ", "¿CARGO BASES?",
                "¿FUNCIONES?", "¿ANTES CULMINAR?", "¿COVID?", "¿TIPO OBRA?", "OBSERVACIONES"]
     m4 = {8: FMT_FECHA, 9: FMT_FECHA, 10: FMT_FECHA, 12: FMT_INT, 13: FMT_DEC, 14: FMT_DEC}
+    # Veredictos PARTE 4: 'pos' = SÍ bueno (¿válido emitir?, ¿cargo bases?,
+    # ¿funciones?, ¿tipo obra?); 'neg' = SÍ malo (¿anterior a colegiatura?,
+    # ¿certificado antes de culminar?). ¿COVID? queda informativo (sin color).
+    V4 = {7: "pos", 15: "neg", 17: "pos", 18: "pos", 19: "neg", 21: "pos"}
+    # Backend: ¿válido emitir? (SUNAT ALT04), días/meses/años (Paso 5),
+    # ¿anterior a colegiatura? (ALT03, recálculo a 25 años).
+    BE4 = {7, 12, 13, 14, 15}
     for prof in espejo.get("profesionales", []):
         b.profblock(f"PROFESIONAL {prof.get('n_prof')}: {prof.get('cargo', '')}")
         b.headers(["No", "CARGO", "DETALLE", "INFORMACIÓN DE LA PROPUESTA", "FOLIO", "PUNTAJE"])
         b.row([prof.get("n_prof"), prof.get("cargo"), "NOMBRE DEL PROFESIONAL", prof.get("nombre"), prof.get("folio_nombre"), ""])
         b.row(["", "", "TÍTULO PROFESIONAL", prof.get("titulo"), prof.get("folio_titulo"), ""])
-        b.row(["", "", "¿La profesión es la indicada?", prof.get("profesion_valida"), "", ""])
+        b.row(["", "", "¿La profesión es la indicada?", prof.get("profesion_valida"), "", ""], verdicts={4: "pos"})
         b.row(["", "", "No de COLEGIATURA / Fecha", prof.get("colegiatura"), prof.get("folio_colegiatura"), ""])
         b.row(["", "", "B. CERTIFICACIONES", prof.get("certificaciones"), "", ""])
         b.blank()
@@ -223,13 +300,13 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
                    e.get("dias"), e.get("meses"), e.get("anios"), e.get("anterior_colegiatura"),
                    e.get("cargo_ocupado"), e.get("cargo_bases_valido"), e.get("funciones_similares"),
                    e.get("cert_antes_culminar"), e.get("incluye_covid"), e.get("tipo_obra_valido"),
-                   e.get("observaciones")], fmts=m4)
+                   e.get("observaciones")], fmts=m4, verdicts=V4, backend_cols=BE4)
         t = prof.get("total", {})
         b.row(["", "", "", "", "", "", "", "", "", "", "TOTAL",
                t.get("dias"), t.get("meses"), t.get("anios"), "", "", "", "", "", "", "", ""],
-              bold=True, fmts=m4)
+              bold=True, fmts=m4, backend_cols={12, 13, 14})
         if prof.get("cumple"):
-            b.kv("¿EL PROFESIONAL CUMPLE?", prof["cumple"])
+            b.kv("¿EL PROFESIONAL CUMPLE?", prof["cumple"], verdict="pos")
         if prof.get("anios_adicionales"):
             b.kv("Años adicionales (Factor A):", prof["anios_adicionales"])
         b.blank()
