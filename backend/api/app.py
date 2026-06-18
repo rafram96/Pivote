@@ -328,11 +328,31 @@ def descargar_zip(job_id: str):
 
 # ── Salud de portales ────────────────────────────────────────────────────────
 
+_SALUD_CACHE: dict = {"ts": 0.0, "data": None}
+_SALUD_TTL = 60.0  # el panel sondea cada ~30s; cacheamos para no golpear los portales
+
+
 @app.get("/api/pivote/salud")
 def salud():
-    # La etapa real de scraping alimentará el diagnóstico (captcha_real /
-    # estructura_desconocida); por ahora reporta operativo.
-    return [
-        {"portal": "sunat", "ok": True, "diagnostico": None, "desde": None},
-        {"portal": "infoobras", "ok": True, "diagnostico": None, "desde": None},
-    ]
+    # En modo NO-real (tests/esqueleto) no hay portales que sondear → operativo sin red.
+    if os.getenv("PIVOTE_ETAPAS") != "real":
+        return [
+            {"portal": "sunat", "ok": True, "diagnostico": None, "desde": None},
+            {"portal": "infoobras", "ok": True, "diagnostico": None, "desde": None},
+        ]
+    import time
+    ahora = time.time()
+    if _SALUD_CACHE["data"] and ahora - _SALUD_CACHE["ts"] < _SALUD_TTL:
+        return _SALUD_CACHE["data"]
+    from scraping.infoobras import sondear as _sondear_infoobras
+    from scraping.sunat import sondear as _sondear_sunat
+    desde = datetime.now(timezone.utc).isoformat()
+    out = []
+    for portal, fn in (("sunat", _sondear_sunat), ("infoobras", _sondear_infoobras)):
+        try:
+            ok, diag = fn()
+        except Exception:  # noqa: BLE001 — /salud nunca debe romper
+            ok, diag = False, "error interno"
+        out.append({"portal": portal, "ok": ok, "diagnostico": diag, "desde": desde})
+    _SALUD_CACHE.update(ts=ahora, data=out)
+    return out

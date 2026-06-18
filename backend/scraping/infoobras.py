@@ -1652,3 +1652,17 @@ def buscar_obra_por_certificado(
         except Exception as e:
             logger.error("InfoObras: error descargando datos de ObraId %s: %s", mejor.obra_id, e)
             return None
+
+
+def sondear(timeout: float = 6.0) -> tuple[bool, Optional[str]]:
+    """Sondeo LIGERO de disponibilidad de InfoObras para /salud. Reusa el warmup
+    de session (que ya hace un GET a BASE_WEB) + un GET al mapa. Nunca lanza."""
+    try:
+        s = _crear_session()
+        try:
+            r = s.get(f"{BASE_WEB}/Mapa/Index", timeout=timeout)
+            return (True, None) if r.status_code < 400 else (False, f"HTTP {r.status_code}")
+        finally:
+            s.close()
+    except Exception:  # noqa: BLE001 — el warmup puede fallar si el portal cae
+        return False, "sin conexion"

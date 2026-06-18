@@ -773,6 +773,25 @@ def consultar_representantes(
             session.close()
 
 
+def sondear(timeout: float = 6.0) -> tuple[bool, Optional[str]]:
+    """Sondeo LIGERO de disponibilidad de SUNAT para el endpoint /salud. Hace un
+    solo GET a la página de consulta (NO una búsqueda real) y reporta
+    (ok, diagnostico). Nunca lanza: ante cualquier fallo devuelve (False, motivo)."""
+    # OJO: la página de consulta de SUNAT trae captcha POR DISEÑO (el scraper real
+    # lo sortea). Por eso el sondeo mide solo REACHABILITY (que cargue), NO corre
+    # diagnosticar_html_sunat — eso daría un falso "caído".
+    try:
+        session = _crear_session_sunat()
+        try:
+            r = session.get(f"{HOST}/cl-ti-itmrconsruc/FrameCriterioBusquedaWeb.jsp",
+                            timeout=timeout)
+            return (True, None) if r.status_code < 400 else (False, f"HTTP {r.status_code}")
+        finally:
+            session.close()
+    except Exception:  # noqa: BLE001 — sondeo no debe propagar
+        return False, "sin conexion"
+
+
 # ============================================================================
 # CLI util — `python -m src.scraping.sunat <RUC>`
 # ============================================================================

@@ -11,8 +11,8 @@ openpyxl>=3.1
 requests>=2.31
 rapidfuzz>=3.0          # fuzzy match razón social (sunat.py)
 
-# Cache SUNAT en PostgreSQL (backend/scraping/sunat_cache.py)
-psycopg2-binary>=2.9
+# Persistencia: hoy en ARCHIVOS (RepositorioArchivos). Cuando se cablee
+# PostgreSQL (repo + caché SUNAT) se re-agrega psycopg2-binary.
 
 # API HTTP (backend/api/)
 fastapi>=0.115
