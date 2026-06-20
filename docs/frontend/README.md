@@ -6,13 +6,17 @@
 > (Job, ResultadoEtapa, ItemRevision, Observacion, ProgresoJob) y
 > `backend/schemas/enriquecimiento.py`.
 
-## ⏳ Estado de implementación y alcance pendiente (2026-06-15)
+## ✅ Estado de implementación (actualizado 2026-06-19)
 
-> **El panel está SIN CONSTRUIR.** El backend ya expone casi toda la API que
-> necesita (ver tabla); lo que falta es el código Next.js que la consuma, en el
-> repo `Panel-InfoObras`. Esto es la **pieza grande pendiente del pivote** — el
-> backend produce Excel + ZIP correctos, pero hoy se operan por API/CLI, no por
-> una UI que un evaluador no técnico pueda usar.
+> **El panel YA ESTÁ CONSTRUIDO y cableado al backend real.** Vive en
+> `Panel-InfoObras` (Next.js 15 + React 19 + Tailwind), proxya `/api/pivote/*`
+> al backend vía `PIVOTE_API`, abre en **modo oscuro** por defecto, y los flujos
+> (concursos, expediente, detalle, revisión humana de las 3 vías, descargas
+> Excel/ZIP) están **probados end-to-end** contra el backend real.
+> Pendiente: portar el rediseño limpio (Stitch) pantalla por pantalla.
+>
+> La tabla de abajo es **histórica** (de cuando el panel estaba pendiente); hoy
+> esas pantallas existen y consumen los endpoints reales.
 
 **Backend listo vs. panel pendiente** (endpoints reales bajo `/api/pivote/…`):
 

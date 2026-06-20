@@ -3,13 +3,19 @@
 > Estado: **PLAN (aprobado para MVP)**. Decisiones tomadas con el cliente el
 > 2026-06-16. El backend ya expone TODO el API necesario; no hay frontend previo
 > que reusar (Alpamayo es solo backend Python).
+>
+> 🔄 **VIGENCIA (2026-06-19):** la decisión de **stack cambió** al implementar.
+> El panel se construyó en **Next.js 15** (no Vite), como repo separado
+> **`Panel-InfoObras`**, en su propio proceso y conectado al backend por proxy
+> `PIVOTE_API` (no "FastAPI sirve el build"). El resto del plan (audiencia,
+> alcance MVP, fase 2) sigue vigente. Estado real: ver [`README.md`](README.md).
 
 ## 0. Decisiones cerradas
 
 | Decisión | Valor |
 |---|---|
-| Stack | **React + Vite (SPA)** — la opción más interactiva |
-| Despliegue | El **propio FastAPI sirve el build** como estáticos (un solo proceso on-prem) |
+| Stack | **Next.js 15 + React 19 + Tailwind** — repo `Panel-InfoObras` *(se descartó Vite)* |
+| Despliegue | Panel en su **propio proceso** (Next), proxya `/api/pivote/*` al backend vía `PIVOTE_API` |
 | Audiencia | Manuel, **evaluador no técnico** → español, palabras de evaluador, sin jerga |
 | Alcance v1 | **MVP útil**: subir → estado → revisión humana → descargar |
 | Fase 2 | histórico filtrable + vistas de hojas embebidas + distinción Claude/backend |
