@@ -98,7 +98,7 @@ const CrossCheck = z.object({
 const Profesional = z.object({
   n_prof: z.number().int().min(1),
   cargo: z.string().min(1),
-  nombre: txt, folio_nombre: folioT, titulo: txt, folio_titulo: folioT,
+  nombre: txt, dni: txt, folio_nombre: folioT, titulo: txt, folio_titulo: folioT,
   profesion_valida: txt, colegiatura: txt,
   fecha_colegiatura: fecha,
   folio_colegiatura: folioT, certificaciones: txt,

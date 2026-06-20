@@ -203,7 +203,8 @@ class CrossCheck(_ModelLax):
 class Profesional(_ModelLax):
     n_prof: int = Field(ge=1)
     cargo: str = Field(min_length=1)
-    nombre: Optional[str] = None
+    nombre: Optional[str] = None        # SOLO el nombre limpio (sin DNI ni notas de OCR)
+    dni: Optional[str] = None           # SOLO dígitos; caveats → notas
     folio_nombre: FolioT = None
     titulo: Optional[str] = None
     folio_titulo: FolioT = None

@@ -52,6 +52,15 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
 7. **Dos folios**: `folio_colegiatura` (constancia de colegiatura) y
    `folio_nombre` (página donde la propuesta lo nombra). `fecha_colegiatura` en
    ISO; si es ilegible → `"POR VERIFICAR (motivo)"` + observación `ilegibilidad`.
+7b. **Datos LIMPIOS y SEPARADOS — NO metas varias cosas en un solo campo:**
+   - `nombre`: SOLO el nombre completo, **sin DNI, sin paréntesis, sin notas de OCR**.
+     Si el OCR distorsiona el nombre, escribe el nombre **correcto** (el que confirman
+     certificados/diplomas), no la versión distorsionada.
+   - `dni`: SOLO los dígitos del DNI. Si figura con 7 dígitos o hay inconsistencia
+     entre el Anexo 16 y un certificado, pon tu **mejor lectura** en `dni` y manda el
+     detalle a `notas`.
+   - `notas` (array): TODO caveat va aquí — distorsión de OCR, ilegibilidad, DNI
+     inconsistente "POR VERIFICAR en RENIEC", etc. **Nunca** dentro de `nombre` ni `dni`.
 8. **Certificaciones del profesional** (insumo Factor B): extrae **literal** en
    `certificaciones` cada certificado de gestión de proyectos u otro. Para un
    posible **PMP**, captura lo que el evaluador necesita para validarlo (NOTA 4):
@@ -91,9 +100,9 @@ inserta tu salida tal cual en `profesionales[]` del JSON espejo):
 === profesional_<n_prof>.json ===
 {
   _meta(subagente:"agent-propuesta-profesional", n_prof),
-  profesional: { n_prof, cargo, nombre, folio_nombre, titulo, folio_titulo,
+  profesional: { n_prof, cargo, nombre, dni, folio_nombre, titulo, folio_titulo,
                  colegiatura, fecha_colegiatura, folio_colegiatura,
-                 certificaciones, experiencia_total_declarada },
+                 certificaciones, experiencia_total_declarada, notas },
   experiencias: [ { n, entidad_emisora, ruc_emisor, proyecto, cui,
                     tipo_documento, nombre_emisor, cargo_emisor,
                     fecha_inicial, fecha_final, fecha_emision, folio,
