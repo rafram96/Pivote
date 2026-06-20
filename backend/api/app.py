@@ -195,7 +195,9 @@ def extraccion(job_id: str):
             "n_prof": p.get("n_prof"),
             "cargo": p.get("cargo"),
             "nombre": p.get("nombre"),
+            "dni": p.get("dni"),
             "colegiatura": p.get("colegiatura"),
+            "notas": p.get("notas") or [],
             "cumple": p.get("cumple"),
             "total": p.get("total") or {},
             "experiencias": [
