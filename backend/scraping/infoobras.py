@@ -903,6 +903,16 @@ def coincide_codigo(o: dict, codigo: str) -> bool:
     return any(str(o.get(c) or "").strip() == codigo for c in ("codSnip", "codUniqInv"))
 
 
+def _cod_obra(o: dict) -> int:
+    """Desempate DETERMINÍSTICO entre obras del mismo CUI: el orden que devuelve
+    el portal NO es estable entre corridas, así que se rompe por menor codigoObra
+    (cae a obraId, luego 0)."""
+    try:
+        return int(o.get("codigoObra") or o.get("obraId") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def seleccionar_obra(
     obras: list[dict],
     cert_inicio: Optional[date] = None,
@@ -933,18 +943,14 @@ def seleccionar_obra(
 
     if not (cert_inicio and cert_fin):
         finalizadas = [o for o in obras if "FINALIZAD" in _estado_obra(o)]
-        return (finalizadas or obras)[0]
+        # determinístico también sin fechas: menor codigoObra (el orden del
+        # portal no es estable entre corridas).
+        return min(finalizadas or obras, key=_cod_obra)
 
     def _fin(o: dict) -> int:
         return 1 if "FINALIZAD" in _estado_obra(o) else 0
 
-    def _cod(o: dict) -> int:
-        # desempate DETERMINÍSTICO: el orden que devuelve el portal no es estable
-        # entre corridas, así que se rompe el empate por menor codigoObra.
-        try:
-            return int(o.get("codigoObra") or o.get("obraId") or 0)
-        except (TypeError, ValueError):
-            return 0
+    _cod = _cod_obra  # mismo desempate determinístico (menor codigoObra)
 
     # P1 · obras con solape positivo: mayor solape, finalizada, menor codigoObra
     con_solape: list[tuple[dict, int]] = []

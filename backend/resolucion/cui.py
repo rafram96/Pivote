@@ -32,16 +32,15 @@ class PortalNoResponde(Exception):
     revisión con un motivo honesto en vez de degradar al fragmento genérico."""
 
 
-try:
-    from rapidfuzz import fuzz
+# rapidfuzz es dependencia DURA (requirements.txt). El fallback a difflib daba
+# scores distintos (token_set_ratio vs ratio), así que la resolución de CUI
+# variaba entre la laptop y el servidor — mejor fallar al importar que degradar
+# en silencio la selección de obras.
+from rapidfuzz import fuzz
 
-    def _sim(a: str, b: str) -> float:
-        return fuzz.token_set_ratio(a, b)
-except ImportError:  # degradación sin rapidfuzz
-    from difflib import SequenceMatcher
 
-    def _sim(a: str, b: str) -> float:
-        return SequenceMatcher(None, a, b).ratio() * 100
+def _sim(a: str, b: str) -> float:
+    return fuzz.token_set_ratio(a, b)
 
 
 # ── normalización y limpieza (idéntico al prototipo medido) ─────────────────

@@ -41,10 +41,9 @@ try:
 except ImportError:  # urllib3 muy viejo
     create_urllib3_context = None  # type: ignore
 
-try:
-    from rapidfuzz import fuzz
-except ImportError:  # rapidfuzz es opcional para los tests; en prod debe instalarse
-    fuzz = None  # type: ignore
+# rapidfuzz es dependencia DURA (requirements.txt): el cruce por razón social
+# debe puntuar igual en la laptop y en el servidor.
+from rapidfuzz import fuzz
 
 logger = logging.getLogger(__name__)
 
@@ -284,15 +283,11 @@ def score_match_empresa(declarado: str, sunat: str) -> int:
           70-84: match parcial (probablemente misma pero verificar)
           < 70: mismatch (probablemente empresas distintas o RUC declarado mal)
 
-    Si rapidfuzz no está disponible, devuelve 100 si los strings normalizados
-    son iguales y 0 si no — degradación elegante.
     """
     norm_decl = normalizar_nombre_empresa(declarado or "")
     norm_sunat = normalizar_nombre_empresa(sunat or "")
     if not norm_decl or not norm_sunat:
         return 0
-    if fuzz is None:
-        return 100 if norm_decl == norm_sunat else 0
     # token_sort_ratio maneja bien orden distinto y palabras extra
     return int(fuzz.token_sort_ratio(norm_decl, norm_sunat))
 

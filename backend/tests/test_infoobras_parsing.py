@@ -242,6 +242,16 @@ def test_seleccionar_obra_sin_fechas_cae_a_la_primera_finalizada():
     assert infoobras.seleccionar_obra([a, b])["codigoObra"] == 7
 
 
+def test_seleccionar_obra_sin_fechas_es_determinista_ante_el_orden():
+    # mismo conjunto en distinto orden → mismo resultado (menor codigoObra),
+    # porque el orden que devuelve el portal no es estable entre corridas.
+    a = _obra("Finalizado", codigoObra=7)
+    b = _obra("Finalizado", codigoObra=8)
+    c = _obra("Finalizado", codigoObra=5)
+    for orden in ([a, b, c], [c, a, b], [b, c, a]):
+        assert infoobras.seleccionar_obra(orden)["codigoObra"] == 5
+
+
 def test_seleccionar_obra_solape_usa_valorizaciones_no_cabecera():
     # caso 133630: la cabecera de la obra A termina antes del certificado, pero
     # sus valorizaciones llegan hasta 2016-07 → es la que realmente solapa.
