@@ -381,17 +381,36 @@ def _ruta_segura(s: str) -> str:
     return s or "(sin nombre)"
 
 
+def _motivo_sin_docs(via: Optional[str], cui: Optional[str]) -> str:
+    """Razón legible para SIN_DOCUMENTOS.txt según la vía de resolución del backend.
+    NOMBRE/CUI_TEXTO/RUC/PROBABLE/MANUAL = resuelto · NA = no aplica ·
+    NO_EXISTE = no está en InfoObras · None = pendiente."""
+    v = (via or "").upper()
+    if v == "NA":
+        return "No aplica: la experiencia no es de obra de salud (sin cruce InfoObras)."
+    if v == "NO_EXISTE":
+        return "Obra no encontrada en InfoObras (marcada por el evaluador)."
+    if cui:
+        return (f"CUI {cui} resuelto (vía {via or '—'}); sus documentos no se "
+                f"incluyeron en esta descarga.")
+    return "Pendiente de resolución de CUI (sin candidato confirmado)."
+
+
 def construir_zip_infoobras(
     espejo: dict,
     descargas: dict[tuple[int, int], Path],
     salida: Path,
+    enriquecimiento: Optional[dict] = None,
 ) -> Path:
     """Arma el ZIP del análisis: Proyecto → Profesional → Experiencia → archivos.
 
-    `descargas`: {(n_prof, n_exp): directorio con los documentos descargados de
-    la obra de esa experiencia}. Las experiencias sin entrada (obra sin CUI,
-    fuera de InfoObras, o descarga fallida) llevan SIN_DOCUMENTOS.txt.
+    `descargas`: {(n_prof, n_exp): directorio con los documentos descargados}.
+    Las experiencias sin entrada llevan SIN_DOCUMENTOS.txt con el motivo REAL
+    (del enriquecimiento: CUI resuelto sin descarga, no aplica, no existe, o
+    pendiente). `enriquecimiento`: {"n_prof:n_exp": {cui, via, ...}} — la verdad
+    del backend (sin ella, cae al `cui` del espejo, que puede estar incompleto).
     """
+    enr = enriquecimiento or {}
     raiz = _ruta_segura(espejo.get("_meta", {}).get("concurso") or "concurso")
     indice: list[str] = [f"ZIP InfoObras · {raiz}",
                          f"Postor: {espejo.get('_meta', {}).get('postor') or '—'}", ""]
@@ -416,17 +435,15 @@ def construir_zip_infoobras(
                         zf.write(p, f"{base}/{partes}")
                     indice.append(f"[{n_prof:02d}.{n_exp}] {nivel3}: {len(archivos)} archivo(s)")
                 else:
-                    motivo = (
-                        "Obra sin CUI resuelto o fuera de InfoObras "
-                        "(ESSALUD/privada), o descarga no disponible."
-                    )
-                    cui = e.get("cui")
+                    info = enr.get(f"{n_prof}:{n_exp}") or {}
+                    cui = info.get("cui") or e.get("cui")
+                    motivo = _motivo_sin_docs(info.get("via"), cui)
                     zf.writestr(
                         f"{base}/SIN_DOCUMENTOS.txt",
                         f"Sin documentos descargados para esta experiencia.\n"
                         f"CUI: {cui or '(no resuelto)'}\nMotivo: {motivo}\n",
                     )
-                    indice.append(f"[{n_prof:02d}.{n_exp}] {nivel3}: SIN DOCUMENTOS")
+                    indice.append(f"[{n_prof:02d}.{n_exp}] {nivel3}: SIN DOCUMENTOS — {motivo}")
 
         zf.writestr(f"{raiz}/indice.txt", "\n".join(indice) + "\n")
     return salida

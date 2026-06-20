@@ -319,7 +319,8 @@ def descargar_zip(job_id: str):
                     descargas[(int(np_), int(ne))] = sub
                 except ValueError:
                     continue
-        construir_zip_infoobras(espejo, descargas, ruta)
+        enr = repo.cargar_enriquecimiento(job_id) or {}
+        construir_zip_infoobras(espejo, descargas, ruta, enriquecimiento=enr)
         job.zip_infoobras = f"/api/pivote/jobs/{job_id}/zip"
         repo.guardar(job)
     return FileResponse(ruta, media_type="application/zip",
