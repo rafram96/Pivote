@@ -10,7 +10,7 @@ Uso:
     ../venv/Scripts/python.exe scripts/correr_demo.py <espejo.json> ["Nombre concurso"]
 Env:
     PIVOTE_DATA_DIR       destino (def: datos_pivote)
-    PIVOTE_MAX_DESCARGAS  nº de obras cuyos documentos se descargan (def: 2)
+    PIVOTE_MAX_DESCARGAS  sin definir = baja TODO · 0 = ninguna · N = tope (pruebas)
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from orquestador import Motor, RepositorioArchivos, etapas_reales  # noqa: E402
 from schemas import pipeline  # noqa: E402
 
-os.environ.setdefault("PIVOTE_MAX_DESCARGAS", "2")
+# Sin tope por defecto (baja todo). Para una demo rápida: PIVOTE_MAX_DESCARGAS=2.
 
 
 def main() -> int:

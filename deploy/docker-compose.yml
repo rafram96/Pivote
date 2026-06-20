@@ -16,7 +16,7 @@ services:
     image: infoobras-backend
     environment:
       PIVOTE_ETAPAS: ${PIVOTE_ETAPAS:-real}        # real = cruces SUNAT/InfoObras
-      PIVOTE_MAX_DESCARGAS: ${PIVOTE_MAX_DESCARGAS:-2}  # nº de obras que bajan ZIP
+      PIVOTE_MAX_DESCARGAS: ${PIVOTE_MAX_DESCARGAS:-}  # vacío = baja TODO; N = tope solo en pruebas
       PIVOTE_DATA_DIR: /datos
       TZ: America/Lima
     volumes:

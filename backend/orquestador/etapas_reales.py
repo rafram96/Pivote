@@ -225,7 +225,10 @@ class EtapaInfoObrasReal:
         self._fetcher = fetcher
         self.dir_descargas = dir_descargas
         self._descargar = descargar
-        self.max_descargas = int(os.getenv("PIVOTE_MAX_DESCARGAS", "0"))
+        # Sin definir → SIN LÍMITE (descarga TODOS los documentos necesarios).
+        # 0 = ninguna (solo transporte). N>0 = tope (solo para acotar pruebas).
+        _raw = os.getenv("PIVOTE_MAX_DESCARGAS")
+        self.max_descargas = None if _raw is None or not _raw.strip() else int(_raw)
 
     def _fetch(self, cui: str, cert_ini=None, cert_fin=None, obra_id=None):
         if self._fetcher:
@@ -359,8 +362,9 @@ class EtapaInfoObrasReal:
                     ))
                     cont["rev"] += 1
 
-            # descarga de documentos (acotada para la demo)
-            if (self.dir_descargas and cont["descargadas"] < self.max_descargas
+            # descarga de documentos (sin límite por defecto; max_descargas solo acota pruebas)
+            if (self.dir_descargas
+                    and (self.max_descargas is None or cont["descargadas"] < self.max_descargas)
                     and getattr(obra, "obra_id", None)):
                 destino = self.dir_descargas / f"{ctx.job.job_id}.descargas" / f"P{np_}_E{ne}"
                 try:

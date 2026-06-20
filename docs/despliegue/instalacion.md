@@ -108,7 +108,7 @@ Sube el análisis al backend. Necesita Node y apuntar al servidor:
 | Variable | Default | Qué hace |
 |---|---|---|
 | `PIVOTE_ETAPAS` | `real` | `real` = cruces SUNAT/InfoObras en vivo · `esqueleto` = stubs sin red |
-| `PIVOTE_MAX_DESCARGAS` | `2` | nº de obras que bajan documentos al ZIP (0 = sin ZIP) |
+| `PIVOTE_MAX_DESCARGAS` | _(sin definir)_ | sin definir = baja **todos** los documentos · `0` = ninguno · `N` = tope (solo pruebas) |
 | `PIVOTE_DATA_DIR` | `/datos` | carpeta de datos (montada como volumen) |
 | `INFOOBRAS_*`, `SUNAT_*` | (ver `Pivote/.env.example`) | reintentos/throttle de scraping |
 

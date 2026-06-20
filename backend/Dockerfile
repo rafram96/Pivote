@@ -24,8 +24,8 @@ WORKDIR /app/backend
 
 # Datos (jobs/espejos/entregables) en un volumen; modo real por defecto.
 ENV PIVOTE_DATA_DIR=/datos \
-    PIVOTE_ETAPAS=real \
-    PIVOTE_MAX_DESCARGAS=2
+    PIVOTE_ETAPAS=real
+# PIVOTE_MAX_DESCARGAS sin definir → baja TODOS los documentos al ZIP.
 
 EXPOSE 8001
 
