@@ -399,8 +399,11 @@ def _extraer_datos_ejecucion(session: requests.Session, obra_id: int) -> dict[st
             r = session.get(url, params={"ObraId": obra_id}, timeout=30)
             r.raise_for_status()
             variables = _parse_js_vars(r.text)
-            # las modificaciones de plazo van como tabla HTML, no como var JS
+            # modificaciones de plazo y contratista ejecutor van como tabla HTML,
+            # no como var JS (lModificacionPlazo/lContratista vacíos en plantilla nueva)
             variables["_modificaciones_plazo"] = _parsear_modificaciones_html(r.text)
+            variables["_contratistas_html"] = _parsear_contratistas_html(r.text)
+            variables["_supervisores_html"] = _parsear_supervisores_html(r.text)
             return variables
         except requests.RequestException as e:
             ultimo_err = e
@@ -630,6 +633,64 @@ def _parsear_modificaciones_html(html_txt: str) -> list[ModificacionPlazoInfo]:
             fecha_aprobacion=_parse_fecha_ddmmyyyy(txt[5]),
             fecha_fin=_parse_fecha_ddmmyyyy(txt[6]),
         ))
+    return out
+
+
+def _parsear_contratistas_html(html_txt: str) -> list[ContratistaInfo]:
+    """El contratista ejecutor tampoco viene como var JS en la plantilla nueva —
+    viene como TABLA HTML en DatosEjecucion (sección "Representante de obra").
+    7 columnas: N° · tipo empresa · RUC · razón social · monto · fecha inicio ·
+    fecha fin. Se aíslan las filas cuya 3ª celda es un RUC de 11 dígitos."""
+    out: list[ContratistaInfo] = []
+    for tr in _RE_TR.findall(html_txt or ""):
+        celdas = _RE_TD.findall(tr)
+        if len(celdas) != 7:
+            continue
+        txt = [_unescape(_RE_TAGS.sub(" ", c)).strip() for c in celdas]
+        if not re.search(r"\b\d{11}\b", txt[2]):
+            continue
+        monto = re.sub(r"[^\d.]", "", txt[4])
+        out.append(ContratistaInfo(
+            tipo_empresa=txt[1],
+            ruc=txt[2],
+            nombre_empresa=txt[3],
+            monto_soles=float(monto) if monto else None,
+            numero_contrato=None,
+            fecha_contrato=_parse_fecha_ddmmyyyy(txt[5]),
+            fecha_fin_contrato=_parse_fecha_ddmmyyyy(txt[6]),
+        ))
+    return out
+
+
+def _parsear_supervisores_html(html_txt: str) -> list[dict]:
+    """Supervisores/inspectores de la sección "Representante de obra" de
+    DatosEjecucion (tabla de 9 columnas): N° · tipo · tipo persona · documento ·
+    razón social · monto · fecha inicio · fecha fin · documento designación.
+    Aporta el MONTO y el documento de designación que `lSupervisor`
+    (DatosPreparacion) no trae. Devuelve dicts (no dataclass) para fusionar."""
+    out: list[dict] = []
+    for tr in _RE_TR.findall(html_txt or ""):
+        celdas = _RE_TD.findall(tr)
+        if len(celdas) != 9:
+            continue
+        txt = [_unescape(_RE_TAGS.sub(" ", c)).strip() for c in celdas]
+        if not re.search(r"supervisor|inspector", txt[1], re.I):
+            continue
+        monto = re.sub(r"[^\d.]", "", txt[5])
+        # documento de designación: link "Ver documento" si existe, si no "-"
+        m = (re.search(r'(?:href|onclick)\s*=\s*["\']([^"\']*(?:srvDownload|ViewPDF|\.pdf|https?)[^"\']*)',
+                       celdas[8], re.I)
+             or re.search(r'(https?://[^"\'\s<>]+)', celdas[8]))
+        out.append({
+            "tipo": txt[1] or None,
+            "tipo_persona": txt[2] or None,
+            "documento": txt[3] or None,
+            "razon_social": txt[4] or None,
+            "monto_soles": float(monto) if monto else None,
+            "fecha_inicio": _parse_fecha_ddmmyyyy(txt[6]),
+            "fecha_fin": _parse_fecha_ddmmyyyy(txt[7]),
+            "doc_designacion": m.group(1) if m else None,
+        })
     return out
 
 

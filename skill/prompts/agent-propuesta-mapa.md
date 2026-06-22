@@ -19,7 +19,9 @@ lista) de páginas donde aparece su apellido — Anexo 16 / declaración de
 "Calificaciones y Experiencia", sus certificados, su constancia de colegiatura y
 su cuadro resumen. Para cada profesional:
 - `n_prof` (correlativo en orden del documento), `cargo` al que postula (si es
-  legible aquí), `apellido_clave` usado para el match,
+  legible aquí) — **etiqueta literal de la propuesta, SIN anexarle la
+  correspondencia con las bases** (esa la pone `agent-evaluador` en campos
+  propios) —, `apellido_clave` usado para el match,
 - `folios_bundle`: rango/lista de folios de ese profesional,
 - `folio_colegiatura`, `folio_nombre` (página donde la propuesta lo nombra),
 - `folio_cuadro_resumen` y, si lo declara, su `experiencia_total_declarada`

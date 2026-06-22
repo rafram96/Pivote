@@ -26,7 +26,7 @@ from schemas import pipeline
 from validacion import verificar_espejo
 from resolucion import ConsultaInfoObras, resolver_con_dedup
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
-from entregables import generar_excel_final
+from entregables import desempaquetar_enriquecimiento, generar_excel_final, mapear_certificados
 from .etapas import Contexto, EtapaIngesta, EtapaStub
 
 logger = logging.getLogger(__name__)
@@ -157,7 +157,7 @@ class EtapaResolucionCuiReal:
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
         consulta = self._consulta or ConsultaInfoObras()
-        ok = rev = na = 0
+        ok = rev = 0
         obs: list[pipeline.Observacion] = []
 
         pares = list(ctx.items_experiencia())
@@ -188,11 +188,12 @@ class EtapaResolucionCuiReal:
                         codigo="CUI", severidad=pipeline.Severidad.ADVERTENCIA,
                         mensaje=f"obra identificada como probable — {r['decision']}",
                         origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
-            elif r["estado"] == "na":
-                ctx.enriquecimiento[k] = {"cui": None, "via": "NA"}
-                na += 1
-            else:
+            else:  # 'revision' o 'na': NADA se descarta en silencio — todo CUI no
+                   # resuelto surge en "Por confirmar" (elegir candidato, pegar el
+                   # CUI a mano, o descartar la experiencia).
                 rev += 1
+                if r["estado"] == "na":                       # tipo fuera del alcance
+                    ctx.enriquecimiento[k] = {"cui": None, "via": "NA"}
                 ya = any(it.n_prof == np_ and it.n_exp == ne and not it.resuelto
                          for it in ctx.job.items_revision)
                 if not ya:
@@ -211,7 +212,7 @@ class EtapaResolucionCuiReal:
 
         total = len(pares)
         estado = EE.OK_CON_REVISION if rev else EE.OK
-        return _res(self.nombre, estado, _met(total, ok + na, rev))
+        return _res(self.nombre, estado, _met(total, ok, rev))
 
 
 # ── 3a · Consulta a InfoObras (paralizaciones + descargas) ───────────────────
@@ -374,6 +375,15 @@ class EtapaInfoObrasReal:
                         descargar = descargar_documentos_obra_por_hito
                     descargar(obra.obra_id, destino)
                     cont["descargadas"] += 1
+                    # informes de control (Contraloría), filtrados al periodo de la
+                    # experiencia — solo en modo real (los tests inyectan _descargar).
+                    if self._descargar is None:
+                        try:
+                            from entregables.zip_infoobras import descargar_informes_control
+                            descargar_informes_control(obra.obra_id, destino,
+                                                       fecha_ini=cert_ini, fecha_fin=cert_fin)
+                        except Exception as ex:  # noqa: BLE001
+                            logger.warning("informes control obra %s: %r", obra.obra_id, ex)
                 except Exception as ex:  # noqa: BLE001
                     logger.warning("descarga obra %s: %r", cui, ex)
 
@@ -733,24 +743,7 @@ class EtapaExcelReal:
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
         # pasa los periodos CON su tipo (paralizado / sin valorización) para que
         # el Excel los muestre diferenciados; el generador normaliza las fechas.
-        paral: dict[tuple[int, int], list] = {}
-        cuis: dict[tuple[int, int], str] = {}
-        fichas: dict[tuple[int, int], dict] = {}
-        sunat: dict[tuple[int, int], dict] = {}
-        for k, enr in ctx.enriquecimiento.items():
-            if ":" not in k or k.startswith("prof:"):
-                continue
-            np_, ne = (int(x) for x in k.split(":"))
-            if enr.get("paralizaciones"):
-                paral[(np_, ne)] = enr["paralizaciones"]
-            if enr.get("cui"):
-                cuis[(np_, ne)] = enr["cui"]
-            if enr.get("sunat"):
-                sunat[(np_, ne)] = enr["sunat"]
-            if enr.get("obra_ficha") or enr.get("valorizaciones"):
-                fichas[(np_, ne)] = {**(enr.get("obra_ficha") or {}),
-                                     "valorizaciones": enr.get("valorizaciones") or [],
-                                     "modificaciones_plazo": enr.get("modificaciones_plazo") or []}
+        paral, cuis, fichas, sunat = desempaquetar_enriquecimiento(ctx.enriquecimiento)
         # experiencias en revisión → su motivo, para que la hoja del profesional
         # muestre "EN REVISIÓN" + la razón en vez de una columna vacía.
         revisiones: dict[tuple[int, int], str] = {}
@@ -760,7 +753,9 @@ class EtapaExcelReal:
         ruta = self.dir_salida / f"{ctx.job.job_id}.final.xlsx"
         if ruta.exists():
             ruta.unlink()  # regenerar (re-disparo tras revisión humana)
-        generar_excel_final(ctx.espejo, ruta, paral, cuis, fichas, revisiones, sunat)
+        # certificados de las experiencias (imágenes) que subió la skill, si los hay
+        certs = mapear_certificados(self.dir_salida, ctx.job.job_id)
+        generar_excel_final(ctx.espejo, ruta, paral, cuis, fichas, revisiones, sunat, certs)
         ctx.job.excel_final = f"/api/pivote/jobs/{ctx.job.job_id}/excel"
         ctx.job.zip_infoobras = f"/api/pivote/jobs/{ctx.job.job_id}/zip"
         zip_previo = self.dir_salida / f"{ctx.job.job_id}.infoobras.zip"

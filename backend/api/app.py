@@ -31,7 +31,7 @@ from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadF
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
-from entregables import construir_zip_infoobras, generar_excel_final
+from entregables import construir_zip_infoobras, generar_excel_final, mapear_certificados
 from orquestador import Motor, RepositorioArchivos, etapas_esqueleto, etapas_reales
 from schemas import pipeline
 from schemas.espejo import JsonEspejo
@@ -129,6 +129,29 @@ def ver_concurso(concurso_id: str):
 
 # ── Análisis (ingesta + pipeline) ────────────────────────────────────────────
 
+def _guardar_certificados(job_id: str, contenido: bytes) -> int:
+    """Descomprime el ZIP de certificados de la skill a `{job}.certs/` — solo PDFs
+    `P{n}_E{m}.pdf`, ignorando rutas (anti zip-slip). Devuelve cuántos guardó."""
+    import io
+    import os
+    import zipfile
+    if not contenido:
+        return 0
+    cdir = DATA_DIR / f"{job_id}.certs"
+    cdir.mkdir(parents=True, exist_ok=True)
+    n = 0
+    try:
+        with zipfile.ZipFile(io.BytesIO(contenido)) as z:
+            for nombre in z.namelist():
+                base = os.path.basename(nombre)
+                if base.lower().endswith(".pdf") and base.upper().startswith("P"):
+                    (cdir / base).write_bytes(z.read(nombre))
+                    n += 1
+    except zipfile.BadZipFile:
+        pass
+    return n
+
+
 @app.post("/api/pivote/analizar", status_code=201)
 async def analizar(
     tareas: BackgroundTasks,
@@ -136,6 +159,7 @@ async def analizar(
     espejo: UploadFile = File(...),
     excel: UploadFile = File(...),
     origen: str = Form("dropzone"),
+    certificados: UploadFile | None = File(None),
 ):
     if repo.cargar_concurso(concurso_id) is None:
         raise HTTPException(404, "concurso no existe")
@@ -159,6 +183,9 @@ async def analizar(
     repo.guardar(job)
     # guardar el Excel de Claude tal cual llegó (referencia/auditoría)
     (DATA_DIR / f"{job.job_id}.claude.xlsx").write_bytes(await excel.read())
+    # certificados de las experiencias (ZIP de PDFs que recortó la skill) → {job}.certs/
+    if certificados is not None:
+        _guardar_certificados(job.job_id, await certificados.read())
 
     tareas.add_task(motor.correr, job.job_id)
     return {"job_id": job.job_id}
@@ -189,24 +216,39 @@ def resolver_revision(job_id: str, body: dict):
 def extraccion(job_id: str):
     _job_o_404(job_id)
     espejo = _espejo_o_404(job_id)
+    enr = repo.cargar_enriquecimiento(job_id) or {}
     profesionales = []
     for p in espejo.get("profesionales", []):
+        np_ = p.get("n_prof")
+        experiencias = []
+        for e in p.get("experiencias", []):
+            d = {k: e.get(k) for k in (
+                "n", "proyecto", "entidad_emisora", "cargo_ocupado",
+                "fecha_inicial", "fecha_final", "dias", "cui",
+                "incluye_covid", "traslape", "folio")}
+            # enriquecimiento del backend: CUI resuelto + quién ejecutó/supervisó
+            # la obra en InfoObras (Representante de obra) + verificación SUNAT.
+            ev = enr.get(f"{np_}:{e.get('n')}")
+            if isinstance(ev, dict):
+                obra = ev.get("obra") or {}
+                d["cui_resuelto"] = obra.get("cui") or ev.get("cui")
+                d["obra_nombre"] = ev.get("obra_nombre") or obra.get("nombre_obra")
+                d["via_resolucion"] = ev.get("via")
+                d["representante_obra"] = ev.get("representante_obra")
+                d["sunat"] = ev.get("sunat")
+            experiencias.append(d)
         profesionales.append({
-            "n_prof": p.get("n_prof"),
+            "n_prof": np_,
             "cargo": p.get("cargo"),
+            "cargo_bases_num": p.get("cargo_bases_num"),
+            "cargo_bases_nombre": p.get("cargo_bases_nombre"),
             "nombre": p.get("nombre"),
             "dni": p.get("dni"),
             "colegiatura": p.get("colegiatura"),
             "notas": p.get("notas") or [],
             "cumple": p.get("cumple"),
             "total": p.get("total") or {},
-            "experiencias": [
-                {k: e.get(k) for k in (
-                    "n", "proyecto", "entidad_emisora", "cargo_ocupado",
-                    "fecha_inicial", "fecha_final", "dias", "cui",
-                    "incluye_covid", "traslape", "folio")}
-                for e in p.get("experiencias", [])
-            ],
+            "experiencias": experiencias,
         })
     return {"profesionales": profesionales}
 
@@ -234,18 +276,29 @@ def resumen(job_id: str):
         veredictos.append({
             "n_prof": np_,
             "cargo": p.get("cargo"),
+            "cargo_bases_num": p.get("cargo_bases_num"),
+            "cargo_bases_nombre": p.get("cargo_bases_nombre"),
             "nombre": p.get("nombre"),
             "cumple_claude": p.get("cumple") or "(sin veredicto en el espejo)",
             "anios_brutos": total.get("anios") or 0,
             "cumple_backend": d.get("cumple_backend"),
             "anios_efectivos": d.get("anios_efectivos"),
+            "minimo_anios": d.get("minimo_anios"),
             "motivo_backend": motivo,
             "fuente": "InfoObras" if d.get("dias_paralizados") else ("recalculo" if d else None),
         })
 
     alertas = []
+    # la misma observación suele venir en job.observaciones Y en la etapa que la
+    # emitió → deduplicar por (severidad, código, mensaje, referencia) para no
+    # mostrar la misma alerta dos veces.
     todas = list(job.observaciones) + [o for e in job.etapas for o in e.observaciones]
+    vistas: set = set()
     for i, o in enumerate(todas):
+        clave = (o.severidad.value, o.codigo, o.mensaje, o.referencia)
+        if clave in vistas:
+            continue
+        vistas.add(clave)
         aid = f"al-{i}"
         alertas.append({
             "id": aid,
@@ -259,7 +312,8 @@ def resumen(job_id: str):
 
     re_ = espejo.get("resumen_evaluacion") or {}
     factores = [
-        {"factor": f.get("factor"), "puntaje": f.get("puntaje"), "detalle": f.get("detalle")}
+        {"factor": f.get("factor"), "criterio": f.get("criterio"),
+         "puntaje": f.get("puntaje"), "detalle": f.get("detalle")}
         for f in re_.get("factores", [])
     ]
     return {
@@ -296,7 +350,8 @@ def descargar_excel(job_id: str):
     if not ruta.exists():
         # Las paralizaciones reales las inyecta la etapa de InfoObras; sin
         # ellas el Excel sale con brutos = efectivos (y se regenera después).
-        generar_excel_final(espejo, ruta)
+        generar_excel_final(espejo, ruta,
+                            certificados=mapear_certificados(DATA_DIR, job_id))
         job.excel_final = f"/api/pivote/jobs/{job_id}/excel"
         repo.guardar(job)
     return FileResponse(

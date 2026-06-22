@@ -16,6 +16,7 @@ Dos piezas:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -23,6 +24,7 @@ import random
 import re
 import time
 import zipfile
+from datetime import date
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -237,9 +239,9 @@ def _descargar_a_carpeta(
                     raise OSError(f"HTTP {resp.status_code}")   # transitorio → reintentar
                 if resp.status_code != 200:
                     return False                                 # 4xx → no disponible
-                carpeta.mkdir(parents=True, exist_ok=True)
+                os.makedirs(_wlong(carpeta), exist_ok=True)
                 n = 0
-                with open(tmp, "wb") as f:
+                with open(_wlong(tmp), "wb") as f:
                     for chunk in resp.iter_content(chunk_size=1 << 16):
                         if chunk:
                             f.write(chunk)
@@ -249,11 +251,11 @@ def _descargar_a_carpeta(
                     raise OSError(f"descarga incompleta {n}/{cl} bytes")
                 if n == 0:
                     raise OSError("respuesta vacía")
-            tmp.replace(destino)
+            os.replace(_wlong(tmp), _wlong(destino))
             return True
         except (requests.RequestException, OSError) as e:
             try:
-                tmp.unlink(missing_ok=True)
+                os.remove(_wlong(tmp))
             except OSError:
                 pass
             if intento < intentos - 1:
@@ -339,10 +341,10 @@ def descargar_documentos_obra_por_hito(
     timeout: float = 90.0,
 ) -> dict[str, Any]:
     """Como `descargar_documentos_obra`, pero los documentos de cada valorización
-    van a una carpeta POR HITO:  destino/Valorizaciones/<AAAA-MM MES>/<documento>,
-    y el archivo se PREFIJA con la fecha del hito ("<AAAA-MM MES> · <nombre>") para
-    identificarse aunque se saque de su carpeta. Los documentos obra-level
-    (expediente, cronograma, …) van a su sección, sin prefijo.
+    van a una carpeta POR HITO:  destino/Valorizaciones/<AAAA-MM MES>/<documento>.
+    Los nombres se sanitizan y CAPAN (`_ruta_segura`) para no reventar el límite de
+    260 de Windows (las obras de educación traen nombres larguísimos). Los
+    documentos obra-level (expediente, cronograma, …) van a su sección.
     Devuelve {descargados, fallidos, inventario}. NO corre en tests offline."""
     sess = session or requests.Session()
     sess.headers.setdefault(
@@ -364,7 +366,7 @@ def descargar_documentos_obra_por_hito(
         etiqueta = _etiqueta_hito(av["anio"], av["mes"])
         carpeta = destino / "Valorizaciones" / _ruta_segura(etiqueta)
         for it in av["documentos"] + (av["imagenes"] if incluir_imagenes else []):
-            _bajar(it, carpeta, prefijo=f"{etiqueta} · ")
+            _bajar(it, carpeta)   # sin prefijo del mes: ya es la carpeta (acorta la ruta)
     # documentos obra-level → su sección (sin prefijo: no pertenecen a un mes)
     for it in inv["obra"]["documentos"] + (inv["obra"]["imagenes"] if incluir_imagenes else []):
         _bajar(it, destino / _ruta_segura(it["seccion"]))
@@ -372,13 +374,187 @@ def descargar_documentos_obra_por_hito(
     return {"descargados": cont["ok"], "fallidos": cont["fail"], "inventario": inv}
 
 
+# ── Informes de control (Contraloría) ────────────────────────────────────────
+# Cada obra tiene "informes de control" (auditorías de la Contraloría) en una
+# página aparte (/Mapa/InformeControl?obraId=…), embebidos en un JSON
+# `var lInformeControl`. Descargamos SOLO los relevantes al periodo de la
+# experiencia: un informe de 2019 no aporta a una experiencia que terminó en
+# 2018. El PDF principal es TIPOARCHIVO=IS (campo RutaInforme).
+INFORME_CONTROL = BASE + "/Mapa/InformeControl"
+
+
+def _parse_fecha_informe(s: Optional[str]) -> Optional[date]:
+    """'11/04/2018' → date. None si no parsea."""
+    m = re.match(r"\s*(\d{2})/(\d{2})/(\d{4})", str(s or ""))
+    if not m:
+        return None
+    try:
+        return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    except ValueError:
+        return None
+
+
+def _anio_informe(inf: dict) -> Optional[int]:
+    a = str(inf.get("Anio") or "").strip()
+    if a.isdigit():
+        return int(a)
+    fe = _parse_fecha_informe(inf.get("FechaEmision"))
+    return fe.year if fe else None
+
+
+def obtener_informes_control(
+    sess: requests.Session, obra_id: int | str, *, timeout: float = 60.0,
+    intentos: int = _DL_RETRIES,
+) -> list[dict]:
+    """Lista los informes de control de una obra (parsea `var lInformeControl`).
+    Cada item: {Codigo, Anio, NroInforme, TituloInforme, TipoServicio,
+    FechaEmision, FechaPublicacion, RutaInforme, RutaPublicacion}. [] si no hay."""
+    ultima: Optional[Exception] = None
+    for intento in range(max(1, intentos)):
+        try:
+            r = sess.get(INFORME_CONTROL, params={"obraId": obra_id}, timeout=timeout)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            ultima = e
+        else:
+            if r.status_code == 200:
+                m = re.search(r"var\s+lInformeControl\s*=\s*(\[.*?\])\s*;", r.text, re.S)
+                if not m:
+                    return []
+                try:
+                    return json.loads(m.group(1))
+                except json.JSONDecodeError:
+                    logger.warning("InfoObras: lInformeControl no parseable (obra %s)", obra_id)
+                    return []
+            if r.status_code < 500:
+                return []   # 4xx → no hay página de informes
+            ultima = requests.HTTPError(f"HTTP {r.status_code}")
+        if intento < intentos - 1:
+            time.sleep(_DL_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.5))
+    logger.warning("InfoObras informes obra %s: %s", obra_id, ultima)
+    return []
+
+
+def informes_relevantes(
+    informes: list[dict], fecha_ini: Optional[date], fecha_fin: Optional[date],
+) -> list[dict]:
+    """Filtra los informes cuyo AÑO cae dentro del periodo de la experiencia
+    (inclusive): exp 2016–2018 + informes 2018–2022 → solo el de 2018. Sin periodo
+    conocido, los devuelve todos (mejor incluir que perder un sustento)."""
+    a_ini = fecha_ini.year if fecha_ini else None
+    a_fin = fecha_fin.year if fecha_fin else None
+    if a_ini is None or a_fin is None:
+        return list(informes)
+    lo, hi = min(a_ini, a_fin), max(a_ini, a_fin)
+    out = []
+    for inf in informes:
+        a = _anio_informe(inf)
+        if a is None or lo <= a <= hi:   # sin año legible → incluir por las dudas
+            out.append(inf)
+    return out
+
+
+def _descargar_url(sess: requests.Session, url: str, destino: Path, *,
+                   timeout: float, intentos: int = _DL_RETRIES) -> bool:
+    """Descarga directa de una URL (PDF de Contraloría) con streaming + reintentos."""
+    destino = Path(destino)
+    tmp = destino.with_name(destino.name + ".part")
+    for intento in range(max(1, intentos)):
+        try:
+            with sess.get(url, timeout=timeout, stream=True) as resp:
+                if resp.status_code >= 500:
+                    raise OSError(f"HTTP {resp.status_code}")
+                if resp.status_code != 200:
+                    return False
+                os.makedirs(_wlong(destino.parent), exist_ok=True)
+                n = 0
+                with open(_wlong(tmp), "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=1 << 16):
+                        if chunk:
+                            f.write(chunk)
+                            n += len(chunk)
+                if n == 0:
+                    raise OSError("respuesta vacía")
+            os.replace(_wlong(tmp), _wlong(destino))
+            return True
+        except (requests.RequestException, OSError) as e:
+            try:
+                os.remove(_wlong(tmp))
+            except OSError:
+                pass
+            if intento < intentos - 1:
+                time.sleep(_DL_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.5))
+            else:
+                logger.warning("InfoObras informe %s falló: %s", url, e)
+    return False
+
+
+def descargar_informes_control(
+    obra_id: int | str, destino: Path, *, fecha_ini: Optional[date] = None,
+    fecha_fin: Optional[date] = None, session: Optional[requests.Session] = None,
+    timeout: float = 60.0,
+) -> dict[str, int]:
+    """Descarga a `destino/Informes de control/` los informes de control de la
+    obra RELEVANTES al periodo [fecha_ini, fecha_fin] de la experiencia. Devuelve
+    {encontrados, relevantes, descargados}. NO corre en tests offline."""
+    sess = session or requests.Session()
+    sess.headers.setdefault(
+        "User-Agent",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+    )
+    informes = obtener_informes_control(sess, obra_id, timeout=timeout)
+    rel = informes_relevantes(informes, fecha_ini, fecha_fin)
+    carpeta = Path(destino) / "Informes de control"
+    ok = 0
+    for inf in rel:
+        url = inf.get("RutaInforme") or inf.get("RutaPublicacion")
+        if not url:
+            continue
+        anio = _anio_informe(inf) or "s-f"
+        nro = str(inf.get("NroInforme") or inf.get("Codigo") or "informe")
+        titulo = str(inf.get("TituloInforme") or "")[:50]
+        nombre = _ruta_segura(f"{anio} - {nro} - {titulo}".strip(" -")) + ".pdf"
+        if _descargar_url(sess, url, carpeta / nombre, timeout=timeout):
+            ok += 1
+    if informes:
+        logger.info("InfoObras informes obra %s: %d encontrados, %d relevantes, %d descargados",
+                    obra_id, len(informes), len(rel), ok)
+    return {"encontrados": len(informes), "relevantes": len(rel), "descargados": ok}
+
+
 # ── Construcción del ZIP (árbol de 4 niveles) ────────────────────────────────
 
-def _ruta_segura(s: str) -> str:
-    """Nombre de carpeta/archivo seguro para ZIP y Windows."""
+_MAXLEN_RUTA = 64  # tope por componente (carpeta/archivo) → la ruta cabe en 260
+
+
+def _ruta_segura(s: str, maxlen: int = _MAXLEN_RUTA) -> str:
+    """Nombre de carpeta/archivo seguro para ZIP y Windows: sin caracteres
+    ilegales y CAPADO a `maxlen`. Si trunca, preserva la extensión y añade un hash
+    corto (determinístico → no rompe la reanudación, no colisiona). Componentes
+    cortos = la ruta cabe en el límite de 260 de Windows al CREAR y al EXTRAER el
+    ZIP en cualquier máquina (los nombres de obras de educación son larguísimos y
+    reventaban el límite)."""
     s = re.sub(r'[<>:"/\\|?*]', "-", str(s or "")).strip(" .")
     s = re.sub(r"\s+", " ", s)
-    return s or "(sin nombre)"
+    s = s or "(sin nombre)"
+    if len(s) <= maxlen:
+        return s
+    h = hashlib.sha1(s.encode("utf-8")).hexdigest()[:6]
+    stem, dot, ext = s.rpartition(".")
+    if dot and 1 <= len(ext) <= 5 and " " not in ext:          # archivo con extensión
+        keep = max(1, maxlen - len(ext) - 8)                   # sitio para "~hash.ext"
+        return f"{stem[:keep].rstrip()}~{h}.{ext}"
+    return f"{s[:max(1, maxlen - 7)].rstrip()}~{h}"            # carpeta / sin extensión
+
+
+def _wlong(p) -> str:
+    """Ruta como str, con prefijo \\\\?\\ en Windows para saltar el límite de 260
+    al crear/escribir/renombrar (red de seguridad si la carpeta base es muy
+    profunda). No-op en Linux/Mac. Lo principal es que los nombres ya van capados;
+    esto garantiza que la CREACIÓN nunca falle por largo."""
+    s = os.path.abspath(str(p))
+    if os.name == "nt" and not s.startswith("\\\\?\\"):
+        s = "\\\\?\\" + s
+    return s
 
 
 def _motivo_sin_docs(via: Optional[str], cui: Optional[str]) -> str:

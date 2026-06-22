@@ -72,7 +72,7 @@ export function crearCliente({ serverUrl, token = null, timeoutMs = 60000, log =
      * Sube el análisis: resuelve el concurso (lo crea si no se pasa concurso_id)
      * y POSTea el espejo + Excel como multipart al backend real.
      */
-    async subirAnalisis({ json_espejo, excel_base64 = null, concurso_id = null, concurso = null }) {
+    async subirAnalisis({ json_espejo, excel_base64 = null, certificados_base64 = null, concurso_id = null, concurso = null }) {
       if (!json_espejo || typeof json_espejo !== "object") {
         return { ok: false, error: "json_espejo es obligatorio (objeto)" };
       }
@@ -104,6 +104,14 @@ export function crearCliente({ serverUrl, token = null, timeoutMs = 60000, log =
           })
         : new Blob([""], { type: "application/octet-stream" });
       fd.set("excel", xls, excel_base64 ? "analisis.xlsx" : "pendiente.xlsx");
+      // certificados: ZIP de PDFs P{n}_E{m}.pdf (constancias recortadas por la skill) — opcional
+      if (certificados_base64) {
+        fd.set(
+          "certificados",
+          new Blob([Buffer.from(certificados_base64, "base64")], { type: "application/zip" }),
+          "certificados.zip"
+        );
+      }
 
       const r = await pedir("POST", "/api/pivote/analizar", { form: fd });
       if (!r.ok) return { ok: false, etapa: "analizar", concurso_id, status_http: r.status, error: r.data };

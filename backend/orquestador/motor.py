@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Callable, Optional, Sequence
 
 from schemas import pipeline
+from schemas.cargo import normalizar_cargos_espejo
 from .etapas import Contexto, ErrorEstructural, EtapaBase
 from .repositorio import Repositorio
 
@@ -54,6 +55,11 @@ class Motor:
 
     def crear_job(self, espejo: dict, *, concurso_id: Optional[str] = None) -> pipeline.Job:
         """Registra el job (estado RECIBIDO) y guarda el espejo. No corre nada."""
+        # B · cargo atómico: si la skill incrustó la correspondencia de bases en
+        # el nombre del cargo, sepárala a `cargo_bases_num/nombre` antes de
+        # persistir (idempotente; no toca lo que la skill ya separó).
+        if isinstance(espejo, dict):
+            normalizar_cargos_espejo(espejo)
         meta = espejo.get("_meta", {}) if isinstance(espejo, dict) else {}
         job = pipeline.Job(
             job_id=uuid.uuid4().hex[:12],

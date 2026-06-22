@@ -167,6 +167,9 @@ class ExperienciaProf(_Model):
     fecha_final: FechaFlexible = None
     fecha_emision: FechaFlexible = None
     folio: FolioT = None
+    # páginas FÍSICAS del PDF de la constancia (1-indexadas, principal 1ª); el folio
+    # impreso ≠ página NO siempre → con esto el recorte toma la hoja correcta.
+    paginas_pdf: Optional[list[int]] = None
     dias: Optional[float] = Field(default=None, ge=0)
     meses: Optional[float] = Field(default=None, ge=0)
     anios: Optional[float] = Field(default=None, ge=0)
@@ -202,7 +205,9 @@ class CrossCheck(_ModelLax):
 
 class Profesional(_ModelLax):
     n_prof: int = Field(ge=1)
-    cargo: str = Field(min_length=1)
+    cargo: str = Field(min_length=1)    # etiqueta LITERAL del cargo en la propuesta (sin la cola "(cargo bases N°…)")
+    cargo_bases_num: Optional[int] = None      # nº del cargo equivalente en el Cuadro de Personal de las bases (decide a qué factor aplica)
+    cargo_bases_nombre: Optional[str] = None   # nombre de ese cargo de bases ("ESPECIALISTA EN ESTRUCTURAS")
     nombre: Optional[str] = None        # SOLO el nombre limpio (sin DNI ni notas de OCR)
     dni: Optional[str] = None           # SOLO dígitos; caveats → notas
     folio_nombre: FolioT = None

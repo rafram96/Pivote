@@ -19,6 +19,7 @@ experiencia no las tiene, su cuadro muestra brutos = efectivos.
 from __future__ import annotations
 
 import calendar
+import io
 import re
 from datetime import date
 from pathlib import Path
@@ -47,9 +48,20 @@ _PALETA_PROF = ["FFF2CC", "DDEBF7", "E2EFDA", "FCE4D6", "EDEDED", "D9E1F2",
 
 # Amarillo para resaltar las valorizaciones que caen dentro del certificado
 FILL_VALOR = PatternFill("solid", fgColor="FFFF00")
+# Amarillo separador: 2 filas (A:Z) entre experiencias en la hoja por profesional
+FILL_SEP = PatternFill("solid", fgColor="FFFF00")
 # Semántico para el cuadro del emisor (SUNAT): rojo = anomalía (ALT04), verde = ok.
 FILL_ALERTA = PatternFill("solid", fgColor="F4CCCC")
 FILL_OK = PatternFill("solid", fgColor="D9EAD3")
+# Sistema de color del ingeniero en las hojas por profesional:
+#   amarillo = declarado / dentro del periodo · cyan = efectivo verificado (Paso 5)
+#   naranja = excluido (paralización / sin valorización) · azules = jerarquía de marco.
+FILL_EFECTIVO = PatternFill("solid", fgColor="00FFFF")     # cyan: días efectivos
+FILL_CERT = PatternFill("solid", fgColor="FFFF00")         # amarillo: encabezado CERT N°X
+F_CERT = Font(bold=True, size=10, color="15212E")
+FILL_DATOS = PatternFill("solid", fgColor="1F4E78")        # azul oscuro: header del recap
+F_DATOS = Font(bold=True, size=10, color="FFFFFF")
+FILL_RECAP = PatternFill("solid", fgColor="DDEBF7")        # azul claro: etiquetas del recap
 FMT_SOLES = '#,##0.00'
 # El avance físico de InfoObras ya viene en escala de porcentaje (38.36 = 38.36%).
 # El formato nativo '0.00%' de Excel multiplica ×100 (mostraría 3836.00%), así que
@@ -82,9 +94,55 @@ def _fecha_iso(v) -> Optional[date]:
 
 
 def _nombre_hoja(n_prof: int, cargo: str) -> str:
-    """Nombre de hoja Excel válido (≤31 chars, sin caracteres prohibidos)."""
-    limpio = re.sub(r'[\\/*?:\[\]]', "", cargo or "").strip()
-    return f"P{n_prof} {limpio}"[:31].rstrip()
+    """Nombre de hoja Excel útil y corto (≤31 chars). Quita el prefijo redundante
+    "Especialista en/de" (el cargo distintivo se ve de una) y, si aún excede,
+    corta en LÍMITE DE PALABRA — no a media palabra. El prefijo P{n} garantiza
+    unicidad aunque dos cargos empiecen igual."""
+    txt = re.sub(r'[\\/*?:\[\]]', "", cargo or "").strip()
+    txt = re.sub(r"^especialista\s+(?:en|de|del)\s+", "", txt, flags=re.I)
+    base = f"P{n_prof} {txt}".strip()
+    if len(base) <= 31:
+        return base
+    cut = base[:31]
+    if base[31] != " ":               # solo retrocede si cortó a media palabra
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip(" ,;-")
+
+
+# ── Certificados embebidos (Fase 2) ──────────────────────────────────────────
+# Ancho de despliegue de la imagen del cert (px). A 130 DPI una página pesa
+# ~100 KB JPEG; un análisis típico suma pocos MB.
+_CERT_ANCHO_PX = 760
+
+
+def _render_cert_pages(cert_pdf, dpi=130, q=70, max_pag=12):
+    """Renderiza cada página del PDF del certificado a JPEG → [(bytes, ancho, alto)].
+    El PDF ya viene con la página principal primero (lo ordena la skill). PyMuPDF
+    se importa perezoso para no exigirlo cuando no hay certificados que embeber."""
+    import fitz
+    out = []
+    with fitz.open(str(cert_pdf)) as doc:
+        m = fitz.Matrix(dpi / 72, dpi / 72)
+        for page in list(doc)[:max_pag]:
+            pix = page.get_pixmap(matrix=m)
+            out.append((pix.tobytes("jpg", jpg_quality=q), pix.width, pix.height))
+    return out
+
+
+def mapear_certificados(dir_base, job_id) -> dict:
+    """Lee la carpeta `{job_id}.certs/` (un PDF `P{n}_E{m}.pdf` por experiencia, con
+    la página principal primero — lo recorta la skill) y devuelve
+    `{(n_prof, n_exp): Path}` para pasarle a `generar_excel_final`."""
+    certs: dict = {}
+    cdir = Path(dir_base) / f"{job_id}.certs"
+    if cdir.is_dir():
+        for f in cdir.glob("P*_E*.pdf"):
+            try:
+                np_, ne = f.stem[1:].split("_E")
+                certs[(int(np_), int(ne))] = f
+            except ValueError:
+                continue
+    return certs
 
 
 # ── Hoja 2 · Base de Datos ───────────────────────────────────────────────────
@@ -161,15 +219,18 @@ def construir_hoja_profesional(
     fichas: Optional[dict] = None,
     revisiones: Optional[dict] = None,
     sunat: Optional[dict] = None,
+    certificados: Optional[dict] = None,
 ) -> None:
     cuis = cuis or {}
     fichas = fichas or {}
     revisiones = revisiones or {}
     sunat = sunat or {}
-    # A:D = hitos (izq) · F:K = obra + valorizaciones (centro) · M:P = emisor SUNAT (der)
+    certificados = certificados or {}
+    # A:D hitos · F:K obra+valorizaciones · M:P emisor SUNAT · R:U representante de obra
     anchos = {"A": 52, "B": 14, "C": 14, "D": 10, "E": 2,
               "F": 5, "G": 18, "H": 14, "I": 18, "J": 14, "K": 13, "L": 2,
-              "M": 16, "N": 12, "O": 18, "P": 12}
+              "M": 16, "N": 12, "O": 18, "P": 12, "Q": 2,
+              "R": 17, "S": 12, "T": 22, "U": 14}
     for col, w in anchos.items():
         ws.column_dimensions[col].width = w
     n_prof = prof.get("n_prof")
@@ -190,7 +251,7 @@ def construir_hoja_profesional(
         ws.row_dimensions[r].height = max(h, lineas * 15 + 4)
         r += 1
 
-    def fila(hito, desde, hasta, dias_v, *, bold=False, backend=False):
+    def fila(hito, desde, hasta, dias_v, *, bold=False, fill=None):
         nonlocal r
         valores = [hito, desde, hasta, dias_v]
         for i, v in enumerate(valores, start=1):
@@ -201,8 +262,8 @@ def construir_hoja_profesional(
                 c.number_format = FMT_FECHA   # presentación dd/mm/yy
             if i == 4 and isinstance(v, (int, float)):
                 c.number_format = FMT_INT
-            if v not in (None, ""):
-                c.fill = FILL_BACKEND if backend else FILL_CLAUDE
+            if v not in (None, "") and fill is not None:
+                c.fill = fill
         r += 1
 
     def render_obra(top: int, fx: dict, ini, fin) -> int:
@@ -391,12 +452,175 @@ def construir_hoja_profesional(
         rr += 2
         return rr - 1
 
+    def render_representante(top: int, rep: Optional[dict]) -> int:
+        """Representante de obra (InfoObras): TODOS los contratistas, supervisores/
+        inspectores y residentes con todos sus campos (tipo, documento, razón social,
+        monto, fechas), en columnas R:U — al lado del emisor SUNAT. Numera cada
+        categoría cuando hay más de uno. Devuelve la última fila (o top-1 si vacío)."""
+        rr = top
+        contr = (rep or {}).get("contratistas") or []
+        supes = (rep or {}).get("supervisores") or []
+        resis = (rep or {}).get("residentes") or []
+        if not (contr or supes or resis):
+            return rr - 1
+        ws.merge_cells(start_row=rr, start_column=18, end_row=rr, end_column=21)
+        c = ws.cell(rr, 18, "REPRESENTANTE DE OBRA (InfoObras)")
+        c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
+        rr += 1
+
+        def sub(texto):
+            nonlocal rr
+            ws.merge_cells(start_row=rr, start_column=18, end_row=rr, end_column=21)
+            cc = ws.cell(rr, 18, texto)
+            cc.font, cc.fill = F_PARTE, FILL_PARTE
+            cc.alignment = Alignment(vertical="center", wrap_text=True)
+            rr += 1
+
+        def kv(label, value, fmt=None):
+            nonlocal rr
+            if value in (None, ""):
+                value = "—"
+            ws.merge_cells(start_row=rr, start_column=18, end_row=rr, end_column=19)
+            cl = ws.cell(rr, 18, label); cl.font, cl.border = F_BOLD, BORDER
+            cl.alignment = Alignment(vertical="top", wrap_text=True)
+            ws.merge_cells(start_row=rr, start_column=20, end_row=rr, end_column=21)
+            cv = ws.cell(rr, 20, value); cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
+            if fmt and isinstance(value, (int, float, date)):
+                cv.number_format = fmt
+            # valor T:U (~36 car) en celda combinada NO auto-ajusta en Excel: si el
+            # texto es largo (razón social, URL), subir la altura para que se vea
+            # completo. Solo AUMENTA (no pisa la altura de otras bandas en la fila).
+            if isinstance(value, str) and len(value) > 34:
+                alto = (len(value) // 34 + 1) * 14 + 2
+                ws.row_dimensions[rr].height = max(ws.row_dimensions[rr].height or 15, alto)
+            rr += 1
+
+        def _nombre(p):
+            return " ".join(x for x in [p.get("nombre"), p.get("apellido_paterno"),
+                                        p.get("apellido_materno")] if x).strip()
+
+        for i, c_ in enumerate(contr, 1):
+            sub(f"Contratista (ejecutor) {i}" if len(contr) > 1 else "Contratista (ejecutor)")
+            kv("Tipo de empresa", c_.get("tipo_empresa"))
+            kv("RUC", c_.get("ruc"))
+            kv("Razón social", c_.get("nombre_empresa"))
+            if c_.get("numero_contrato"):
+                kv("N° de contrato", c_.get("numero_contrato"))
+            kv("Monto contrato (S/)", c_.get("monto_soles"), FMT_SOLES)
+            kv("Inicio de contrato", _fecha_iso(c_.get("fecha_contrato")), FMT_FECHA)
+            kv("Fin de contrato", _fecha_iso(c_.get("fecha_fin_contrato")), FMT_FECHA)
+        for i, s_ in enumerate(supes, 1):
+            etiqueta = s_.get("tipo") or "Supervisor"
+            sub(f"{etiqueta} {i}" if len(supes) > 1 else etiqueta)
+            kv("Tipo de persona", s_.get("tipo_persona"))
+            kv("Razón social / empresa", s_.get("empresa") or s_.get("razon_social"))
+            if _nombre(s_):
+                kv("Persona", _nombre(s_))
+            kv("RUC / documento", s_.get("ruc") or s_.get("documento"))
+            if s_.get("dni"):
+                kv("DNI", s_.get("dni"))
+            if s_.get("monto_soles") is not None:
+                kv("Monto contrato (S/)", s_.get("monto_soles"), FMT_SOLES)
+            kv("Inicio", _fecha_iso(s_.get("fecha_inicio")), FMT_FECHA)
+            kv("Fin", _fecha_iso(s_.get("fecha_fin")), FMT_FECHA)
+            if s_.get("doc_designacion"):
+                kv("Doc. designación", s_.get("doc_designacion"))
+        for i, r_ in enumerate(resis, 1):
+            sub(f"Residente {i}" if len(resis) > 1 else "Residente")
+            kv("Nombre y apellido", _nombre(r_))
+            kv("Inicio de labores", _fecha_iso(r_.get("fecha_inicio")), FMT_FECHA)
+            kv("Fin de labores", _fecha_iso(r_.get("fecha_fin")), FMT_FECHA)
+        return rr - 1
+
+    def separador():
+        """Dos filas amarillas (A:Z) tras cada experiencia, como separador visual."""
+        nonlocal r
+        for _ in range(2):
+            for col in range(1, 27):          # columnas A..Z
+                ws.cell(r, col).fill = FILL_SEP
+            ws.row_dimensions[r].height = 10
+            r += 1
+
+    def embeber_cert(cert_pdf):
+        """Embebe las páginas del certificado (principal primero) a lo ancho, bajo
+        las bandas de la experiencia, para que el evaluador lo vea sin abrir el PDF.
+        Tolerante: si PyMuPDF/Pillow fallan, deja una nota y sigue."""
+        nonlocal r
+        try:
+            paginas = _render_cert_pages(cert_pdf)
+        except Exception as ex:    # noqa: BLE001 — no romper el Excel por un cert
+            c = ws.cell(r, 1, f"(certificado no embebido: {ex})")
+            c.font = F_CELL
+            r += 1
+            return
+        if not paginas:
+            return
+        from openpyxl.drawing.image import Image as XLImage
+        banda("DOCUMENTO DE LA EXPERIENCIA — constancia / conformidad (imagen)",
+              F_PARTE, FILL_PARTE, 16)
+        for i, (jpg, w0, h0) in enumerate(paginas):
+            etiqueta = "Página principal" if i == 0 else f"Página {i + 1}"
+            ce = ws.cell(r, 1, etiqueta); ce.font = F_BOLD
+            r += 1
+            img = XLImage(io.BytesIO(jpg))
+            img.width = _CERT_ANCHO_PX
+            img.height = int(h0 * _CERT_ANCHO_PX / w0)
+            ws.add_image(img, f"A{r}")
+            r += -(-img.height // 15) + 1     # avanza las filas que ocupa la imagen
+
     banda(f"PROFESIONAL {n_prof}: {prof.get('cargo', '')}")
     ws.cell(r, 1, f"Nombre: {prof.get('nombre') or '—'}").font = F_BOLD; r += 1
     ws.cell(r, 1, f"Colegiatura: {prof.get('colegiatura') or '—'}").font = F_CELL; r += 1
     r += 1
-    banda("CUADRO DE HITOS DE LAS EXPERIENCIAS (días efectivos — Paso 5)",
-          F_PARTE, FILL_PARTE, 18)
+    # ── helpers del formato por-certificado (feedback del ingeniero) ─────────
+    def _dias_exp(n_exp, ini, fin):
+        """(declarado, efectivo, clamp) de una experiencia: días del periodo
+        certificado, días efectivos del Paso 5 (recortando paralizaciones /
+        sin-valorización) y las ventanas inactivas recortadas (para el cálculo
+        ALT11 a nivel del profesional)."""
+        if not (ini and fin):
+            return None, None, []
+        clamp = []
+        for p in paralizaciones.get((n_prof, n_exp), []):
+            p_ini, p_fin = periodo_fechas(p)
+            ci, cf = max(p_ini, ini), min(p_fin, fin)
+            if cf >= ci:
+                clamp.append((ci, cf))
+        tramos = restar_paralizaciones((ini, fin), clamp)
+        return dias_inclusivos(ini, fin), sum(dias_inclusivos(a, b) for a, b in tramos), clamp
+
+    def cert_marco(n_exp, e, ini, fin, cui):
+        """Encabezado 'CERT. N°X' (amarillo) + recap 'DATOS DE LA EXPERIENCIA'
+        (azul) en columnas A:D, antes de las bandas técnicas (formato ingeniero)."""
+        nonlocal r
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
+        c = ws.cell(r, 1, f"CERT. N°{n_exp} — {prof.get('cargo', '')} — {prof.get('nombre') or ''}")
+        c.font, c.fill = F_CERT, FILL_CERT
+        c.alignment = Alignment(vertical="center", wrap_text=True)
+        _lns = max(1, -(-len(c.value) // 88))          # A:D ≈ 88 car/línea
+        ws.row_dimensions[r].height = max(16, _lns * 14 + 2)
+        r += 1
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
+        c = ws.cell(r, 1, "DATOS DE LA EXPERIENCIA (del certificado)")
+        c.font, c.fill, c.alignment = F_DATOS, FILL_DATOS, AL_HEAD
+        r += 1
+        periodo = (f"{ini.strftime('%d/%m/%Y')} – {fin.strftime('%d/%m/%Y')}"
+                   if (ini and fin) else "—")
+        for label, value in [("ENTIDAD / EMPRESA QUE EMITE", e.get("entidad_emisora")),
+                             ("TIPO DE DOCUMENTO", e.get("tipo_documento")),
+                             ("PROYECTO U OBRA", e.get("proyecto")),
+                             ("PERIODO (certificado)", periodo),
+                             ("CARGO QUE OCUPÓ", e.get("cargo_ocupado")),
+                             ("CÓDIGO (CUI/SNIP)",
+                              str(cui) if cui else "No consignado en el certificado")]:
+            cl = ws.cell(r, 1, label); cl.font, cl.fill, cl.border = F_BOLD, FILL_RECAP, BORDER
+            cl.alignment = Alignment(vertical="top", wrap_text=True)
+            ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=4)
+            cv = ws.cell(r, 2, value or "—")
+            cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
+            lns = max(1, -(-len(str(value or "—")) // 35))   # B:D ≈ 35 car/línea
+            ws.row_dimensions[r].height = max(15, lns * 13 + 2)
+            r += 1
 
     periodos_validos: list[tuple[date, date]] = []
     paral_por_idx: dict[int, list[tuple[date, date]]] = {}
@@ -405,10 +629,11 @@ def construir_hoja_profesional(
         n_exp = e.get("n")
         ini, fin = _fecha_iso(e.get("fecha_inicial")), _fecha_iso(e.get("fecha_final"))
         fx = fichas.get((n_prof, n_exp))
-        r_top = r  # fila del título: el bloque de obra (F:J) arranca alineado aquí
-        titulo = f"EXPERIENCIA {n_exp}: {str(e.get('proyecto') or '')}"  # nombre VERBATIM, sin truncar
         # CUI resuelto por el backend (etapa InfoObras); si no, el del espejo
         cui = cuis.get((n_prof, n_exp)) or (fx or {}).get("cui") or e.get("cui")
+        cert_marco(n_exp, e, ini, fin, cui)   # encabezado CERT N°X + recap (formato ingeniero)
+        r_top = r  # fila del título: el bloque de obra (F:J) arranca alineado aquí
+        titulo = f"EXPERIENCIA {n_exp}: {str(e.get('proyecto') or '')}"  # nombre VERBATIM, sin truncar
         extra = " · ".join(x for x in [
             f"CUI {cui}" if cui else "",
             f"folio {e['folio']}" if e.get("folio") else ""] if x)
@@ -424,7 +649,7 @@ def construir_hoja_profesional(
                  e.get("fecha_inicial"), e.get("fecha_final"), None)
             r += 1
         else:
-            fila("Periodo certificado", ini, fin, dias_inclusivos(ini, fin))
+            fila("Periodo certificado", ini, fin, dias_inclusivos(ini, fin), fill=FILL_CLAUDE)
 
             # periodos inactivos de la obra (dict con tipo, o tupla legacy=paralizado)
             # SOLO los que caen dentro del periodo que supervisó este profesional;
@@ -449,15 +674,15 @@ def construir_hoja_profesional(
                 else:
                     n_par += 1
                     etiqueta = f"Paralización {n_par} de la obra (InfoObras)"
-                fila(etiqueta, c_ini, c_fin, dias_inclusivos(c_ini, c_fin), backend=True)
+                fila(etiqueta, c_ini, c_fin, dias_inclusivos(c_ini, c_fin), fill=FILL_BACKEND)
 
             tramos = restar_paralizaciones((ini, fin), tuplas)
             for k, (t_ini, t_fin) in enumerate(tramos, start=1):
                 fila(f"Tramo efectivo {k}", t_ini, t_fin,
-                     dias_inclusivos(t_ini, t_fin), backend=bool(tuplas))
+                     dias_inclusivos(t_ini, t_fin), fill=FILL_EFECTIVO)
             efectivo = sum(dias_inclusivos(a, b) for a, b in tramos)
             fila(f"EFECTIVO EXPERIENCIA {n_exp}", "", "", efectivo, bold=True,
-                 backend=bool(tuplas))
+                 fill=FILL_EFECTIVO)
             r += 1
 
             idx = len(periodos_validos)
@@ -479,21 +704,90 @@ def construir_hoja_profesional(
                               e.get("fecha_emision"), ini, e.get("ruc_emisor"))
         r = max(r, r_emi + 1)
 
-    # Resumen del profesional (Paso 5 completo, con fusión de traslapes ALT11)
-    if periodos_validos:
-        res = dias_efectivos_profesional(periodos_validos, paral_por_idx)
-        banda("RESUMEN PASO 5 — DÍAS EFECTIVOS DEL PROFESIONAL", F_PARTE, FILL_PARTE, 18)
-        fila("Días brutos (suma de certificados)", "", "", res.dias_brutos, bold=True)
-        fila("(−) Periodos sin avance en obra (paralización / sin valorización)", "", "",
-             res.dias_paralizados, bold=True, backend=True)
-        fila("(−) Traslapes entre experiencias (ALT11)", "", "", res.dias_traslape,
-             bold=True, backend=True)
-        fila("DÍAS EFECTIVOS", "", "", res.dias_efectivos, bold=True, backend=True)
-        c = ws.cell(r, 1, "AÑOS EFECTIVOS (días/365)")
-        c.font = F_BOLD
-        c2 = ws.cell(r, 4, round(anios(res.dias_efectivos), 2))
-        c2.font, c2.fill, c2.border = F_BOLD, FILL_BACKEND, BORDER
-        c2.number_format = FMT_DEC
+        # 4ª banda (R:U): representante de obra (InfoObras), al lado del emisor SUNAT
+        r_rep = render_representante(r_top, (fx or {}).get("representante_obra"))
+        r = max(r, r_rep + 1)
+
+        # imagen del certificado presentado (Fase 2): la skill recortó sus folios a
+        # un PDF chico (principal primero); aquí se renderiza y embebe.
+        cert_pdf = certificados.get((n_prof, n_exp))
+        if cert_pdf:
+            embeber_cert(cert_pdf)
+
+        separador()   # 2 filas amarillas (A:Z) cerrando la experiencia
+
+    # ── PARTE 5 (al FINAL): tabla por experiencia — declarado vs efectivo ──────
+    # Es la conclusión del profesional (días efectivos del Paso 5). Flush-left;
+    # A=52 lleva el Cliente, Objeto (B:D) y Proyecto (F:I) combinados anchos para
+    # que el texto no se corte. Reconcilia la suma por-experiencia con ALT11.
+    banda("PARTE 5 — EXPERIENCIA DEL PROFESIONAL (días declarados y efectivos verificados)",
+          F_PARTE, FILL_PARTE, 18)
+
+    # 8 columnas: N°(A) · Proyecto(B:H) · Cliente(I:K) · Objeto(M:N) · F.inicio(O)
+    #             · F.fin(P) · Declarado(R) · Efectivo(S). Largos en celdas anchas.
+    def _p5(n, proyecto, cliente, objeto, fini, ffin, decl, efec, *, head=False):
+        nonlocal r
+        ft = F_HEAD if head else F_CELL
+        for ci, cf, val in [(1, 1, n), (2, 8, proyecto), (9, 11, cliente),
+                            (13, 14, objeto), (15, 15, fini), (16, 16, ffin)]:
+            if cf > ci:
+                ws.merge_cells(start_row=r, start_column=ci, end_row=r, end_column=cf)
+            c = ws.cell(r, ci, val); c.font, c.border, c.alignment = ft, BORDER, AL_WRAP
+            if head:
+                c.fill = FILL_HEAD
+            elif ci in (15, 16) and isinstance(val, date):
+                c.number_format = FMT_FECHA
+        cd = ws.cell(r, 18, decl); cd.font, cd.border, cd.alignment = ft, BORDER, AL_HEAD
+        ce = ws.cell(r, 19, efec); ce.font, ce.border, ce.alignment = ft, BORDER, AL_HEAD
+        if head:
+            cd.fill = ce.fill = FILL_HEAD
+        else:
+            if isinstance(decl, (int, float)):
+                cd.number_format, cd.fill = FMT_INT, FILL_CLAUDE
+            if isinstance(efec, (int, float)):
+                ce.number_format, ce.fill = FMT_INT, FILL_EFECTIVO
+        lns = max(-(-len(str(proyecto)) // 74), -(-len(str(cliente)) // 43),
+                  -(-len(str(objeto)) // 26), 1)   # alto = celda más alta (texto envuelto)
+        ws.row_dimensions[r].height = 30 if head else max(28, lns * 13 + 3)
+        r += 1
+
+    def _p5_tot(label, decl_v, efec_v, fill_e=FILL_EFECTIVO):
+        nonlocal r
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=16)
+        cl = ws.cell(r, 1, label); cl.font, cl.border, cl.alignment = F_BOLD, BORDER, AL_HEAD
+        if decl_v is not None:
+            cd = ws.cell(r, 18, decl_v)
+            cd.font, cd.fill, cd.border, cd.number_format = F_BOLD, FILL_CLAUDE, BORDER, FMT_INT
+        if efec_v is not None:
+            ce = ws.cell(r, 19, efec_v)
+            ce.font, ce.fill, ce.border, ce.number_format = F_BOLD, fill_e, BORDER, FMT_INT
+        r += 1
+
+    _p5("N°", "Proyecto / Obra", "Cliente o Empleador", "Objeto de contratación",
+        "Fecha de inicio", "Fecha de fin", "Declarado (días)", "Efectivo (días)", head=True)
+    _sd = _se = 0
+    for e in prof.get("experiencias", []):
+        ne = e.get("n")
+        ini_, fin_ = _fecha_iso(e.get("fecha_inicial")), _fecha_iso(e.get("fecha_final"))
+        decl, efec, _clamp = _dias_exp(ne, ini_, fin_)
+        _p5(ne, e.get("proyecto") or "—", e.get("entidad_emisora") or "—",
+            e.get("cargo_ocupado") or "—", ini_, fin_, decl, efec)
+        if isinstance(decl, (int, float)):
+            _sd += decl
+        if isinstance(efec, (int, float)):
+            _se += efec
+
+    res5 = dias_efectivos_profesional(periodos_validos, paral_por_idx) if periodos_validos else None
+    _p5_tot("TOTAL, DÍAS (suma por experiencia)", _sd, _se)
+    if res5 and res5.dias_traslape:
+        _p5_tot("(−) Traslapes entre experiencias (ALT11)", None, res5.dias_traslape, FILL_BACKEND)
+    _dias_ef = res5.dias_efectivos if res5 else _se
+    _p5_tot("DÍAS EFECTIVOS DEL PROFESIONAL", None, _dias_ef)
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=18)
+    ca = ws.cell(r, 1, "AÑOS EFECTIVOS (días efectivos / 365)")
+    ca.font, ca.border, ca.alignment = F_BOLD, BORDER, AL_HEAD
+    cy = ws.cell(r, 19, round(anios(_dias_ef), 2))
+    cy.font, cy.fill, cy.border, cy.number_format = F_BOLD, FILL_EFECTIVO, BORDER, FMT_DEC
 
 
 # ── Entregable completo ──────────────────────────────────────────────────────
@@ -506,6 +800,7 @@ def generar_excel_final(
     fichas: Optional[dict] = None,
     revisiones: Optional[dict] = None,
     sunat: Optional[dict] = None,
+    certificados: Optional[dict] = None,
 ) -> Path:
     """Construye el Excel final: CLAUDE + Base de Datos + 1 hoja por profesional.
 
@@ -523,6 +818,7 @@ def generar_excel_final(
     fichas = fichas or {}
     revisiones = revisiones or {}
     sunat = sunat or {}
+    certificados = certificados or {}
     wb = openpyxl.Workbook()
 
     ws = wb.active
@@ -533,9 +829,49 @@ def generar_excel_final(
 
     for prof in espejo.get("profesionales", []):
         nombre = _nombre_hoja(prof.get("n_prof", 0), prof.get("cargo", ""))
+        certs_prof = {k: v for k, v in certificados.items() if k[0] == prof.get("n_prof")}
         construir_hoja_profesional(wb.create_sheet(nombre), prof, paralizaciones,
-                                   cuis, fichas, revisiones, sunat)
+                                   cuis, fichas, revisiones, sunat, certs_prof)
 
     salida.parent.mkdir(parents=True, exist_ok=True)
     wb.save(salida)
     return salida
+
+
+def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
+    """De `{'N:M': {...}, 'prof:N': {...}}` (lo que guarda el orquestador) a los
+    cuatro dicts `(paral, cuis, fichas, sunat)` que consume `generar_excel_final`.
+
+    Es la MISMA lógica que arma la etapa EXCEL del pipeline; está factorizada aquí
+    para que el backfill regenere el Excel sin re-correr scrapers ni duplicarla."""
+    paral: dict = {}
+    cuis: dict = {}
+    fichas: dict = {}
+    sunat: dict = {}
+    for k, enr in (enriquecimiento or {}).items():
+        if ":" not in k or k.startswith("prof:"):
+            continue
+        np_, ne = (int(x) for x in k.split(":"))
+        if enr.get("paralizaciones"):
+            paral[(np_, ne)] = enr["paralizaciones"]
+        if enr.get("cui"):
+            cuis[(np_, ne)] = enr["cui"]
+        if enr.get("sunat"):
+            sunat[(np_, ne)] = enr["sunat"]
+        if enr.get("obra_ficha") or enr.get("valorizaciones") or enr.get("representante_obra"):
+            fichas[(np_, ne)] = {**(enr.get("obra_ficha") or {}),
+                                 "valorizaciones": enr.get("valorizaciones") or [],
+                                 "modificaciones_plazo": enr.get("modificaciones_plazo") or [],
+                                 "representante_obra": enr.get("representante_obra")}
+    return paral, cuis, fichas, sunat
+
+
+def regenerar_excel_final(espejo: dict, enriquecimiento: Optional[dict],
+                          salida: Path, revisiones: Optional[dict] = None) -> Path:
+    """Regenera el Excel final desde el espejo + enriquecimiento YA en disco (sin
+    tocar red). Lo usa el backfill de cargos para dejar el entregable limpio."""
+    paral, cuis, fichas, sunat = desempaquetar_enriquecimiento(enriquecimiento)
+    salida = Path(salida)
+    if salida.exists():
+        salida.unlink()
+    return generar_excel_final(espejo, salida, paral, cuis, fichas, revisiones or {}, sunat)

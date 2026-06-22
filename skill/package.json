@@ -10,7 +10,10 @@
   },
   "dependencies": {
     "exceljs": "^4.4.0",
+    "pdf-lib": "^1.17.1",
     "zod": "^3.23.0"
   },
-  "engines": { "node": ">=18" }
+  "engines": {
+    "node": ">=18"
+  }
 }

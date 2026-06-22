@@ -93,10 +93,23 @@ _SALUD = re.compile(r"(salud|hospital|essalud|asistencial|policl[ií]nico|matern
                     r"\binsn\b|\binen\b|\bcmi\b|"
                     r"\bc\.\s?s\.|\be\.\s?s\.|\bp\.\s?s\.)", re.I)
 
+# Alcance ampliado a EDUCACIÓN (2026-06-21): estas obras también están en
+# InfoObras y son buscables por nombre. La PRECISIÓN del match por nombre en
+# educación (ponderar el N° de I.E./instituto para no confundir colegios
+# distintos) queda pendiente de afinar; con CUI explícito la resolución es
+# determinística (PASO 0) y no depende del nombre.
+_EDUCACION = re.compile(
+    r"(educativ|educaci[oó]n|instituci[oó]n educativa|local escolar|"
+    r"\bi\.?\s?e\.?\b|colegio|escuela|\biest\b|\biestp\b|instituto superior|"
+    r"\bcetpro\b|\bpronoei\b|facultad|universidad|universitari|acad[eé]mic|"
+    r"centro educativo|\bc\.?\s?e\.?\s*n[°º]|pedag[óo]gic)", re.I)
+
 
 def es_aplicable(proyecto: str) -> bool:
-    """False = obra privada/ajena a salud: no está en InfoObras, no se cruza."""
-    return bool(_SALUD.search(expandir_abrev(proyecto or "")))
+    """False = obra fuera del alcance (ni salud ni educación): no está en
+    InfoObras, no se cruza. Salud + educación SÍ están en el portal."""
+    txt = expandir_abrev(proyecto or "")
+    return bool(_SALUD.search(txt) or _EDUCACION.search(txt))
 
 
 _RE_EST = re.compile(
@@ -160,9 +173,25 @@ def _nucleo(est: str) -> str:
     return p
 
 
+_RE_NUM_INST = re.compile(
+    r"(?:n[°º]|i\.?\s?e\.?i?\.?|c\.?\s?e\.?|educativ\w*|escolar|inicial|"
+    r"primaria|secundaria|colegio)\s*n?[°º]?\s*(\d{3,6})", re.I)
+
+
+def _numero_obra(texto: str) -> set[str]:
+    """Números de institución (I.E./C.E./colegio, p. ej. '1452', '14078') en un
+    nombre de obra. Es la señal MÁS distintiva de una obra educativa: matchea
+    aunque el nombre tenga otro formato ('N°1452.' vs 'N° 1452') y distingue
+    instituciones (I.E. 359 ≠ I.E. 1435). Devuelve el set (sin ceros a la izq)."""
+    return {str(int(m.group(1))) for m in _RE_NUM_INST.finditer(texto or "")}
+
+
 def fragmentos(proyecto: str) -> list[str]:
     t = _sin_prefijo(proyecto)
     frags: list[str] = []
+    # número de I.E./C.E. → fragmento de búsqueda distintivo (los de ≥4 díg pasan
+    # el filtro de abajo; los de 3 caen pero igual puntúan en _puntuar)
+    frags.extend(sorted(_numero_obra(proyecto)))
     m = _RE_EST.search(t)
     if m:
         est = m.group(1).strip(" :,-.")
@@ -214,9 +243,16 @@ def _anio_de(fecha_iniobra) -> Optional[int]:
     return None
 
 
-def _puntuar(cand: dict, proyecto_norm: str, deptos_hint: set[str], anio_cert: Optional[int]) -> float:
+def _puntuar(cand: dict, proyecto_norm: str, deptos_hint: set[str],
+             anio_cert: Optional[int], nums_cert: frozenset = frozenset()) -> float:
     nombre = norm(cand.get("nombrObra") or "")
     score = _sim(proyecto_norm, nombre)
+    # número de institución: la señal MÁS fuerte para obras educativas. Mismo N° de
+    # I.E./C.E. → casi seguro la misma obra; N° distinto → otra institución (precisión).
+    if nums_cert:
+        nums_cand = _numero_obra(cand.get("nombrObra") or "")
+        if nums_cand:
+            score += 40 if (nums_cert & nums_cand) else -15
     dep = norm(cand.get("nombrDepartamento") or "")
     if deptos_hint:
         if dep and dep in deptos_hint:
@@ -349,12 +385,10 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
     {estado: 'resuelto'|'revision'|'na', cui, via, decision, candidatos[], obra}
     candidatos = [{cui, nombre_obra, departamento, score}] para la cola humana."""
     proyecto = exp.get("proyecto") or ""
-    if not es_aplicable(proyecto):
-        return {"estado": "na", "cui": None, "via": "NA",
-                "decision": "obra privada o ajena a salud (no está en InfoObras)",
-                "candidatos": [], "obra": None}
 
-    # PASO 0 · CUI/SNIP explícito → determinístico (verificado)
+    # PASO 0 · CUI/SNIP citado → SIEMPRE primero. Un CUI en el certificado es
+    # autoritativo: se intenta sin importar el tipo de obra (el filtro de tipo solo
+    # acota la búsqueda POR NOMBRE, más abajo). Si el CUI no resuelve, cae al filtro.
     cui_campo = re.sub(r"\D", "", str(exp.get("cui") or ""))
     mcod = RE_CODIGO.search(proyecto)
     codigo = cui_campo if 4 <= len(cui_campo) <= 8 else (mcod.group(1) if mcod else None)
@@ -388,6 +422,15 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
                                     "departamento": o.get("nombrDepartamento"), "score": 50}],
                     "obra": None}
 
+    # Filtro de tipo de obra: SOLO para la búsqueda POR NOMBRE (sin CUI fiable).
+    # Evita que el matcher (afinado a salud/educación) agarre obras ajenas. Un CUI
+    # citado ya se intentó arriba, así que esto NO bloquea certificados con CUI.
+    if not es_aplicable(proyecto):
+        return {"estado": "na", "cui": None, "via": "NA",
+                "decision": "fuera del alcance automático (no es salud ni educación) — "
+                            "pega el CUI si la obra está en InfoObras, o descártala",
+                "candidatos": [], "obra": None}
+
     # PASO 2 · por nombre + RUC + ubicación
     pn = norm(proyecto)
     deptos_hint = ubicacion(proyecto)
@@ -396,6 +439,7 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
     mruc = RE_RUC.search(str(exp.get("ruc_emisor") or "") + " " + str(exp.get("entidad_emisora") or ""))
     ruc_cert = mruc.group(1) if mruc else None
     toks = _tokens_clave(establecimiento(proyecto))
+    nums_cert = frozenset(_numero_obra(proyecto))   # N° de I.E./C.E. del certificado
 
     # recolectar TODOS los registros distintos (sin descartar por CUI todavía:
     # un CUI puede tener varias obras y la 1ª devuelta no es la mejor)
@@ -425,7 +469,7 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
         rej = str(o.get("rucEjecutor") or "").strip()
         rsup = str(o.get("rucSupervisor") or "").strip()
         ruc_match = bool(ruc_cert and ruc_cert in (rej, rsup))
-        sc = _puntuar(o, pn, deptos_hint, anio_cert) + (30 if ruc_match else 0)
+        sc = _puntuar(o, pn, deptos_hint, anio_cert, nums_cert) + (30 if ruc_match else 0)
         cand = {"cui": cui, "nombre_obra": (o.get("nombrObra") or "")[:90],
                 "full": norm(o.get("nombrObra") or ""),
                 "departamento": o.get("nombrDepartamento"),

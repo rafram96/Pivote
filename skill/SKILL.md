@@ -103,22 +103,29 @@ experiencia, ¿cargo válido para emitir?, ¿anterior a colegiatura?, traslapes 
 rojo, descalificación económica vs límite inferior, factores A/B/C/E/J con puntaje
 (y "NO APLICA" donde corresponda), todo con **razón literal**.
 
-### Paso 4 — Consolidar → Excel + JSON espejo
+### Paso 4 — Consolidar → Excel + JSON espejo + imágenes de constancias
 El orquestador une todas las salidas (bases + mapa + N profesionales + evaluador) en:
 - el **JSON espejo** (estructura en `references/salida.md`), dejando el bloque
   `_backend` en `null`;
 - el **Excel** de 5 partes (`node scripts/generar_excel.js` — construcción
   dinámica: un bloque por cargo, filas variables por experiencia, estilos del
-  ingeniero + resaltado Claude/backend. Validado con el caso Trujillo).
+  ingeniero + resaltado Claude/backend. Validado con el caso Trujillo);
+- las **imágenes de las constancias** (Fase 2): recorta de `propuesta.pdf` las
+  páginas de la constancia de cada experiencia (usa `paginas_pdf` = páginas FÍSICAS
+  reales, principal 1ª — el folio impreso ≠ página no siempre) a un ZIP —
+  `node scripts/extraer_certificados.js <espejo.json> <propuesta.pdf> certificados.zip`.
+  Son los documentos de la **experiencia** (constancias/conformidades de servicio),
+  NO los títulos/colegiatura. El backend los embebe en cada bloque `CERT N°X`.
 
-Persiste ambos en `~/InfoObras/analisis/<analisis_id>/`.
+Persiste todo en `~/InfoObras/analisis/<analisis_id>/`.
 
 ### Paso 5 — Transporte al backend (POR DEFECTO: MCP, automático)
 **El default es subir por el MCP, sin preguntar.** Tras consolidar y validar:
 1. `probar_conexion` del MCP `infoobras-onprem-bridge` (ver `mcp-server/`). Si
    responde, continúa; si no, ve al fallback.
-2. `subir_analisis(json_espejo, excel_base64)` — crea/usa el concurso y hace POST
-   multipart por LAN a `/api/pivote/analizar`. Devuelve `job_id`.
+2. `subir_analisis(json_espejo, excel_base64, certificados_base64)` — crea/usa el
+   concurso y hace POST multipart por LAN a `/api/pivote/analizar` (espejo + Excel +
+   el ZIP de constancias del Paso 4 en base64, si lo hay). Devuelve `job_id`.
 3. `consultar_estado(job_id)` — reporta el estado + los enlaces de descarga del
    Excel/ZIP enriquecidos.
 

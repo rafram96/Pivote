@@ -43,6 +43,14 @@ Para cada experiencia, cruzándola con los requisitos del cargo en `bases`:
    total vs mínimo exigido).
 9. **Años adicionales sobre el mínimo** → insumo del Factor A. Indica si CUENTA o
    NO para puntaje según las bases.
+9b. **Correspondencia de cargo — en campos propios, NO pegada al nombre.**
+   Identifica a qué cargo del **Cuadro de Personal de las bases** corresponde la
+   posición del profesional y devuélvela atómica:
+   - `cargo_bases_num`: el número (ej. `5`),
+   - `cargo_bases_nombre`: el nombre (ej. `"ESPECIALISTA EN ESTRUCTURAS"`).
+   **NO reescribas `cargo`** anexándole "(cargo bases N°5 …)": `cargo` conserva la
+   etiqueta **literal de la propuesta**. La razón literal del match sigue yendo en
+   `cargo_bases_valido` (por experiencia); estos dos campos son solo el puntero limpio.
 
 ### Experiencia del postor (Parte 2)
 10. Por contrato: **% por objeto**, **le corresponde (S/)**, **¿acredita?**, y si

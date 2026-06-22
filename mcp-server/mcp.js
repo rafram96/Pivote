@@ -85,6 +85,10 @@ server.tool(
       .string()
       .optional()
       .describe("Excel 'Formato de Evaluación' en base64 (el backend lo guarda como referencia y regenera el enriquecido)."),
+    certificados_base64: z
+      .string()
+      .optional()
+      .describe("ZIP en base64 de las constancias recortadas por la skill (extraer_certificados.js → P{n}_E{m}.pdf, página principal primero). El backend las embebe en cada bloque CERT N°X."),
     concurso_id: z
       .string()
       .optional()

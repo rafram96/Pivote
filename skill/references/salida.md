@@ -65,7 +65,9 @@ raíz), y los datos del emisor/firmante son campos planos (no objetos anidados).
     "consorciados": [ { "nombre", "ruc", "pct" } ]   // de la Promesa de Consorcio (NOTA 14)
   },
   "profesionales": [ {
-     "n_prof", "cargo", "nombre", "folio_nombre",
+     "n_prof", "cargo",                    // cargo = etiqueta LITERAL de la propuesta (sin "(cargo bases N°…)")
+     "cargo_bases_num", "cargo_bases_nombre", // correspondencia con el Cuadro de Personal de las bases (atómica, la pone agent-evaluador)
+     "nombre", "folio_nombre",
      "titulo", "folio_titulo", "profesion_valida",
      "colegiatura", "fecha_colegiatura", "folio_colegiatura",
      "certificaciones",                    // texto (incl. hechos PMP para Factor B)

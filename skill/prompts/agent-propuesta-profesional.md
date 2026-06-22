@@ -28,6 +28,12 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
    (cargo que desempeñó el profesional), fechas (`fecha_inicial`, `fecha_final`,
    `fecha_emision`), `folio`, `tipo_documento`, `entidad_contratante` (dueño de
    la obra, si ≠ emisor), `ubicacion` (dpto/prov/distrito si el cert lo cita).
+   `paginas_pdf`: las **páginas FÍSICAS del PDF** de la constancia (1-indexadas, tal
+   como las estás leyendo), con la **principal primero** (la hoja de la constancia en
+   sí — membrete, periodo, firma; los anexos contrato/cuadro van después). ⚠ El
+   **folio impreso del borde ≠ la página del PDF** no siempre (puede haber desfase):
+   acá pon la página REAL que lees, NO el folio, para que el recorte tome la hoja
+   correcta. `folio` queda como el número impreso (para citar).
 4. **Fechas**: ISO `YYYY-MM-DD`. Si el documento solo consigna mes/año →
    `"YYYY-MM (anotación literal)"`. Si es ilegible/no consta tras reintentar
    (NOTA 12) → `"POR VERIFICAR (motivo)"`. Nada fuera de esas tres formas.
@@ -53,6 +59,10 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
    `folio_nombre` (página donde la propuesta lo nombra). `fecha_colegiatura` en
    ISO; si es ilegible → `"POR VERIFICAR (motivo)"` + observación `ilegibilidad`.
 7b. **Datos LIMPIOS y SEPARADOS — NO metas varias cosas en un solo campo:**
+   - `cargo`: SOLO la etiqueta literal del cargo en la propuesta — **sin pegarle
+     "(cargo bases N°5 …)"** ni ninguna correspondencia con las bases (esa la
+     resuelve `agent-evaluador` en `cargo_bases_num`/`cargo_bases_nombre`). Pásalo
+     tal como lo recibes del mapa.
    - `nombre`: SOLO el nombre completo, **sin DNI, sin paréntesis, sin notas de OCR**.
      Si el OCR distorsiona el nombre, escribe el nombre **correcto** (el que confirman
      certificados/diplomas), no la versión distorsionada.
@@ -105,7 +115,7 @@ inserta tu salida tal cual en `profesionales[]` del JSON espejo):
                  certificaciones, experiencia_total_declarada, notas },
   experiencias: [ { n, entidad_emisora, ruc_emisor, proyecto, cui,
                     tipo_documento, nombre_emisor, cargo_emisor,
-                    fecha_inicial, fecha_final, fecha_emision, folio,
+                    fecha_inicial, fecha_final, fecha_emision, folio, paginas_pdf,
                     cargo_ocupado, cert_antes_culminar, incluye_covid,
                     traslape, nivel_categoria, area_construida_m2,
                     monto_contrato_soles, entidad_contratante, ubicacion,

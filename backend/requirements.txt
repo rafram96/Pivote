@@ -6,6 +6,8 @@ pydantic>=2.0
 
 # Excel final enriquecido
 openpyxl>=3.1
+pymupdf>=1.24          # render PDF→imagen de las constancias (Fase 2: certs embebidos)
+Pillow>=10.0           # openpyxl lo usa para embeber las imágenes
 
 # Scraping SUNAT / InfoObras (backend/scraping/)
 requests>=2.31

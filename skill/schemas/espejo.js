@@ -69,6 +69,10 @@ const ExperienciaProf = z.object({
   cargo_emisor: txt, cargo_valido_emitir: txt,
   fecha_inicial: fecha, fecha_final: fecha, fecha_emision: fecha,
   folio: folioT,
+  // páginas FÍSICAS reales del PDF de la constancia (1-indexadas, principal 1ª).
+  // El folio impreso del borde ≠ la página del PDF NO siempre → esto evita recortar
+  // la hoja equivocada. `folio` queda para citar; `paginas_pdf` para el recorte.
+  paginas_pdf: z.array(z.number().int().positive()).nullable().optional(),
   dias: monto, meses: monto, anios: monto,
   anterior_colegiatura: txt, cargo_ocupado: txt, cargo_bases_valido: txt,
   funciones_similares: txt, cert_antes_culminar: txt, incluye_covid: txt,
@@ -97,7 +101,9 @@ const CrossCheck = z.object({
 
 const Profesional = z.object({
   n_prof: z.number().int().min(1),
-  cargo: z.string().min(1),
+  cargo: z.string().min(1),            // etiqueta LITERAL del cargo en la propuesta (sin la cola "(cargo bases N°…)")
+  cargo_bases_num: z.number().int().nullable().optional(),  // nº del cargo equivalente en el Cuadro de Personal de las bases
+  cargo_bases_nombre: txt,             // nombre de ese cargo de bases ("ESPECIALISTA EN ESTRUCTURAS")
   nombre: txt, dni: txt, folio_nombre: folioT, titulo: txt, folio_titulo: folioT,
   profesion_valida: txt, colegiatura: txt,
   fecha_colegiatura: fecha,
