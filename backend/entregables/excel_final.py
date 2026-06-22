@@ -48,6 +48,9 @@ _PALETA_PROF = ["FFF2CC", "DDEBF7", "E2EFDA", "FCE4D6", "EDEDED", "D9E1F2",
 
 # Amarillo para resaltar las valorizaciones que caen dentro del certificado
 FILL_VALOR = PatternFill("solid", fgColor="FFFF00")
+# Rojo: meses PARALIZADOS en la tabla de valorizaciones (la obra estuvo parada → no
+# cuentan para la experiencia; el ingeniero los marcaba así, a mano e incompleto).
+F_CELL_ROJO = Font(size=9, color="FF0000")
 # Amarillo separador: 2 filas (A:Z) entre experiencias en la hoja por profesional
 FILL_SEP = PatternFill("solid", fgColor="FFFF00")
 # Semántico para el cuadro del emisor (SUNAT): rojo = anomalía (ALT04), verde = ok.
@@ -309,13 +312,15 @@ def construir_hoja_profesional(
         for n, v in enumerate(vals, start=1):
             anio, mes = v.get("anio") or 0, v.get("mes") or 0
             resaltar = _mes_en_rango(anio, mes, ini, fin)
+            paraliz = "paraliz" in str(v.get("estado") or "").lower()
             ndoc = v.get("docs") or 0
             celdas = [n, f"{anio} / {_MES_ES.get(mes, mes)}",
                       v.get("fisico_real"), v.get("valorizado_real"), v.get("estado") or "",
                       f"Sí ({ndoc})" if ndoc else "—"]
             for i, val in enumerate(celdas, start=6):
                 cc = ws.cell(rr, i, val)
-                cc.font, cc.border, cc.alignment = F_CELL, BORDER, AL_WRAP
+                cc.font = F_CELL_ROJO if paraliz else F_CELL    # rojo: mes paralizado (obra parada)
+                cc.border, cc.alignment = BORDER, AL_WRAP
                 if i == 8 and isinstance(val, (int, float)):
                     cc.number_format = FMT_PCT
                 if i == 9 and isinstance(val, (int, float)):
