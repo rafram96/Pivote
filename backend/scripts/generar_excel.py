@@ -109,6 +109,21 @@ def _fill_veredicto(value, polaridad):
     return FILL_CUMPLE if bueno else FILL_NO_CUMPLE
 
 
+def _sin_jerga(v):
+    """La experiencia del POSTOR (Parte 2) la resuelve el evaluador/Comité, NO el
+    backend (el servidor solo cruza la experiencia de los PROFESIONALES vía
+    SUNAT/InfoObras). Por eso, en esa sección, 'backend' es jerga interna y además
+    incorrecta → se reescribe a lenguaje de evaluador para quien lee el Excel.
+    No-op en valores no-texto (números, None)."""
+    if not isinstance(v, str):
+        return v
+    out = re.sub(r"\bbackend\s*/\s*comit[eé]\b", "Comité", v, flags=re.I)
+    out = re.sub(r"\bEl\s+backend\b", "El equipo evaluador", out)
+    out = re.sub(r"\bel\s+backend\b", "el equipo evaluador", out)
+    out = re.sub(r"\bbackend\b", "equipo evaluador", out, flags=re.I)
+    return out
+
+
 def fecha_excel(v):
     """ISO 'YYYY-MM-DD' → date real (NOTA 13: fechas en formato fecha, se
     muestran dd/mm/yy). Sentinels ('POR VERIFICAR…') y parciales quedan texto."""
@@ -255,16 +270,18 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
     # el cómputo de antigüedad (11) lo recalcula el backend.
     V2, BE2 = {11: "pos", 12: "pos"}, {11}
     for e in p.get("experiencia_postor", []):
-        b.row([e.get("n"), e.get("cliente"), e.get("contrato"), e.get("proyecto"), e.get("tipo_acreditacion"),
-               e.get("monto"), e.get("pct_objeto"), e.get("le_corresponde"), e.get("acredita"), e.get("folio"),
-               e.get("ultimos_20_anios"), e.get("tipo_solicitado"), e.get("observaciones")],
+        b.row([_sin_jerga(x) for x in
+               [e.get("n"), e.get("cliente"), e.get("contrato"), e.get("proyecto"), e.get("tipo_acreditacion"),
+                e.get("monto"), e.get("pct_objeto"), e.get("le_corresponde"), e.get("acredita"), e.get("folio"),
+                e.get("ultimos_20_anios"), e.get("tipo_solicitado"), e.get("observaciones")]],
               fmts=m2, verdicts=V2, backend_cols=BE2)
     tot = p.get("experiencia_postor_total", {})
     if tot:
-        b.row(["", "TOTAL", "", "", "", "", "", tot.get("le_corresponde"), tot.get("acredita"), "", "", "", ""],
+        b.row(["", "TOTAL", "", "", "", "", "", _sin_jerga(tot.get("le_corresponde")),
+               _sin_jerga(tot.get("acredita")), "", "", "", ""],
               bold=True, fmts={8: FMT_MONEY, 9: FMT_MONEY})
     if p.get("postor_cumple"):
-        b.kv("¿POSTOR CUMPLE 3.4?", p["postor_cumple"], verdict="pos")
+        b.kv("¿POSTOR CUMPLE 3.4?", _sin_jerga(p["postor_cumple"]), verdict="pos")
     b.blank()
 
     # ── PARTE 3 + 4 ──
