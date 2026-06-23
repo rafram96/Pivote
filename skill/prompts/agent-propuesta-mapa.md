@@ -31,6 +31,25 @@ su cuadro resumen. Para cada profesional:
 > No omitas profesionales. Si un apellido aparece disperso, incluye todos sus
 > folios en el bundle aunque estén lejos entre sí.
 
+### Anti-contaminación (crítico — el roster se reusa entre concursos)
+> El **mismo** profesional puede presentarse con **distinto cargo y orden** en otra
+> licitación. Por eso:
+> - **Lee el documento, no tu memoria.** Extrae `n_prof`, `cargo` y `apellido_clave`
+>   ÚNICAMENTE de lo impreso en ESTA propuesta. **Nunca** completes ni "corrijas" un
+>   cargo/nombre/orden con lo que recuerdes de otro análisis. Si un dato no es legible
+>   aquí, déjalo vacío y emite `extraccion_parcial` — no lo infieras.
+> - **Ancla el roster a B.1.** El cuadro de **Calificaciones del Personal Clave (B.1)**
+>   de la propuesta es la lista maestra: tu roster debe **coincidir 1:1** con B.1
+>   (mismos profesionales, mismos cargos ofertados). Recórrelo y verifica que no
+>   falte ni sobre ninguno.
+> - **Encabezados-imagen.** Algunos cargos vienen como **encabezado escaneado
+>   (imagen)**, no como texto, y una lectura por texto los salta. Revisa
+>   **visualmente** cada Anexo 16 / cuadro de calificaciones para no perder a esos
+>   profesionales.
+> - **Chequeo de conteo.** Si el número de profesionales que hallas **no coincide**
+>   con B.1, emite `observaciones_claude` severidad `warning`, tipo
+>   `roster_conteo_no_cuadra`, indicando cuántos esperabas (B.1) vs cuántos hallaste.
+
 ## 2 · Formularios y oferta económica (Partes 1-2)
 - Checklist de **anexos** (1-6 y los que pida el formato): cuáles presenta + folio.
 - **Oferta económica**: monto ofertado (Anexo de oferta) y los límites si aparecen

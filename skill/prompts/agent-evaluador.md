@@ -95,6 +95,17 @@ Para cada experiencia, cruzándola con los requisitos del cargo en `bases`:
   de profesiones aceptadas → CUMPLE"*; *"Nivel II-2 ≥ II-1 requerido → CUMPLE"*).
 - **Comparación de niveles hospitalarios**: II-2 ≥ II-1, etc. Si no estás seguro,
   emite observación y NO afirmes cumplimiento.
+- **El veredicto sigue al razonamiento — equivalencia de cargo.** Si el cargo que
+  acreditan las constancias figura (literal **o por equivalencia**) en la lista de
+  `cargos_similares_validos` del cargo ofertado, y el tiempo y la profesión cumplen,
+  el veredicto del profesional (`cumple`) es **CUMPLE**. Una discrepancia entre el
+  cargo *ofertado* (Anexo 16) y el cargo *certificado* (constancias) se registra en
+  `observaciones_claude` y como nota "para ratificación del comité" — **NUNCA
+  convierte un CUMPLE en NO CUMPLE**. El encabezado de `cumple` debe **coincidir
+  con su propia conclusión**: si concluyes "acredita por equivalencia", el veredicto
+  NO puede empezar con "NO CUMPLE" (eso es una contradicción interna y descalifica a
+  quien sí califica). Reserva "NO CUMPLE" para cuando el cargo **no** acredita ni
+  literal ni por equivalencia, o falla el tiempo/profesión.
 - **No inventes verificaciones**: lo que dependa de SUNAT/InfoObras (RUC real,
   facultad del firmante, paralizaciones, vinculación postor↔emisor) va en `null`
   dentro de `_backend`. Tú señalas "ASUMIDO", el servidor confirma.
