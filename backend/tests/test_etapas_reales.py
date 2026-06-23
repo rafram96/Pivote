@@ -490,8 +490,9 @@ def test_fetch_fallido_no_se_clampa_y_marca_veredicto_provisional(tmp_path):
 
 def test_fecha_por_verificar_en_no_cumple_va_a_revision(tmp_path):
     # prof con 2 experiencias; la 2da resuelve pero su fecha_final no se leyó
-    # ("POR VERIFICAR") → se excluye del cálculo. Solo con la 1ra queda NO CUMPLE
-    # → debe flaguearse (confirmar la fecha podría cambiar el veredicto).
+    # ("POR VERIFICAR") → se excluye del cálculo. Solo con la 1ra el cómputo cae bajo el
+    # mínimo, PERO como depende de una fecha sin leer NO es un NO CUMPLE definitivo: se
+    # reformula a INCERTIDUMBRE ("POR VERIFICAR", la ausencia no invalida) y va a revisión.
     espejo = {
         "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
         "postor": {},
@@ -516,7 +517,9 @@ def test_fecha_por_verificar_en_no_cumple_va_a_revision(tmp_path):
     job = motor.correr(motor.crear_job(espejo).job_id)
 
     enr = repo.cargar_enriquecimiento(job.job_id)
-    assert "NO CUMPLE" in enr["prof:1"]["cumple_backend"]   # solo cuenta exp 1 (~1 año)
+    veredicto = enr["prof:1"]["cumple_backend"]
+    assert "POR VERIFICAR" in veredicto and "NO invalida" in veredicto  # incertidumbre, no fallo duro
+    assert not veredicto.startswith("NO CUMPLE")
     assert enr["prof:1"].get("veredicto_provisional") == [2]
     assert any(it.n_prof == 1 and it.n_exp == 2 and not it.resuelto
                and "fecha sin verificar" in it.motivo for it in job.items_revision)

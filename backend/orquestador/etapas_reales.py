@@ -775,6 +775,20 @@ class EtapaReglasReal:
                         candidatos=[], profesional=p.get("nombre"), cargo=p.get("cargo"),
                         proyecto=exp0.get("proyecto"),
                         fechas=f"{exp0.get('fecha_inicial')} → {exp0.get('fecha_final')}"))
+            # ⚖ Regla legal — la AUSENCIA no invalida ("la falta de información es a
+            # favor del que declara"). Si el NO CUMPLE depende de una experiencia sin
+            # verificar en InfoObras o de una fecha sin leer, NO es un fallo definitivo:
+            # se reformula como INCERTIDUMBRE (texto "POR VERIFICAR" → amarillo en el
+            # Excel), nunca como NO CUMPLE duro. El NO CUMPLE se reserva para cuando los
+            # días caen bajo el mínimo con datos EFECTIVAMENTE verificados.
+            prov = datos.get("veredicto_provisional")
+            if prov and str(datos.get("cumple_backend", "")).startswith("NO CUMPLE"):
+                exps = ", ".join(map(str, sorted(set(prov))))
+                datos["cumple_backend"] = (
+                    f"POR VERIFICAR — {datos['anios_efectivos']} años efectivos PROVISIONALES "
+                    f"(mínimo {datos.get('minimo_anios')}): la(s) experiencia(s) {exps} no se "
+                    f"pudo verificar en InfoObras. La ausencia de datos NO invalida la "
+                    f"experiencia — confirmar a mano antes de concluir; el cómputo puede estar incompleto.")
             ctx.enriquecimiento[f"prof:{np_}"] = datos
             ok += 1
         return _res(self.nombre, EE.OK, _met(total, ok), obs)
