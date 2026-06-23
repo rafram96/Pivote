@@ -197,15 +197,9 @@ class Motor:
         wall = sum(durs.values()) - min(durs.get("infoobras", 0), durs.get("sunat", 0))
         partes = " · ".join(f"{k} {v / 1000:.0f}s"
                             for k, v in sorted(durs.items(), key=lambda x: -x[1]) if v >= 1000)
-        io = job.etapa(pipeline.Etapa.INFOOBRAS)
-        extra = ""
-        if io is not None:
-            m = io.metrica
-            extra = (f" | infoobras: {m.descargas} arch, "
-                     f"{m.bytes_descargados / 1_048_576:.0f} MB, {m.reintentos} reintentos")
-        logger.info("RESUMEN job %s · %s · wall≈%.0fs · %s%s",
+        logger.info("RESUMEN job %s · %s · wall≈%.0fs · %s · descargas: diferidas (ver línea DESCARGAS)",
                     job.job_id, getattr(job.estado, "value", job.estado),
-                    wall / 1000, partes or "(todo <1s)", extra)
+                    wall / 1000, partes or "(todo <1s)")
 
     def _ejecutar(self, nombre: pipeline.Etapa, ctx: Contexto) -> pipeline.ResultadoEtapa:
         """Corre una etapa con cronómetro y contención de errores. Una excepción

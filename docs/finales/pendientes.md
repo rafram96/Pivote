@@ -50,7 +50,20 @@ consorcio). Lo segundo es **alcance nuevo no cotizado**. Ver
 
 ## ⚪ Backlog técnico (no urgente)
 
-### P6 · `/zip` async a disco + servir estático
-El fix actual (atómico + lock) hace el build seguro, pero **bloquea el request**
-mientras arma ~1 GB. El de fondo: armar el ZIP **async** a disco y que el panel
-solo descargue el archivo estático (sin armar en el request).
+### P6 · Descarga diferida — seguimientos
+La descarga de documentos InfoObras (~90% del tiempo, ~1 GB) ya se **desacopló del
+camino crítico** (corre en background tras el pipeline; el veredicto/Excel quedan
+en ~1 min). `Job.descargas_estado` (pendiente→en_progreso→listas|error) refleja el
+avance. Quedan tres mejoras (no bloquean single-user):
+- **`/zip` aún bloquea el request** si la descarga no terminó (es la red de
+  seguridad: baja en vivo y luego arma). Lo normal es que el background ya terminó
+  → es rápido. Fix de fondo: devolver **202 "en preparación"** si
+  `descargas_estado != "listas"` y que el **panel haga polling** de ese campo
+  (requiere cambio en `Panel-InfoObras`).
+- **Race del backfill de métrica** (multi-usuario): si `/zip` y `/revision` del
+  MISMO job corren a la vez, el backfill de `metrica` de InfoObras podría pisar un
+  checkpoint del motor. Inofensivo single-user; el fix es un lock compartido
+  motor↔API por job.
+- **Orden de locks**: hoy `_descargas_locks` y `_zip_build_lock` NO se anidan (se
+  libera uno antes de tomar el otro) → sin deadlock. Documentar el orden si se
+  agregan más locks.

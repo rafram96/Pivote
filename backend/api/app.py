@@ -14,8 +14,11 @@ Datos en PIVOTE_DATA_DIR (def: ./datos_pivote — jobs, espejos y entregables).
 from __future__ import annotations
 
 import json
+import logging
 import os
+import shutil
 import threading
+import time
 import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -69,6 +72,71 @@ def _espejo_o_404(job_id: str) -> dict:
     if espejo is None:
         raise HTTPException(404, "espejo no disponible para este job")
     return espejo
+
+
+# ── Descarga DIFERIDA de documentos InfoObras ────────────────────────────────
+# Los PDFs de InfoObras (~1 GB) solo alimentan el ZIP, no el veredicto/Excel. Por
+# eso se bajan DESPUÉS del pipeline (sin bloquear el resultado) y, como red de
+# seguridad, también al pedir el /zip. Serializado por job para no duplicar trabajo.
+logger = logging.getLogger("pivote.api")
+_descargas_guard = threading.Lock()
+_descargas_locks: dict[str, threading.Lock] = {}
+
+
+def _lock_descargas(job_id: str) -> threading.Lock:
+    with _descargas_guard:
+        return _descargas_locks.setdefault(job_id, threading.Lock())
+
+
+def _asegurar_descargas(job_id: str) -> None:
+    """Idempotente + serializado por job: baja lo que falte de InfoObras y rellena
+    la métrica de la etapa INFOOBRAS. La llaman el background task (tras el
+    pipeline) y el endpoint /zip (garantía). No relanza: deja el estado en el job."""
+    job = repo.cargar(job_id)
+    if job is None or job.descargas_estado == "listas":
+        return
+    with _lock_descargas(job_id):
+        job = repo.cargar(job_id)                      # re-leer dentro del lock
+        if job is None or job.descargas_estado == "listas":
+            return
+        espejo = repo.cargar_espejo(job_id) or {}
+        enr = repo.cargar_enriquecimiento(job_id) or {}
+        job.descargas_estado = "en_progreso"
+        repo.guardar(job)
+        _raw = os.getenv("PIVOTE_MAX_DESCARGAS")
+        maxd = None if not _raw or not _raw.strip() else int(_raw)
+        t0 = time.time()
+        try:
+            from orquestador.etapas_reales import descargar_documentos_job
+            stats = descargar_documentos_job(espejo, enr, job_id, DATA_DIR, max_descargas=maxd)
+            job = repo.cargar(job_id) or job
+            io = job.etapa(pipeline.Etapa.INFOOBRAS)
+            if io is not None:                          # backfill de la métrica
+                io.metrica.descargas = stats["descargas"]
+                io.metrica.bytes_descargados = stats["bytes"]
+                io.metrica.reintentos = stats["reintentos"]
+            job.descargas_estado = "listas"
+            repo.guardar(job)
+            logger.info("DESCARGAS job %s · %d arch · %.0f MB · %d reintentos · %.0fs",
+                        job_id, stats["descargas"], stats["bytes"] / 1_048_576,
+                        stats["reintentos"], time.time() - t0)
+        except Exception:
+            logger.exception("descargas job %s fallaron", job_id)
+            job = repo.cargar(job_id) or job
+            job.descargas_estado = "error"
+            repo.guardar(job)
+
+
+def _correr_y_descargar(job_id: str) -> None:
+    """Background task: corre el pipeline (veredicto/Excel listos en ~1 min) y,
+    RECIÉN entonces, baja los documentos InfoObras (lo lento, que solo nutre el ZIP)."""
+    job = motor.correr(job_id)
+    if job is not None and job.estado == pipeline.JobEstado.ERROR:
+        return  # el pipeline falló: no hay enriquecimiento útil que descargar
+    try:
+        _asegurar_descargas(job_id)
+    except Exception:
+        logger.exception("descarga diferida del job %s falló", job_id)
 
 
 def _decisiones_path(job_id: str) -> Path:
@@ -188,7 +256,7 @@ async def analizar(
     if certificados is not None:
         _guardar_certificados(job.job_id, await certificados.read())
 
-    tareas.add_task(motor.correr, job.job_id)
+    tareas.add_task(_correr_y_descargar, job.job_id)
     return {"job_id": job.job_id}
 
 
@@ -198,7 +266,7 @@ def ver_job(job_id: str):
 
 
 @app.post("/api/pivote/jobs/{job_id}/revision")
-def resolver_revision(job_id: str, body: dict):
+def resolver_revision(job_id: str, tareas: BackgroundTasks, body: dict):
     n_prof, n_exp = body.get("n_prof"), body.get("n_exp")
     if not isinstance(n_prof, int) or not isinstance(n_exp, int):
         raise HTTPException(400, "n_prof y n_exp son obligatorios")
@@ -208,6 +276,16 @@ def resolver_revision(job_id: str, body: dict):
         job = motor.resolver_revision(job_id, n_prof, n_exp, body)
     except ValueError as e:
         raise HTTPException(404, str(e))
+    # La obra del item pudo cambiar al re-resolver → invalida SUS PDFs (carpeta +
+    # marca .ok) para re-bajarlos frescos; los demás se saltan por su .ok. Bajo el
+    # lock del job para NO borrar mientras una descarga escribe esa carpeta.
+    with _lock_descargas(job_id):
+        base = DATA_DIR / f"{job_id}.descargas"
+        shutil.rmtree(base / f"P{n_prof}_E{n_exp}", ignore_errors=True)
+        (base / f"P{n_prof}_E{n_exp}.ok").unlink(missing_ok=True)
+        job.descargas_estado = "pendiente"
+        repo.guardar(job)
+    tareas.add_task(_asegurar_descargas, job_id)   # re-baja en background (fuera del lock)
     return json.loads(job.model_dump_json())
 
 
@@ -373,6 +451,9 @@ def descargar_zip(job_id: str):
     espejo = _espejo_o_404(job_id)
     ruta = DATA_DIR / f"{job_id}.infoobras.zip"
     if not ruta.exists():
+        # Garantía: si la descarga diferida aún no terminó (o el usuario pidió el
+        # ZIP enseguida), bájala ahora (idempotente, serializada por job).
+        _asegurar_descargas(job_id)
         with _zip_build_lock:           # un solo build a la vez
             if not ruta.exists():       # otro request pudo armarlo mientras esperábamos el lock
                 descargas_dir = DATA_DIR / f"{job_id}.descargas"

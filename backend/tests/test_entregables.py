@@ -80,8 +80,8 @@ def test_excel_final_hoja_profesional_cuadro_de_hitos(tmp_path):
     celdas = [str(c.value) for fila in ws.iter_rows() for c in fila if c.value is not None]
     texto = "\n".join(celdas)
 
-    # el cuadro de hitos existe, con periodo certificado, paralizaciones y tramos
-    assert "CUADRO DE HITOS" in texto
+    # el marco del certificado existe, con periodo certificado, paralizaciones y tramos
+    assert "CERT. N°1" in texto and "DATOS DE LA EXPERIENCIA" in texto
     assert "Periodo certificado" in texto
     assert "Paralización 1 de la obra (InfoObras)" in texto
     assert "Tramo efectivo 1" in texto
@@ -196,20 +196,21 @@ def test_zip_arbol_de_4_niveles_con_y_sin_documentos(tmp_path):
 
     with zipfile.ZipFile(salida) as zf:
         nombres = zf.namelist()
-        raiz = "CP-TEST-2026"
-        # nivel 1: proyecto · nivel 2: profesional · nivel 3: experiencia
-        assert any(n.startswith(f"{raiz}/01 - JEFE DE SUPERVISIÓN/Exp 1 - Obra A/") for n in nombres)
+        # carpeta corta "P{nn} {cargo}" / "E{n}" (nombres cortos para el límite 260
+        # de Windows; el nivel del concurso se omite, va en el indice.txt)
+        pref = "P01 SUPERVISIÓN/E1/"
+        assert any(n.startswith(pref) for n in nombres)
         # la experiencia CON descargas trae archivos reales
-        con_docs = [n for n in nombres if "/Exp 1 - Obra A/" in n and not n.endswith("/")]
+        con_docs = [n for n in nombres if n.startswith(pref) and not n.endswith("/")]
         assert len(con_docs) >= 1
         # las experiencias SIN descargas llevan la nota, no desaparecen
         sin_docs = [n for n in nombres if n.endswith("SIN_DOCUMENTOS.txt")]
         assert len(sin_docs) == 2  # exp (1,2) y (2,1)
         contenido = zf.read(sin_docs[0]).decode("utf-8")
         assert "Motivo" in contenido
-        # índice en la raíz
-        assert f"{raiz}/indice.txt" in nombres
-        indice = zf.read(f"{raiz}/indice.txt").decode("utf-8")
+        # índice en la raíz del ZIP
+        assert "indice.txt" in nombres
+        indice = zf.read("indice.txt").decode("utf-8")
         assert "SIN DOCUMENTOS" in indice
 
 

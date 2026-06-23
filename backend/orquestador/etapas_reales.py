@@ -243,11 +243,9 @@ class EtapaInfoObrasReal:
         return fetch_by_cui(cui, cert_ini, cert_fin, obra_id)
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
-        from entregables.zip_infoobras import reset_descargas_stats, descargas_stats
-        reset_descargas_stats()  # contador de reintentos de descarga, por hilo
         obs: list[pipeline.Observacion] = []
         cache: dict[tuple, object] = {}
-        cont = {"ok": 0, "rev": 0, "err": 0, "descargadas": 0}
+        cont = {"ok": 0, "rev": 0, "err": 0}
 
         def _fetch_obra(cui, cert_ini, cert_fin, obra_id=None):
             # Cachea SOLO éxitos: si la obra cae por flakiness no se memoriza el
@@ -367,29 +365,10 @@ class EtapaInfoObrasReal:
                     ))
                     cont["rev"] += 1
 
-            # descarga de documentos (sin límite por defecto; max_descargas solo acota pruebas)
-            if (self.dir_descargas
-                    and (self.max_descargas is None or cont["descargadas"] < self.max_descargas)
-                    and getattr(obra, "obra_id", None)):
-                destino = self.dir_descargas / f"{ctx.job.job_id}.descargas" / f"P{np_}_E{ne}"
-                try:
-                    descargar = self._descargar
-                    if descargar is None:
-                        from entregables.zip_infoobras import descargar_documentos_obra_por_hito
-                        descargar = descargar_documentos_obra_por_hito
-                    descargar(obra.obra_id, destino)
-                    cont["descargadas"] += 1
-                    # informes de control (Contraloría), filtrados al periodo de la
-                    # experiencia — solo en modo real (los tests inyectan _descargar).
-                    if self._descargar is None:
-                        try:
-                            from entregables.zip_infoobras import descargar_informes_control
-                            descargar_informes_control(obra.obra_id, destino,
-                                                       fecha_ini=cert_ini, fecha_fin=cert_fin)
-                        except Exception as ex:  # noqa: BLE001
-                            logger.warning("informes control obra %s: %r", obra.obra_id, ex)
-                except Exception as ex:  # noqa: BLE001
-                    logger.warning("descarga obra %s: %r", cui, ex)
+            # La DESCARGA de documentos ya NO ocurre aquí: se DIFIERE a después del
+            # pipeline (descargar_documentos_job, disparada por la API) usando el
+            # obra_id ya persistido en el enriquecimiento. Así el veredicto/Excel
+            # quedan listos en ~1 min sin esperar ~1 GB de PDFs (que solo sirven al ZIP).
 
         # 1ª pasada: procesar lo que responda; lo que cae por flakiness se aparta
         # (todavía NO se marca error) para reintentarlo al final.
@@ -434,24 +413,74 @@ class EtapaInfoObrasReal:
                     _procesar(_e, np_, ne, cui, cert_ini, cert_fin, obra)
 
         total = sum(1 for _ in ctx.items_experiencia())
-        # métricas de descarga: #archivos + bytes (del folder) + reintentos (del scraper)
-        n_files = n_bytes = 0
-        if self.dir_descargas:
-            ddir = self.dir_descargas / f"{ctx.job.job_id}.descargas"
-            if ddir.is_dir():
-                for p in ddir.rglob("*"):
-                    if p.is_file():
-                        n_files += 1
-                        try:
-                            n_bytes += p.stat().st_size
-                        except OSError:
-                            pass
-        reint = descargas_stats().get("reintentos", 0)
+        # Las métricas de descarga (archivos/bytes/reintentos) las RELLENA la
+        # descarga diferida (post-pipeline) sobre esta misma etapa — aquí van en 0.
         estado = (EE.ERROR_PARCIAL if cont["err"]
                   else (EE.OK_CON_REVISION if cont["rev"] else EE.OK))
-        return _res(self.nombre, estado,
-                    _met(total, cont["ok"], cont["rev"], cont["err"],
-                         reintentos=reint, descargas=n_files, bytes_=n_bytes), obs)
+        return _res(self.nombre, estado, _met(total, cont["ok"], cont["rev"], cont["err"]), obs)
+
+
+def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
+                             max_descargas=None, descargar=None):
+    """Descarga DIFERIDA de los documentos InfoObras de TODAS las experiencias del
+    job a {job}.descargas/P{n}_E{m}, usando el `obra_id` YA persistido en el
+    enriquecimiento (sin re-fetch al portal). Idempotente: salta las carpetas que
+    ya tienen archivos (skip-existing → re-runs rápidos y reentrada segura).
+    Devuelve {descargas, bytes, reintentos} medidos del folder + el scraper."""
+    from entregables.zip_infoobras import (
+        descargar_documentos_obra_por_hito, descargar_informes_control,
+        reset_descargas_stats, descargas_stats)
+    base = Path(dir_descargas) / f"{job_id}.descargas"
+    reset_descargas_stats()
+    bajadas = saltados = 0
+    for prof in espejo.get("profesionales", []):
+        np_ = prof.get("n_prof")
+        for e in prof.get("experiencias", []) or []:
+            ne = e.get("n")
+            enr = enriquecimiento.get(_clave(np_, ne)) or {}
+            obra = enr.get("obra") if isinstance(enr.get("obra"), dict) else None
+            obra_id = (obra or {}).get("obra_id")
+            if not obra_id:
+                saltados += 1            # NA / sin CUI resuelto → no descargable
+                continue
+            if max_descargas is not None and bajadas >= max_descargas:
+                break
+            destino = base / f"P{np_}_E{ne}"
+            ok = base / f"P{np_}_E{ne}.ok"          # marca de descarga COMPLETA (no .part)
+            if ok.exists():
+                continue  # ya descargado COMPLETO → idempotencia / re-runs rápidos.
+                # (una carpeta a medio bajar NO tiene .ok → se vuelve a intentar)
+            try:
+                if descargar is not None:           # inyección de tests
+                    descargar(obra_id, destino)
+                else:
+                    descargar_documentos_obra_por_hito(obra_id, destino)
+                    cert_ini = _fecha_iso(e.get("fecha_inicial"))
+                    cert_fin = _fecha_iso(e.get("fecha_final"))
+                    try:
+                        descargar_informes_control(obra_id, destino,
+                                                   fecha_ini=cert_ini, fecha_fin=cert_fin)
+                    except Exception as ex:  # noqa: BLE001
+                        logger.warning("informes control obra %s: %r", obra_id, ex)
+                base.mkdir(parents=True, exist_ok=True)
+                ok.write_text("ok", encoding="utf-8")   # recién aquí: descarga COMPLETA
+                bajadas += 1
+            except Exception as ex:  # noqa: BLE001
+                logger.warning("descarga obra %s (P%sE%s): %r", obra_id, np_, ne, ex)
+    if saltados:
+        logger.info("descargas job %s: %d experiencia(s) sin obra_id (no descargables)",
+                    job_id, saltados)
+    n_files = n_bytes = 0
+    if base.is_dir():
+        for p in base.rglob("*"):
+            if p.is_file() and p.suffix != ".ok":   # no contar las marcas
+                n_files += 1
+                try:
+                    n_bytes += p.stat().st_size
+                except OSError:
+                    pass
+    return {"descargas": n_files, "bytes": n_bytes,
+            "reintentos": descargas_stats().get("reintentos", 0)}
 
 
 # ── 3b · Consulta a SUNAT (ALT04) + vinculación postor↔emisor ────────────────

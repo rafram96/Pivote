@@ -165,6 +165,9 @@ class Job(_ModelLax):
     items_revision: list[ItemRevision] = Field(default_factory=list)
     excel_final: Optional[str] = None      # ruta/ref del Excel regenerado
     zip_infoobras: Optional[str] = None    # ref del ZIP de archivos (⏳ futuro)
+    # Descarga de documentos InfoObras: diferida tras el pipeline (no bloquea el
+    # veredicto). pendiente → en_progreso → listas | error.
+    descargas_estado: str = "pendiente"
     creado_en: Optional[datetime] = None
     actualizado_en: Optional[datetime] = None
 
