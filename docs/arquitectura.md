@@ -56,7 +56,7 @@ Claude emite **dos artefactos** por análisis:
   `_backend` con los campos en `null` que el servidor debe llenar (SUNAT,
   InfoObras, recálculos).
 
-Schema en [`contrato/schema_canonico_pydantic.md`](contrato/schema_canonico_pydantic.md).
+Schema en el código: `backend/schemas/espejo.py` ↔ `skill/schemas/espejo.js` (contrato v1.2.0).
 El servidor **regenera** el Excel final enriquecido (no parchea el de Claude).
 
 ## Regla de oro (constraint on-prem)

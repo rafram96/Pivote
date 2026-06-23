@@ -69,7 +69,6 @@ hizo Claude en la PC del cliente.
 ## Contratos relacionados
 
 - **Schema del JSON espejo** (incl. campos `cui`, `ruc_emisor` que alimentan #2/#3):
-  [`../contrato/schema_canonico_pydantic.md`](../contrato/schema_canonico_pydantic.md)
-  · gemelo Python en `backend/schemas/espejo.py`.
+  `backend/schemas/espejo.py` (Pydantic) ↔ `skill/schemas/espejo.js` (zod) · contrato v1.2.0.
 - **Qué extrae Claude** para que #2 resuelva bien (nombre verbatim + CUI):
-  [`../skill/skill_design.md`](../skill/skill_design.md) y `skill/prompts/agent-propuesta.md` §A-E.
+  `skill/prompts/agent-propuesta-mapa.md` y `agent-propuesta-profesional.md`.

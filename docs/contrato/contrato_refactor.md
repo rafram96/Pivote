@@ -2,7 +2,8 @@
 
 > **Fecha**: 2026-05-30
 > **Reemplaza a**: la arquitectura híbrida de 3 JSONs (`skill_design.md` v2,
-> `schema_canonico.md` v2). Esos docs quedan como historia; este manda.
+> `schema_canonico.md` v2, ya **eliminados por superados**); este manda. El schema
+> vive en el código: `backend/schemas/espejo.py` ↔ `skill/schemas/espejo.js`.
 > **Qué es**: el contrato técnico del segundo pivote, donde Claude pasa de
 > "extractor que alimenta al backend" a **motor central de extracción Y
 > evaluación**, y el backend on-prem queda como **capa de verificación,
