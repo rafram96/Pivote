@@ -109,6 +109,8 @@ class MetricaEtapa(_Model):
     items_revision: int = Field(default=0, ge=0)
     items_error: int = Field(default=0, ge=0)
     reintentos: int = Field(default=0, ge=0)       # transitorios reintentados (scrapers)
+    descargas: int = Field(default=0, ge=0)         # archivos descargados (InfoObras)
+    bytes_descargados: int = Field(default=0, ge=0)
     duracion_ms: Optional[int] = Field(default=None, ge=0)
 
 

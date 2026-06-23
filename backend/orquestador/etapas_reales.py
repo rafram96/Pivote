@@ -35,9 +35,11 @@ E = pipeline.Etapa
 EE = pipeline.EstadoEtapa
 
 
-def _met(total=0, ok=0, rev=0, err=0) -> pipeline.MetricaEtapa:
+def _met(total=0, ok=0, rev=0, err=0, reintentos=0, descargas=0, bytes_=0) -> pipeline.MetricaEtapa:
     return pipeline.MetricaEtapa(items_total=total, items_ok=ok,
-                                 items_revision=rev, items_error=err)
+                                 items_revision=rev, items_error=err,
+                                 reintentos=reintentos, descargas=descargas,
+                                 bytes_descargados=bytes_)
 
 
 def _res(etapa, estado, met, obs=None) -> pipeline.ResultadoEtapa:
@@ -241,6 +243,8 @@ class EtapaInfoObrasReal:
         return fetch_by_cui(cui, cert_ini, cert_fin, obra_id)
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
+        from entregables.zip_infoobras import reset_descargas_stats, descargas_stats
+        reset_descargas_stats()  # contador de reintentos de descarga, por hilo
         obs: list[pipeline.Observacion] = []
         cache: dict[tuple, object] = {}
         cont = {"ok": 0, "rev": 0, "err": 0, "descargadas": 0}
@@ -430,9 +434,24 @@ class EtapaInfoObrasReal:
                     _procesar(_e, np_, ne, cui, cert_ini, cert_fin, obra)
 
         total = sum(1 for _ in ctx.items_experiencia())
+        # métricas de descarga: #archivos + bytes (del folder) + reintentos (del scraper)
+        n_files = n_bytes = 0
+        if self.dir_descargas:
+            ddir = self.dir_descargas / f"{ctx.job.job_id}.descargas"
+            if ddir.is_dir():
+                for p in ddir.rglob("*"):
+                    if p.is_file():
+                        n_files += 1
+                        try:
+                            n_bytes += p.stat().st_size
+                        except OSError:
+                            pass
+        reint = descargas_stats().get("reintentos", 0)
         estado = (EE.ERROR_PARCIAL if cont["err"]
                   else (EE.OK_CON_REVISION if cont["rev"] else EE.OK))
-        return _res(self.nombre, estado, _met(total, cont["ok"], cont["rev"], cont["err"]), obs)
+        return _res(self.nombre, estado,
+                    _met(total, cont["ok"], cont["rev"], cont["err"],
+                         reintentos=reint, descargas=n_files, bytes_=n_bytes), obs)
 
 
 # ── 3b · Consulta a SUNAT (ALT04) + vinculación postor↔emisor ────────────────

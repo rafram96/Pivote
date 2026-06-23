@@ -22,6 +22,7 @@ import logging
 import os
 import random
 import re
+import threading
 import time
 import zipfile
 from datetime import date
@@ -38,6 +39,23 @@ logger = logging.getLogger(__name__)
 # esos sustentos (los más importantes) se perdían en silencio del ZIP.
 _DL_RETRIES = int(os.getenv("INFOOBRAS_DOWNLOAD_RETRIES", "3"))
 _DL_BASE_DELAY = float(os.getenv("INFOOBRAS_DOWNLOAD_BASE_DELAY", "1.0"))
+
+# Contador de reintentos de descarga, por HILO: la etapa InfoObras corre en su
+# propio hilo del pool y descarga sincrónicamente, así que `reset` al inicio y
+# `descargas_stats` al cierre (mismo hilo) son seguros incluso con jobs concurrentes.
+_dl_local = threading.local()
+
+
+def reset_descargas_stats() -> dict:
+    _dl_local.v = {"reintentos": 0}
+    return _dl_local.v
+
+
+def descargas_stats() -> dict:
+    v = getattr(_dl_local, "v", None)
+    if v is None:
+        v = _dl_local.v = {"reintentos": 0}
+    return v
 
 BASE = "https://infobras.contraloria.gob.pe/InfobrasWeb"
 PAGINA = BASE + "/Mapa/DatosEjecucion"
@@ -259,6 +277,7 @@ def _descargar_a_carpeta(
             except OSError:
                 pass
             if intento < intentos - 1:
+                descargas_stats()["reintentos"] += 1
                 delay = _DL_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.5)
                 logger.warning("InfoObras descarga %s intento %d/%d: %s — reintento en %.1fs",
                                it["nombre"], intento + 1, intentos, e, delay)

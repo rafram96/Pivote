@@ -121,6 +121,7 @@ class Motor:
                 return self._abortar(job)
             i += 1
 
+        self._log_resumen(job)
         job.estado = (
             pipeline.JobEstado.REQUIERE_REVISION
             if job.pendientes_humano
@@ -187,6 +188,24 @@ class Motor:
         return res is not None and res.estado in (
             pipeline.EstadoEtapa.OK, pipeline.EstadoEtapa.OK_CON_REVISION,
         )
+
+    def _log_resumen(self, job: pipeline.Job) -> None:
+        """Línea de resumen para detectar cuellos de botella: duración por etapa +
+        descargas/reintentos de InfoObras. (infoobras∥sunat van en paralelo, así que
+        el 'wall' descuenta el solape de la más corta de las dos.)"""
+        durs = {r.etapa.value: (r.metrica.duracion_ms or 0) for r in job.etapas}
+        wall = sum(durs.values()) - min(durs.get("infoobras", 0), durs.get("sunat", 0))
+        partes = " · ".join(f"{k} {v / 1000:.0f}s"
+                            for k, v in sorted(durs.items(), key=lambda x: -x[1]) if v >= 1000)
+        io = job.etapa(pipeline.Etapa.INFOOBRAS)
+        extra = ""
+        if io is not None:
+            m = io.metrica
+            extra = (f" | infoobras: {m.descargas} arch, "
+                     f"{m.bytes_descargados / 1_048_576:.0f} MB, {m.reintentos} reintentos")
+        logger.info("RESUMEN job %s · %s · wall≈%.0fs · %s%s",
+                    job.job_id, getattr(job.estado, "value", job.estado),
+                    wall / 1000, partes or "(todo <1s)", extra)
 
     def _ejecutar(self, nombre: pipeline.Etapa, ctx: Contexto) -> pipeline.ResultadoEtapa:
         """Corre una etapa con cronómetro y contención de errores. Una excepción
