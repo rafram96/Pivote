@@ -592,7 +592,11 @@ def construir_zip_infoobras(
                          f"Postor: {espejo.get('_meta', {}).get('postor') or '—'}", ""]
 
     salida.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(salida, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+    # Se arma en un `.tmp` único y se renombra atómicamente al final → `salida`
+    # SOLO aparece cuando está completo. Sin esto, una descarga concurrente sirve
+    # el ZIP a medio escribir y h11 aborta ("Too much data for declared Content-Length").
+    tmp = salida.with_name(f"{salida.name}.{os.urandom(4).hex()}.tmp")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for prof in espejo.get("profesionales", []):
             n_prof = prof.get("n_prof")
             nivel2 = _ruta_segura(f"{n_prof:02d} - {prof.get('cargo', '')}")
@@ -622,4 +626,5 @@ def construir_zip_infoobras(
                     indice.append(f"[{n_prof:02d}.{n_exp}] {nivel3}: SIN DOCUMENTOS — {motivo}")
 
         zf.writestr(f"{raiz}/indice.txt", "\n".join(indice) + "\n")
+    os.replace(tmp, salida)   # atómico: recién aquí `salida` existe y está completo
     return salida

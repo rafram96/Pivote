@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -361,25 +362,32 @@ def descargar_excel(job_id: str):
     )
 
 
+# Serializa el armado del ZIP: dos descargas concurrentes no deben rearmar el
+# mismo ZIP de ~1 GB en paralelo (ni renombrarlo mientras otra petición lo sirve).
+_zip_build_lock = threading.Lock()
+
+
 @app.get("/api/pivote/jobs/{job_id}/zip")
 def descargar_zip(job_id: str):
     job = _job_o_404(job_id)
     espejo = _espejo_o_404(job_id)
     ruta = DATA_DIR / f"{job_id}.infoobras.zip"
     if not ruta.exists():
-        descargas_dir = DATA_DIR / f"{job_id}.descargas"
-        descargas: dict[tuple[int, int], Path] = {}
-        if descargas_dir.is_dir():
-            for sub in descargas_dir.iterdir():  # carpetas "P{n}_E{m}"
-                try:
-                    np_, ne = sub.name.removeprefix("P").split("_E")
-                    descargas[(int(np_), int(ne))] = sub
-                except ValueError:
-                    continue
-        enr = repo.cargar_enriquecimiento(job_id) or {}
-        construir_zip_infoobras(espejo, descargas, ruta, enriquecimiento=enr)
-        job.zip_infoobras = f"/api/pivote/jobs/{job_id}/zip"
-        repo.guardar(job)
+        with _zip_build_lock:           # un solo build a la vez
+            if not ruta.exists():       # otro request pudo armarlo mientras esperábamos el lock
+                descargas_dir = DATA_DIR / f"{job_id}.descargas"
+                descargas: dict[tuple[int, int], Path] = {}
+                if descargas_dir.is_dir():
+                    for sub in descargas_dir.iterdir():  # carpetas "P{n}_E{m}"
+                        try:
+                            np_, ne = sub.name.removeprefix("P").split("_E")
+                            descargas[(int(np_), int(ne))] = sub
+                        except ValueError:
+                            continue
+                enr = repo.cargar_enriquecimiento(job_id) or {}
+                construir_zip_infoobras(espejo, descargas, ruta, enriquecimiento=enr)
+                job.zip_infoobras = f"/api/pivote/jobs/{job_id}/zip"
+                repo.guardar(job)
     return FileResponse(ruta, media_type="application/zip",
                         filename=f"InfoObras_{job.analisis_id}.zip")
 
