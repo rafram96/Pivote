@@ -1,69 +1,61 @@
-# Pendientes finales
+# Pendientes del proyecto — inventario A–E
 
-> Recopilación de los cabos sueltos detectados al cerrar la fase de demos
-> (sesión 2026-06-23). Ordenados por prioridad. Marcar con ✓ al cerrar.
+> Fuente única de lo que falta. Última actualización: 2026-06-23.
+> ✅ hecho · ⏳ pendiente · ❌ descartado.
 
-## 🔴 Operativos — desbloquean cosas ya hechas
+## ✅ Ya hecho (no re-decidir)
+Manual de instalación · manual de usuario · plan de BD (modelo "Base de Datos") ·
+constancias embebidas · informes de control · ZIP nombres cortos · razones literales
+en "no cumple" · blindajes de la skill (veredicto + anti-contaminación) · descarga
+diferida · observabilidad (resumen + métricas) · **B1 (la ausencia no invalida)** ·
+**B2 (resumen "X de Y no encontrados")**.
 
-### P1 · Reiniciar el backend
-El proceso `uvicorn` que corre tiene **código viejo en memoria**. Hay dos fixes
-commiteados que **solo toman efecto al reiniciar**:
-- `b1554ed` — armado **atómico** del `/zip` + lock → mata el error
-  `h11 Too much data for declared Content-Length` en descargas concurrentes.
-- `6d3499b` — **nombres cortos** en el ZIP (`P08 Estructuras/E1/…`) → cabe en el
-  límite de 260 de Windows al extraer.
+---
 
-> Los ZIP **ya generados** en disco (Vitarte, 2× Pichanaqui) ya están con nombres
-> cortos; reiniciar es para que **los análisis NUEVOS** también salgan bien y para
-> el fix atómico del `/zip`. **Cómo:** detener y relanzar el uvicorn del backend.
+## 🔴 A — Cerrar el contrato (hito final S/. 2,880)
+| # | Pendiente | Estado | Esfuerzo |
+|---|---|---|---|
+| A1 | Desplegar en el servidor de Manuel | ⏳ runbook listo, falta ejecutar | ~0.5 d |
+| A2 | Correr propuestas reales + que las apruebe | ⏳ depende de Manuel | — |
+| A3 | Capacitación (2 h) | ⏳ pendiente | 2 h |
+| A4 | Manual de usuario | ✅ hecho | — |
+| A5 | PostgreSQL (lo cobra el contrato; hoy archivos) | ⏳ decisión: cablear o aceptar archivos v1 | ~1.5–2 d |
+| A6 | Reiniciar el backend (activa /zip atómico + nombres cortos) | ⏳ pendiente | minutos |
 
-## 🟡 Skill — mejoras de robustez
+## 🟡 B — Mejoras del core
+| # | Pendiente | Estado | Esfuerzo |
+|---|---|---|---|
+| B1 | Regla "no encontrado = válido + alerta" | ✅ hecho | — |
+| B2 | Resumen "X de Y proyectos no encontrados" | ✅ hecho | — |
+| B3 | Mejorar precisión buscador nombre→CUI | ❌ descartado | — |
+| B4 | Completar factores / las "15 alertas" | ⏳ pendiente | ~1 d |
+| B6 | Cruce de conteo roster vs bases (validador) | ⏳ pendiente | ~0.5 d |
+| B7 | Nomenclatura: agregar el apellido a carpetas/hojas | ⏳ pendiente | ~0.25 d |
 
-### P2 · Cruce de conteo contra las BASES (validador del orquestador)
-El blindaje anti-contaminación de `agent-propuesta-mapa` ancla el roster a **B.1**
-(el cuadro de calificaciones de la **propuesta**). Falta el cruce contra el
-**Cuadro de Personal Clave de las BASES** (cuántos cargos exige el concurso). Eso
-NO puede ir en el mapa (corre en paralelo a `agent-bases`, no tiene las bases) →
-va en el **validador del orquestador**, que sí tiene ambas salidas. Emitir alerta
-si `#profesionales(propuesta) ≠ #cargos(bases)`. *Extra opcional.*
+## 🟣 C — Deuda técnica / robustez
+| # | Pendiente | Estado | Esfuerzo |
+|---|---|---|---|
+| C2 | /zip async (servir estático + 202 "en preparación") | ⏳ pendiente | ~1 d |
+| C3 | Lock compartido motor↔API (race del backfill, multi-usuario) | ⏳ pendiente | ~0.5 d |
+| C4 | Re-empaquetar el plugin de Cowork (`build.ps1`) | ⏳ si se despliega como plugin | ~0.25 d |
 
-### P3 · Re-empaquetar el plugin de Cowork
-Los blindajes (`agent-evaluador`, `agent-propuesta-mapa`) están en `skill/` y
-sincronizados a `~/.claude/skills`, pero **no** se re-empaquetó el plugin de
-Cowork. Si se despliega allí, correr `build.ps1`. Ver [[cowork-plugin-y-frontmatter]].
+## 🔵 D — Alcance nuevo (se cotiza aparte)
+| # | Pendiente | Estado | Esfuerzo |
+|---|---|---|---|
+| D1 | Experiencia del postor 3.4 (automatizar) | ⏳ pendiente | ~2–3 d |
+| D2 | Recortes-imagen de bases B.1/B.2 + Anexo (gap del .docx SINTAXIS) | ⏳ confirmar con Manuel | ~1 d |
+| D3 | Rediseño del panel (Stitch → código) | ⏳ pendiente | ~2–3 d |
+| D4 | Persona maestra deduplicada por DNI (BD v2) | ⏳ pendiente | ~1 d |
 
-### P4 · Los blindajes aplican a análisis NUEVOS
-`agent-evaluador` (veredicto coherente) y `agent-propuesta-mapa`
-(anti-contaminación) corrigen de cara al futuro. Los jobs **ya corridos** no se
-re-evalúan salvo **re-run**. (El veredicto P1 de Vitarte se corrigió a mano en el
-dato; el resto de jobs ya está limpio.)
+## ⚪ E — Side-projects (FUERA del analizador; vida y cobro propios)
+- **E1** Telegram bot (puente al Claude del Ingeniero) — en pruebas; falta acceso a red (E:/NAS) + PC prendida.
+- **E2** Dispatch (acceso móvil a proyectos locales) — sin refinar.
+- **E3** Cotizador (búsqueda diaria de convocatorias) — falla la búsqueda en la web del Estado.
 
-## 🔵 Decisiones de alcance — requieren a Manuel
+---
 
-### P5 · Experiencia del postor (requisito 3.4) — ¿manual o automatizada?
-Hoy el backend **NO computa** la experiencia del postor (`etapas_reales.py:447`);
-es tarea del Comité/evaluador. La tabla del Excel ya lo dice sin jerga (`_sin_jerga`).
-Decisión: dejarla **manual** (estado actual) **o** construir el cómputo real
-(input fecha SEACE + conversión €→S/ SBS + filtro 20 años + % de participación de
-consorcio). Lo segundo es **alcance nuevo no cotizado**. Ver
-[[postor-experiencia-manual-no-backend]].
-
-## ⚪ Backlog técnico (no urgente)
-
-### P6 · Descarga diferida — seguimientos
-La descarga de documentos InfoObras (~90% del tiempo, ~1 GB) ya se **desacopló del
-camino crítico** (corre en background tras el pipeline; el veredicto/Excel quedan
-en ~1 min). `Job.descargas_estado` (pendiente→en_progreso→listas|error) refleja el
-avance. Quedan tres mejoras (no bloquean single-user):
-- **`/zip` aún bloquea el request** si la descarga no terminó (es la red de
-  seguridad: baja en vivo y luego arma). Lo normal es que el background ya terminó
-  → es rápido. Fix de fondo: devolver **202 "en preparación"** si
-  `descargas_estado != "listas"` y que el **panel haga polling** de ese campo
-  (requiere cambio en `Panel-InfoObras`).
-- **Race del backfill de métrica** (multi-usuario): si `/zip` y `/revision` del
-  MISMO job corren a la vez, el backfill de `metrica` de InfoObras podría pisar un
-  checkpoint del motor. Inofensivo single-user; el fix es un lock compartido
-  motor↔API por job.
-- **Orden de locks**: hoy `_descargas_locks` y `_zip_build_lock` NO se anidan (se
-  libera uno antes de tomar el otro) → sin deadlock. Documentar el orden si se
-  agregan más locks.
+## Plan acordado
+- **Ahora:** B1 ✅ + B2 ✅.
+- **Sigue:** todo el **bloque A** (cerrar el contrato), y luego **detalles del panel**.
+- **B3 descartado** (complejidad alta, retorno incierto).
+- **D y E:** cotización aparte, no entran en este contrato.

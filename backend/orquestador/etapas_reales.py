@@ -791,6 +791,29 @@ class EtapaReglasReal:
                     f"experiencia — confirmar a mano antes de concluir; el cómputo puede estar incompleto.")
             ctx.enriquecimiento[f"prof:{np_}"] = datos
             ok += 1
+        # B2 — resumen de incertidumbre InfoObras: "X de Y no encontrados". Solo en
+        # corrida COMPLETA (en re-disparo de un item no se recalcula → evita duplicar,
+        # porque el re-disparo EXTIENDE las observaciones en vez de reemplazarlas).
+        if not ctx.solo_items:
+            tot_exp = no_verif = na = 0
+            for p in ctx.espejo.get("profesionales", []):
+                for e in p.get("experiencias", []):
+                    tot_exp += 1
+                    enr = ctx.enriquecimiento.get(_clave(p.get("n_prof"), e.get("n"))) or {}
+                    if str(enr.get("via") or "").upper() == "NA":
+                        na += 1                     # no aplica (no es obra verificable)
+                        continue
+                    obra = enr.get("obra") if isinstance(enr.get("obra"), dict) else None
+                    if not (obra or {}).get("obra_id") or enr.get("sin_verificar"):
+                        no_verif += 1
+            if no_verif:
+                extra = f" ({na} no aplican)" if na else ""
+                obs.append(pipeline.Observacion(
+                    codigo="RESUMEN_INFOOBRAS", severidad=pipeline.Severidad.ADVERTENCIA,
+                    mensaje=f"{no_verif} de {tot_exp} experiencias no se ubicaron/verificaron "
+                            f"en InfoObras{extra} → revisión manual. La ausencia de datos NO "
+                            f"invalida la experiencia.",
+                    origen=self.nombre))
         return _res(self.nombre, EE.OK, _met(total, ok), obs)
 
 
