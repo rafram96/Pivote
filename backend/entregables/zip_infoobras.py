@@ -572,6 +572,24 @@ def _motivo_sin_docs(via: Optional[str], cui: Optional[str]) -> str:
     return "Pendiente de resolución de CUI (sin candidato confirmado)."
 
 
+def _cargo_corto(cargo: str) -> str:
+    """Parte distintiva del cargo para la carpeta del ZIP: quita el prefijo
+    genérico ('Especialista en', 'Jefe de'...) y deja lo que identifica
+    ('Estructuras', 'Supervisión'...). El cargo completo va en el indice.txt."""
+    c = re.sub(r"^\s*(especialista en|especialista|jefe de|jefe|ingeniero|"
+               r"responsable de|gerente de|gerente)\s+", "", str(cargo or ""),
+               flags=re.I).strip()
+    return c or str(cargo or "").strip() or "Profesional"
+
+
+def _corto(txt: str, maxlen: int) -> str:
+    """Trunca limpio (sin sufijo hash) a `maxlen`. La unicidad la garantiza el
+    prefijo P{nn}/E{n}, así que aquí no hace falta anticolisión."""
+    t = re.sub(r'[<>:"/\\|?*]', "-", str(txt or "")).strip()
+    t = re.sub(r"\s+", " ", t)
+    return t[:maxlen].strip() or "(sin nombre)"
+
+
 def construir_zip_infoobras(
     espejo: dict,
     descargas: dict[tuple[int, int], Path],
@@ -599,21 +617,27 @@ def construir_zip_infoobras(
     with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for prof in espejo.get("profesionales", []):
             n_prof = prof.get("n_prof")
-            nivel2 = _ruta_segura(f"{n_prof:02d} - {prof.get('cargo', '')}")
+            # Carpeta corta y navegable: "P08 Estructuras" en vez del cargo completo
+            # (hasta 80 chars). Se elimina además el nivel del concurso (lo aportan el
+            # nombre del ZIP y el indice.txt) → la ruta total queda holgada bajo el
+            # límite de 260 de Windows al EXTRAER (antes reventaba al copiar/descomprimir).
+            nivel2 = _corto(f"P{n_prof:02d} {_cargo_corto(prof.get('cargo', ''))}", 22)
             for e in prof.get("experiencias", []):
                 n_exp = e.get("n")
-                nivel3 = _ruta_segura(
-                    f"Exp {n_exp} - {str(e.get('proyecto') or 'sin proyecto')[:60]}")
-                base = f"{raiz}/{nivel2}/{nivel3}"
+                nivel3 = f"E{n_exp}"
+                base = f"{nivel2}/{nivel3}"
+                proyecto = str(e.get("proyecto") or "sin proyecto")
 
                 origen = descargas.get((n_prof, n_exp))
                 if origen and Path(origen).is_dir():
                     archivos = [p for p in sorted(Path(origen).rglob("*")) if p.is_file()]
                     for p in archivos:
                         rel = p.relative_to(origen)
-                        partes = "/".join(_ruta_segura(x) for x in rel.parts)
+                        partes = "/".join(_ruta_segura(x, 38) for x in rel.parts)
                         zf.write(p, f"{base}/{partes}")
-                    indice.append(f"[{n_prof:02d}.{n_exp}] {nivel3}: {len(archivos)} archivo(s)")
+                    indice.append(
+                        f"[P{n_prof:02d} / E{n_exp}]  {prof.get('cargo', '')} · "
+                        f"{proyecto[:70]}: {len(archivos)} archivo(s)")
                 else:
                     info = enr.get(f"{n_prof}:{n_exp}") or {}
                     cui = info.get("cui") or e.get("cui")
@@ -623,8 +647,10 @@ def construir_zip_infoobras(
                         f"Sin documentos descargados para esta experiencia.\n"
                         f"CUI: {cui or '(no resuelto)'}\nMotivo: {motivo}\n",
                     )
-                    indice.append(f"[{n_prof:02d}.{n_exp}] {nivel3}: SIN DOCUMENTOS — {motivo}")
+                    indice.append(
+                        f"[P{n_prof:02d} / E{n_exp}]  {prof.get('cargo', '')} · "
+                        f"{proyecto[:70]}: SIN DOCUMENTOS — {motivo}")
 
-        zf.writestr(f"{raiz}/indice.txt", "\n".join(indice) + "\n")
+        zf.writestr("indice.txt", "\n".join(indice) + "\n")
     os.replace(tmp, salida)   # atómico: recién aquí `salida` existe y está completo
     return salida
