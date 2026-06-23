@@ -18,6 +18,8 @@ services:
       PIVOTE_ETAPAS: ${PIVOTE_ETAPAS:-real}        # real = cruces SUNAT/InfoObras
       PIVOTE_MAX_DESCARGAS: ${PIVOTE_MAX_DESCARGAS:-}  # vacío = baja TODO; N = tope solo en pruebas
       PIVOTE_DATA_DIR: /datos
+      INFOOBRAS_DOWNLOAD_RETRIES: ${INFOOBRAS_DOWNLOAD_RETRIES:-5}  # portal intermitente → 5 reintentos
+      SUNAT_MAX_RETRIES: ${SUNAT_MAX_RETRIES:-5}
       TZ: America/Lima
     volumes:
       - datos_pivote:/datos          # jobs/espejos/entregables (datos del cliente)
