@@ -1,113 +1,148 @@
 # Modelo de datos — PostgreSQL (plan)
 
 Hoy la persistencia es en **archivos** (`{job}.espejo.json` + `{job}.enriquecimiento.json`
-+ `{job}.job.json` por análisis). El contrato pide **PostgreSQL**. Este doc define el
-modelo y la migración, sin reescribir el sistema.
++ `{job}.job.json`). El contrato pide **PostgreSQL**. Este modelo sigue la **hoja
+"Base de Datos"** del Excel: **plano, 1 fila = 1 experiencia**, con el profesional
+denormalizado en cada fila (igual que la hoja). Simple y fiel a lo que ya usan.
 
 ---
 
-## Las entidades (de mayor a menor)
-Tu intuición es correcta — el corazón son **profesionales** y **experiencias**, colgando
-de la **propuesta/análisis**:
+## Las dos tablas
 
 ```
-concurso ──1:N── analisis ──1:1── postor (la propuesta)
-                    │
-                    ├──1:N── profesional ──1:N── experiencia      ← el núcleo
-                    │
-                    └──1:N── observacion (alertas)
+analisis  ──1:N──  base_datos   (la hoja "Base de Datos" tal cual)
+ (1 corrida)         (1 fila = 1 experiencia)
 ```
 
-| Entidad | Qué es | Clave |
+- **`analisis`** — cabecera liviana: agrupa las filas y da el **histórico** (por
+  concurso, entidad, fecha). Aquí van también, como JSONB, las cosas que NO son la
+  tabla de experiencias (resumen de factores, alertas, datos del postor).
+- **`base_datos`** — el corazón: cada fila es una experiencia, con las **25 columnas
+  de la hoja** + lo que el backend enriquece.
+
+---
+
+## `base_datos` — mapeo 1:1 con la hoja
+Cada columna de la hoja "Base de Datos" es una columna de la tabla:
+
+| # | Columna de la hoja | Columna SQL | Tipo |
+|---|---|---|---|
+| 1 | CARGO AL QUE POSTULA | `cargo_postula` | text |
+| 2 | N° PROF | `n_prof` | int |
+| 3 | PROFESIONAL | `profesional` | text |
+| 4 | N° COLEGIATURA | `colegiatura` | text |
+| 5 | N° EXP | `n_exp` | int |
+| 6 | ENTIDAD / EMPRESA EMISORA | `entidad_emisora` | text |
+| 7 | PROYECTO U OBRA | `proyecto` | text |
+| 8 | CUI | `cui` | text |
+| 9 | TIPO DOC | `tipo_doc` | text |
+| 10 | NOMBRE DEL EMISOR | `nombre_emisor` | text |
+| 11 | CARGO DEL EMISOR | `cargo_emisor` | text |
+| 12 | FECHA INICIAL | `fecha_inicial` | date NULL *(+ crudo en `raw`)* |
+| 13 | FECHA FINAL | `fecha_final` | date NULL |
+| 14 | FECHA EMISIÓN | `fecha_emision` | date NULL |
+| 15 | FOLIO | `folio` | text *(puede ser rango "14-32")* |
+| 16 | DÍAS | `dias` | numeric |
+| 17 | MESES | `meses` | numeric |
+| 18 | AÑOS | `anios` | numeric |
+| 19 | CARGO QUE OCUPÓ | `cargo_ocupado` | text |
+| 20 | ¿CARGO EN BASES? | `cargo_en_bases` | text |
+| 21 | ¿ANT. COLEGIAT.? | `ant_colegiatura` | text |
+| 22 | ¿INCLUYE COVID? | `incluye_covid` | text |
+| 23 | ¿TRASLAPE? | `traslape` | text |
+| 24 | ¿TIPO DE OBRA SOLICITADO? | `tipo_obra_solicitado` | text |
+| 25 | OBSERVACIONES | `observaciones` | text |
+
+### + lo que el backend agrega (no está en la hoja de Claude)
+| Columna SQL | Tipo | Origen |
 |---|---|---|
-| **concurso** | la licitación | nomenclatura, entidad, objeto, fecha de ofertas |
-| **analisis** | una corrida del sistema (1 propuesta evaluada) | estado, fechas, descargas_estado |
-| **postor** | el que presenta (la propuesta / consorcio) | detalle, representante, oferta, consorciados, ISOs, experiencia 3.4 |
-| **profesional** ⭐ | cada profesional clave evaluado | cargo, nombre, DNI, colegiatura, **veredicto** (cumple), años adicionales |
-| **experiencia** | cada periodo de obra del profesional | proyecto, fechas, **días declarados/efectivos**, cargo, **CUI**, veredictos |
-| **observacion** | alertas del análisis | severidad, tipo, mensaje |
+| `cargo_bases_num` / `cargo_bases_nombre` | int / text | a qué cargo de las bases corresponde |
+| `cumple_profesional` | text | el veredicto del profesional (de la hoja P) |
+| `dias_efectivos` | numeric | **Paso 5** (descuento de paralizaciones) |
+| `codigo_infoobras` | text | cruce InfoObras |
+| `paralizaciones` | **jsonb** | periodos paralizados (InfoObras) |
+| `valorizaciones` | **jsonb** | valorizaciones mensuales |
+| `backend` | **jsonb** | el bloque `_backend` (ALT04, vinculación, etc.) |
+| `raw` | **jsonb** | la experiencia cruda del espejo (respaldo/auditoría) |
+
+```sql
+CREATE TABLE base_datos (
+  id              bigserial PRIMARY KEY,
+  analisis_id     text NOT NULL REFERENCES analisis(id),
+  -- profesional (denormalizado, como en la hoja)
+  cargo_postula   text, n_prof int, profesional text, colegiatura text,
+  cargo_bases_num int, cargo_bases_nombre text, cumple_profesional text,
+  -- experiencia (las 25 columnas)
+  n_exp int, entidad_emisora text, proyecto text, cui text, tipo_doc text,
+  nombre_emisor text, cargo_emisor text,
+  fecha_inicial date, fecha_final date, fecha_emision date, folio text,
+  dias numeric, meses numeric, anios numeric,
+  cargo_ocupado text, cargo_en_bases text, ant_colegiatura text,
+  incluye_covid text, traslape text, tipo_obra_solicitado text, observaciones text,
+  -- enriquecido por el backend
+  dias_efectivos numeric, codigo_infoobras text,
+  paralizaciones jsonb, valorizaciones jsonb, backend jsonb, raw jsonb,
+  UNIQUE (analisis_id, n_prof, n_exp)
+);
+```
 
 ---
 
-## Estrategia recomendada: **híbrido (tablas + JSONB)**
-No conviene normalizar TODO en 20 tablas hijas (valorizaciones, paralizaciones,
-razones literales cambian de forma con el contrato espejo). La regla:
-
-- **Tabla real** para lo que se **filtra, busca o lista** → permite el histórico y las
-  búsquedas del panel.
-- **JSONB** para lo **rico y variable que NO se filtra** → mantiene la flexibilidad
-  del espejo v1.2.0 sin migrar el schema cada vez.
-
-### Esbozo de tablas
+## `analisis` — la cabecera
 ```sql
-concurso(
-  id PK, nomenclatura, entidad, objeto, fecha_ofertas, creado_en)
-
-analisis(
-  id PK, concurso_id FK, postor, estado, descargas_estado,
-  creado_en, actualizado_en,
-  espejo JSONB,            -- el espejo completo, como respaldo/auditoría
-  enriquecimiento JSONB)   -- el cruce del backend (paralizaciones, valorizaciones…)
-
-postor(
-  id PK, analisis_id FK, detalle, representante_comun, cumple_34,
-  oferta_economica JSONB, consorciados JSONB, isos JSONB,
-  experiencia_postor JSONB)            -- el 3.4, hoy manual
-
-profesional(                            -- ⭐ la principal
-  id PK, analisis_id FK, n_prof,
-  cargo, cargo_bases_num, cargo_bases_nombre,
-  nombre, dni, titulo, colegiatura, fecha_colegiatura, profesion_valida,
-  cumple TEXT,                          -- el veredicto literal
-  anios_adicionales,
-  UNIQUE(analisis_id, n_prof))
-
-experiencia(
-  id PK, profesional_id FK, n,
-  proyecto, cliente, objeto, fecha_inicial, fecha_final,
-  dias_declarados, dias_efectivos, cargo_ocupado,
-  cui, codigo_infoobras,
-  veredictos JSONB,                     -- cargo_bases_valido, tipo_obra, anterior_colegiatura…
-  paralizaciones JSONB, valorizaciones JSONB,
-  UNIQUE(profesional_id, n))
-
-observacion(
-  id PK, analisis_id FK, severidad, tipo, mensaje, referencia)
+CREATE TABLE analisis (
+  id              text PRIMARY KEY,        -- el analisis_id / job_id
+  concurso        text,
+  entidad         text,
+  objeto          text,
+  postor          text,
+  fecha_ofertas   date,
+  estado          text,                    -- recibido | en_proceso | requiere_revision | completado | error
+  descargas_estado text,                   -- pendiente | en_progreso | listas | error
+  creado_en       timestamptz DEFAULT now(),
+  -- lo que NO es la tabla de experiencias, como JSONB:
+  resumen         jsonb,    -- factores A/B/C + puntaje (hoja CLAUDE)
+  observaciones   jsonb,    -- alertas (severidad/tipo/mensaje)
+  postor_data     jsonb,    -- oferta económica, consorciados, experiencia 3.4
+  espejo          jsonb     -- el espejo completo (respaldo/auditoría)
+);
 ```
-
-### Índices que dan el valor del panel
-```sql
-CREATE INDEX ON profesional (lower(nombre));   -- buscar a una persona
-CREATE INDEX ON profesional (dni);             -- … entre TODOS los concursos
-CREATE INDEX ON experiencia (cui);             -- cruzar por obra
-CREATE INDEX ON analisis (concurso_id);        -- histórico por concurso
-CREATE INDEX ON analisis (creado_en);          -- histórico por fecha
-```
-
-> **Bonus de diseño:** como `profesional` es tabla real con índice por **DNI/nombre**,
-> podrás **buscar a un mismo profesional entre concursos** (los rosters se reusan —
-> lo vimos en datos reales). Eso es una capacidad nueva valiosa, casi gratis con este modelo.
 
 ---
 
-## Decisión abierta (para conversar)
-**¿`profesional` por análisis, o una persona maestra deduplicada?**
-- **v1 (recomendado):** `profesional` es **una fila por aparición** (por análisis).
-  Para "ver a una persona entre concursos" se consulta por DNI. Simple, suficiente.
-- **v2 (a futuro):** una tabla `persona(dni PK, nombre)` y que `profesional` apunte a
-  ella → historial real por persona. Más trabajo; no hace falta para cerrar.
+## Índices (lo que da valor al panel)
+```sql
+CREATE INDEX ON base_datos (lower(profesional));  -- buscar a una persona…
+CREATE INDEX ON base_datos (cui);                 -- …o cruzar por obra
+CREATE INDEX ON base_datos (analisis_id);
+CREATE INDEX ON analisis (concurso);
+CREATE INDEX ON analisis (creado_en);
+```
+> **Bonus:** con el índice por `profesional`/`colegiatura` puedes **buscar a la misma
+> persona entre concursos** (los rosters se reusan — lo vimos en datos reales). Casi gratis.
+
+## Regla de diseño
+- **Columna** = lo que se **filtra, busca o exporta** (las 25 de la hoja + Paso 5).
+  Así la hoja "Base de Datos" se reconstruye con un simple `SELECT … FROM base_datos`.
+- **JSONB** = lo **rico y variable** (valorizaciones, paralizaciones, `_backend`,
+  razones literales). No hay que migrar el schema cuando el contrato evoluciona.
+
+## Trade-off (honesto)
+La tabla es **denormalizada**: el profesional se repite en cada fila de experiencia
+(igual que la hoja). A tu escala (100–200 análisis/mes, 1 usuario) la redundancia es
+trivial y **gana en simplicidad + export directo a Excel**. Si algún día se quiere
+historial por persona deduplicado, se agrega una tabla `persona(dni)` — mejora futura,
+no hace falta para cerrar.
 
 ---
 
 ## Migración (sin reescribir el sistema)
-El backend ya tiene una **interfaz de repositorio** (`RepositorioArchivos`). El cambio
-es localizado:
-1. Implementar **`RepositorioPostgres`** con la misma interfaz → cambiar **1 línea** en
-   `api/app.py` (qué repositorio se instancia).
-2. Al persistir un job: guardar `espejo`+`enriquecimiento` como **JSONB** (respaldo) y
-   **poblar las tablas** normalizadas (concurso/analisis/postor/profesional/experiencia/observacion).
-3. **Script de backfill:** leer los `*.job.json` / `*.espejo.json` existentes en
-   `datos_pivote/` e insertarlos en Postgres (no se pierde el histórico ya corrido).
+1. Implementar **`RepositorioPostgres`** con la misma interfaz que `RepositorioArchivos`
+   → cambiar **1 línea** en `api/app.py`.
+2. Al persistir: poblar `analisis` (1 fila) + `base_datos` (1 fila por experiencia),
+   guardando lo variable en los JSONB.
+3. **Backfill:** un script que lee los `*.espejo.json` / `*.enriquecimiento.json`
+   existentes en `datos_pivote/` y los inserta (no se pierde el histórico ya corrido).
 4. Descomentar el servicio **`db`** en `deploy/docker-compose.yml` + `DATABASE_URL` +
    `psycopg2-binary` en requirements.
 
@@ -116,4 +151,4 @@ Los **documentos descargados** (PDFs, ZIP) siguen en **disco / volumen** — son
 grandes; la BD solo guarda metadatos y referencias.
 
 ## Esfuerzo estimado
-~1.5–2 días (repositorio Postgres + tablas + backfill + cablear el compose).
+~1.5–2 días (repositorio Postgres + las 2 tablas + backfill + cablear el compose).
