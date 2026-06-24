@@ -238,6 +238,31 @@ def editar_concurso(concurso_id: str, body: dict):
     return json.loads(c.model_dump_json())
 
 
+@app.delete("/api/pivote/concursos/{concurso_id}")
+def borrar_concurso(concurso_id: str):
+    """Borra el concurso y, EN CASCADA, todos sus análisis (jobs) con sus
+    artefactos (espejo, excels, ZIP, certs, descargas). Irreversible."""
+    c = repo.cargar_concurso(concurso_id)
+    if c is None:
+        raise HTTPException(404, "concurso no existe")
+    jobs = [j for j in repo.listar() if j.concurso_id == concurso_id]
+    for j in jobs:
+        repo.eliminar(j.job_id)
+    repo.eliminar_concurso(concurso_id)
+    return {"eliminado": concurso_id, "analisis_eliminados": len(jobs)}
+
+
+@app.delete("/api/pivote/jobs/{job_id}")
+def borrar_job(job_id: str):
+    """Borra un análisis (job) y TODOS sus artefactos (espejo, excels, ZIP, certs,
+    descargas). No borra el concurso. Irreversible."""
+    job = repo.cargar(job_id)
+    if job is None:
+        raise HTTPException(404, "análisis no existe")
+    repo.eliminar(job_id)
+    return {"eliminado": job_id, "concurso_id": job.concurso_id}
+
+
 @app.get("/api/pivote/concursos/{concurso_id}")
 def ver_concurso(concurso_id: str):
     c = repo.cargar_concurso(concurso_id)

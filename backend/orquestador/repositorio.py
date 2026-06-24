@@ -11,6 +11,7 @@ de un análisis real pesa ~100 KB).
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
@@ -29,6 +30,8 @@ class Repositorio(Protocol):
     def listar_concursos(self) -> list[pipeline.Concurso]: ...
     def guardar_enriquecimiento(self, job_id: str, datos: dict) -> None: ...
     def cargar_enriquecimiento(self, job_id: str) -> dict: ...
+    def eliminar(self, job_id: str) -> None: ...
+    def eliminar_concurso(self, concurso_id: str) -> None: ...
 
 
 class RepositorioMemoria:
@@ -72,6 +75,14 @@ class RepositorioMemoria:
     def cargar_enriquecimiento(self, job_id: str) -> dict:
         crudo = self._espejos.get(f"enr-{job_id}")
         return json.loads(crudo) if crudo else {}
+
+    def eliminar(self, job_id: str) -> None:
+        self._jobs.pop(job_id, None)
+        self._espejos.pop(job_id, None)
+        self._espejos.pop(f"enr-{job_id}", None)
+
+    def eliminar_concurso(self, concurso_id: str) -> None:
+        self._concursos.pop(concurso_id, None)
 
 
 class RepositorioArchivos:
@@ -131,6 +142,24 @@ class RepositorioArchivos:
     def cargar_enriquecimiento(self, job_id: str) -> dict:
         ruta = self._ruta(job_id, "enriquecimiento")
         return json.loads(ruta.read_text(encoding="utf-8")) if ruta.exists() else {}
+
+    def eliminar(self, job_id: str) -> None:
+        """Borra TODOS los artefactos del job: .job/.espejo/.enriquecimiento.json,
+        .claude.xlsx, .final.xlsx, .infoobras.zip y las carpetas .certs/.descargas."""
+        for p in self.dir.glob(f"{job_id}.*"):
+            if p.is_dir():
+                shutil.rmtree(p, ignore_errors=True)
+            else:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+
+    def eliminar_concurso(self, concurso_id: str) -> None:
+        try:
+            self._ruta(concurso_id, "concurso").unlink()
+        except OSError:
+            pass
 
 
 # La implementación PostgreSQL vive en el servidor (tabla jobs JSONB + espejos).
