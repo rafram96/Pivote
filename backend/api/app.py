@@ -32,7 +32,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile  # noqa: E402
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 
 from entregables import construir_zip_infoobras, generar_excel_final, mapear_certificados
@@ -88,10 +88,25 @@ def _lock_descargas(job_id: str) -> threading.Lock:
         return _descargas_locks.setdefault(job_id, threading.Lock())
 
 
+def _mapa_descargas(job_id: str) -> dict:
+    """{(n_prof, n_exp): carpeta} de las descargas `P{n}_E{m}` en disco."""
+    d = DATA_DIR / f"{job_id}.descargas"
+    out: dict[tuple[int, int], Path] = {}
+    if d.is_dir():
+        for sub in d.iterdir():
+            try:
+                np_, ne = sub.name.removeprefix("P").split("_E")
+                out[(int(np_), int(ne))] = sub
+            except ValueError:
+                continue
+    return out
+
+
 def _asegurar_descargas(job_id: str) -> None:
-    """Idempotente + serializado por job: baja lo que falte de InfoObras y rellena
-    la métrica de la etapa INFOOBRAS. La llaman el background task (tras el
-    pipeline) y el endpoint /zip (garantía). No relanza: deja el estado en el job."""
+    """Idempotente + serializado por job: baja lo que falte de InfoObras, rellena la
+    métrica de INFOOBRAS y, al terminar TODO, arma el ZIP COMPLETO antes de marcar
+    `descargas_estado="listas"`. La llaman el background task (tras el pipeline) y el
+    endpoint /zip (que la reanuda si se cortó). No relanza: deja el estado en el job."""
     job = repo.cargar(job_id)
     if job is None or job.descargas_estado == "listas":
         return
@@ -115,6 +130,13 @@ def _asegurar_descargas(job_id: str) -> None:
                 io.metrica.descargas = stats["descargas"]
                 io.metrica.bytes_descargados = stats["bytes"]
                 io.metrica.reintentos = stats["reintentos"]
+            # arma el ZIP COMPLETO recién ahora que están TODOS los documentos
+            # (atómico → reemplaza cualquier zip parcial previo). Luego marca "listas".
+            ruta_zip = DATA_DIR / f"{job_id}.infoobras.zip"
+            with _zip_build_lock:
+                construir_zip_infoobras(espejo, _mapa_descargas(job_id), ruta_zip,
+                                        enriquecimiento=enr)
+            job.zip_infoobras = f"/api/pivote/jobs/{job_id}/zip"
             job.descargas_estado = "listas"
             repo.guardar(job)
             logger.info("DESCARGAS job %s · %d arch · %.0f MB · %d reintentos · %.0fs",
@@ -137,6 +159,24 @@ def _correr_y_descargar(job_id: str) -> None:
         _asegurar_descargas(job_id)
     except Exception:
         logger.exception("descarga diferida del job %s falló", job_id)
+
+
+@app.on_event("startup")
+def _reanudar_descargas_pendientes() -> None:
+    """Si el backend se reinició con descargas a medias, las RETOMA al arrancar —
+    evita que un job quede en 'en_progreso' para siempre y el ZIP nunca se complete
+    (lo que obligaba a servir un ZIP parcial)."""
+    for f in DATA_DIR.glob("*.job.json"):
+        try:
+            j = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        # Solo "en_progreso" = descarga genuinamente interrumpida. "pendiente" puede
+        # ser un job viejo (el campo se defaulteó) → NO lo re-disparamos.
+        if j.get("descargas_estado") == "en_progreso":
+            jid = j.get("job_id") or f.name[: -len(".job.json")]
+            threading.Thread(target=_asegurar_descargas, args=(jid,), daemon=True).start()
+            logger.info("reanudando descargas pendientes del job %s tras reinicio", jid)
 
 
 def _decisiones_path(job_id: str) -> Path:
@@ -446,29 +486,27 @@ _zip_build_lock = threading.Lock()
 
 
 @app.get("/api/pivote/jobs/{job_id}/zip")
-def descargar_zip(job_id: str):
+def descargar_zip(job_id: str, tareas: BackgroundTasks):
     job = _job_o_404(job_id)
-    espejo = _espejo_o_404(job_id)
     ruta = DATA_DIR / f"{job_id}.infoobras.zip"
+    en_prep = {"descargas_estado": job.descargas_estado,
+               "mensaje": "El ZIP se está preparando: descargando los documentos de InfoObras."}
+    # Descargando activamente → el zip (si existe) es PARCIAL → no servirlo: 202.
+    # El panel pollea `descargas_estado` y habilita la descarga SOLO al quedar "listas".
+    if job.descargas_estado == "en_progreso":
+        tareas.add_task(_asegurar_descargas, job_id)
+        return JSONResponse(status_code=202, content=en_prep)
     if not ruta.exists():
-        # Garantía: si la descarga diferida aún no terminó (o el usuario pidió el
-        # ZIP enseguida), bájala ahora (idempotente, serializada por job).
-        _asegurar_descargas(job_id)
-        with _zip_build_lock:           # un solo build a la vez
-            if not ruta.exists():       # otro request pudo armarlo mientras esperábamos el lock
-                descargas_dir = DATA_DIR / f"{job_id}.descargas"
-                descargas: dict[tuple[int, int], Path] = {}
-                if descargas_dir.is_dir():
-                    for sub in descargas_dir.iterdir():  # carpetas "P{n}_E{m}"
-                        try:
-                            np_, ne = sub.name.removeprefix("P").split("_E")
-                            descargas[(int(np_), int(ne))] = sub
-                        except ValueError:
-                            continue
-                enr = repo.cargar_enriquecimiento(job_id) or {}
-                construir_zip_infoobras(espejo, descargas, ruta, enriquecimiento=enr)
-                job.zip_infoobras = f"/api/pivote/jobs/{job_id}/zip"
-                repo.guardar(job)
+        if job.descargas_estado == "listas":      # listas pero borraron el zip → rearmar
+            with _zip_build_lock:
+                if not ruta.exists():
+                    espejo = _espejo_o_404(job_id)
+                    enr = repo.cargar_enriquecimiento(job_id) or {}
+                    construir_zip_infoobras(espejo, _mapa_descargas(job_id), ruta, enriquecimiento=enr)
+        else:                                      # pendiente/error sin zip → reanuda + 202
+            tareas.add_task(_asegurar_descargas, job_id)
+            return JSONResponse(status_code=202, content=en_prep)
+    # zip presente y NO se está descargando → completo (listas, o job previo) → servir
     return FileResponse(ruta, media_type="application/zip",
                         filename=f"InfoObras_{job.analisis_id}.zip")
 

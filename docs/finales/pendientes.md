@@ -35,7 +35,7 @@ diferida · observabilidad (resumen + métricas) · **B1 (la ausencia no invalid
 ## 🟣 C — Deuda técnica / robustez
 | # | Pendiente | Estado | Esfuerzo |
 |---|---|---|---|
-| C2 | /zip async (servir estático + 202 "en preparación") | ⏳ pendiente | ~1 d |
+| C2 | /zip 202 "en preparación" + indicador "listo/preparando" en el panel + retoma tras reinicio | ✅ hecho | — |
 | C3 | Lock compartido motor↔API (race del backfill, multi-usuario) | ⏳ pendiente | ~0.5 d |
 | C4 | Re-empaquetar el plugin de Cowork (`build.ps1`) | ⏳ si se despliega como plugin | ~0.25 d |
 
