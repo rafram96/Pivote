@@ -142,7 +142,6 @@ class Concurso(_ModelLax):
     N postores y habilita el cuadro comparativo y el histórico."""
     concurso_id: str
     nomenclatura: str                      # "CP-02-2025/GOB.REG.HVCA/C"
-    entidad: Optional[str] = None          # entidad convocante
     fecha_presentacion: Optional[datetime] = None
     creado_en: Optional[datetime] = None
 

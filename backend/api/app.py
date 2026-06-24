@@ -216,7 +216,6 @@ def crear_concurso(body: dict):
     c = pipeline.Concurso(
         concurso_id=uuid.uuid4().hex[:10],
         nomenclatura=nomenclatura,
-        entidad=body.get("entidad"),
         fecha_presentacion=body.get("fecha_presentacion"),
         creado_en=datetime.now(timezone.utc),
     )
@@ -226,9 +225,7 @@ def crear_concurso(body: dict):
 
 @app.patch("/api/pivote/concursos/{concurso_id}")
 def editar_concurso(concurso_id: str, body: dict):
-    """Edita el nombre (nomenclatura) y/o la entidad de un concurso, persistente.
-    Útil porque los concursos creados al subir desde la skill no traen entidad
-    (el espejo no la incluye)."""
+    """Edita el nombre (nomenclatura) de un concurso, persistente."""
     c = repo.cargar_concurso(concurso_id)
     if c is None:
         raise HTTPException(404, "concurso no existe")
@@ -237,8 +234,6 @@ def editar_concurso(concurso_id: str, body: dict):
         if not nom:
             raise HTTPException(400, "la nomenclatura no puede quedar vacía")
         c.nomenclatura = nom
-    if "entidad" in body:
-        c.entidad = (body.get("entidad") or "").strip() or None
     repo.guardar_concurso(c)
     return json.loads(c.model_dump_json())
 
