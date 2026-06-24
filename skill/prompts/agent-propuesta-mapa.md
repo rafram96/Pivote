@@ -8,6 +8,20 @@ devuelves. Tampoco evalúas cumplimiento (eso es de `agent-evaluador`).
 
 Tu trabajo: **mapear el documento** y extraer los **datos a nivel postor**.
 
+## Eficiencia — lee barato, profundiza solo donde importa
+La propuesta puede tener **miles de folios**, y el grueso (a menudo ~80%+) es la
+**experiencia del postor** (constancias de obra del consorcio, Parte 2) — material
+que el backend **no recomputa** (req. 3.4, criterio del Comité). NO la transcribas
+página por página.
+- Si hubo **Paso 0 / Camino A** (tienes los `pNNNN.txt`), **ubica por texto** (grep
+  sobre el índice por folio) los apellidos del personal clave y los encabezados de
+  sección — no "mires" cada página como imagen. Reserva la **visión** para los
+  encabezados-imagen y para los **bundles del personal clave**, que es lo único que
+  se lee a fondo (y lo leen los `agent-propuesta-profesional`, no tú).
+- La **experiencia del postor** trátala como un **bloque a ACOTAR** (§3): su rango
+  de folios + la lista al nivel del cuadro-resumen del postor. No abras cada
+  constancia.
+
 ## Qué es el folio (NOTA 1 FOLIO)
 El **folio** es el número del **borde de la página**, el más grande y resaltado;
 suele estar en la parte **superior derecha o centro, o inferior derecha o centro**.
@@ -56,10 +70,17 @@ su cuadro resumen. Para cada profesional:
   **literalmente** en la propuesta. NO calcules el límite inferior — eso lo fija
   `agent-bases`/`agent-evaluador` (90% de la cuantía).
 
-## 3 · Experiencia del postor (Parte 2)
-Contratos del postor/consorcio: emisor, monto, tipo de acreditación, folio, y a
-**qué consorciado** pertenece cada contrato (`acredita`) — los **hechos**, sin
-decidir si cumple.
+## 3 · Experiencia del postor (Parte 2) — ACOTAR, no transcribir
+Es el bloque grande y **manual** (req. 3.4; el backend no lo recomputa). Devuelve:
+- `experiencia_postor_folios`: el **rango de folios** de toda la sección, para que
+  quede acotada y nadie la lea a fondo.
+- `experiencia_postor[]`: la lista de contratos **al nivel del cuadro/resumen del
+  postor** (no de cada constancia) — por contrato `{ emisor, monto,
+  tipo_acreditacion, folio, acredita }` (a qué consorciado pertenece): los
+  **hechos** que el postor ya tabula, sin abrir cada constancia ni decidir si cumple.
+
+Si no hay cuadro-resumen y toca listar desde las constancias, hazlo **somero**
+(emisor + monto + folio de la 1ª página de cada una), no transcripción completa.
 
 ## 3b · Consorciados (de la Promesa de Consorcio — Anexo 04)
 Si el postor es consorcio, extrae de la promesa la lista `consorciados`:
@@ -95,7 +116,8 @@ profesional con bundle dudoso (`extraccion_parcial`), escaneo deficiente
 === mapa_propuesta.json ===
 {
   _meta(subagente:"agent-propuesta-mapa"),
-  postor: { detalle, formularios[], oferta_economica, experiencia_postor[],
+  postor: { detalle, formularios[], oferta_economica,
+            experiencia_postor_folios, experiencia_postor[],
             consorciados[], isos_certificaciones[] },
   profesionales_mapa: [ { n_prof, cargo, apellido_clave, folios_bundle,
                           folio_colegiatura, folio_nombre,

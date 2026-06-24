@@ -32,6 +32,8 @@ profundidad por profesional):
 - **`agent-propuesta-mapa`** hace UNA pasada estructural a `propuesta.pdf` → datos
   a nivel postor (anexos, oferta económica, experiencia del postor, ISOs) y el
   **bundle de folios de cada profesional** (rango de páginas por apellido).
+  **Acota** la experiencia del postor por folios (no la transcribe: es el ~80%
+  manual del req. 3.4) y, si hubo Camino A, ubica apellidos por **grep** del índice.
 - **`agent-propuesta-profesional`** — **uno por profesional**: lee SOLO el bundle
   de ese profesional y extrae a fondo sus experiencias atómicas (1 fila/periodo),
   con cross-check NOTA 1 contra su cuadro resumen. Más profundidad por profesional,
@@ -57,6 +59,8 @@ python3 scripts/ocr_propuesta.py "<propuesta.pdf>" "<out_ocr>" 33 120
 
 Si en vez de avanzar imprime **`NO_TESSERACT`** (o `NO_PYMUPDF`) y sale con código 3,
 el entorno **no** tiene el binario → cae al **Camino B** sin pedir instalar nada.
+(En **Cowork** / sandbox Linux, antes de rendirte intenta `pip install -q pymupdf` y
+comprueba `tesseract --version`; si el binario no está y no puedes instalarlo, B.)
 Cada página queda en `<out_ocr>/pNNNN.txt` (= el índice por folio). Diseño:
 - Tesseract con idioma `spa` (tessdata_fast) en un `TESSDATA_PREFIX` escribible.
 - **`OMP_THREAD_LIMIT=1`** por proceso (evita que Tesseract sobre-suscriba hilos);
