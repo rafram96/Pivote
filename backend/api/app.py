@@ -263,6 +263,32 @@ def borrar_job(job_id: str):
     return {"eliminado": job_id, "concurso_id": job.concurso_id}
 
 
+@app.get("/api/pivote/jobs/{job_id}/descargas")
+def avance_descargas(job_id: str):
+    """Avance real de las descargas InfoObras por experiencia (alimenta la barra del
+    ZIP): cuántas obras ya se bajaron vs las que deben bajar (las en revisión no bajan)."""
+    job = repo.cargar(job_id)
+    if job is None:
+        raise HTTPException(404, "análisis no existe")
+    espejo = repo.cargar_espejo(job_id) or {}
+    todas = [(p["n_prof"], e["n"])
+             for p in espejo.get("profesionales", [])
+             for e in p.get("experiencias", [])]
+    rev = {(it.n_prof, it.n_exp) for it in job.items_revision if not it.resuelto}
+    bajan = [x for x in todas if x not in rev]
+    carpetas = _mapa_descargas(job_id)
+    descargadas = sum(1 for x in bajan if x in carpetas)
+    total = len(bajan)
+    return {
+        "estado": job.descargas_estado,
+        "listo": job.descargas_estado == "listas",
+        "total": total,
+        "descargadas": descargadas,
+        "faltan": total - descargadas,
+        "en_revision": len(rev),
+    }
+
+
 @app.get("/api/pivote/concursos/{concurso_id}")
 def ver_concurso(concurso_id: str):
     c = repo.cargar_concurso(concurso_id)
