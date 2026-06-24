@@ -46,9 +46,18 @@ profundidad por profesional):
 Si `propuesta.pdf` **no tiene capa de texto** (escaneo de imagen), necesitas leer
 las páginas como imagen antes de mapear. Hay dos caminos, en orden de preferencia:
 
-**Camino A — Tesseract (si está disponible).** Enfoque heredado del flujo manual,
-determinístico y barato; ideal en propuestas de miles de folios cuando el script y
-el binario están instalados:
+**Camino A — Tesseract (PREFERIDO si está disponible).** Saca el OCR del **modelo**
+(visión = caro, consume tu límite) y lo hace **local** (CPU = gratis). El script ya
+vive en la skill: `scripts/ocr_propuesta.py`. Llámalo **en bucle** hasta que imprima
+`ALLDONE` (es reanudable y se auto-limita por tiempo):
+
+```
+python3 scripts/ocr_propuesta.py "<propuesta.pdf>" "<out_ocr>" 33 120
+```
+
+Si en vez de avanzar imprime **`NO_TESSERACT`** (o `NO_PYMUPDF`) y sale con código 3,
+el entorno **no** tiene el binario → cae al **Camino B** sin pedir instalar nada.
+Cada página queda en `<out_ocr>/pNNNN.txt` (= el índice por folio). Diseño:
 - Tesseract con idioma `spa` (tessdata_fast) en un `TESSDATA_PREFIX` escribible.
 - **`OMP_THREAD_LIMIT=1`** por proceso (evita que Tesseract sobre-suscriba hilos);
   paraleliza con un `Pool` = nº de CPUs.
