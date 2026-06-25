@@ -24,13 +24,17 @@ services:
     volumes:
       - datos_pivote:/datos          # jobs/espejos/entregables (datos del cliente)
     ports:
-      - "${BACKEND_PORT:-8001}:8001" # expón solo si necesitas llegar al API directo
+      - "${BACKEND_PORT:-8001}:8001" # REQUERIDO en LAN: el browser baja el ZIP directo + el MCP de Manuel
     restart: unless-stopped
 
   panel:
     build:
       context: ../../Panel-InfoObras/frontend
       dockerfile: Dockerfile
+      args:
+        # URL del backend para el BROWSER (LAN), horneada en build-time → el panel
+        # baja el ZIP DIRECTO del backend (el proxy no streamea GBs). IP LAN, no localhost.
+        NEXT_PUBLIC_PIVOTE_API: ${NEXT_PUBLIC_PIVOTE_API:-}
     image: infoobras-panel
     environment:
       # El panel proxyea /api/pivote/* a este servicio (red interna de compose).
