@@ -9,6 +9,8 @@
 # (Indeconsult / Manuel Echandía) con datos identificables.
 /fixtures/
 /docs/examples/
+# docs comerciales (precios, addendum, recotización) — info de negocio, queda local.
+/docs/comercial/
 
 # Descargas de portales (PDFs de InfoObras DownloadFile, etc.)
 /descargas_infoobras/
