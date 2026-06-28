@@ -117,9 +117,18 @@ rojo, descalificación económica vs límite inferior, factores A/B/C/E/J con pu
 (y "NO APLICA" donde corresponda), todo con **razón literal**.
 
 ### Paso 4 — Consolidar → Excel + JSON espejo + imágenes de constancias
-El orquestador une todas las salidas (bases + mapa + N profesionales + evaluador) en:
-- el **JSON espejo** (estructura en `references/salida.md`), dejando el bloque
-  `_backend` en `null`;
+Guarda la salida de cada subagente en la carpeta del análisis y corre el
+**consolidador determinístico** — NO ensambles el espejo a mano (inviable y
+propenso a errores en propuestas grandes):
+- `bases.json` (agent-bases), `roster_bundles.json` (agent-propuesta-mapa —
+  **incluye el bloque `postor`**: `formularios`, `oferta_economica`,
+  `experiencia_postor`, `isos_certificaciones`, `consorciados`),
+  `evaluacion.json` (agent-evaluador), `_prof/profesional_NN.json` (uno por prof).
+- `node scripts/consolidar_espejo.js <carpeta_analisis>` → escribe `espejo.json`
+  uniendo todo, normalizando los alias/typos de los subagentes (cada uno diverge)
+  y dejando `_backend` en `null`. Auto-detecta N de `_prof/`; si falta el bloque
+  postor del mapa, lo deja vacío + un aviso en `observaciones_claude`.
+- el **JSON espejo** resultante (estructura en `references/salida.md`);
 - el **Excel** de 5 partes (`node scripts/generar_excel.js` — construcción
   dinámica: un bloque por cargo, filas variables por experiencia, estilos del
   ingeniero + resaltado Claude/backend. Validado con el caso Trujillo);
