@@ -137,6 +137,8 @@ def test_veredicto_vacio_o_no_concluyente():
     assert veredictos_no_vacios({"n_prof": 5, "cumple": "— años válidos: "})
     assert veredictos_no_vacios({"n_prof": 5, "cumple": "SÍ — 5.09 años"}) == []
     assert veredictos_no_vacios({"n_prof": 5, "cumple": "NO CUMPLE (1.55)"}) == []
+    # vocabulario real del veredicto: "CUMPLE — …" es concluyente (no alerta falsa)
+    assert veredictos_no_vacios({"n_prof": 5, "cumple": "CUMPLE — 7.2 años, cargo válido ⚠"}) == []
 
 
 def test_totales_descuadrados():

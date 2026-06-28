@@ -175,13 +175,16 @@ def nota10_covid(prof: dict) -> list[pipeline.Observacion]:
 
 def veredictos_no_vacios(prof: dict) -> list[pipeline.Observacion]:
     cumple = prof.get("cumple")
-    # vacío, None, o un texto que no dice SÍ/NO (ej. "— años válidos:")
-    if _es_si(cumple) is None:
-        return [_obs(
-            "VEREDICTO", _SEV.ALERTA,
-            f"veredicto 'cumple' del profesional vacío o no concluyente: {cumple!r}",
-            f"prof={prof.get('n_prof')}")]
-    return []
+    # El veredicto del profesional usa el vocabulario CUMPLE / NO CUMPLE (no SÍ/NO,
+    # que es para flags como incluye_covid). Es concluyente si empieza con CUMPLE,
+    # NO (cubre "NO CUMPLE") o SÍ/SI (legacy); vacío/None/"—" → alerta.
+    t = cumple.strip().upper() if isinstance(cumple, str) else ""
+    if t.startswith(("CUMPLE", "NO", "SÍ", "SI")):
+        return []
+    return [_obs(
+        "VEREDICTO", _SEV.ALERTA,
+        f"veredicto 'cumple' del profesional vacío o no concluyente: {cumple!r}",
+        f"prof={prof.get('n_prof')}")]
 
 
 # ── Totales del profesional vs suma de experiencias ─────────────────────────
