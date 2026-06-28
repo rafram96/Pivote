@@ -145,6 +145,15 @@ def mapear_certificados(dir_base, job_id) -> dict:
                 certs[(int(np_), int(ne))] = f
             except ValueError:
                 continue
+        # Mejora A: recorte del TDR (de las bases) y del Anexo 16 por profesional,
+        # `P{n}_TDR.pdf` / `P{n}_ANEXO.pdf` → clave (n_prof, "TDR"/"ANEXO"). No
+        # colisiona con las experiencias (n_exp es int).
+        for tag in ("TDR", "ANEXO"):
+            for f in cdir.glob(f"P*_{tag}.pdf"):
+                try:
+                    certs[(int(f.stem[1:].split("_")[0]), tag)] = f
+                except ValueError:
+                    continue
     return certs
 
 
@@ -546,9 +555,10 @@ def construir_hoja_profesional(
             ws.row_dimensions[r].height = 10
             r += 1
 
-    def embeber_cert(cert_pdf):
-        """Embebe las páginas del certificado (principal primero) a lo ancho, bajo
-        las bandas de la experiencia, para que el evaluador lo vea sin abrir el PDF.
+    def embeber_cert(cert_pdf, titulo="DOCUMENTO DE LA EXPERIENCIA — constancia / conformidad (imagen)"):
+        """Embebe las páginas de un PDF (principal primero) a lo ancho, bajo una
+        banda de título, para que el evaluador lo vea sin abrir el PDF. Se usa para
+        la constancia de la experiencia y también para el TDR/Anexo (mejora A).
         Tolerante: si PyMuPDF/Pillow fallan, deja una nota y sigue."""
         nonlocal r
         try:
@@ -561,8 +571,7 @@ def construir_hoja_profesional(
         if not paginas:
             return
         from openpyxl.drawing.image import Image as XLImage
-        banda("DOCUMENTO DE LA EXPERIENCIA — constancia / conformidad (imagen)",
-              F_PARTE, FILL_PARTE, 16)
+        banda(titulo, F_PARTE, FILL_PARTE, 16)
         for i, (jpg, w0, h0) in enumerate(paginas):
             etiqueta = "Página principal" if i == 0 else f"Página {i + 1}"
             ce = ws.cell(r, 1, etiqueta); ce.font = F_BOLD
@@ -577,6 +586,33 @@ def construir_hoja_profesional(
     ws.cell(r, 1, f"Nombre: {prof.get('nombre') or '—'}").font = F_BOLD; r += 1
     ws.cell(r, 1, f"Colegiatura: {prof.get('colegiatura') or '—'}").font = F_CELL; r += 1
     r += 1
+
+    # ── A · Contexto del TDR + Anexo 16, ANTES de las experiencias ───────────
+    # Qué pide el TDR para este cargo (texto del espejo + recorte de las bases) y
+    # el Anexo 16 declarado/firmado, para evaluar con el requisito a la vista.
+    _req = prof.get("requisitos") or {}
+    _tdr_pdf = certificados.get((n_prof, "TDR"))
+    _anexo_pdf = certificados.get((n_prof, "ANEXO"))
+    if _req or _tdr_pdf or _anexo_pdf:
+        banda("REQUISITO DEL TDR PARA ESTE CARGO", F_PARTE, FILL_PARTE, 16)
+        for label, value in [
+            ("CARGOS VÁLIDOS (bases)", _req.get("cargos_validos")),
+            ("EXPERIENCIA / PROFESIÓN EXIGIDA", _req.get("tipo_experiencia_valida")),
+            ("TIPO DE OBRA VÁLIDA", _req.get("tipo_obra_valida")),
+        ]:
+            if not value:
+                continue
+            cl = ws.cell(r, 1, label); cl.font, cl.fill, cl.border = F_BOLD, FILL_RECAP, BORDER
+            cl.alignment = Alignment(vertical="top", wrap_text=True)
+            ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=4)
+            cv = ws.cell(r, 2, value); cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
+            ws.row_dimensions[r].height = max(15, (-(-len(str(value)) // 35)) * 13 + 2)
+            r += 1
+        if _tdr_pdf:
+            embeber_cert(_tdr_pdf, "REQUISITO DEL TDR — recorte de las bases (imagen)")
+        if _anexo_pdf:
+            embeber_cert(_anexo_pdf, "ANEXO 16 — EXPERIENCIA DECLARADA Y FIRMADA (imagen)")
+        r += 1
     # ── helpers del formato por-certificado (feedback del ingeniero) ─────────
     def _dias_exp(n_exp, ini, fin):
         """(declarado, efectivo, clamp) de una experiencia: días del periodo
