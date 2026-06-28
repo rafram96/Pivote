@@ -112,20 +112,37 @@ profesional con bundle dudoso (`extraccion_parcial`), escaneo deficiente
 (`calidad_documento` + `pagina_pdf`), o inconsistencia de folios.
 
 ## Salida
-```
-=== mapa_propuesta.json ===
+Guárdala como **`roster_bundles.json`**. El consolidador (Paso 4) lee `roster`
+(el array) y `postor` (el bloque). Rellena este **esqueleto** con valores reales:
+```json
 {
-  _meta(subagente:"agent-propuesta-mapa"),
-  postor: { detalle, formularios[], oferta_economica,
-            experiencia_postor_folios, experiencia_postor[],
-            consorciados[], isos_certificaciones[] },
-  profesionales_mapa: [ { n_prof, cargo, apellido_clave, folios_bundle,
-                          folio_colegiatura, folio_nombre,
-                          folio_cuadro_resumen, experiencia_total_declarada } ],
-  observaciones_claude[]
+  "_meta": { "subagente": "agent-propuesta-mapa" },
+  "postor": {
+    "postor": "CESAR FERNANDO TAPIA JULCA", "postor_ruc": "10086838228",
+    "detalle": "persona natural con negocio; MYPE — Pequeña Empresa",
+    "formularios": [
+      { "anexo": "ANEXO N° 01", "documento": "Declaración Jurada de Datos del Postor", "observacion": "Presenta", "folio": 7 }
+    ],
+    "oferta_economica": { "cuantia": 18015551.75, "limite_inferior": 16213996.58, "propuesta": 16213996.58, "detalle": "literal si aparece en la propuesta" },
+    "experiencia_postor_folios": "32-1097",
+    "experiencia_postor": [
+      { "emisor": "MINSA/PRONIS", "monto": 21166773.88, "tipo_acreditacion": "Contrato + constancia", "folio": "32-90", "acredita": "consorcio 40% — criterio del Comité" }
+    ],
+    "consorciados": [],
+    "isos_certificaciones": [
+      { "norma": "ISO 9001", "presente": true, "folio": 1205, "titular": "razón social del titular" }
+    ]
+  },
+  "roster": [
+    { "n_prof": 1, "cargo": "Jefe de Supervisión", "apellido_clave": "PÉREZ",
+      "folios_bundle": "1098-1120", "folio_nombre": 1098, "folio_colegiatura": 1100,
+      "folio_cuadro_resumen": 1118, "experiencia_total_declarada": "12 años (texto literal)" }
+  ],
+  "observaciones_claude": []
 }
 ```
-Los campos de `postor` usan los nombres EXACTOS del schema espejo
-(`schemas/espejo.js`); `profesionales_mapa` e `isos_certificaciones` son
-artefactos intermedios para los otros subagentes (no van tal cual al espejo).
+**Reglas:** `postor` con los nombres EXACTOS del schema espejo; **siempre incluye
+`formularios` y `experiencia_postor`** (si no, el consolidador deja el postor vacío
+y avisa). `experiencia_postor` **somero** (§3, no abras cada constancia). `roster` e
+`isos_certificaciones` son artefactos intermedios para los otros subagentes.
 Solo el JSON, sin texto extra.

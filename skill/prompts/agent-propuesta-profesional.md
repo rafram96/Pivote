@@ -106,23 +106,49 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
 ## Salida
 Nombres de campo EXACTOS del schema espejo (`schemas/espejo.js` — el orquestador
 inserta tu salida tal cual en `profesionales[]` del JSON espejo):
-```
-=== profesional_<n_prof>.json ===
+Rellena este **esqueleto** con los valores reales (mismas claves, mismos tipos):
+```json
 {
-  _meta(subagente:"agent-propuesta-profesional", n_prof),
-  profesional: { n_prof, cargo, nombre, dni, folio_nombre, titulo, folio_titulo,
-                 colegiatura, fecha_colegiatura, folio_colegiatura,
-                 certificaciones, experiencia_total_declarada, notas },
-  experiencias: [ { n, entidad_emisora, ruc_emisor, proyecto, cui,
-                    tipo_documento, nombre_emisor, cargo_emisor,
-                    fecha_inicial, fecha_final, fecha_emision, folio, paginas_pdf,
-                    cargo_ocupado, cert_antes_culminar, incluye_covid,
-                    traslape, nivel_categoria, area_construida_m2,
-                    monto_contrato_soles, entidad_contratante, ubicacion,
-                    observaciones } ],
-  cross_checks: [ { label: "Cross-check vs cuadro resumen del Anexo 16:",
-                    valor: { extraidas, declaradas, cuadra, intentos } } ],
-  observaciones_claude[]
+  "_meta": { "subagente": "agent-propuesta-profesional", "n_prof": 5 },
+  "profesional": {
+    "n_prof": 5, "cargo": "Especialista en Instalaciones Sanitarias",
+    "nombre": "JUAN PÉREZ", "dni": "12345678",
+    "folio_nombre": 1150, "titulo": "Ingeniero Sanitario", "folio_titulo": 1152,
+    "colegiatura": "CIP 123456", "fecha_colegiatura": "2008-05-12", "folio_colegiatura": 1153,
+    "certificaciones": ["PMP (PMI, vig. 2024-2026)"],
+    "experiencia_total_declarada": "12 años 3 meses (texto literal del cuadro)",
+    "notas": []
+  },
+  "experiencias": [
+    {
+      "n": 1,
+      "entidad_emisora": "GOBIERNO REGIONAL DE X", "ruc_emisor": "20123456789",
+      "proyecto": "Supervisión del Hospital ...", "cui": "2354781",
+      "tipo_documento": "Constancia", "nombre_emisor": "ING. ...", "cargo_emisor": "Gerente de Obras",
+      "fecha_inicial": "2019-03-01", "fecha_final": "2020-06-30", "fecha_emision": "2020-07-10",
+      "folio": 1160, "paginas_pdf": [1160, 1161],
+      "cargo_ocupado": "Supervisor de Instalaciones Sanitarias",
+      "cert_antes_culminar": "NO", "incluye_covid": "SÍ", "traslape": "NO",
+      "nivel_categoria": "II-2", "area_construida_m2": 12000, "monto_contrato_soles": 18015551.75,
+      "entidad_contratante": "GOBIERNO REGIONAL DE X", "ubicacion": "Huancavelica",
+      "observaciones": null
+    }
+  ],
+  "cross_checks": [
+    { "label": "Cross-check vs cuadro resumen del Anexo 16:",
+      "extraidas": 3, "declaradas": 3, "cuadra": true, "intentos": 1 }
+  ],
+  "observaciones_claude": []
 }
 ```
+**Tipos exactos — NO derives** (un consolidador los normaliza, pero ayúdalo):
+- Usa EXACTAMENTE estas claves. **Sin alias**: `entidad_emisora` (no `cliente_empleador`),
+  `fecha_inicial` (no `fecha_inicio`), `fecha_emision` (no `fecha_emision_constancia`).
+- `paginas_pdf`: **array de enteros** `[1160, 1161]` (NUNCA un string como `"1160 (dup 1229)"`).
+- Fechas: string `YYYY-MM-DD`, parcial `"YYYY-MM (anotación)"`, o `"POR VERIFICAR…"`. Nada más.
+- `experiencia_total_declarada`: **string** (NUNCA un objeto).
+- `incluye_covid` / `traslape` / `cert_antes_culminar`: `"SÍ"` / `"NO"` / `null` (NUNCA booleano).
+- `monto_contrato_soles` / `area_construida_m2`: número (sin `S/`, sin comas).
+- `n_prof` va en `_meta` **y** en `profesional`; `n` de cada experiencia contiguo 1..N.
+
 Solo el JSON, sin texto extra.
