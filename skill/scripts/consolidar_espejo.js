@@ -84,6 +84,7 @@ function requisitosDe(cargoNum) {
     cargos_validos: (c.cargos_similares_validos || []).join("; "),
     tipo_experiencia_valida: `Experiencia mínima: ${c.tiempo_minimo_experiencia}. Profesión aceptada: ${(c.profesiones_aceptadas || []).join(" / ")}.`,
     tipo_obra_valida: c.tipos_obra_validos || null,
+    folio: pick(c.folio, c.folio_requisito, c.folio_tdr),   // folio en las BASES → recorte TDR (mejora A)
   };
 }
 
@@ -187,6 +188,7 @@ for (const i of nums) {
     folio_colegiatura: pick(pr.folio_colegiatura, rRow.folio_colegiatura),
     certificaciones: certs,
     experiencia_total_declarada: declStr(pick(pr.experiencia_total_declarada, rRow.experiencia_total_declarada)),
+    folio_anexo: pick(pr.folio_anexo, rRow.folio_anexo, rRow.folio_cuadro_resumen),  // Anexo 16 en la propuesta → recorte (mejora A)
     requisitos: requisitosDe(cargoNum),
     experiencias,
     total: pe.total || {},

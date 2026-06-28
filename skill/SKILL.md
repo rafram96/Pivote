@@ -135,9 +135,13 @@ propenso a errores en propuestas grandes):
 - las **imágenes de las constancias** (Fase 2): recorta de `propuesta.pdf` las
   páginas de la constancia de cada experiencia (usa `paginas_pdf` = páginas FÍSICAS
   reales, principal 1ª — el folio impreso ≠ página no siempre) a un ZIP —
-  `node scripts/extraer_certificados.js <espejo.json> <propuesta.pdf> certificados.zip`.
+  `node scripts/extraer_certificados.js <espejo.json> <propuesta.pdf> certificados.zip <bases.pdf>`.
   Son los documentos de la **experiencia** (constancias/conformidades de servicio),
   NO los títulos/colegiatura. El backend los embebe en cada bloque `CERT N°X`.
+  **Mejora A:** si pasas `bases.pdf`, también recorta por profesional el requisito
+  del TDR (`requisitos.folio`, de las bases) y el Anexo 16 (`folio_anexo`, de la
+  propuesta) → `P{n}_TDR.pdf` / `P{n}_ANEXO.pdf`; el backend los embebe **antes de
+  las experiencias** en la hoja del profesional.
 
 Persiste todo en `~/InfoObras/analisis/<analisis_id>/`.
 

@@ -46,14 +46,18 @@ Cada una con `severidad`, `mensaje` humano y `referencia` (número de cargo si
 aplica).
 
 ## Salida
-JSON conforme a `BasesSchema` (ver `docs/contrato/schema_canonico_pydantic.md` §2):
-`_meta` (con `subagente: "agent-bases"`), `metadata_concurso`,
+JSON: `_meta` (con `subagente: "agent-bases"`), `metadata_concurso`,
 `factores_evaluacion`, `personal_clave[]`, `observaciones_claude[]`.
+Cada entrada de `personal_clave` incluye: `numero`, `cargos_similares_validos`,
+`profesiones_aceptadas`, `tiempo_minimo_experiencia`, `tipos_obra_validos`,
+`aplica` (Factor A) y **`folio`** = el folio de las bases donde aparece el
+requisito de ese cargo (lo usa el recorte del TDR — mejora A).
 
 ## Checklist antes de devolver
 - [ ] `personal_clave` tiene una entrada por cada cargo del cuadro (ninguno omitido).
 - [ ] `fecha_presentacion_oferta` en ISO o `null` + observación critical.
 - [ ] `cargos_similares_validos` no vacío para los cargos que sí los tienen.
+- [ ] cada `personal_clave` con `folio` (dónde está su requisito en las bases → recorte TDR).
 - [ ] `cuantia` + `limite_inferior` (90% si la oferta es limitada) calculados.
 - [ ] cada factor con `aplica` true/false según el Cuadro Resumen (PMP puede ser NO APLICA).
 - [ ] JSON sintácticamente válido.
