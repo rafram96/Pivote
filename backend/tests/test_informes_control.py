@@ -4,7 +4,7 @@ Regla del cliente: descarga los informes cuyo AÑO cae dentro del periodo de la
 experiencia. Exp 2016–2018 + informes 2018–2022 → solo el de 2018."""
 from datetime import date
 
-from entregables.zip_infoobras import _anio_informe, informes_relevantes
+from entregables.zip_infoobras import _anio_informe, _items_descarga, informes_relevantes
 
 INFORMES = [
     {"Anio": "2018", "FechaEmision": "11/04/2018", "NroInforme": "351-2018"},
@@ -47,3 +47,23 @@ def test_anio_cae_de_fecha_si_falta_Anio():
 def test_informe_sin_anio_legible_se_incluye_por_las_dudas():
     inf = {"NroInforme": "x"}  # ni Anio ni FechaEmision
     assert informes_relevantes([inf], date(2016, 1, 1), date(2018, 1, 1)) == [inf]
+
+
+# ── Datos de cierre (mejora D): parser de los botones de descarga ────────────
+
+def test_items_descarga_botones_y_href():
+    html = (
+        '<a data-download-url="/Mapa/DownloadFile?filename=cierre/acta.pdf'
+        '&name=Acta de Recepción&extension=.pdf">Descargar</a>'
+        '<a href="https://x/Mapa/DownloadFile?filename=cierre/liquidacion.pdf'
+        '&amp;name=Liquidación">Descargar</a>'
+        '<a data-download-url="/Mapa/DownloadFile?filename=cierre/acta.pdf&name=dup">x</a>'
+    )
+    items = _items_descarga(html)
+    assert [i["filename"] for i in items] == ["cierre/acta.pdf", "cierre/liquidacion.pdf"]  # dedup
+    assert items[1]["nombre"] == "Liquidación"
+    assert all(i["extension"] == "pdf" for i in items)  # ext del filename si falta el param
+
+
+def test_items_descarga_sin_botones():
+    assert _items_descarga("<html>sin descargas</html>") == []

@@ -540,6 +540,78 @@ def descargar_informes_control(
     return {"encontrados": len(informes), "relevantes": len(rel), "descargados": ok}
 
 
+# ── Datos de cierre (Recepción, Liquidación, Resolución de contrato) ──────────
+# Página aparte (/Mapa/DatosCierre?obraId=…) con los documentos del CIERRE de la
+# obra: acta de recepción, aprobación de liquidación, resolución de contrato,
+# transferencia. Botones "Descargar" con data-download-url → /Mapa/DownloadFile,
+# el mismo mecanismo que DatosEjecucion (lo verifica `inventariar`).
+DATOS_CIERRE = BASE + "/Mapa/DatosCierre"
+
+
+def _items_descarga(html: str) -> list[dict]:
+    """Items {filename, nombre, extension} desde los botones de descarga de una
+    página (data-download-url o href a DownloadFile). Dedup por filename."""
+    out: list[dict] = []
+    vistos: set[str] = set()
+    urls = re.findall(r'data-download-url="([^"]+)"', html)
+    urls += re.findall(r'href="([^"]*DownloadFile[^"]*)"', html)
+    for raw in urls:
+        qs = parse_qs(urlsplit(unquote(raw.replace("&amp;", "&"))).query)
+        fn = (qs.get("filename", [""])[0]).strip()
+        if not fn or fn in vistos:
+            continue
+        vistos.add(fn)
+        base = fn.rsplit("/", 1)[-1]
+        nombre = (qs.get("name", [""])[0]).strip() or base
+        ext = ((qs.get("extension", [""])[0] or "").lstrip(".")
+               or (base.rsplit(".", 1)[-1] if "." in base else "")
+               or "pdf")
+        out.append({"filename": fn, "nombre": nombre, "extension": ext})
+    return out
+
+
+def descargar_datos_cierre(
+    obra_id: int | str, destino: Path, *,
+    session: Optional[requests.Session] = None, timeout: float = 60.0,
+    intentos: int = _DL_RETRIES,
+) -> dict[str, int]:
+    """Descarga a `destino/Datos de cierre/` los documentos del cierre de la obra
+    (acta de recepción, liquidación, resolución de contrato, transferencia) desde
+    `/Mapa/DatosCierre`. Devuelve {encontrados, descargados}. NO corre en tests offline."""
+    sess = session or requests.Session()
+    sess.headers.setdefault(
+        "User-Agent",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+    )
+    html = ""
+    ultima: Optional[Exception] = None
+    for intento in range(max(1, intentos)):
+        try:
+            r = sess.get(DATOS_CIERRE, params={"obraId": obra_id}, timeout=timeout)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            ultima = e
+        else:
+            if r.status_code == 200:
+                html = r.text
+                break
+            if r.status_code < 500:
+                return {"encontrados": 0, "descargados": 0}   # 4xx → sin página de cierre
+            ultima = requests.HTTPError(f"HTTP {r.status_code}")
+        if intento < intentos - 1:
+            time.sleep(_DL_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.5))
+    if not html:
+        logger.warning("InfoObras datos de cierre obra %s: %s", obra_id, ultima)
+        return {"encontrados": 0, "descargados": 0}
+
+    items = _items_descarga(html)
+    carpeta = Path(destino) / "Datos de cierre"
+    ok = sum(1 for it in items if _descargar_a_carpeta(sess, it, carpeta, timeout=timeout))
+    if items:
+        logger.info("InfoObras datos de cierre obra %s: %d encontrados, %d descargados",
+                    obra_id, len(items), ok)
+    return {"encontrados": len(items), "descargados": ok}
+
+
 # ── Construcción del ZIP (árbol de 4 niveles) ────────────────────────────────
 
 _MAXLEN_RUTA = 64  # tope por componente (carpeta/archivo) → la ruta cabe en 260

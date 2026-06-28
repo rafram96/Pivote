@@ -429,7 +429,7 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
     Devuelve {descargas, bytes, reintentos} medidos del folder + el scraper."""
     from entregables.zip_infoobras import (
         descargar_documentos_obra_por_hito, descargar_informes_control,
-        reset_descargas_stats, descargas_stats)
+        descargar_datos_cierre, reset_descargas_stats, descargas_stats)
     base = Path(dir_descargas) / f"{job_id}.descargas"
     reset_descargas_stats()
     bajadas = saltados = 0
@@ -462,6 +462,10 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                                                    fecha_ini=cert_ini, fecha_fin=cert_fin)
                     except Exception as ex:  # noqa: BLE001
                         logger.warning("informes control obra %s: %r", obra_id, ex)
+                    try:
+                        descargar_datos_cierre(obra_id, destino)
+                    except Exception as ex:  # noqa: BLE001
+                        logger.warning("datos de cierre obra %s: %r", obra_id, ex)
                 base.mkdir(parents=True, exist_ok=True)
                 ok.write_text("ok", encoding="utf-8")   # recién aquí: descarga COMPLETA
                 bajadas += 1
