@@ -630,9 +630,10 @@ def construir_hoja_profesional(
         tramos = restar_paralizaciones((ini, fin), clamp)
         return dias_inclusivos(ini, fin), sum(dias_inclusivos(a, b) for a, b in tramos), clamp
 
-    def cert_marco(n_exp, e, ini, fin, cui):
+    def cert_marco(n_exp, e, ini, fin, cui, fx=None):
         """Encabezado 'CERT. N°X' (amarillo) + recap 'DATOS DE LA EXPERIENCIA'
-        (azul) en columnas A:D, antes de las bandas técnicas (formato ingeniero)."""
+        (azul) en columnas A:D, antes de las bandas técnicas (formato ingeniero).
+        Muestra el periodo del certificado y el de InfoObras juntos, para comparar."""
         nonlocal r
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
         c = ws.cell(r, 1, f"CERT. N°{n_exp} — {prof.get('cargo', '')} — {prof.get('nombre') or ''}")
@@ -647,10 +648,16 @@ def construir_hoja_profesional(
         r += 1
         periodo = (f"{ini.strftime('%d/%m/%Y')} – {fin.strftime('%d/%m/%Y')}"
                    if (ini and fin) else "—")
+        io_ini = _fecha_iso((fx or {}).get("fecha_inicio"))
+        io_fin = _fecha_iso((fx or {}).get("fecha_fin"))
+        periodo_io = ("— (obra no ubicada en InfoObras)" if not io_ini else
+                      f"{io_ini.strftime('%d/%m/%Y')} – "
+                      f"{io_fin.strftime('%d/%m/%Y') if io_fin else '(sin fin)'}")
         for label, value in [("ENTIDAD / EMPRESA QUE EMITE", e.get("entidad_emisora")),
                              ("TIPO DE DOCUMENTO", e.get("tipo_documento")),
                              ("PROYECTO U OBRA", e.get("proyecto")),
                              ("PERIODO (certificado)", periodo),
+                             ("PERIODO (InfoObras)", periodo_io),
                              ("CARGO QUE OCUPÓ", e.get("cargo_ocupado")),
                              ("CÓDIGO (CUI/SNIP)",
                               str(cui) if cui else "No consignado en el certificado")]:
@@ -672,7 +679,7 @@ def construir_hoja_profesional(
         fx = fichas.get((n_prof, n_exp))
         # CUI resuelto por el backend (etapa InfoObras); si no, el del espejo
         cui = cuis.get((n_prof, n_exp)) or (fx or {}).get("cui") or e.get("cui")
-        cert_marco(n_exp, e, ini, fin, cui)   # encabezado CERT N°X + recap (formato ingeniero)
+        cert_marco(n_exp, e, ini, fin, cui, fx)   # encabezado CERT N°X + recap (cert vs InfoObras)
         r_top = r  # fila del título: el bloque de obra (F:J) arranca alineado aquí
         titulo = f"EXPERIENCIA {n_exp}: {str(e.get('proyecto') or '')}"  # nombre VERBATIM, sin truncar
         extra = " · ".join(x for x in [
