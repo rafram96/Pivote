@@ -438,3 +438,29 @@ def test_hoja_claude_blanca_con_veredictos(tmp_path):
     # ya NO se usa el amarillo de "llenado por Claude" en cada celda
     assert "Verde = cumple" in "\n".join(
         str(c.value) for row in ws.iter_rows() for c in row if c.value)
+
+
+def test_excel_final_requisitos_lista_no_crashea(tmp_path):
+    """Regresión: `requisitos.*` puede llegar como lista (el espejo permite
+    record(any)); openpyxl no escribe listas en celdas. El generador coerce
+    list/dict→string en vez de reventar (bloque del TDR por profesional, mejora A)."""
+    espejo = {
+        "_meta": {},
+        "profesionales": [{
+            "n_prof": 1, "cargo": "Esp", "nombre": "JUAN", "colegiatura": "CIP1",
+            "requisitos": {
+                "cargos_validos": ["Residente de obra", "Jefe de obra", "Supervisor de obra"],
+                "tipo_experiencia_valida": "5 años",
+                "tipo_obra_valida": ["Hospital II-1", "Hospital II-2"],  # LISTA → antes crasheaba
+            },
+            "experiencias": [{"n": 1, "proyecto": "H", "fecha_inicial": "2019-01-01",
+                              "fecha_final": "2020-01-01", "entidad_emisora": "GR",
+                              "cargo_ocupado": "Sup"}],
+        }],
+        "resumen_evaluacion": {"factores": []}, "postor": {},
+    }
+    salida = generar_excel_final(espejo, tmp_path / "lista.xlsx")   # NO debe crashear
+    ws = next(s for s in openpyxl.load_workbook(salida).worksheets if s.title.startswith("P1"))
+    rows = {str(row[0].value or ""): row[1].value for row in ws.iter_rows(min_col=1, max_col=2)}
+    cargos = next((rows[k] for k in rows if "CARGOS VÁLIDOS" in k), None)
+    assert cargos == "Residente de obra; Jefe de obra; Supervisor de obra"

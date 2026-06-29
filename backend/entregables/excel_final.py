@@ -225,6 +225,18 @@ def construir_hoja_base_datos(ws, espejo: dict) -> int:
 _HITO_HEAD = ["HITO", "DESDE", "HASTA", "DÍAS"]
 
 
+def _xl(v):
+    """Valor seguro para una celda: list/tuple → '; '.join, dict → 'k: v; …', el
+    resto tal cual. El espejo permite `requisitos`/`total` como record(any), así que
+    un campo válido puede llegar como lista y openpyxl NO escribe listas en celdas
+    (ValueError 'Cannot convert [...] to Excel'). Coercer evita tumbar el Excel."""
+    if isinstance(v, (list, tuple)):
+        return "; ".join(str(x) for x in v)
+    if isinstance(v, dict):
+        return "; ".join(f"{k}: {val}" for k, val in v.items())
+    return v
+
+
 def construir_hoja_profesional(
     ws, prof: dict, paralizaciones: Paralizaciones,
     cuis: Optional[dict] = None,
@@ -605,6 +617,7 @@ def construir_hoja_profesional(
             cl = ws.cell(r, 1, label); cl.font, cl.fill, cl.border = F_BOLD, FILL_RECAP, BORDER
             cl.alignment = Alignment(vertical="top", wrap_text=True)
             ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=4)
+            value = _xl(value)
             cv = ws.cell(r, 2, value); cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
             ws.row_dimensions[r].height = max(15, (-(-len(str(value)) // 35)) * 13 + 2)
             r += 1
@@ -664,6 +677,7 @@ def construir_hoja_profesional(
             cl = ws.cell(r, 1, label); cl.font, cl.fill, cl.border = F_BOLD, FILL_RECAP, BORDER
             cl.alignment = Alignment(vertical="top", wrap_text=True)
             ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=4)
+            value = _xl(value)
             cv = ws.cell(r, 2, value or "—")
             cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
             lns = max(1, -(-len(str(value or "—")) // 35))   # B:D ≈ 35 car/línea
