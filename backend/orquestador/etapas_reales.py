@@ -429,7 +429,9 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
     Devuelve {descargas, bytes, reintentos} medidos del folder + el scraper."""
     from entregables.zip_infoobras import (
         descargar_documentos_obra_por_hito, descargar_informes_control,
-        descargar_datos_cierre, reset_descargas_stats, descargas_stats)
+        descargar_datos_cierre, reset_descargas_stats, descargas_stats,
+        resumen_descargas)
+    from scraping.errores_red import corto
     base = Path(dir_descargas) / f"{job_id}.descargas"
     reset_descargas_stats()
     bajadas = saltados = 0
@@ -461,19 +463,20 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                         descargar_informes_control(obra_id, destino,
                                                    fecha_ini=cert_ini, fecha_fin=cert_fin)
                     except Exception as ex:  # noqa: BLE001
-                        logger.warning("informes control obra %s: %r", obra_id, ex)
+                        logger.debug("informes control obra %s: %s", obra_id, corto(ex))
                     try:
                         descargar_datos_cierre(obra_id, destino)
                     except Exception as ex:  # noqa: BLE001
-                        logger.warning("datos de cierre obra %s: %r", obra_id, ex)
+                        logger.debug("datos de cierre obra %s: %s", obra_id, corto(ex))
                 base.mkdir(parents=True, exist_ok=True)
                 ok.write_text("ok", encoding="utf-8")   # recién aquí: descarga COMPLETA
                 bajadas += 1
             except Exception as ex:  # noqa: BLE001
-                logger.warning("descarga obra %s (P%sE%s): %r", obra_id, np_, ne, ex)
+                logger.warning("InfoObras ✗ obra %s (P%sE%s): %s", obra_id, np_, ne, corto(ex))
     if saltados:
         logger.info("descargas job %s: %d experiencia(s) sin obra_id (no descargables)",
                     job_id, saltados)
+    logger.info("InfoObras descargas job %s — %s", job_id, resumen_descargas())
     n_files = n_bytes = 0
     if base.is_dir():
         for p in base.rglob("*"):

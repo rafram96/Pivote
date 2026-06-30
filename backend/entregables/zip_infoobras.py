@@ -28,6 +28,8 @@ import zipfile
 from datetime import date
 from pathlib import Path
 from typing import Any, Optional
+
+from scraping.errores_red import clasificar, corto
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import requests
@@ -47,15 +49,39 @@ _dl_local = threading.local()
 
 
 def reset_descargas_stats() -> dict:
-    _dl_local.v = {"reintentos": 0}
+    _dl_local.v = {"reintentos": 0, "fallidos": []}
     return _dl_local.v
 
 
 def descargas_stats() -> dict:
     v = getattr(_dl_local, "v", None)
     if v is None:
-        v = _dl_local.v = {"reintentos": 0}
+        v = reset_descargas_stats()
     return v
+
+
+def _registrar_fallo(e, etiqueta: str) -> tuple[str, str]:
+    """Clasifica un fallo DEFINITIVO (agotados los reintentos) y lo guarda para el
+    resumen final. Devuelve (categoria, mensaje)."""
+    cat, msg = clasificar(e)
+    descargas_stats().setdefault("fallidos", []).append((etiqueta, cat, msg))
+    return cat, msg
+
+
+def resumen_descargas() -> str:
+    """Una sola línea con el balance de la etapa (reintentos + ítems no descargados
+    por categoría), en vez de cientos de líneas crudas."""
+    st = descargas_stats()
+    fall = st.get("fallidos", [])
+    linea = f"{st.get('reintentos', 0)} reintento(s)"
+    if fall:
+        from collections import Counter
+        c = Counter(cat for _, cat, _ in fall)
+        desg = " · ".join(f"{n} {k}" for k, n in c.most_common())
+        linea += f" · {len(fall)} ítem(s) NO descargados ({desg})"
+    else:
+        linea += " · sin fallos definitivos"
+    return linea
 
 BASE = "https://infobras.contraloria.gob.pe/InfobrasWeb"
 PAGINA = BASE + "/Mapa/DatosEjecucion"
@@ -278,13 +304,15 @@ def _descargar_a_carpeta(
                 pass
             if intento < intentos - 1:
                 descargas_stats()["reintentos"] += 1
+                cat, msg = clasificar(e)
                 delay = _DL_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.5)
-                logger.warning("InfoObras descarga %s intento %d/%d: %s — reintento en %.1fs",
-                               it["nombre"], intento + 1, intentos, e, delay)
+                logger.debug("InfoObras descarga «%s» %d/%d: [%s] %s — reintento %.1fs",
+                             it["nombre"], intento + 1, intentos, cat, msg, delay)
                 time.sleep(delay)
             else:
-                logger.warning("InfoObras descarga %s falló tras %d intentos: %s",
-                               it["nombre"], intentos, e)
+                cat, msg = _registrar_fallo(e, it["nombre"])
+                logger.warning("InfoObras ✗ «%s»: [%s] %s (tras %d intentos)",
+                               it["nombre"], cat, msg, intentos)
     return False
 
 
@@ -316,8 +344,8 @@ def _get_inventario(
             ultima = requests.HTTPError(f"HTTP {r.status_code}", response=r)
         if intento < intentos - 1:
             delay = _DL_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.5)
-            logger.warning("InfoObras inventario obra %s intento %d/%d: %s — reintento en %.1fs",
-                           obra_id, intento + 1, intentos, ultima, delay)
+            logger.debug("InfoObras inventario obra %s %d/%d: %s — reintento %.1fs",
+                         obra_id, intento + 1, intentos, corto(ultima), delay)
             time.sleep(delay)
     raise ultima or requests.HTTPError("inventario no disponible")
 
@@ -449,7 +477,7 @@ def obtener_informes_control(
             ultima = requests.HTTPError(f"HTTP {r.status_code}")
         if intento < intentos - 1:
             time.sleep(_DL_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.5))
-    logger.warning("InfoObras informes obra %s: %s", obra_id, ultima)
+    logger.debug("InfoObras informes obra %s: %s", obra_id, corto(ultima))
     return []
 
 
@@ -503,7 +531,7 @@ def _descargar_url(sess: requests.Session, url: str, destino: Path, *,
             if intento < intentos - 1:
                 time.sleep(_DL_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.5))
             else:
-                logger.warning("InfoObras informe %s falló: %s", url, e)
+                logger.debug("InfoObras informe (control) falló: %s", corto(e))
     return False
 
 
@@ -600,7 +628,7 @@ def descargar_datos_cierre(
         if intento < intentos - 1:
             time.sleep(_DL_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.5))
     if not html:
-        logger.warning("InfoObras datos de cierre obra %s: %s", obra_id, ultima)
+        logger.debug("InfoObras datos de cierre obra %s: %s", obra_id, corto(ultima))
         return {"encontrados": 0, "descargados": 0}
 
     items = _items_descarga(html)

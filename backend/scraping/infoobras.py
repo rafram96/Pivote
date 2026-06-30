@@ -24,6 +24,8 @@ from typing import Callable, Optional
 
 import requests
 
+from scraping.errores_red import corto
+
 logger = logging.getLogger(__name__)
 
 BASE_MAPA = "https://infobras.contraloria.gob.pe/infobrasweb"
@@ -272,7 +274,7 @@ def _crear_session() -> requests.Session:
             return s
         except requests.RequestException as e:
             ultimo_err = e
-            logger.warning("InfoObras: warmup de session intento %d/3: %r", intento + 1, e)
+            logger.debug("InfoObras: warmup intento %d/3: %s", intento + 1, corto(e))
             if intento < 2:
                 time.sleep(1.5 * (intento + 1))
     raise ultimo_err
@@ -309,7 +311,7 @@ def _buscar_por_cui(session: requests.Session, cui: str) -> list[dict]:
             break
         except requests.RequestException as e:
             ultimo_err = e
-            logger.warning("InfoObras: busqueda CUI %s intento %d/3: %s", cui, intento + 1, e)
+            logger.debug("InfoObras: búsqueda CUI %s intento %d/3: %s", cui, intento + 1, corto(e))
             if intento < 2:
                 time.sleep(1.5 * (intento + 1))
     if data is None:
@@ -407,8 +409,8 @@ def _extraer_datos_ejecucion(session: requests.Session, obra_id: int) -> dict[st
             return variables
         except requests.RequestException as e:
             ultimo_err = e
-            logger.warning("InfoObras: DatosEjecucion ObraId %s intento %d/3: %s",
-                           obra_id, intento + 1, e)
+            logger.debug("InfoObras: DatosEjecucion ObraId %s intento %d/3: %s",
+                         obra_id, intento + 1, corto(e))
             if intento < 2:
                 time.sleep(1.5 * (intento + 1))
         finally:
@@ -437,7 +439,7 @@ def _extraer_datos_preparacion(session: requests.Session, obra_id: int) -> dict[
         r = session.get(url, params={"ObraId": obra_id}, timeout=30)
         r.raise_for_status()
     except requests.RequestException as e:
-        logger.warning("InfoObras: error en DatosPreparacion ObraId %s: %s", obra_id, e)
+        logger.debug("InfoObras: DatosPreparacion ObraId %s: %s", obra_id, corto(e))
         return {}
     finally:
         session.headers["Accept"] = "application/json, text/javascript, */*; q=0.01"
@@ -1107,7 +1109,7 @@ def fetch_by_cui(
                 if meses:
                     rango = (min(meses), max(meses))
             except Exception as e:  # noqa: BLE001 — portal intermitente
-                logger.warning("InfoObras: rango valorizaciones ObraId %s: %r", oid, e)
+                logger.debug("InfoObras: rango valorizaciones ObraId %s: %s", oid, corto(e))
             _cache_rango[oid] = rango
             return rango
 
@@ -1232,7 +1234,7 @@ def fetch_by_cui(
         )
 
     except requests.RequestException as e:
-        logger.error("InfoObras: error de red para CUI %s: %s", cui, e)
+        logger.warning("InfoObras: CUI %s no resuelto — %s", cui, corto(e))
         return None
     except Exception as e:
         logger.exception("InfoObras: error inesperado para CUI %s", cui)
@@ -1272,7 +1274,7 @@ def buscar_obras_por_nombre(nombre: str) -> list[dict]:
             return result.get("data", result.get("obras", []))
         return []
     except Exception as e:
-        logger.error("InfoObras: error buscando por nombre '%s': %s", nombre, e)
+        logger.warning("InfoObras: búsqueda por nombre '%s' falló — %s", nombre[:40], corto(e))
         return []
 
 
@@ -1717,7 +1719,8 @@ def buscar_obra_por_certificado(
                 raw_busqueda=mejor.obra_raw,
             )
         except Exception as e:
-            logger.error("InfoObras: error descargando datos de ObraId %s: %s", mejor.obra_id, e)
+            logger.warning("InfoObras: no se pudo descargar ObraId %s — %s",
+                           mejor.obra_id, corto(e))
             return None
 
 
