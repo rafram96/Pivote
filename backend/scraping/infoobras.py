@@ -301,31 +301,46 @@ def _buscar_por_cui(session: requests.Session, cui: str) -> list[dict]:
         "rowsPerPage": 20,
         "Parameters": json.dumps(params_json, separators=(",", ":")),
     }
-    data = None
+    # El portal es NO determinístico: ante un hipo responde 200 con lista VACÍA
+    # (no por ausencia real — "las tablas varían entre corridas"). Como un CUI
+    # citado debería existir, se reintenta tanto ante excepción de red COMO ante
+    # resultado vacío, con backoff. Solo se concluye "no está" si sigue vacío tras
+    # agotar los intentos. (Antes solo reintentaba en excepción → un 200-vacío
+    # daba "sin candidato fiable" para un CUI que sí existe; resolución no estable.)
     ultimo_err: Optional[Exception] = None
-    for intento in range(3):  # el portal cae a ratos; reintentar el POST
+    hubo_respuesta = False
+    for intento in range(3):
         try:
             r = session.post(url, params=query, timeout=15)
             r.raise_for_status()
             data = r.json()
-            break
         except requests.RequestException as e:
             ultimo_err = e
             logger.debug("InfoObras: búsqueda CUI %s intento %d/3: %s", cui, intento + 1, corto(e))
             if intento < 2:
                 time.sleep(1.5 * (intento + 1))
-    if data is None:
-        raise ultimo_err
-    result = data.get("Result", data)
-    if isinstance(result, list):
-        obras = result
-    elif isinstance(result, dict):
-        obras = result.get("data", result.get("obras", [result]))
-    else:
-        return []
-    # filtro exacto: la API matchea codSnip por substring (buscar '95555' trae
-    # '2595555'). Quedarse solo con los registros del código pedido.
-    return [o for o in obras if coincide_codigo(o, cui)]
+            continue
+        hubo_respuesta = True
+        result = data.get("Result", data)
+        if isinstance(result, list):
+            obras = result
+        elif isinstance(result, dict):
+            obras = result.get("data", result.get("obras", [result]))
+        else:
+            obras = []
+        # filtro exacto: la API matchea codSnip por substring (buscar '95555' trae
+        # '2595555'). Quedarse solo con los registros del código pedido.
+        encontradas = [o for o in obras if coincide_codigo(o, cui)]
+        if encontradas:
+            return encontradas
+        # 200 pero vacío para un código específico: casi siempre es hipo del portal.
+        if intento < 2:
+            logger.debug("InfoObras: búsqueda CUI %s intento %d/3: 200 vacío — reintento",
+                         cui, intento + 1)
+            time.sleep(1.5 * (intento + 1))
+    if not hubo_respuesta:
+        raise ultimo_err           # siempre falló la red → relanzar (como antes)
+    return []                       # respondió pero vacío tras reintentar → no está
 
 
 def _parse_js_vars(html: str) -> dict[str, list]:
