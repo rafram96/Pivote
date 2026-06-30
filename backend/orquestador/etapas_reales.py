@@ -183,7 +183,13 @@ class EtapaResolucionCuiReal:
         for (np_, ne), r in resolver_con_dedup(pendientes, consulta):
             k = _clave(np_, ne)
             if r["estado"] == "resuelto":
-                ctx.enriquecimiento[k] = {"cui": r["cui"], "via": r["via"], "obra": r["obra"]}
+                # se persisten candidatos + decision también en los RESUELTOS (no
+                # solo en revisión): un PROBABLE auto-elegido (caso obra homónima
+                # vieja) necesita mostrar las alternativas para que el evaluador
+                # pueda corregir sin re-correr.
+                ctx.enriquecimiento[k] = {"cui": r["cui"], "via": r["via"], "obra": r["obra"],
+                                          "candidatos": r.get("candidatos") or [],
+                                          "decision": r.get("decision")}
                 ok += 1
                 if r["via"] == "PROBABLE":
                     obs.append(pipeline.Observacion(
