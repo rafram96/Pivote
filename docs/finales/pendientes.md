@@ -37,7 +37,7 @@ diferida · observabilidad (resumen + métricas) · **B1 (la ausencia no invalid
 |---|---|---|---|
 | C2 | /zip 202 "en preparación" + indicador "listo/preparando" en el panel + retoma tras reinicio | ✅ hecho | — |
 | C3 | Lock compartido motor↔API (race del backfill, multi-usuario) | ⏳ pendiente | ~0.5 d |
-| C4 | Re-empaquetar el plugin de Cowork (`build.ps1`) | ⏳ si se despliega como plugin | ~0.25 d |
+| C4 | Re-empaquetar el plugin de Cowork (`build.ps1`) | ✅ re-empacado 2026-06-27 (re-correr al editar skill/MCP) | — |
 
 ## 🔵 D — Alcance nuevo (se cotiza aparte)
 | # | Pendiente | Estado | Esfuerzo |

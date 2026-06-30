@@ -152,3 +152,51 @@ grandes; la BD solo guarda metadatos y referencias.
 
 ## Esfuerzo estimado
 ~1.5–2 días (repositorio Postgres + las 2 tablas + backfill + cablear el compose).
+
+---
+
+## Decisión de implementación (pendiente — listo para ejecutar con server)
+> Añadido 2026-06-27. La implementación **no se codeó aún**: requiere un Postgres real
+> para probar de verdad (ver "Cómo probarlo"), y el server está apagado. Esta sección
+> deja la decisión y el mapeo cerrados para cablear sin re-pensar.
+
+### El desajuste a resolver
+La interfaz real `Repositorio` ([`backend/orquestador/repositorio.py`](../../backend/orquestador/repositorio.py))
+está orientada a **blobs** (Job / Concurso / espejo / enriquecimiento), no a las tablas
+`analisis` + `base_datos` de este doc. Hay **dos formas** de cablear `RepositorioPostgres`:
+
+| | **Opción 1 — Blob JSONB** | **Opción 2 — Modelo completo** ⭐ |
+|---|---|---|
+| Qué hace | Espeja el `Protocol` actual: 1 tabla JSONB por tipo (`jobs`, `espejos`, `concursos`, `enriquecimientos`) | Las tablas `analisis` + `base_datos` de arriba; explota cada experiencia a fila |
+| Cambio en `api/app.py` | 1 línea | 1 línea (misma interfaz) + lógica de mapeo en el repo |
+| Cumple el contrato ("usa PostgreSQL") | ✅ | ✅ |
+| Búsqueda/filtro/export SQL del panel | ❌ (todo en JSONB) | ✅ tabla buscable, "misma persona entre concursos" |
+| Esfuerzo | ~0.5–0.75 d | ~1.5–2 d + backfill |
+
+**Recomendación: Opción 2.** El contrato cobra Postgres y el valor está en la tabla
+buscable; la Opción 1 cumple "de nombre" pero no entrega el histórico filtrable que el
+panel promete. La Opción 1 solo se justifica si hay que cerrar el hito contra reloj.
+
+### Mapeo de la interfaz `Repositorio` → modelo completo (Opción 2)
+| Método del `Protocol` | A dónde va |
+|---|---|
+| `guardar(job)` / `cargar` / `listar` | fila en `analisis` (cabecera) + estado/descargas |
+| `guardar_espejo` / `cargar_espejo` | `analisis.espejo` (JSONB) **y** explotar `experiencias[]` → filas `base_datos` |
+| `guardar_enriquecimiento` / `cargar` | merge sobre `base_datos` (dias_efectivos, paralizaciones, valorizaciones, `backend`) |
+| `guardar_concurso` / `cargar` / `listar_concursos` | tabla `concursos` (cabecera del concurso; 1:N con `analisis`) |
+| `eliminar(job_id)` | `DELETE` en cascada (`analisis`+`base_datos`) **+ borrar binarios de disco** (xlsx/zip/certs — siguen en disco, ver arriba) |
+| `eliminar_concurso` | `DELETE` en `concursos` |
+
+> ⚠ `eliminar` hoy borra también artefactos de disco ([`repositorio.py:146`](../../backend/orquestador/repositorio.py)).
+> El repo Postgres debe conservar ese borrado de disco — la BD no guarda los binarios.
+
+### Cómo probarlo (por qué necesita el server / un Postgres)
+A diferencia del resto de tests offline, este sí necesita una BD:
+- Local: `docker run -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:16` y apuntar
+  `DATABASE_URL` ahí; o `testcontainers` en los tests.
+- Server: descomentar el servicio `db` del compose (paso 4 de Migración).
+
+### Notas de cableado
+- Rama de trabajo: **`dev`** (no `demo`).
+- Dependencia nueva: `psycopg2-binary` en `backend/requirements.txt`.
+- El motor **no cambia**: depende del `Protocol`, no de la implementación.
