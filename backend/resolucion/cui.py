@@ -412,10 +412,22 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
             obra = {"cui": cui_out, "nombre_obra": o.get("nombrObra"),
                     "departamento": o.get("nombrDepartamento"),
                     "obra_id": o.get("codigoObra") or o.get("obraId")}
-            if (toks and n_hit >= max(1, (len(toks) + 1) // 2)) or depmatch:
-                return {"estado": "resuelto", "cui": cui_out, "via": "CUI_TEXTO",
-                        "decision": "código CUI verificado contra la obra",
-                        "candidatos": [], "obra": obra}
+            # ¿el CUI citado coincide EXACTO con el de la obra hallada? El CUI
+            # (codUniqInv 7 díg / codSnip) es código único nacional → autoritativo:
+            # si calza exacto, ES la obra, aunque el nombre difiera (el certificado
+            # suele citar un componente, p.ej. "C.S. Fortaleza", dentro de la red
+            # integrada). Solo el chequeo por nombre podía rechazar un CUI correcto.
+            cui_exacto = bool(codigo) and codigo in {
+                re.sub(r"\D", "", str(o.get("codUniqInv") or "")),
+                re.sub(r"\D", "", str(o.get("codSnip") or "")),
+            }
+            nombre_ok = (toks and n_hit >= max(1, (len(toks) + 1) // 2)) or depmatch
+            if cui_exacto or nombre_ok:
+                via = "CUI_TEXTO" if nombre_ok else "PROBABLE"
+                decision = ("código CUI verificado contra la obra" if nombre_ok else
+                            "CUI exacto hallado en InfoObras; el nombre de la obra difiere — verificar")
+                return {"estado": "resuelto", "cui": cui_out, "via": via,
+                        "decision": decision, "candidatos": [], "obra": obra}
             return {"estado": "revision", "cui": None, "via": "CUI_TEXTO",
                     "decision": "el código CUI del certificado no coincide con la obra — confirmar",
                     "candidatos": [{"cui": cui_out, "nombre_obra": (o.get("nombrObra") or "")[:90],

@@ -85,3 +85,34 @@ def test_resolver_determinista_mismo_cui_varias_obras():
         assert r["cui"] == "2000003"
         obra_ids.add(r["obra"]["obra_id"])
     assert obra_ids == {70}  # menor obra_id como representante, en ambos órdenes
+
+
+# ── CUI exacto es autoritativo aunque el nombre difiera ──────────────────────
+
+class _FakeConCodigo:
+    """Devuelve la obra al buscar POR CÓDIGO (ejercita el PASO 0 / CUI)."""
+
+    def __init__(self, obras):
+        self.obras = obras
+
+    def por_codigo(self, codigo):
+        return list(self.obras)
+
+    def buscar(self, nombre):
+        return []
+
+
+def test_resolver_cui_exacto_resuelve_aunque_nombre_difiera():
+    # Regresión (caso Pichanaki/Fortaleza): el certificado cita un COMPONENTE
+    # ("C.S. Fortaleza") dentro de la red integrada; la obra en InfoObras tiene
+    # otro nombre, pero el CUI coincide EXACTO → debe RESOLVER (CUI autoritativo),
+    # no quedar en revisión por el chequeo de tokens del nombre.
+    exp = {"cui": "2466824", "fecha_inicial": "2025-05-15", "fecha_final": "2025-09-01",
+           "proyecto": "SUPERVISIÓN DE LA CONSTRUCCIÓN DEL NUEVO CENTRO DE SALUD FORTALEZA"}
+    obra = _obra("2466824", 517400,
+                 "MEJORAMIENTO Y AMPLIACION DE LOS SERVICIOS DE SALUD DEL PRIMER NIVEL "
+                 "DE ATENCION DE LA RED INTEGRADA DE SALUD ATE VITARTE", depto="LIMA")
+    r = resolver(exp, _FakeConCodigo([obra]))
+    assert r["estado"] == "resuelto", r          # antes caía en 'revision'
+    assert r["cui"] == "2466824"
+    assert r["obra"]["obra_id"] == 517400
