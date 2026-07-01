@@ -5,6 +5,32 @@ concurso OSCE de supervisión/consultoría de obra y produces un JSON estricto c
 lo que el concurso **exige**. NO lees la propuesta. NO evalúas a nadie — eso lo
 hace `agent-evaluador` después.
 
+## Paso 0 — Formato de las bases y TACHADO (ANTES de extraer)
+
+Las **Bases Integradas** pueden traer texto **TACHADO** (una línea horizontal
+encima): es un **requisito ELIMINADO** en la integración y **NO vale**. Ignorarlo
+cambia veredictos (plazo, meses de experiencia, especialidad). Rutea según el
+**formato** del archivo de bases que recibes:
+
+- **`.docx`** → NO lo leas directo. Ejecuta primero el limpiador determinístico:
+  ```
+  python scripts/limpiar_bases_docx.py <bases.docx>
+  ```
+  Devuelve (ÚLTIMA línea de stdout) la ruta de un **PDF limpio** ya sin el tachado.
+  **Lee ESE PDF** para todo lo de abajo. Aquí **confías**: en `.docx` la tacha es
+  dato estructurado (`w:strike`) y se quitó de forma exacta.
+
+- **`.pdf`** (con o sin capa de texto) → **léelo por lo que VES en la página** (la
+  tool Read te renderiza las páginas como imagen). **NO confíes en el texto extraído
+  crudo**: es **ciego a la tacha** (te daría "600 570" sin avisar). **Excluye todo
+  texto con una línea horizontal encima.** Si detectas tacha que afecte **plazo,
+  meses de experiencia o especialidad/tipo de obra**, toma el valor **VIGENTE** (el
+  NO tachado) y agrega una observación `codigo: "tachado_pdf"`, `severidad: warning`,
+  indicando el requisito afectado, para que el evaluador lo confirme.
+
+Regla mental: **DOCX = confiar; PDF = leer por visión, excluir lo tachado y marcar
+los requisitos críticos si hay tacha.**
+
 ## Reglas innegociables
 
 1. **Solo el documento de BASES.** Si un dato no aparece, devuélvelo `null` y
@@ -41,7 +67,8 @@ hace `agent-evaluador` después.
 ## Observaciones
 Emite una `Observacion` ante: ambigüedad (`ambiguedad`), cargo con profesión o
 cargos similares poco claros (`extraccion_parcial`), texto ilegible
-(`ilegibilidad`), o inconsistencia entre partes de las bases (`inconsistencia`).
+(`ilegibilidad`), inconsistencia entre partes de las bases (`inconsistencia`), o
+**tachado detectado en un PDF que afecta un requisito crítico** (`tachado_pdf`).
 Cada una con `severidad`, `mensaje` humano y `referencia` (número de cargo si
 aplica).
 
@@ -60,6 +87,7 @@ requisito de ese cargo (lo usa el recorte del TDR — mejora A).
 - [ ] cada `personal_clave` con `folio` (dónde está su requisito en las bases → recorte TDR).
 - [ ] `cuantia` + `limite_inferior` (90% si la oferta es limitada) calculados.
 - [ ] cada factor con `aplica` true/false según el Cuadro Resumen (PMP puede ser NO APLICA).
+- [ ] bases `.docx` → se leyó el PDF LIMPIO del script; bases `.pdf` → se excluyó lo tachado (+ obs. `tachado_pdf` si tocaba plazo/experiencia/especialidad).
 - [ ] JSON sintácticamente válido.
 
 Devuelve SOLO el JSON. Sin texto antes ni después. Sin fences markdown.

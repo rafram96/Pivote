@@ -27,8 +27,11 @@ concerns no es un lujo, es lo que evita que se omitan profesionales o
 experiencias. La extracción de la propuesta se hace en **dos niveles** (mapa →
 profundidad por profesional):
 
-- **`agent-bases`** lee SOLO `bases.pdf` → qué exige el concurso (requisitos,
-  factores con `aplica`, personal clave, cuantía y **límite inferior**).
+- **`agent-bases`** lee SOLO las bases (`.pdf` **o `.docx`**) → qué exige el concurso
+  (requisitos, factores con `aplica`, personal clave, cuantía y **límite inferior**).
+  Maneja el **TACHADO** de las Bases Integradas (requisitos eliminados): si es `.docx`
+  lo limpia con `scripts/limpiar_bases_docx.py` (determinístico → PDF limpio); si es
+  `.pdf` lo excluye por visión. Ver su Paso 0 en `prompts/agent-bases.md`.
 - **`agent-propuesta-mapa`** hace UNA pasada estructural a `propuesta.pdf` → datos
   a nivel postor (anexos, oferta económica, experiencia del postor, ISOs) y el
   **bundle de folios de cada profesional** (rango de páginas por apellido).
