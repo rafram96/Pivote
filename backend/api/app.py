@@ -58,6 +58,43 @@ ETAPA_FUENTE = {
 }
 
 
+def _int_env(nombre: str, defecto: int) -> int:
+    """int de una var de entorno con fallback silencioso — un valor basura en el
+    .env NO tumba el arranque ni la tarea, cae al defecto."""
+    try:
+        v = int((os.getenv(nombre) or "").strip() or defecto)
+    except ValueError:
+        return defecto
+    return v if v > 0 else defecto
+
+
+# Límite de análisis concurrentes: cada uno corre el pipeline + baja ~1 GB de
+# InfoObras. Sin tope, N uploads simultáneos agotan hilos/red/disco (DoS trivial).
+_MAX_ANALISIS = _int_env("PIVOTE_MAX_ANALISIS_CONCURRENTES", 2)
+_sem_analisis = threading.BoundedSemaphore(_MAX_ANALISIS)
+
+# Topes de subida (evitan OOM/disco por uploads gigantes cargados en memoria).
+_MAX_ESPEJO = _int_env("PIVOTE_MAX_MB_ESPEJO", 30) * (1 << 20)
+_MAX_EXCEL = _int_env("PIVOTE_MAX_MB_EXCEL", 60) * (1 << 20)
+_MAX_CERTS = _int_env("PIVOTE_MAX_MB_CERTS", 400) * (1 << 20)
+_MAX_CERTS_DESCOMP = 800 * (1 << 20)     # tope del ZIP de certs YA descomprimido
+_MAX_CERTS_ENTRADAS = 5000               # tope de archivos en el ZIP
+
+
+async def _leer_limitado(f: UploadFile, tope: int, etiqueta: str) -> bytes:
+    """Lee un UploadFile por chunks y aborta con 413 si excede `tope` bytes — sin
+    cargar de golpe un archivo gigante en memoria."""
+    buf = bytearray()
+    while True:
+        chunk = await f.read(1 << 20)
+        if not chunk:
+            break
+        buf += chunk
+        if len(buf) > tope:
+            raise HTTPException(413, f"{etiqueta} excede el límite de {tope // (1 << 20)} MB")
+    return bytes(buf)
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _job_o_404(job_id: str) -> pipeline.Job:
@@ -118,24 +155,29 @@ def _asegurar_descargas(job_id: str) -> None:
         enr = repo.cargar_enriquecimiento(job_id) or {}
         job.descargas_estado = "en_progreso"
         repo.guardar(job)
-        _raw = os.getenv("PIVOTE_MAX_DESCARGAS")
-        maxd = None if not _raw or not _raw.strip() else int(_raw)
+        _raw = (os.getenv("PIVOTE_MAX_DESCARGAS") or "").strip()
+        try:
+            maxd = int(_raw) if _raw else None      # vacío = baja TODO; N = tope (0 = ninguno)
+        except ValueError:
+            maxd = None                              # basura en el .env → baja todo (seguro)
         t0 = time.time()
         try:
             from orquestador.etapas_reales import descargar_documentos_job
             stats = descargar_documentos_job(espejo, enr, job_id, DATA_DIR, max_descargas=maxd)
+            # arma el ZIP COMPLETO recién ahora que están TODOS los documentos
+            # (atómico → reemplaza cualquier zip parcial previo).
+            ruta_zip = DATA_DIR / f"{job_id}.infoobras.zip"
+            with _zip_build_lock:
+                construir_zip_infoobras(espejo, _mapa_descargas(job_id), ruta_zip,
+                                        enriquecimiento=enr)
+            # re-leer JUSTO antes de guardar: una resolución de revisión concurrente
+            # pudo tocar el job durante la descarga/armado del ZIP → no pisarla.
             job = repo.cargar(job_id) or job
             io = job.etapa(pipeline.Etapa.INFOOBRAS)
             if io is not None:                          # backfill de la métrica
                 io.metrica.descargas = stats["descargas"]
                 io.metrica.bytes_descargados = stats["bytes"]
                 io.metrica.reintentos = stats["reintentos"]
-            # arma el ZIP COMPLETO recién ahora que están TODOS los documentos
-            # (atómico → reemplaza cualquier zip parcial previo). Luego marca "listas".
-            ruta_zip = DATA_DIR / f"{job_id}.infoobras.zip"
-            with _zip_build_lock:
-                construir_zip_infoobras(espejo, _mapa_descargas(job_id), ruta_zip,
-                                        enriquecimiento=enr)
             job.zip_infoobras = f"/api/pivote/jobs/{job_id}/zip"
             job.descargas_estado = "listas"
             repo.guardar(job)
@@ -151,30 +193,40 @@ def _asegurar_descargas(job_id: str) -> None:
 
 def _correr_y_descargar(job_id: str) -> None:
     """Background task: corre el pipeline (veredicto/Excel listos en ~1 min) y,
-    RECIÉN entonces, baja los documentos InfoObras (lo lento, que solo nutre el ZIP)."""
-    job = motor.correr(job_id)
-    if job is not None and job.estado == pipeline.JobEstado.ERROR:
-        return  # el pipeline falló: no hay enriquecimiento útil que descargar
-    try:
-        _asegurar_descargas(job_id)
-    except Exception:
-        logger.exception("descarga diferida del job %s falló", job_id)
+    RECIÉN entonces, baja los documentos InfoObras (lo lento, que solo nutre el ZIP).
+    Serializado por `_sem_analisis` para no lanzar N pipelines + N descargas de GBs
+    a la vez (protege hilos/red/disco del server ante uploads simultáneos)."""
+    with _sem_analisis:
+        job = motor.correr(job_id)
+        if job is not None and job.estado == pipeline.JobEstado.ERROR:
+            return  # el pipeline falló: no hay enriquecimiento útil que descargar
+        try:
+            _asegurar_descargas(job_id)
+        except Exception:
+            logger.exception("descarga diferida del job %s falló", job_id)
 
 
 @app.on_event("startup")
-def _reanudar_descargas_pendientes() -> None:
-    """Si el backend se reinició con descargas a medias, las RETOMA al arrancar —
-    evita que un job quede en 'en_progreso' para siempre y el ZIP nunca se complete
-    (lo que obligaba a servir un ZIP parcial)."""
+def _reanudar_pendientes() -> None:
+    """Si el backend se reinició con trabajo a medias, lo RETOMA al arrancar: un
+    pipeline cortado (estado `en_proceso`) y/o descargas a medias (`en_progreso`).
+    Sin esto, un job interrumpido quedaba colgado para siempre sin recuperación."""
     for f in DATA_DIR.glob("*.job.json"):
         try:
             j = json.loads(f.read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             continue
+        jid = j.get("job_id") or f.name[: -len(".job.json")]
+        # pipeline cortado a medias (crash/reinicio) → retomar. `motor.correr` es
+        # reanudable (salta etapas ya hechas). Si no, el job queda en 'en_proceso'
+        # para siempre, sin recuperación ni desde la UI.
+        if j.get("estado") == pipeline.JobEstado.EN_PROCESO.value:
+            threading.Thread(target=_correr_y_descargar, args=(jid,), daemon=True).start()
+            logger.info("reanudando pipeline interrumpido del job %s tras reinicio", jid)
+            continue
         # Solo "en_progreso" = descarga genuinamente interrumpida. "pendiente" puede
         # ser un job viejo (el campo se defaulteó) → NO lo re-disparamos.
         if j.get("descargas_estado") == "en_progreso":
-            jid = j.get("job_id") or f.name[: -len(".job.json")]
             threading.Thread(target=_asegurar_descargas, args=(jid,), daemon=True).start()
             logger.info("reanudando descargas pendientes del job %s tras reinicio", jid)
 
@@ -316,10 +368,17 @@ def _guardar_certificados(job_id: str, contenido: bytes) -> int:
     n = 0
     try:
         with zipfile.ZipFile(io.BytesIO(contenido)) as z:
-            for nombre in z.namelist():
-                base = os.path.basename(nombre)
+            infos = z.infolist()
+            if len(infos) > _MAX_CERTS_ENTRADAS:
+                raise HTTPException(413, "el ZIP de certificados tiene demasiados archivos")
+            total = 0
+            for info in infos:
+                total += info.file_size            # tamaño declarado (anti zip-bomb)
+                if total > _MAX_CERTS_DESCOMP:
+                    raise HTTPException(413, "el ZIP de certificados descomprimido excede el límite")
+                base = os.path.basename(info.filename)
                 if base.lower().endswith(".pdf") and base.upper().startswith("P"):
-                    (cdir / base).write_bytes(z.read(nombre))
+                    (cdir / base).write_bytes(z.read(info.filename))
                     n += 1
     except zipfile.BadZipFile:
         pass
@@ -338,7 +397,7 @@ async def analizar(
     if repo.cargar_concurso(concurso_id) is None:
         raise HTTPException(404, "concurso no existe")
     try:
-        datos = json.loads((await espejo.read()).decode("utf-8"))
+        datos = json.loads((await _leer_limitado(espejo, _MAX_ESPEJO, "el archivo de datos")).decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise HTTPException(422, f"el archivo de datos no es JSON válido: {e}")
     try:
@@ -356,10 +415,12 @@ async def analizar(
     job.origen = origen if origen in ("mcp", "dropzone") else "dropzone"
     repo.guardar(job)
     # guardar el Excel de Claude tal cual llegó (referencia/auditoría)
-    (DATA_DIR / f"{job.job_id}.claude.xlsx").write_bytes(await excel.read())
+    (DATA_DIR / f"{job.job_id}.claude.xlsx").write_bytes(
+        await _leer_limitado(excel, _MAX_EXCEL, "el Excel"))
     # certificados de las experiencias (ZIP de PDFs que recortó la skill) → {job}.certs/
     if certificados is not None:
-        _guardar_certificados(job.job_id, await certificados.read())
+        _guardar_certificados(job.job_id,
+                              await _leer_limitado(certificados, _MAX_CERTS, "los certificados"))
 
     tareas.add_task(_correr_y_descargar, job.job_id)
     return {"job_id": job.job_id}
@@ -377,14 +438,17 @@ def resolver_revision(job_id: str, tareas: BackgroundTasks, body: dict):
         raise HTTPException(400, "n_prof y n_exp son obligatorios")
     if not body.get("cui") and body.get("accion") != "no_existe":
         raise HTTPException(400, "se requiere cui o accion='no_existe'")
-    try:
-        job = motor.resolver_revision(job_id, n_prof, n_exp, body)
-    except ValueError as e:
-        raise HTTPException(404, str(e))
-    # La obra del item pudo cambiar al re-resolver → invalida SUS PDFs (carpeta +
-    # marca .ok) para re-bajarlos frescos; los demás se saltan por su .ok. Bajo el
-    # lock del job para NO borrar mientras una descarga escribe esa carpeta.
+    # TODO el read-modify-write del job va bajo el lock del job, para que NO se
+    # entrelace con `_asegurar_descargas` (que toma el mismo lock): antes,
+    # `motor.resolver_revision` guardaba FUERA del lock y una descarga en background
+    # podía pisar los `items_revision` recién resueltos (última escritura gana).
     with _lock_descargas(job_id):
+        try:
+            job = motor.resolver_revision(job_id, n_prof, n_exp, body)
+        except ValueError as e:
+            raise HTTPException(404, str(e))
+        # La obra del item pudo cambiar al re-resolver → invalida SUS PDFs (carpeta
+        # + marca .ok) para re-bajarlos frescos; los demás se saltan por su .ok.
         base = DATA_DIR / f"{job_id}.descargas"
         shutil.rmtree(base / f"P{n_prof}_E{n_exp}", ignore_errors=True)
         (base / f"P{n_prof}_E{n_exp}.ok").unlink(missing_ok=True)

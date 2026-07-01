@@ -11,11 +11,30 @@ de un análisis real pesa ~100 KB).
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import uuid
 from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
 from schemas import pipeline
+
+
+def _escribir_atomico(ruta: Path, texto: str) -> None:
+    """Escribe `texto` de forma ATÓMICA: a un tmp en el mismo directorio y luego
+    `os.replace`. Evita que un lector concurrente (otro request, la etapa de
+    descargas) lea un archivo a medio escribir (JSON truncado) y que dos escritores
+    dejen contenido mezclado. El tmp lleva un sufijo único (uuid) para no colisionar
+    entre hilos/procesos que guarden el mismo archivo a la vez."""
+    tmp = ruta.with_name(f"{ruta.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_text(texto, encoding="utf-8")
+        os.replace(tmp, ruta)          # atómico en el mismo filesystem
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)   # limpia el tmp si os.replace falló
+        except OSError:
+            pass
 
 
 @runtime_checkable
@@ -97,7 +116,7 @@ class RepositorioArchivos:
         return self.dir / f"{job_id}.{tipo}.json"
 
     def guardar(self, job: pipeline.Job) -> None:
-        self._ruta(job.job_id, "job").write_text(job.model_dump_json(indent=2), encoding="utf-8")
+        _escribir_atomico(self._ruta(job.job_id, "job"), job.model_dump_json(indent=2))
 
     def cargar(self, job_id: str) -> Optional[pipeline.Job]:
         ruta = self._ruta(job_id, "job")
@@ -112,16 +131,16 @@ class RepositorioArchivos:
         ]
 
     def guardar_espejo(self, job_id: str, espejo: dict) -> None:
-        self._ruta(job_id, "espejo").write_text(
-            json.dumps(espejo, ensure_ascii=False, indent=1), encoding="utf-8")
+        _escribir_atomico(self._ruta(job_id, "espejo"),
+                          json.dumps(espejo, ensure_ascii=False, indent=1))
 
     def cargar_espejo(self, job_id: str) -> Optional[dict]:
         ruta = self._ruta(job_id, "espejo")
         return json.loads(ruta.read_text(encoding="utf-8")) if ruta.exists() else None
 
     def guardar_concurso(self, concurso: pipeline.Concurso) -> None:
-        self._ruta(concurso.concurso_id, "concurso").write_text(
-            concurso.model_dump_json(indent=2), encoding="utf-8")
+        _escribir_atomico(self._ruta(concurso.concurso_id, "concurso"),
+                          concurso.model_dump_json(indent=2))
 
     def cargar_concurso(self, concurso_id: str) -> Optional[pipeline.Concurso]:
         ruta = self._ruta(concurso_id, "concurso")
@@ -136,8 +155,8 @@ class RepositorioArchivos:
         ]
 
     def guardar_enriquecimiento(self, job_id: str, datos: dict) -> None:
-        self._ruta(job_id, "enriquecimiento").write_text(
-            json.dumps(datos, ensure_ascii=False, indent=1), encoding="utf-8")
+        _escribir_atomico(self._ruta(job_id, "enriquecimiento"),
+                          json.dumps(datos, ensure_ascii=False, indent=1))
 
     def cargar_enriquecimiento(self, job_id: str) -> dict:
         ruta = self._ruta(job_id, "enriquecimiento")

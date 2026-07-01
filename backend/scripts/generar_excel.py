@@ -28,6 +28,31 @@ from pathlib import Path
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
+# ── Saneo defensivo de celdas (GLOBAL al proceso) ────────────────────────────
+# openpyxl lanza IllegalCharacterError al asignar un string con caracteres de
+# control (\x00-\x08, \x0b-\x0c, \x0e-\x1f) — comunes en texto de OCR/PDF — y
+# revienta el Excel ENTERO. También revienta con list/dict en una celda ("Cannot
+# convert [...] to Excel"), y el espejo permite `requisitos`/`total` como
+# record(any). Parcheamos `_bind_value` para coercer list/dict→string y quitar los
+# chars de control al vuelo. Es process-global (cubre también excel_final, que
+# importa este módulo) e idempotente. Cierra los dos vectores de crash de Excel.
+from openpyxl.cell import cell as _oc_cell  # noqa: E402
+
+if not getattr(_oc_cell.Cell, "_saneo_controles", False):
+    _oc_orig_bind = _oc_cell.Cell._bind_value
+
+    def _oc_bind(self, value):
+        if isinstance(value, (list, tuple)):
+            value = "; ".join(str(x) for x in value)
+        elif isinstance(value, dict):
+            value = "; ".join(f"{k}: {v}" for k, v in value.items())
+        if isinstance(value, str):
+            value = _oc_cell.ILLEGAL_CHARACTERS_RE.sub("", value)
+        return _oc_orig_bind(self, value)
+
+    _oc_cell.Cell._bind_value = _oc_bind
+    _oc_cell.Cell._saneo_controles = True
+
 NCOLS = 22  # A..V
 
 # ── Estilos ──────────────────────────────────────────────────────────────────
