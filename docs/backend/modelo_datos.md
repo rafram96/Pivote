@@ -155,10 +155,25 @@ grandes; la BD solo guarda metadatos y referencias.
 
 ---
 
-## Decisión de implementación (pendiente — listo para ejecutar con server)
-> Añadido 2026-06-27. La implementación **no se codeó aún**: requiere un Postgres real
-> para probar de verdad (ver "Cómo probarlo"), y el server está apagado. Esta sección
-> deja la decisión y el mapeo cerrados para cablear sin re-pensar.
+## ✅ DECISIÓN TOMADA (2026-07-01): esquema HÍBRIDO — ver `backend/db/schema.sql`
+> El esquema quedó **diseñado, escrito y VALIDADO** contra un Postgres 16 real
+> (Docker efímero con un job real: la vista devolvió las 19 experiencias con
+> cui/via/fechas correctos). Es un **híbrido** que costó como la Opción 1 y entrega
+> el valor de la 2:
+>
+> - **4 tablas JSONB** espejo del `Repositorio` (`concursos`, `jobs`, `espejos`,
+>   `enriquecimientos`) → el `RepositorioPostgres` es mapeo 1:1 de blobs (~0.5 d).
+> - **Columnas generadas** (estado, postor, nomenclatura…) + índices para el panel.
+> - **La hoja "Base de Datos" es una VISTA** (`base_datos`) que explota el JSONB con
+>   LATERAL — buscable/exportable por SQL, **sin ETL** y siempre consistente. También
+>   la vista `analisis` (cabecera del histórico con `pendientes_revision`).
+>
+> Lo que queda para cablear en el server: `RepositorioPostgres` (blobs 1:1, misma
+> interfaz), `psycopg2-binary`, descomentar `db` en el compose, backfill de
+> `datos_pivote/`. Las tablas `analisis`/`base_datos` FÍSICAS de abajo ya no se
+> crean — quedaron como VISTAS (misma forma, cero mantenimiento).
+
+### Análisis original de las dos opciones (histórico)
 
 ### El desajuste a resolver
 La interfaz real `Repositorio` ([`backend/orquestador/repositorio.py`](../../backend/orquestador/repositorio.py))
