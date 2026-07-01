@@ -102,6 +102,40 @@ class _FakeConCodigo:
         return []
 
 
+class _FakeConRango:
+    """buscar() devuelve dos obras HOMÓNIMAS (mismo nombre/depto → mismo score);
+    rango() da valorizaciones distintas: la vieja NO solapa el certificado, la
+    correcta SÍ. Ejercita el re-rank por solape del PASO 2."""
+    def __init__(self, obras, rangos):
+        self.obras = obras
+        self.rangos = rangos
+
+    def por_codigo(self, codigo):
+        return []
+
+    def buscar(self, nombre):
+        return list(self.obras)
+
+    def rango(self, obra_id):
+        return self.rangos.get(obra_id, (None, None))
+
+
+def test_resolver_prefiere_la_obra_que_solapa_valorizaciones():
+    # Regresión (caso obra 4653): dos obras con nombre idéntico; sin el re-rank gana
+    # la de menor CUI (desempate) aunque sus valorizaciones sean VIEJAS y no cubran
+    # el certificado. Con el re-rank, gana la que SOLAPA el periodo del cert.
+    from datetime import date
+    exp = {"proyecto": "MEJORAMIENTO DEL PUESTO DE SALUD DE POMACOCHAS",
+           "fecha_inicial": "2022-06-01", "fecha_final": "2023-01-31"}
+    vieja = _obra("1111111", 100, "MEJORAMIENTO DEL PUESTO DE SALUD DE POMACOCHAS")
+    nueva = _obra("2222222", 200, "MEJORAMIENTO DEL PUESTO DE SALUD DE POMACOCHAS")
+    rangos = {100: (date(2015, 1, 1), date(2016, 4, 1)),     # vieja: NO solapa
+              200: (date(2022, 1, 1), date(2023, 3, 1))}     # nueva: SÍ solapa
+    r = resolver(exp, _FakeConRango([vieja, nueva], rangos))
+    assert r["estado"] == "resuelto"
+    assert r["cui"] == "2222222", r     # la que solapa, pese a tener CUI mayor
+
+
 def test_resolver_cui_exacto_resuelve_aunque_nombre_difiera():
     # Regresión (caso Pichanaki/Fortaleza): el certificado cita un COMPONENTE
     # ("C.S. Fortaleza") dentro de la red integrada; la obra en InfoObras tiene
