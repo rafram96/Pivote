@@ -117,6 +117,26 @@ def _espejo_o_404(job_id: str) -> dict:
 # seguridad, también al pedir el /zip. Serializado por job para no duplicar trabajo.
 logger = logging.getLogger("pivote.api")
 _descargas_guard = threading.Lock()
+
+
+class _FiltroPolling(logging.Filter):
+    """Silencia el ruido del access-log de uvicorn: el panel hace polling (GET
+    /jobs/{id}, /salud, /concursos cada ~1s) y ensuciaba la consola con cientos de
+    'GET ... 200 OK' que no dicen nada. Deja pasar TODO lo demás (POST/DELETE, la
+    creación de jobs, y cualquier 4xx/5xx — los errores sí importan)."""
+
+    _RUIDO = ("/api/pivote/jobs/", "/api/pivote/salud", "/api/pivote/concursos")
+
+    def filter(self, record: logging.LogRecord) -> bool:  # True = se muestra
+        msg = record.getMessage()
+        if '"GET ' not in msg:
+            return True                       # POST/DELETE/PATCH siempre se ven
+        if not any(p in msg for p in self._RUIDO):
+            return True                       # otros GET (excel, zip…) se ven
+        return not (" 200 " in msg or " 304 " in msg)   # ocultar solo el poll OK
+
+
+logging.getLogger("uvicorn.access").addFilter(_FiltroPolling())
 _descargas_locks: dict[str, threading.Lock] = {}
 
 
@@ -198,9 +218,13 @@ def _correr_y_descargar(job_id: str) -> None:
     a la vez (protege hilos/red/disco del server ante uploads simultáneos)."""
     with _sem_analisis:
         job = motor.correr(job_id)
+        if job is not None:
+            logger.info("PIPELINE job %s → %s · %d en revisión", job_id,
+                        getattr(job.estado, "value", job.estado), len(job.items_revision))
         if job is not None and job.estado == pipeline.JobEstado.ERROR:
             return  # el pipeline falló: no hay enriquecimiento útil que descargar
         try:
+            logger.info("DESCARGAS job %s: bajando documentos de InfoObras…", job_id)
             _asegurar_descargas(job_id)
         except Exception:
             logger.exception("descarga diferida del job %s falló", job_id)
