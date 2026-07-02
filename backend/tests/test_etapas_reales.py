@@ -297,11 +297,11 @@ def test_infoobras_segunda_pasada_recupera_obra_transitoria(tmp_path):
     assert len(obs) == 1 and "por debajo del mínimo" in obs[0].mensaje
 
 
-def test_obra_fuera_de_alcance_surge_a_revision(tmp_path):
-    """Requisito del cliente: NADA se descarta en silencio. Una obra fuera del
-    alcance automático (no salud/educación) NO se marca NA y se olvida — surge en
-    "Por confirmar" para que el humano pegue el CUI (si la obra está en InfoObras)
-    o la descarte. El via queda en NA (sin obra resuelta) pero el ítem aparece."""
+def test_obra_sin_match_surge_a_revision(tmp_path):
+    """Requisito del cliente: NADA se descarta en silencio. Ya NO hay 'gate de alcance'
+    (se resuelve cualquier rubro/tipo). Una experiencia que no resuelve —sin CUI y sin
+    candidato fiable por nombre— surge igual en "Por confirmar" para que el humano
+    pegue el CUI o la descarte; no se marca y se olvida."""
     espejo = {
         "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
         "postor": {},
@@ -317,8 +317,6 @@ def test_obra_fuera_de_alcance_surge_a_revision(tmp_path):
     motor, repo = hacer_motor(tmp_path)
     job = motor.correr(motor.crear_job(espejo).job_id)
     assert job.estado == JobEstado.REQUIERE_REVISION  # surge para resolución humana
-    enr = repo.cargar_enriquecimiento(job.job_id)
-    assert enr["1:1"]["via"] == "NA"                   # aún sin obra resuelta
     item = next(it for it in job.items_revision if it.n_prof == 1 and it.n_exp == 1)
     assert not item.resuelto                           # esperando decisión del humano
 
