@@ -105,11 +105,33 @@ _EDUCACION = re.compile(
     r"centro educativo|\bc\.?\s?e\.?\s*n[°º]|pedag[óo]gic)", re.I)
 
 
+# Consultorías/expedientes: ESTUDIOS sin obra física → InfoObras registra OBRAS
+# (con valorizaciones), no estudios. Se detectan para mandarlos a revisión manual
+# con un motivo CLARO (en vez de fallar como "sin candidato"). Cuidado de NO atrapar
+# obras reales: solo dispara con vocabulario inequívoco de estudio.
+_CONSULTORIA = re.compile(
+    r"(expediente\s+t[eé]cnico|expediente\s+de\s+saldo|"
+    r"(elaboraci[oó]n|reformulaci[oó]n|actualizaci[oó]n)\s+(del?\s+)?expediente|"
+    r"\bconsultor[ií]a\b|ficha\s+t[eé]cnica|"
+    r"estudio\s+(definitivo|de\s+pre\s?inversi[oó]n|de\s+factibilidad|b[aá]sico|de\s+ingenier[ií]a)|"
+    r"supervisi[oó]n\s+del?\s+(estudio|expediente))", re.I)
+
+
+def _es_consultoria(proyecto: str) -> bool:
+    """True = ESTUDIO (expediente técnico, consultoría, estudio definitivo…), no una
+    obra física → InfoObras no lo registra con valorizaciones."""
+    return bool(_CONSULTORIA.search(expandir_abrev(proyecto or "")))
+
+
 def es_aplicable(proyecto: str) -> bool:
-    """False = obra fuera del alcance (ni salud ni educación): no está en
-    InfoObras, no se cruza. Salud + educación SÍ están en el portal."""
-    txt = expandir_abrev(proyecto or "")
-    return bool(_SALUD.search(txt) or _EDUCACION.search(txt))
+    """True = obra REAL de CUALQUIER rubro (se cruza con InfoObras). False = una
+    consultoría/expediente (estudio, sin obra física) → revisión manual.
+
+    Antes limitaba a salud/educación; ampliado a CUALQUIER rubro el 2026-07-02 (el
+    sistema debe evaluar obras de todo sector). Solo se excluyen los ESTUDIOS, que
+    InfoObras no registra con valorizaciones. Las regex `_SALUD`/`_EDUCACION` se
+    conservan: `_puntuar` y la extracción de establecimiento aún las usan."""
+    return not _es_consultoria(proyecto)
 
 
 _RE_EST = re.compile(
@@ -458,13 +480,14 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
                                     "departamento": o.get("nombrDepartamento"), "score": 50}],
                     "obra": None}
 
-    # Filtro de tipo de obra: SOLO para la búsqueda POR NOMBRE (sin CUI fiable).
-    # Evita que el matcher (afinado a salud/educación) agarre obras ajenas. Un CUI
-    # citado ya se intentó arriba, así que esto NO bloquea certificados con CUI.
+    # Consultorías/expedientes (ESTUDIOS) → revisión manual: InfoObras registra OBRAS
+    # físicas con valorizaciones, no estudios. El sistema cruza obras de CUALQUIER
+    # rubro; solo los estudios quedan fuera. Un CUI citado ya se intentó arriba, así
+    # que esto NO bloquea certificados con CUI.
     if not es_aplicable(proyecto):
-        return {"estado": "na", "cui": None, "via": "NA",
-                "decision": "fuera del alcance automático (no es salud ni educación) — "
-                            "pega el CUI si la obra está en InfoObras, o descártala",
+        return {"estado": "na", "cui": None, "via": "CONSULTORIA",
+                "decision": "experiencia de consultoría/expediente (estudio, no obra) — "
+                            "InfoObras no la registra; evaluar a mano o pegar el CUI si aplica",
                 "candidatos": [], "obra": None}
 
     # PASO 2 · por nombre + RUC + ubicación

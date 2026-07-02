@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import itertools
 
-from resolucion.cui import _puntuar, norm, resolver, ubicacion
+from resolucion.cui import _puntuar, es_aplicable, norm, resolver, ubicacion
 
 
 def test_ubicacion_no_confunde_ica_dentro_de_huancavelica():
@@ -150,3 +150,30 @@ def test_resolver_cui_exacto_resuelve_aunque_nombre_difiera():
     assert r["estado"] == "resuelto", r          # antes caía en 'revision'
     assert r["cui"] == "2466824"
     assert r["obra"]["obra_id"] == 517400
+
+
+# ── Alcance: CUALQUIER rubro de obra; consultorías/expedientes → revisión manual ──
+
+def test_es_aplicable_acepta_cualquier_rubro_de_obra():
+    # obras fuera de salud/educación ahora SÍ se cruzan (ampliado 2026-07-02)
+    assert es_aplicable("Mejoramiento de la carretera Lima - Canta")
+    assert es_aplicable("Instalación del sistema de agua potable de X")
+    assert es_aplicable("Mejoramiento de los servicios de salud del hospital Y")
+    assert es_aplicable("Construcción de la I.E. N° 044")
+
+
+def test_es_aplicable_excluye_consultorias_y_expedientes():
+    assert not es_aplicable("Elaboración del expediente técnico del proyecto X")
+    assert not es_aplicable("Consultoría para la elaboración de cuatro expedientes")
+    assert not es_aplicable("Supervisión del estudio definitivo del contrato")
+    assert not es_aplicable("Reformulación del expediente técnico de la obra Z")
+
+
+def test_resolver_consultoria_va_a_revision_con_motivo_claro():
+    # un ESTUDIO (sin obra física) → 'na' con motivo claro, no 'sin candidato'
+    exp = {"proyecto": "Elaboración del expediente técnico de mejoramiento vial",
+           "fecha_inicial": "2022-01-01"}
+    r = resolver(exp, _FakeConCodigo([]))
+    assert r["estado"] == "na"
+    assert r["via"] == "CONSULTORIA"
+    assert "expediente" in r["decision"].lower() or "consultor" in r["decision"].lower()
