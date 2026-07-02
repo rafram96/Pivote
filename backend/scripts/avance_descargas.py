@@ -44,26 +44,39 @@ def main() -> None:
     try:
         j = requests.get(f"{API}/api/pivote/jobs/{job}", timeout=8).json()
         estado = j.get("estado", "?")
-        rev = {(it["n_prof"], it["n_exp"]) for it in j.get("items_revision", []) if not it.get("resuelto")}
+        descargas_estado = j.get("descargas_estado", "?")
     except Exception:
-        estado, rev = "?", set()
+        estado, descargas_estado = "?", "?"
 
-    bajan = [x for x in todas if x not in rev]
+    enr = json.load(open(os.path.join(base, f"{job}.enriquecimiento.json"), encoding="utf-8"))
+    # La descarga se dispara para TODA experiencia que tuvo un obra_id resuelto EN
+    # ALGÚN MOMENTO — no solo las que terminan "no en revisión": una experiencia puede
+    # resolver el CUI (dispara la descarga) y RECIÉN DESPUÉS la etapa InfoObras la manda
+    # a revisión por falta de cobertura. Filtrar por el resultado final subestimaba el
+    # total (denominador falso) y el conteo de carpetas lo superaba.
+    bajan = [x for x in todas
+             if isinstance(enr.get(f"{x[0]}:{x[1]}"), dict) and enr[f"{x[0]}:{x[1]}"].get("obra")]
     faltan = [x for x in bajan if x not in carpetas]
 
-    print(f"job {job} · estado: {estado}")
-    print(f"experiencias: {len(bajan)} bajan · {len(rev)} en revisión (no bajan)")
+    print(f"job {job} · estado: {estado} · descargas: {descargas_estado}")
+    print(f"experiencias con obra resuelta (bajan): {len(bajan)} · {len(todas) - len(bajan)} no bajan (sin obra)")
     print(f"descargadas: {len(carpetas)}/{len(bajan)} · faltan por empezar: {len(faltan)} {sorted(faltan)}")
 
-    if estado == "en_proceso" and carpetas and faltan:
+    # "terminado" es descargas_estado, NO estado del job (el job pasa a
+    # requiere_revision/completado con las descargas AÚN en background).
+    if descargas_estado == "en_progreso" and carpetas and faltan:
         ini = min(carpetas.values())
         transcurrido = time.time() - ini
         prom = transcurrido / max(1, len(carpetas) - 1)  # la última carpeta está en curso
         eta = prom * (len(faltan) + 1)
         print(f"~{transcurrido/60:.0f} min descargando · ETA resto: "
               f"~{eta/60:.0f} min (aprox; las obras de hospital pesan 10-100x más que las chicas)")
-    elif estado != "en_proceso":
-        print("→ descargas terminadas (el job ya pasó de la etapa InfoObras)")
+    elif descargas_estado == "listas":
+        print("→ descargas terminadas (ZIP completo)")
+    elif descargas_estado == "error":
+        print("→ descargas terminaron con error — revisa los logs del backend")
+    else:
+        print(f"→ descargas: {descargas_estado}")
 
 
 if __name__ == "__main__":
