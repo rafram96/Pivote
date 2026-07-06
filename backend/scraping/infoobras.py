@@ -20,6 +20,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from html import unescape as _unescape
+from urllib.parse import parse_qs, unquote, urlsplit
 from typing import Callable, Optional
 
 import requests
@@ -228,6 +229,10 @@ class WorkInfo:
     adicionales_deductivos: list[AdicionalDeductivoInfo] = field(default_factory=list)
     controversias: list[ControversiaInfo] = field(default_factory=list)
     raw_busqueda: dict = field(default_factory=dict)
+    # Aprobación del EXPEDIENTE técnico (hito "Aprobación del proyecto" de la Línea de
+    # tiempo, página Mapa/Sumario). Solo se busca cuando la obra NO tiene valorizaciones
+    # (posible experiencia de expediente). {url, filename, nombre, extension, fecha} | None
+    aprobacion_expediente: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------
@@ -1081,6 +1086,82 @@ def elegir_obra_raw(
     return seleccionar_obra(obras, cert_inicio, cert_fin, rango_valorizaciones)
 
 
+# ── Aprobación del EXPEDIENTE técnico (página Mapa/Sumario) ───────────────────
+# El hito "Aprobación del proyecto" de la Línea de tiempo tiene un botón de descarga
+# cuyo filename empieza por 'expediente/'. Mismo mecanismo data-download-url →
+# /Mapa/DownloadFile que DatosEjecucion. Solo se consulta para obras SIN valorizaciones
+# (posible experiencia de expediente). OJO: validar en vivo que los <button
+# data-download-url> vengan en el HTML del servidor (no pintados por JS).
+_SUMARIO = BASE_WEB + "/Mapa/Sumario"
+_RE_DL_URL = re.compile(r'data-download-url="([^"]+)"')
+_RE_APROB_PROY = re.compile(r"Aprobaci[oó]n\s+del\s+proyecto", re.I)
+
+
+def _url_a_item(raw: str) -> Optional[dict]:
+    """data-download-url → {url, filename, nombre, extension, fecha}. Des-escapa
+    &amp;, decodifica %2F/%20/%C2%B0 (unquote) y parte el query."""
+    raw = (raw or "").replace("&amp;", "&")
+    qs = parse_qs(urlsplit(unquote(raw)).query)
+    filename = (qs.get("filename", [""])[0] or "").strip()
+    if not filename:
+        return None
+    base = filename.rsplit("/", 1)[-1]
+    nombre = (qs.get("name", [""])[0] or "").strip() or base
+    ext = ((qs.get("extension", [""])[0] or "").lstrip(".")
+           or (base.rsplit(".", 1)[-1] if "." in base else "") or "pdf")
+    url = raw if raw.lower().startswith("http") else BASE_WEB.rsplit("/InfobrasWeb", 1)[0] + raw
+    fecha = None
+    m = re.search(r"(20\d{2})(\d{2})(\d{2})\d*", filename)   # documentoYYYYMMDD… → fecha
+    if m and 1 <= int(m.group(2)) <= 12 and 1 <= int(m.group(3)) <= 31:
+        fecha = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    else:
+        m = re.search(r"\b(\d{2})/(\d{2})/(\d{4})\b", nombre)
+        if m:
+            fecha = f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+    return {"url": url, "filename": filename, "nombre": nombre, "extension": ext, "fecha": fecha}
+
+
+def parsear_aprobacion_expediente(html: str) -> Optional[dict]:
+    """Del HTML de Mapa/Sumario extrae el documento del hito 'Aprobación del proyecto':
+    {url, filename, nombre, extension, fecha} | None. Vía (a): el botón más cercano al
+    rótulo 'Aprobación del proyecto'. Vía (b) fallback: filename que empieza en
+    'expediente/' o nombre tipo resolución de aprobación."""
+    if not html:
+        return None
+    m = _RE_APROB_PROY.search(html)
+    if m:
+        ventana = html[max(0, m.start() - 4000): m.end() + 4000]
+        cands = sorted(_RE_DL_URL.findall(ventana),
+                       key=lambda u: 0 if "expediente" in u.lower() else 1)
+        for raw in cands:
+            it = _url_a_item(raw)
+            if it:
+                return it
+    mejor = None
+    for raw in _RE_DL_URL.findall(html):
+        it = _url_a_item(raw)
+        if not it:
+            continue
+        fn, nom = it["filename"].lower(), it["nombre"].lower()
+        if fn.startswith("expediente/") or fn.startswith("expediente\\"):
+            return it
+        if re.search(r"aprob|res(oluci[oó]n)?\.?\s*gerenc", nom):
+            mejor = mejor or it
+    return mejor
+
+
+def _fetch_aprobacion_expediente(session: requests.Session, obra_id) -> Optional[dict]:
+    """GET Mapa/Sumario?obraId= → parsea la 'Aprobación del proyecto'. Best-effort:
+    si el portal falla o no hay hito, devuelve None (la experiencia cae a revisión)."""
+    try:
+        r = session.get(_SUMARIO, params={"obraId": obra_id}, timeout=30)
+        r.raise_for_status()
+    except requests.RequestException as e:
+        logger.debug("InfoObras Sumario obra %s: %s", obra_id, corto(e))
+        return None
+    return parsear_aprobacion_expediente(r.text)
+
+
 def fetch_by_cui(
     cui: str,
     cert_inicio: Optional[date] = None,
@@ -1213,6 +1294,12 @@ def fetch_by_cui(
             len(adicionales_deductivos), len(controversias), len(suspension_periods),
         )
 
+        # Obra SIN valorizaciones → puede ser una experiencia de EXPEDIENTE técnico.
+        # Buscar el hito "Aprobación del proyecto" en Mapa/Sumario (best-effort; None si
+        # no hay o el portal falla). La decisión de ACEPTARLA la toma el orquestador y
+        # solo si la experiencia es de expediente (por nombre).
+        aprobacion_exp = _fetch_aprobacion_expediente(session, obra_id) if not avances else None
+
         return WorkInfo(
             cui=cui,
             obra_id=obra_id,
@@ -1246,6 +1333,7 @@ def fetch_by_cui(
             adicionales_deductivos=adicionales_deductivos,
             controversias=controversias,
             raw_busqueda=obra_raw,
+            aprobacion_expediente=aprobacion_exp,
         )
 
     except requests.RequestException as e:

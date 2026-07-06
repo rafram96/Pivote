@@ -640,6 +640,26 @@ def descargar_datos_cierre(
     return {"encontrados": len(items), "descargados": ok}
 
 
+def descargar_aprobacion_expediente(
+    aprob: dict, destino: Path, *,
+    session: Optional[requests.Session] = None, timeout: float = 60.0,
+    intentos: int = _DL_RETRIES,
+) -> bool:
+    """Descarga el documento de la 'Aprobación del proyecto' (experiencias de
+    EXPEDIENTE técnico sin valorizaciones) a `destino/`. `aprob` es el dict que
+    arma `parsear_aprobacion_expediente` ({url, filename, nombre, extension, fecha}),
+    con las mismas claves que espera `_descargar_a_carpeta`. Devuelve True si bajó."""
+    if not aprob or not aprob.get("filename"):
+        return False
+    sess = session or requests.Session()
+    sess.headers.setdefault(
+        "User-Agent",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+    )
+    carpeta = Path(destino) / "Aprobación del expediente"
+    return _descargar_a_carpeta(sess, aprob, carpeta, timeout=timeout, intentos=intentos)
+
+
 # ── Construcción del ZIP (árbol de 4 niveles) ────────────────────────────────
 
 _MAXLEN_RUTA = 64  # tope por componente (carpeta/archivo) → la ruta cabe en 260

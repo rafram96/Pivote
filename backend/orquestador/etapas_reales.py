@@ -281,6 +281,15 @@ class EtapaInfoObrasReal:
             from scraping.infoobras import periodos_inactividad
             k = _clave(np_, ne)
             enr = ctx.enriquecimiento.get(k) or {}
+            # ¿Experiencia de EXPEDIENTE técnico aceptada por su aprobación? Sin
+            # valorizaciones + nombre de expediente + el hito "Aprobación del proyecto"
+            # trajo el documento. Solo entonces cuenta por el periodo del certificado
+            # (no se le aplica el clamp fuera_de_ventana ni se manda a revisión).
+            from resolucion.cui import _es_experiencia_expediente
+            _avances = getattr(obra, "avances", []) or []
+            _aprob_exp = getattr(obra, "aprobacion_expediente", None)
+            es_exp_aprobado = (not _avances and _aprob_exp is not None
+                               and _es_experiencia_expediente(_e.get("proyecto") or ""))
             periodos = periodos_inactividad(getattr(obra, "avances", []) or [])
             enr["paralizaciones"] = [
                 {"inicio": p["inicio"].isoformat(), "fin": p["fin"].isoformat(),
@@ -290,10 +299,11 @@ class EtapaInfoObrasReal:
             # valorizaciones no cuenta como experiencia (sin valoriz que lo
             # respalde). Se inyecta como descuento para que reglas/ lo reste sin
             # tocar su firma. Disjunto de los huecos internos → sin doble conteo.
-            enr["paralizaciones"] += [
-                {"inicio": a.isoformat(), "fin": b.isoformat(), "tipo": "fuera_de_ventana"}
-                for a, b in _fuera_de_ventana(getattr(obra, "avances", []) or [], cert_ini, cert_fin)
-            ]
+            if not es_exp_aprobado:
+                enr["paralizaciones"] += [
+                    {"inicio": a.isoformat(), "fin": b.isoformat(), "tipo": "fuera_de_ventana"}
+                    for a, b in _fuera_de_ventana(getattr(obra, "avances", []) or [], cert_ini, cert_fin)
+                ]
             enr.pop("sin_verificar", None)  # se trajo OK: ya no es incierta
             enr["codigo_infoobras"] = getattr(obra, "codigo_infoobras", None)
             enr["obra_nombre"] = getattr(obra, "nombre", None)
@@ -325,6 +335,17 @@ class EtapaInfoObrasReal:
                  "fecha_fin": m.fecha_fin.isoformat() if m.fecha_fin else None}
                 for m in (getattr(obra, "modificaciones_plazo", []) or [])
             ]
+            if es_exp_aprobado:
+                enr["aprobacion_expediente"] = _aprob_exp   # {url,filename,nombre,extension,fecha}
+                _f = _aprob_exp.get("fecha")                # ISO "AAAA-MM-DD" | None
+                _fm = f"{_f[8:10]}/{_f[5:7]}/{_f[0:4]}" if _f and len(_f) == 10 else None
+                obs.append(pipeline.Observacion(
+                    codigo="RESPALDO", severidad=pipeline.Severidad.INFO,
+                    mensaje=f"experiencia de expediente técnico (sin valorizaciones) — "
+                            f"respaldada por la Aprobación del proyecto"
+                            f"{f' del {_fm}' if _fm else ''} registrada en InfoObras; "
+                            f"cuenta por el periodo del certificado",
+                    origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
             ctx.enriquecimiento[k] = enr
             cont["ok"] += 1
             if periodos:
@@ -346,7 +367,7 @@ class EtapaInfoObrasReal:
             # certificado? Si casi no solapan, el emparejamiento es dudoso (obra
             # equivocada o periodo en un hueco) → revisión humana.
             cob = _cobertura_cert(getattr(obra, "avances", []) or [], cert_ini, cert_fin)
-            if cob is not None and cob < _COBERTURA_MIN:
+            if not es_exp_aprobado and cob is not None and cob < _COBERTURA_MIN:
                 pct = round(cob * 100)
                 cod = getattr(obra, "codigo_infoobras", None)
                 motivo = _motivo_cobertura(getattr(obra, "avances", []) or [],
@@ -435,8 +456,8 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
     Devuelve {descargas, bytes, reintentos} medidos del folder + el scraper."""
     from entregables.zip_infoobras import (
         descargar_documentos_obra_por_hito, descargar_informes_control,
-        descargar_datos_cierre, reset_descargas_stats, descargas_stats,
-        resumen_descargas)
+        descargar_datos_cierre, descargar_aprobacion_expediente,
+        reset_descargas_stats, descargas_stats, resumen_descargas)
     from scraping.errores_red import corto
     base = Path(dir_descargas) / f"{job_id}.descargas"
     reset_descargas_stats()
@@ -474,6 +495,14 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                         descargar_datos_cierre(obra_id, destino)
                     except Exception as ex:  # noqa: BLE001
                         logger.debug("datos de cierre obra %s: %s", obra_id, corto(ex))
+                    # Experiencia de expediente aceptada por su aprobación → bajar
+                    # el documento del hito "Aprobación del proyecto" (Mapa/Sumario).
+                    _aprob = enr.get("aprobacion_expediente")
+                    if _aprob:
+                        try:
+                            descargar_aprobacion_expediente(_aprob, destino)
+                        except Exception as ex:  # noqa: BLE001
+                            logger.debug("aprobación expediente obra %s: %s", obra_id, corto(ex))
                 base.mkdir(parents=True, exist_ok=True)
                 ok.write_text("ok", encoding="utf-8")   # recién aquí: descarga COMPLETA
                 bajadas += 1

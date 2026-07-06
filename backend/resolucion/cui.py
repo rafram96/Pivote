@@ -132,6 +132,30 @@ def _sin_prefijo(proyecto: str) -> str:
     return re.sub(r"\s{2,}", " ", t).strip(" ;,–-.")
 
 
+# Experiencia de EXPEDIENTE técnico (o estudio/consultoría de proyecto): NO tiene
+# valorizaciones en InfoObras, su respaldo es el hito "Aprobación del proyecto".
+# Solo estas experiencias aceptan esa aprobación como sustento; una obra de
+# construcción sin valorizaciones sigue yendo a revisión (no es un expediente).
+_RE_EXPEDIENTE = re.compile(
+    r"expediente\s+t[eé]cnico"
+    r"|consultor[ií]a\s+para\s+la\s+elaboraci[oó]n"
+    r"|estudio\s+de\s+(?:pre\s?inversi[oó]n|factibilidad|ingenier[ií]a|perfil)"
+    r"|proyecto\s+definitivo"
+    r"|anteproyecto\b"
+    r"|elaboraci[oó]n\s+del\s+(?:expediente|proyecto|estudio)",
+    re.I)
+
+
+def _es_experiencia_expediente(proyecto: str) -> bool:
+    """True si el nombre de la experiencia es de expediente técnico / estudio /
+    consultoría de proyecto (no una obra ejecutada). Se apoya en el nombre crudo
+    y en el expandido de abreviaturas para no depender del OCR."""
+    if not proyecto:
+        return False
+    return bool(_RE_EXPEDIENTE.search(proyecto)
+                or _RE_EXPEDIENTE.search(expandir_abrev(proyecto)))
+
+
 def establecimiento(proyecto: str) -> str:
     t = _sin_prefijo(proyecto)
     m = _RE_EST.search(t)

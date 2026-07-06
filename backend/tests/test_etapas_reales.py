@@ -82,6 +82,7 @@ class ObraFake:
     nombre: str
     codigo_infoobras: str = "INF-001"
     avances: list = field(default_factory=list)
+    aprobacion_expediente: object = None
 
 
 def _meses(desde, hasta, paralizados=()):
@@ -319,6 +320,89 @@ def test_obra_sin_match_surge_a_revision(tmp_path):
     assert job.estado == JobEstado.REQUIERE_REVISION  # surge para resolución humana
     item = next(it for it in job.items_revision if it.n_prof == 1 and it.n_exp == 1)
     assert not item.resuelto                           # esperando decisión del humano
+
+
+def test_experiencia_de_expediente_se_acepta_por_su_aprobacion(tmp_path):
+    """Experiencia de EXPEDIENTE técnico: no tiene valorizaciones, su respaldo es el
+    hito 'Aprobación del proyecto'. Con el nombre de expediente + la aprobación traída
+    de InfoObras, NO va a revisión y cuenta por el periodo del certificado."""
+    espejo = {
+        "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
+        "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N",
+             "requisitos": {"tipo_experiencia": "mínimo 1 año"},
+             "experiencias": [
+                 {"n": 1, "cui": "2418877",
+                  "proyecto": "Elaboración del Expediente Técnico: Mejoramiento del "
+                              "Centro de Salud Pillco Marca, Huanuco",
+                  "fecha_inicial": "2020-01-01", "fecha_final": "2020-12-31", "folio": "1"},
+             ]},
+        ],
+        "resumen_evaluacion": {"factores": []},
+    }
+    aprob = {"url": "https://infobras.contraloria.gob.pe/InfobrasWeb/Mapa/DownloadFile?x",
+             "filename": "expediente/documento20200917114618.pdf",
+             "nombre": "Res. Gerencia Municipal N° 072-2020-GM MDS",
+             "extension": "pdf", "fecha": "2020-09-17"}
+
+    def fetcher_expediente(cui):
+        # obra sin valorizaciones, pero con la aprobación del expediente
+        return ObraFake(111, "C.S. PILLCO MARCA", avances=[], aprobacion_expediente=aprob)
+
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
+                                fetcher_infoobras=fetcher_expediente,
+                                consultor_sunat=lambda r: None,
+                                descargar=lambda *a, **k: None), repo)
+    job = motor.correr(motor.crear_job(espejo).job_id)
+
+    # NO cae en revisión por cobertura (la aprobación la respalda)
+    assert not [it for it in job.items_revision
+                if it.n_exp == 1 and not it.resuelto and it.etapa == Etapa.INFOOBRAS]
+    # observación RESPALDO con la fecha de aprobación
+    resp = [o for e in job.etapas for o in e.observaciones if o.codigo == "RESPALDO"]
+    assert len(resp) == 1 and "17/09/2020" in resp[0].mensaje
+    # se persiste la aprobación en el enriquecimiento (para Excel + descarga)
+    enr = repo.cargar_enriquecimiento(job.job_id)
+    assert enr["1:1"]["aprobacion_expediente"]["fecha"] == "2020-09-17"
+    # sin clamp fuera_de_ventana (no se anuló el periodo del certificado)
+    assert not any(p.get("tipo") == "fuera_de_ventana"
+                   for p in enr["1:1"].get("paralizaciones", []))
+
+
+def test_obra_de_construccion_sin_valorizaciones_no_usa_aprobacion(tmp_path):
+    """El respaldo por aprobación es SOLO para expedientes (por nombre). Una obra de
+    construcción sin valorizaciones NO se acepta por la aprobación → sigue a revisión."""
+    espejo = {
+        "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
+        "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N",
+             "requisitos": {"tipo_experiencia": "mínimo 1 año"},
+             "experiencias": [
+                 {"n": 1, "cui": "2418877",
+                  "proyecto": "Mejoramiento del Centro de Salud Pillco Marca, Huanuco",
+                  "fecha_inicial": "2020-01-01", "fecha_final": "2020-12-31", "folio": "1"},
+             ]},
+        ],
+        "resumen_evaluacion": {"factores": []},
+    }
+    aprob = {"url": "u", "filename": "expediente/doc20200917.pdf",
+             "nombre": "Res", "extension": "pdf", "fecha": "2020-09-17"}
+
+    def fetcher(cui):
+        return ObraFake(111, "C.S. PILLCO MARCA", avances=[], aprobacion_expediente=aprob)
+
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
+                                fetcher_infoobras=fetcher,
+                                consultor_sunat=lambda r: None,
+                                descargar=lambda *a, **k: None), repo)
+    job = motor.correr(motor.crear_job(espejo).job_id)
+    # NO hay RESPALDO (no es expediente) y sí surge a revisión
+    assert not [o for e in job.etapas for o in e.observaciones if o.codigo == "RESPALDO"]
+    assert job.estado == JobEstado.REQUIERE_REVISION
 
 
 def test_infoobras_cache_por_obra_id(tmp_path):

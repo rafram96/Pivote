@@ -53,6 +53,48 @@ def test_parse_js_vars_html_sin_vars():
     assert infoobras._parse_js_vars("<html><body>nada</body></html>") == {}
 
 
+# ── Aprobación del expediente (hito "Aprobación del proyecto", Mapa/Sumario) ──
+# Botón real que Manuel compartió del obraId=124468: el filename empieza en
+# "expediente/" y el timestamp del documento da la fecha de aprobación.
+HTML_SUMARIO = (
+    '<div class="vis-item vis-box">'
+    '<div class="vis-item-content">Aprobación del proyecto</div>'
+    '<button class="btn-descarga" data-download-url="/InfobrasWeb/Mapa/DownloadFile?'
+    'filename=expediente%2Fdocumento20200917114618.pdf&amp;'
+    'name=Res.%20Gerencia%20Municipal%20N%C2%B0%20072-2020-GM%20MDS&amp;'
+    'contentType=application%2Fpdf&amp;extension=.pdf" '
+    'data-nombre="Res. Gerencia Municipal N° 072-2020-GM MDS">Descargar</button></div>'
+)
+
+
+def test_parsear_aprobacion_expediente_extrae_documento():
+    it = infoobras.parsear_aprobacion_expediente(HTML_SUMARIO)
+    assert it is not None
+    assert it["filename"] == "expediente/documento20200917114618.pdf"
+    assert it["nombre"] == "Res. Gerencia Municipal N° 072-2020-GM MDS"
+    assert it["extension"] == "pdf"
+    assert it["fecha"] == "2020-09-17"          # del timestamp documentoAAAAMMDD…
+    assert it["url"].startswith(
+        "https://infobras.contraloria.gob.pe/InfobrasWeb/Mapa/DownloadFile")
+
+
+def test_parsear_aprobacion_expediente_fallback_por_filename():
+    # sin rótulo cercano, cae al fallback: filename que empieza en "expediente/"
+    html = ('<button data-download-url="/InfobrasWeb/Mapa/DownloadFile?'
+            'filename=expediente%2Fdoc20210101.pdf&name=ET&extension=.pdf"></button>')
+    it = infoobras.parsear_aprobacion_expediente(html)
+    assert it and it["filename"].startswith("expediente/")
+    assert it["fecha"] == "2021-01-01"
+
+
+def test_parsear_aprobacion_expediente_sin_hito_es_none():
+    # una obra normal (sin hito de aprobación ni filename de expediente) → None
+    html = ('<button data-download-url="/InfobrasWeb/Mapa/DownloadFile?'
+            'filename=valorizacion%2Fdoc.pdf&name=Valorizaci%C3%B3n&extension=.pdf"></button>')
+    assert infoobras.parsear_aprobacion_expediente(html) is None
+    assert infoobras.parsear_aprobacion_expediente("") is None
+
+
 # ── Parseo de fechas ─────────────────────────────────────────────────────────
 
 def test_parse_fecha_ddmmyyyy():

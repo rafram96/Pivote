@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import itertools
 
-from resolucion.cui import _puntuar, _sin_prefijo, norm, resolver, ubicacion
+from resolucion.cui import (
+    _es_experiencia_expediente, _puntuar, _sin_prefijo, norm, resolver, ubicacion)
 
 
 def test_ubicacion_no_confunde_ica_dentro_de_huancavelica():
@@ -174,6 +175,22 @@ def test_sin_prefijo_no_toca_nombres_de_obra_limpios():
                    "Rehabilitación del C.E.P. N° 5027 - ARTURO TIMORAN, LA PERLA - CALLAO",
                    "Ampliación de la Sede Médico Legal de Juliaca"]:
         assert norm(N(nombre)) == norm(nombre), nombre
+
+
+def test_es_experiencia_expediente_detecta_por_nombre():
+    # Solo estas experiencias (sin valorizaciones) aceptan la "Aprobación del proyecto"
+    # como respaldo; una obra ejecutada NO.
+    ee = _es_experiencia_expediente
+    assert ee("Elaboración del Expediente Técnico: Mejoramiento del Hospital X")
+    assert ee("Consultoría para la elaboración de expedientes técnicos de saneamiento")
+    assert ee("Estudio de preinversión a nivel de perfil del C.S. Y")
+    assert ee("Anteproyecto y proyecto arquitectónico del Coliseo Z")
+    assert ee("Proyecto definitivo integral del terminal terrestre")
+    # obras ejecutadas normales → NO son expediente
+    assert not ee("Mejoramiento del Puesto de Salud Lircay, Huancavelica")
+    assert not ee("Construcción del nuevo Centro de Salud Fortaleza")
+    assert not ee("")
+    assert not ee(None)
 
 
 def test_resolver_no_pre_bloquea_consultorias_ni_otros_rubros():

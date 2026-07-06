@@ -350,8 +350,26 @@ def construir_hoja_profesional(
                     cc.fill = FILL_VALOR
             rr += 1
         if not vals:
-            ws.cell(rr, 6, "Sin valorizaciones registradas en InfoObras").font = F_CELL
-            rr += 1
+            aprob = fx.get("aprobacion_expediente")
+            if aprob:
+                # Experiencia de EXPEDIENTE técnico: no hay valorizaciones; su respaldo
+                # es la "Aprobación del proyecto" en InfoObras y cuenta por el periodo
+                # del certificado. En amarillo, igual que un mes válido.
+                f = aprob.get("fecha")                                   # ISO "AAAA-MM-DD"
+                fm = f"{f[8:10]}/{f[5:7]}/{f[0:4]}" if f and len(f) == 10 else None
+                msg = ("Expediente técnico aprobado" + (f" el {fm}" if fm else "")
+                       + " — aceptada por el periodo del certificado "
+                         "(experiencia de expediente, sin valorizaciones)")
+                ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+                c = ws.cell(rr, 6, msg); c.font, c.alignment, c.fill = F_CELL, AL_WRAP, FILL_VALOR
+                rr += 1
+                if aprob.get("nombre"):
+                    ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+                    ws.cell(rr, 6, f"Documento: {aprob['nombre']}").font = F_CELL
+                    rr += 1
+            else:
+                ws.cell(rr, 6, "Sin valorizaciones registradas en InfoObras").font = F_CELL
+                rr += 1
 
         # modificaciones de plazo: contexto para el evaluador (explican por qué la
         # obra siguió "viva" más allá de sus valorizaciones). NO cuentan como avance.
@@ -920,11 +938,13 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
             cuis[(np_, ne)] = enr["cui"]
         if enr.get("sunat"):
             sunat[(np_, ne)] = enr["sunat"]
-        if enr.get("obra_ficha") or enr.get("valorizaciones") or enr.get("representante_obra"):
+        if (enr.get("obra_ficha") or enr.get("valorizaciones")
+                or enr.get("representante_obra") or enr.get("aprobacion_expediente")):
             fichas[(np_, ne)] = {**(enr.get("obra_ficha") or {}),
                                  "valorizaciones": enr.get("valorizaciones") or [],
                                  "modificaciones_plazo": enr.get("modificaciones_plazo") or [],
-                                 "representante_obra": enr.get("representante_obra")}
+                                 "representante_obra": enr.get("representante_obra"),
+                                 "aprobacion_expediente": enr.get("aprobacion_expediente")}
     return paral, cuis, fichas, sunat
 
 
