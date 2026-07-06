@@ -59,6 +59,18 @@ PREFIJOS = [
     r"implementaci[oó]n del plan de contingencia.*?obra\s*:?",
     r"ejecuci[oó]n de (?:la )?obra\s*:?",
     r"supervisi[oó]n\s*:?",
+    # Envoltorio de CONSULTORÍA/EXPEDIENTE/ESTUDIO: el proyecto real va adentro y SÍ
+    # está en InfoObras bajo su nombre. Quitar el envoltorio mejora el recall de las
+    # experiencias de expediente (que hoy caen en "sin candidato"). El chequeo de
+    # cobertura evita que limpiar de más meta un CUI equivocado.
+    r"consultor[ií]a para la elaboraci[oó]n de (?:\w+\s+)?(?:\(\s*\d+\s*\)\s*)?expedientes? t[eé]cnicos?(?:\s+de)?\s*:?",
+    r"expedientes? t[eé]cnicos?(?:\s+definitivos?)?(?:\s+integral(?:es)?)?(?:\s+agroindustrial)?\s*(?:de\s+|para\s+(?:la\s+|el\s+)?|:\s*)",
+    r"estudio de (?:pre\s?inversi[oó]n|factibilidad|ingenier[ií]a)(?:\s+a nivel(?:\s+de\s+\w+)?)?\s*(?:de\s+|del\s+|:\s*)?",
+    r"proyecto definitivo(?:\s+integral)?\s+",
+    r"anteproyecto y proyecto arquitect[oó]nico de\s+",
+    # sufijo entre paréntesis: "... (Expediente Técnico)", "... (Estudio de Preinversión ...)"
+    r"\((?:expediente t[eé]cnico|estudio de pre\s?inversi[oó]n[^)]*|desarrollo del proyecto[^)]*|dise[ñn]o arquitect[oó]nico[^)]*)\)",
+    r"^para (?:la|el|los|las)\s+",   # remanente tras quitar "expediente técnico para..."
 ]
 DEPTOS = [
     "AMAZONAS", "ANCASH", "APURIMAC", "AREQUIPA", "AYACUCHO", "CAJAMARCA",
@@ -106,7 +118,18 @@ def _sin_prefijo(proyecto: str) -> str:
     t = expandir_abrev(proyecto)
     for pat in PREFIJOS:
         t = re.sub(pat, "", t, flags=re.I).strip()
-    return _META.sub("", t).strip(" ;,–-.")
+    t = _META.sub("", t).strip(" ;,–-.")
+    # Envoltorio de estudio/expediente con ":" → el proyecto real va DESPUÉS del ":"
+    # (p.ej. "…Definitivo Agroindustrial: CONSTRUCCIÓN DE UNA PLANTA"). Solo si lo de
+    # antes es corto y trae vocabulario de estudio — para NO cortar nombres reales.
+    if ":" in t:
+        antes, despues = t.split(":", 1)
+        if (len(antes.split()) <= 5 and len(despues.strip()) >= 12
+                and re.search(r"expediente|estudio|definitiv|preinversi|t[eé]cnic|agroindustrial",
+                              antes, re.I)):
+            t = despues
+    t = re.sub(r"\(\s*\)", "", t)                      # paréntesis vacío que dejó un sufijo
+    return re.sub(r"\s{2,}", " ", t).strip(" ;,–-.")
 
 
 def establecimiento(proyecto: str) -> str:

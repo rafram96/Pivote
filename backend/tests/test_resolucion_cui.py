@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import itertools
 
-from resolucion.cui import _puntuar, norm, resolver, ubicacion
+from resolucion.cui import _puntuar, _sin_prefijo, norm, resolver, ubicacion
 
 
 def test_ubicacion_no_confunde_ica_dentro_de_huancavelica():
@@ -153,6 +153,28 @@ def test_resolver_cui_exacto_resuelve_aunque_nombre_difiera():
 
 
 # ── Sin gate de alcance: se resuelve TODO rubro y TODO tipo (obras y consultorías) ──
+
+def test_sin_prefijo_limpia_envoltorio_de_expediente():
+    # Recall de experiencias de expediente: el proyecto real está DENTRO del envoltorio
+    # de consultoría/expediente/estudio y sí existe en InfoObras. Quitar el envoltorio.
+    N = lambda s: norm(_sin_prefijo(s))
+    assert N("Expedientes técnicos de Remodelaciones de Oficinas").startswith("REMODELACIONES")
+    assert N("Elaboración del Expediente Técnico Definitivo Agroindustrial: "
+             "CONSTRUCCIÓN DE UNA PLANTA").startswith("CONSTRUCCION DE UNA PLANTA")
+    assert N("ELABORACIÓN DEL EXPEDIENTE TÉCNICO: MEJORAMIENTO de Iluminación").startswith("MEJORAMIENTO")
+    assert "ARQUITECT" not in N("Coliseo Cerrado de Arequipa "
+                                 "(desarrollo del proyecto - Diseño Arquitectónico)")
+    assert N("Elaboración del Expediente Técnico para la Adecuación del hospital").startswith("ADECUACION")
+
+
+def test_sin_prefijo_no_toca_nombres_de_obra_limpios():
+    # No debe recortar nombres reales sin envoltorio (salud/educación/otros).
+    N = _sin_prefijo
+    for nombre in ["Mejoramiento del Puesto de Salud Lircay, Huancavelica",
+                   "Rehabilitación del C.E.P. N° 5027 - ARTURO TIMORAN, LA PERLA - CALLAO",
+                   "Ampliación de la Sede Médico Legal de Juliaca"]:
+        assert norm(N(nombre)) == norm(nombre), nombre
+
 
 def test_resolver_no_pre_bloquea_consultorias_ni_otros_rubros():
     # Antes un gate mandaba a 'na' lo que no fuera salud/educación (y luego un intento
