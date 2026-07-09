@@ -136,3 +136,59 @@ def test_revision_inexistente_404(cliente):
     r = cliente.post(f"/api/pivote/jobs/{job_id}/revision",
                      json={"n_prof": 9, "n_exp": 9, "cui": "123"})
     assert r.status_code == 404
+
+
+# ── Descarga por un solo CUI (endpoint suelto) ───────────────────────────────
+
+def test_descargar_cui_valida_entrada(cliente):
+    assert cliente.post("/api/pivote/descargar-cui", json={}).status_code == 400
+    assert cliente.post("/api/pivote/descargar-cui", json={"cui": "abc"}).status_code == 400
+
+
+def test_descargar_cui_estado_y_zip_inexistentes_404(cliente):
+    assert cliente.get("/api/pivote/descargar-cui/nope").status_code == 404
+    assert cliente.get("/api/pivote/descargar-cui/nope/zip").status_code == 404
+
+
+def test_descargar_cui_flujo_feliz(cliente, monkeypatch):
+    # el background task del TestClient corre sincrónico → al volver el POST ya terminó.
+    # Monkeypatcheamos la descarga real (red) por una que deja un archivo en la carpeta;
+    # el _zip_carpeta REAL lo empaqueta.
+    import api.app as modulo
+
+    def fake_descargar_cui(cui, carpeta, *, fecha_inicio=None, fecha_fin=None):
+        d = (carpeta / "Valorizaciones" / "2020-09")
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "doc.pdf").write_bytes(b"%PDF-1.4 demo")
+        return {"cui": cui, "obra_id": 111, "nombre": "OBRA DEMO",
+                "descargados": 1, "fallidos": 0, "error": None}
+
+    monkeypatch.setattr(modulo, "descargar_cui", fake_descargar_cui)
+
+    r = cliente.post("/api/pivote/descargar-cui",
+                     json={"cui": "2418877", "fecha_inicio": "2020-01-01"})
+    assert r.status_code == 201
+    did = r.json()["descarga_id"]
+
+    r = cliente.get(f"/api/pivote/descargar-cui/{did}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["estado"] == "listas" and body["listo"] is True
+    assert body["obra_id"] == 111 and body["descargados"] == 1
+
+    r = cliente.get(f"/api/pivote/descargar-cui/{did}/zip")
+    assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
+    nombres = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert "indice.txt" in nombres and any(n.endswith("doc.pdf") for n in nombres)
+
+
+def test_descargar_cui_no_resuelto_marca_error_y_zip_409(cliente, monkeypatch):
+    import api.app as modulo
+    monkeypatch.setattr(modulo, "descargar_cui",
+                        lambda cui, carpeta, **k: {"cui": cui, "obra_id": None,
+                                                   "nombre": None, "descargados": 0,
+                                                   "fallidos": 0, "error": "no resolvió"})
+    did = cliente.post("/api/pivote/descargar-cui",
+                       json={"cui": "9999999"}).json()["descarga_id"]
+    assert cliente.get(f"/api/pivote/descargar-cui/{did}").json()["estado"] == "error"
+    assert cliente.get(f"/api/pivote/descargar-cui/{did}/zip").status_code == 409

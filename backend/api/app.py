@@ -35,7 +35,10 @@ from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadF
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 
-from entregables import construir_zip_infoobras, generar_excel_final, mapear_certificados
+from entregables import (
+    construir_zip_infoobras, descargar_cui, generar_excel_final, mapear_certificados,
+    _zip_carpeta,
+)
 from orquestador import Motor, RepositorioArchivos, etapas_esqueleto, etapas_reales
 from schemas import pipeline
 from schemas.espejo import JsonEspejo
@@ -662,6 +665,127 @@ def descargar_zip(job_id: str, tareas: BackgroundTasks):
     # zip presente y NO se está descargando → completo (listas, o job previo) → servir
     return FileResponse(ruta, media_type="application/zip",
                         filename=f"InfoObras_{job.analisis_id}.zip")
+
+
+# ── Descarga por un solo CUI (sin correr un análisis) ────────────────────────
+# Baja TODOS los documentos de InfoObras de una obra a partir de su CUI y los
+# entrega en un ZIP, reutilizando la misma maquinaria del ZIP de un análisis.
+# Es un "dame los papeles de esta obra" suelto. Se hace como tarea en background
+# (un CUI puede traer cientos de MB) con estado polleable, igual que las descargas
+# de un job. Estado en {descarga_id}.cui.json; documentos en {id}.cui-descargas/.
+
+def _fecha_opt(s) -> Optional[date]:
+    """'AAAA-MM-DD' (o None/vacío) → date | None, sin reventar ante basura."""
+    if not s:
+        return None
+    try:
+        return date.fromisoformat(str(s)[:10])
+    except ValueError:
+        return None
+
+
+def _ruta_descarga_cui(descarga_id: str) -> Path:
+    return DATA_DIR / f"{descarga_id}.cui.json"
+
+
+def _leer_descarga_cui(descarga_id: str) -> Optional[dict]:
+    p = _ruta_descarga_cui(descarga_id)
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _guardar_descarga_cui(descarga_id: str, est: dict) -> None:
+    _ruta_descarga_cui(descarga_id).write_text(
+        json.dumps(est, ensure_ascii=False), encoding="utf-8")
+
+
+def _correr_descarga_cui(descarga_id: str) -> None:
+    """Background: resuelve el CUI, baja sus documentos de InfoObras y arma el ZIP.
+    Serializado por `_sem_analisis` (mismo cupo que los análisis, para no saturar
+    red/disco). No relanza: deja el estado en el JSON de la descarga."""
+    est = _leer_descarga_cui(descarga_id)
+    if est is None:
+        return
+    with _sem_analisis:
+        est = _leer_descarga_cui(descarga_id) or est
+        if est.get("estado") == "listas":
+            return
+        carpeta = DATA_DIR / f"{descarga_id}.cui-descargas"
+        try:
+            r = descargar_cui(est["cui"], carpeta,
+                              fecha_inicio=_fecha_opt(est.get("fecha_inicio")),
+                              fecha_fin=_fecha_opt(est.get("fecha_fin")))
+            est.update({k: r.get(k) for k in
+                        ("obra_id", "nombre", "descargados", "fallidos", "error")})
+            if r.get("obra_id") is None:
+                est["estado"] = "error"
+                _guardar_descarga_cui(descarga_id, est)
+                logger.info("DESCARGA-CUI %s · CUI %s no resolvió", descarga_id, est["cui"])
+                return
+            titulo = (f"InfoObras · CUI {est['cui']} · obra {r.get('obra_id')} · "
+                      f"{r.get('nombre') or ''}".strip())
+            _zip_carpeta(carpeta, DATA_DIR / f"{descarga_id}.cui.zip", titulo)
+            est["estado"] = "listas"
+            _guardar_descarga_cui(descarga_id, est)
+            logger.info("DESCARGA-CUI %s · CUI %s · obra %s · %d arch",
+                        descarga_id, est["cui"], r.get("obra_id"), r.get("descargados", 0))
+        except Exception:
+            logger.exception("descarga por CUI %s falló", descarga_id)
+            est["estado"] = "error"
+            est["error"] = "fallo al descargar de InfoObras"
+            _guardar_descarga_cui(descarga_id, est)
+
+
+@app.post("/api/pivote/descargar-cui", status_code=201)
+def descargar_cui_crear(tareas: BackgroundTasks, body: dict):
+    """Dispara la descarga de TODOS los documentos de InfoObras de un solo CUI
+    (valorizaciones, informes de control, datos de cierre, aprobación de expediente)
+    sin correr un análisis. Devuelve un `descarga_id` para pollear estado y bajar el ZIP.
+    Body: {cui, fecha_inicio?, fecha_fin?} (fechas AAAA-MM-DD, acotan los informes)."""
+    cui = str(body.get("cui") or "").strip()
+    if not cui.isdigit():
+        raise HTTPException(400, "cui es obligatorio y debe ser numérico")
+    fi, ff = _fecha_opt(body.get("fecha_inicio")), _fecha_opt(body.get("fecha_fin"))
+    descarga_id = uuid.uuid4().hex[:12]
+    _guardar_descarga_cui(descarga_id, {
+        "descarga_id": descarga_id, "cui": cui,
+        "fecha_inicio": fi.isoformat() if fi else None,
+        "fecha_fin": ff.isoformat() if ff else None,
+        "estado": "en_progreso", "obra_id": None, "nombre": None,
+        "descargados": 0, "fallidos": 0, "error": None,
+        "creado_en": datetime.now(timezone.utc).isoformat(),
+    })
+    tareas.add_task(_correr_descarga_cui, descarga_id)
+    return {"descarga_id": descarga_id, "estado": "en_progreso"}
+
+
+@app.get("/api/pivote/descargar-cui/{descarga_id}")
+def descargar_cui_estado(descarga_id: str):
+    est = _leer_descarga_cui(descarga_id)
+    if est is None:
+        raise HTTPException(404, "descarga no existe")
+    est["listo"] = est.get("estado") == "listas"
+    return est
+
+
+@app.get("/api/pivote/descargar-cui/{descarga_id}/zip")
+def descargar_cui_zip(descarga_id: str):
+    est = _leer_descarga_cui(descarga_id)
+    if est is None:
+        raise HTTPException(404, "descarga no existe")
+    if est.get("estado") == "error":
+        raise HTTPException(409, est.get("error") or "la descarga falló")
+    ruta = DATA_DIR / f"{descarga_id}.cui.zip"
+    if est.get("estado") != "listas" or not ruta.exists():
+        return JSONResponse(status_code=202, content={
+            "estado": est.get("estado"),
+            "mensaje": "El ZIP se está preparando: descargando los documentos de InfoObras."})
+    return FileResponse(ruta, media_type="application/zip",
+                        filename=f"InfoObras_CUI_{est['cui']}.zip")
 
 
 # ── Salud de portales ────────────────────────────────────────────────────────

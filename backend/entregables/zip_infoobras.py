@@ -793,3 +793,77 @@ def construir_zip_infoobras(
         zf.writestr("indice.txt", "\n".join(indice) + "\n")
     os.replace(tmp, salida)   # atómico: recién aquí `salida` existe y está completo
     return salida
+
+
+# ── Descarga de UN solo CUI (endpoint suelto, sin correr un análisis) ─────────
+
+def _zip_carpeta(carpeta: Path, salida: Path, titulo: str = "") -> Path:
+    """ZIP plano de `carpeta` conservando su árbol relativo, con rename atómico. Cada
+    componente de ruta se sanea y capa (`_ruta_segura`) para no reventar el límite de
+    260 de Windows al extraer. Usado por la descarga por CUI (sin espejo/profesionales)."""
+    carpeta = Path(carpeta)
+    salida.parent.mkdir(parents=True, exist_ok=True)
+    tmp = salida.with_name(f"{salida.name}.{os.urandom(4).hex()}.tmp")
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        if titulo:
+            zf.writestr("indice.txt", titulo + "\n")
+        if carpeta.is_dir():
+            for p in sorted(carpeta.rglob("*")):
+                if p.is_file():
+                    partes = "/".join(_ruta_segura(x, 38) for x in p.relative_to(carpeta).parts)
+                    zf.write(p, partes)
+    os.replace(tmp, salida)
+    return salida
+
+
+def descargar_cui(
+    cui: str,
+    destino: Path,
+    *,
+    fecha_inicio: Optional[date] = None,
+    fecha_fin: Optional[date] = None,
+    fetch=None,
+    session: Optional[requests.Session] = None,
+    timeout: float = 90.0,
+) -> dict:
+    """Resuelve el obra_id del CUI y baja TODOS sus documentos de InfoObras a `destino/`
+    con el mismo árbol que el ZIP de un análisis: valorizaciones por hito + documentos
+    obra-level + informes de control del periodo + datos de cierre + aprobación de
+    expediente (si la obra es de expediente). Es el motor del endpoint "descargar por
+    un solo CUI", desacoplado del pipeline.
+
+    Devuelve `{cui, obra_id, nombre, descargados, fallidos, error}`. `fetch` es
+    inyectable para tests; con red real usa `fetch_by_cui`. NO corre en tests offline
+    salvo con `fetch` inyectado (y las descargas monkeypatcheadas)."""
+    if fetch is None:
+        from scraping.infoobras import fetch_by_cui as fetch
+    obra = fetch(str(cui).strip(), fecha_inicio, fecha_fin, None)
+    obra_id = getattr(obra, "obra_id", None) if obra is not None else None
+    if obra_id is None:
+        return {"cui": cui, "obra_id": None, "nombre": None,
+                "descargados": 0, "fallidos": 0,
+                "error": "el CUI no resolvió a ninguna obra en InfoObras"}
+
+    sess = session or requests.Session()
+    destino = Path(destino)
+    r = descargar_documentos_obra_por_hito(obra_id, destino, session=sess, timeout=timeout)
+    # secciones extra, best-effort: la caída de una no tumba el resto de la descarga
+    try:
+        descargar_informes_control(obra_id, destino, fecha_ini=fecha_inicio,
+                                   fecha_fin=fecha_fin, session=sess)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("descargar_cui %s informes de control: %s", cui, corto(e))
+    try:
+        descargar_datos_cierre(obra_id, destino, session=sess)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("descargar_cui %s datos de cierre: %s", cui, corto(e))
+    aprob = getattr(obra, "aprobacion_expediente", None)
+    if aprob:
+        try:
+            descargar_aprobacion_expediente(aprob, destino, session=sess)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("descargar_cui %s aprobación: %s", cui, corto(e))
+
+    return {"cui": cui, "obra_id": obra_id, "nombre": getattr(obra, "nombre", None),
+            "descargados": r.get("descargados", 0), "fallidos": r.get("fallidos", 0),
+            "error": None}
