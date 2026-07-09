@@ -148,11 +148,13 @@ propenso a errores en propuestas grandes):
 
 Persiste todo en `~/InfoObras/analisis/<analisis_id>/`.
 
-### Paso 4.5 — Resolver el CUI de cada experiencia (TÚ, buscando en la web)
+### Paso 4.5 — Resolver y VERIFICAR el CUI de cada experiencia (TÚ, buscando en la web)
 El backend resuelve CUIs por nombre con un scorer difuso, pero TÚ tienes el contexto
 completo del certificado (establecimiento, ubicación, fechas, nivel del hospital) y
-desambiguas mejor. Después de consolidar `espejo.json`, para **cada experiencia con
-`cui: null`** intenta resolverlo tú mismo con tus herramientas web:
+desambiguas mejor. Corres en Claude Code con salida a internet (curl / navegador /
+búsqueda web). Después de consolidar `espejo.json`, recorre TODAS las experiencias:
+las que tienen `cui: null` (resolver) **y las que ya citan un CUI (verificar — un CUI
+citado puede estar desactualizado, ver punto 3)**.
 
 1. **Sonda primero (una sola vez):** haz una consulta de prueba a la búsqueda pública
    de InfoObras. Si no hay salida a internet o el portal no responde, **omite este
@@ -169,22 +171,42 @@ desambiguas mejor. Después de consolidar `espejo.json`, para **cada experiencia
    con el orden cambiado da 0. Usa fragmentos contiguos y distintivos: el proyecto
    completo; sin el envoltorio de consultoría ("elaboración del expediente técnico
    de…", "estudio de…"); solo el establecimiento ("centro de salud X"); solo la
-   localidad distintiva. Si InfoObras no da nada, prueba una búsqueda web general
-   (`"<nombre de la obra>" CUI` o la Consulta de Inversiones del MEF — los CUI nacen
-   ahí) para obtener el código y vuelve al punto 3 a confirmarlo.
-3. **Elige con tu contexto** entre los candidatos: departamento del certificado,
+   localidad distintiva. Si InfoObras no da nada, busca el proyecto en el **Banco de
+   Inversiones del MEF (SSI — Sistema de Seguimiento de Inversiones)** o con una
+   búsqueda web general (`"<nombre de la obra>" CUI`) — los CUI nacen en el MEF —
+   para obtener el código, y vuelve al punto 4 a confirmarlo.
+3. **VERIFICA los CUI citados (no los tomes por buenos):** consulta `codSnip=<cui
+   citado>`. Si la obra devuelta **no solapa en absoluto** el periodo del certificado
+   (p.ej. obra ejecutada 2015-2016 vs certificado 2022-2023) o no existe, es probable
+   un **CUI desactualizado**: el proyecto se reformuló/re-registró con un CUI nuevo
+   (caso real: el cert citaba CUI 2140959 → obra vieja 2015-16; el proyecto vigente
+   con el MISMO nombre era CUI 2448758 en el Banco de Inversiones del MEF). Busca el
+   nombre en InfoObras y en el SSI del MEF; si encuentras el proyecto con nombre
+   coincidente y época que SÍ cuadra, usa ese CUI (`cui_fuente: "skill"`) y deja
+   constancia del reemplazo en `observaciones_claude` (citado X → vigente Y). Si no
+   encuentras reemplazo claro, deja el citado — el backend lo marcará a revisión por
+   cobertura.
+4. **Elige con tu contexto** entre los candidatos: departamento del certificado,
    fechas (una obra cuyo estado/época no cuadra con el periodo certificado NO es),
    establecimiento y nivel. Homónimos en distinta región o década: descártalos.
-4. **Confirma SIEMPRE antes de escribir** (anti-alucinación): re-consulta el endpoint
+   **Excepción — experiencias de EXPEDIENTE técnico/estudio:** esas obras suelen NO
+   tener ejecución/valorizaciones (el trabajo fue el papel, no la construcción), así
+   que el solape de época NO aplica como criterio; confirma solo por nombre/ubicación.
+   El backend las acepta por el hito "Aprobación del proyecto" de InfoObras.
+5. **Confirma SIEMPRE antes de escribir** (anti-alucinación): re-consulta el endpoint
    con `codSnip=<cui elegido>` y verifica que la obra devuelta coincide en nombre/
    departamento con el certificado. El backend trata el CUI como **autoritativo** —
    un CUI inventado o mal confirmado lo llevaría a la obra EQUIVOCADA. **Nunca
    escribas un CUI que no confirmaste; jamás lo deduzcas "de memoria".**
-5. **Escribe en `espejo.json`**: `cui` (solo dígitos) + `cui_fuente: "skill"`. En las
-   experiencias donde el cert ya citaba CUI, deja `cui_fuente: "certificado"`. Si no
-   hay candidato convincente, deja `cui: null` — caerá a "Por confirmar" en el panel,
-   como hoy. **Mejor null que un CUI dudoso.**
-6. Re-valida el espejo (`node scripts/validar_espejo.js`) tras editarlo.
+6. **Escribe en `espejo.json`**: `cui` (solo dígitos) + `cui_fuente: "skill"`. En las
+   experiencias donde el cert ya citaba CUI y quedó verificado, deja
+   `cui_fuente: "certificado"`. Si no hay candidato convincente, deja `cui: null` —
+   caerá a "Por confirmar" en el panel, como hoy. **Mejor null que un CUI dudoso.**
+7. Re-valida el espejo (`node scripts/validar_espejo.js`) tras editarlo.
+
+> **Alcance:** esto aplica a obras/proyectos PÚBLICOS (InfoObras/MEF). Las
+> experiencias con cliente PRIVADO no tienen CUI ni están en estos registros — déjalas
+> con `cui: null` sin insistir; su verificación es otro flujo (fuera de este alcance).
 
 ### Paso 5 — Transporte al backend (POR DEFECTO: MCP, automático)
 **El default es subir por el MCP, sin preguntar.** Tras consolidar y validar:
