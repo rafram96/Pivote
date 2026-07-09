@@ -148,6 +148,44 @@ propenso a errores en propuestas grandes):
 
 Persiste todo en `~/InfoObras/analisis/<analisis_id>/`.
 
+### Paso 4.5 — Resolver el CUI de cada experiencia (TÚ, buscando en la web)
+El backend resuelve CUIs por nombre con un scorer difuso, pero TÚ tienes el contexto
+completo del certificado (establecimiento, ubicación, fechas, nivel del hospital) y
+desambiguas mejor. Después de consolidar `espejo.json`, para **cada experiencia con
+`cui: null`** intenta resolverlo tú mismo con tus herramientas web:
+
+1. **Sonda primero (una sola vez):** haz una consulta de prueba a la búsqueda pública
+   de InfoObras. Si no hay salida a internet o el portal no responde, **omite este
+   paso completo** y sigue al Paso 5 — el backend resolverá como siempre (cero regresión).
+   La búsqueda es un POST simple (sin login):
+   ```
+   curl -s "https://infobras.contraloria.gob.pe/InfobrasWeb/Mapa/busqueda/obrasBasic?page=0&rowsPerPage=20&Parameters=%7B%22nombrObra%22%3A%22<NOMBRE+URL-ENCODED>%22%2C%22codSnip%22%3A%22%22%7D" -X POST
+   ```
+   (el JSON `Parameters` admite también `codSnip` para buscar por código; los campos
+   no enviados se asumen vacíos). Cada resultado trae `codUniqInv` (el CUI, 7 díg.),
+   `codigoObra`, `nombrObra`, `nombrDepartamento`, `nombreEntidad`, `estObra`.
+2. **Busca con 2-3 variantes del nombre.** OJO: la búsqueda matchea por **substring
+   contiguo** del nombre oficial de la obra (no por palabras sueltas) — un fragmento
+   con el orden cambiado da 0. Usa fragmentos contiguos y distintivos: el proyecto
+   completo; sin el envoltorio de consultoría ("elaboración del expediente técnico
+   de…", "estudio de…"); solo el establecimiento ("centro de salud X"); solo la
+   localidad distintiva. Si InfoObras no da nada, prueba una búsqueda web general
+   (`"<nombre de la obra>" CUI` o la Consulta de Inversiones del MEF — los CUI nacen
+   ahí) para obtener el código y vuelve al punto 3 a confirmarlo.
+3. **Elige con tu contexto** entre los candidatos: departamento del certificado,
+   fechas (una obra cuyo estado/época no cuadra con el periodo certificado NO es),
+   establecimiento y nivel. Homónimos en distinta región o década: descártalos.
+4. **Confirma SIEMPRE antes de escribir** (anti-alucinación): re-consulta el endpoint
+   con `codSnip=<cui elegido>` y verifica que la obra devuelta coincide en nombre/
+   departamento con el certificado. El backend trata el CUI como **autoritativo** —
+   un CUI inventado o mal confirmado lo llevaría a la obra EQUIVOCADA. **Nunca
+   escribas un CUI que no confirmaste; jamás lo deduzcas "de memoria".**
+5. **Escribe en `espejo.json`**: `cui` (solo dígitos) + `cui_fuente: "skill"`. En las
+   experiencias donde el cert ya citaba CUI, deja `cui_fuente: "certificado"`. Si no
+   hay candidato convincente, deja `cui: null` — caerá a "Por confirmar" en el panel,
+   como hoy. **Mejor null que un CUI dudoso.**
+6. Re-valida el espejo (`node scripts/validar_espejo.js`) tras editarlo.
+
 ### Paso 5 — Transporte al backend (POR DEFECTO: MCP, automático)
 **El default es subir por el MCP, sin preguntar.** Tras consolidar y validar:
 1. `probar_conexion` del MCP `infoobras-onprem-bridge` (ver `mcp-server/`). Si
