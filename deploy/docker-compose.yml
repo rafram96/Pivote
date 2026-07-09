@@ -3,7 +3,9 @@
 #   .../InfoObras/Pivote            (este repo; el compose vive en deploy/)
 #   .../InfoObras/Panel-InfoObras   (el panel)
 #
-# Uso:  cd deploy && docker compose up -d --build
+# Uso — UN comando desde la raíz (D:\proyectos\InfoObras):
+#   docker compose -f .\Pivote\deploy\docker-compose.yml up -d --build
+# (el .env se lee solo desde Pivote\deploy\.env, junto a este archivo)
 # El skill y el MCP NO van aquí: corren en la máquina del ingeniero (ver docs).
 
 name: infoobras-pivote
@@ -25,6 +27,12 @@ services:
       - datos_pivote:/datos          # jobs/espejos/entregables (datos del cliente)
     ports:
       - "${BACKEND_PORT:-8001}:8001" # REQUERIDO en LAN: el browser baja el ZIP directo + el MCP de Manuel
+    healthcheck:                     # smoke test integrado: docker compose ps → "healthy"
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/pivote/salud', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   panel:
@@ -34,15 +42,23 @@ services:
       args:
         # URL del backend para el BROWSER (LAN), horneada en build-time → el panel
         # baja el ZIP DIRECTO del backend (el proxy no streamea GBs). IP LAN, no localhost.
-        NEXT_PUBLIC_PIVOTE_API: ${NEXT_PUBLIC_PIVOTE_API:-}
+        # `:?` = compose ABORTA si falta en deploy/.env (el error nº1 del despliegue).
+        NEXT_PUBLIC_PIVOTE_API: ${NEXT_PUBLIC_PIVOTE_API:?define NEXT_PUBLIC_PIVOTE_API en deploy/.env con la IP LAN del server (NO localhost)}
     image: infoobras-panel
     environment:
       # El panel proxyea /api/pivote/* a este servicio (red interna de compose).
       PIVOTE_API: http://backend:8001
     ports:
       - "${PANEL_PORT:-3002}:3002"   # la URL que abre el ingeniero
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3002').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy   # el panel arranca cuando el backend ya responde
     restart: unless-stopped
 
   # --- Persistencia PostgreSQL — PENDIENTE de cablear en el backend ------------

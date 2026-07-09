@@ -29,23 +29,25 @@ Compose. La skill y el MCP **NO** van aquí — corren donde Manuel analiza (ver
 ---
 
 ## 2 · Llevar el código al servidor
-No hay remoto git configurado (los repos son locales). Elige UNA vía:
+Ruta elegida en el server: **`D:\proyectos\InfoObras\`** (los 2 repos como hermanos).
 
-### Vía A — copiar las carpetas por red/USB (simple para la prueba)
-Desde tu laptop, copia **ambos repos** al server **excluyendo lo pesado/regenerable**.
-Con el server accesible por recurso compartido (o a un USB):
+### Vía B — git clone (la vía activa; Pivote ya está en GitHub)
+`Pivote` ya tiene remoto con la rama `demo` pusheada. Para el Panel, pushear su
+rama `demo` antes de clonar (`cd Panel-InfoObras && git push -u origin demo`).
 ```powershell
-# ajusta el destino (\\SERVER\... o E:\)
-$dst = "\\SERVER\C$\InfoObras"       # o "E:\InfoObras"
+cd D:\proyectos\InfoObras
+git clone -b demo https://github.com/rafram96/Pivote.git
+git clone -b demo https://github.com/rafram96/panel-infoObras.git Panel-InfoObras
+```
+
+### Vía A — copiar las carpetas por red/USB (alternativa sin git)
+Desde tu laptop, copia **ambos repos** al server **excluyendo lo pesado/regenerable**:
+```powershell
+$dst = "\\SERVER\D$\proyectos\InfoObras"   # o un USB
 $excl = @("venv","node_modules","datos_pivote",".git",".next","__pycache__")
 robocopy "C:\Users\Holbi\Documents\Freelance\proyectos\InfoObras\Pivote" "$dst\Pivote" /E /XD $excl
 robocopy "C:\Users\Holbi\Documents\Freelance\proyectos\InfoObras\Panel-InfoObras" "$dst\Panel-InfoObras" /E /XD $excl
 ```
-Quedan hermanos: `C:\InfoObras\Pivote` y `C:\InfoObras\Panel-InfoObras`.
-
-### Vía B — remoto git (mejor para actualizar luego con `git pull`)
-Crea un repo privado (GitHub/Gitea), `git push` de **ambos**, y en el server
-`git clone` los dos como hermanos.
 
 ---
 
@@ -63,7 +65,7 @@ Luego **fíjala**: reserva DHCP en el router (por la MAC del server) **o** IP es
 
 ## 4 · Configurar `deploy\.env`  ⚠ el paso que más se equivoca
 ```powershell
-cd C:\InfoObras\Pivote\deploy
+cd D:\proyectos\InfoObras\Pivote\deploy
 Copy-Item .env.example .env
 notepad .env
 ```
@@ -106,11 +108,22 @@ PC, si nadie inicia sesión, el daemon no arranca y el sistema queda **caído en
 
 ---
 
-## 7 · Levantar
+## 7 · Levantar — un solo comando (docker puro)
 ```powershell
-cd C:\InfoObras\Pivote\deploy
-docker compose up -d --build     # 1ª vez tarda: baja imágenes + npm ci + next build + pip
-docker compose ps                # backend y panel en "running"
+docker compose -f D:\proyectos\InfoObras\Pivote\deploy\docker-compose.yml up -d --build
+```
+(el `.env` se lee solo desde `Pivote\deploy\.env`, junto al compose; la 1ª vez tarda:
+baja imágenes + npm ci + next build + pip)
+
+El compose trae los guardarraíles integrados:
+- **Aborta con mensaje claro si falta `NEXT_PUBLIC_PIVOTE_API`** en el `.env` (sintaxis `:?`).
+- **Healthchecks**: el backend se marca `healthy` cuando `/api/pivote/salud` responde,
+  y el panel espera a que el backend esté sano antes de arrancar.
+
+Verificar:
+```powershell
+docker compose -f D:\proyectos\InfoObras\Pivote\deploy\docker-compose.yml ps
+# backend y panel en estado "running (healthy)"
 ```
 
 ---
