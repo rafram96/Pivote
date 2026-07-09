@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 _RAMA_PARALELA = (pipeline.Etapa.INFOOBRAS, pipeline.Etapa.SUNAT)
 
 Notificador = Callable[[pipeline.ProgresoJob], None]
+# Progreso fino por ítem: (job_id, etapa, item_actual, items_total, descripcion).
+# Lo escribe el RegistroProgreso de la API; el motor solo lo reenvía a las etapas.
+ReporteProgreso = Callable[[str, pipeline.Etapa, int, int, str], None]
 
 
 def _ahora() -> datetime:
@@ -43,6 +46,7 @@ class Motor:
         etapas: Sequence[EtapaBase],
         repositorio: Repositorio,
         notificar: Optional[Notificador] = None,
+        reportar: Optional[ReporteProgreso] = None,
     ):
         self._etapas: dict[pipeline.Etapa, EtapaBase] = {e.nombre: e for e in etapas}
         faltantes = [e for e in pipeline.Etapa.orden() if e not in self._etapas]
@@ -50,6 +54,12 @@ class Motor:
             raise ValueError(f"faltan etapas: {[e.value for e in faltantes]}")
         self._repo = repositorio
         self._notificar = notificar or (lambda _p: None)
+        self._reportar = reportar or (lambda *_: None)
+
+    def _reporter_de(self, job_id: str):
+        """Adapta el reporter de proceso (con job_id) a la firma que espera el
+        Contexto (sin job_id) — cierra sobre el job actual."""
+        return lambda etapa, i, total, desc: self._reportar(job_id, etapa, i, total, desc)
 
     # ── Ciclo de vida ────────────────────────────────────────────────────────
 
@@ -81,7 +91,8 @@ class Motor:
         job = self._cargar(job_id)
         espejo = self._repo.cargar_espejo(job_id) or {}
         ctx = Contexto(job=job, espejo=espejo,
-                       enriquecimiento=self._repo.cargar_enriquecimiento(job_id))
+                       enriquecimiento=self._repo.cargar_enriquecimiento(job_id),
+                       reportar=self._reporter_de(job_id))
 
         job.estado = pipeline.JobEstado.EN_PROCESO
         self._checkpoint(job)
@@ -153,6 +164,7 @@ class Motor:
             solo_items={(n_prof, n_exp)},
             datos_humano={(n_prof, n_exp): dato},
             enriquecimiento=self._repo.cargar_enriquecimiento(job_id),
+            reportar=self._reporter_de(job_id),
         )
 
         orden = pipeline.Etapa.orden()

@@ -40,6 +40,7 @@ from entregables import (
     _zip_carpeta,
 )
 from orquestador import Motor, RepositorioArchivos, etapas_esqueleto, etapas_reales
+from orquestador.progreso import REGISTRO
 from schemas import pipeline
 from schemas.espejo import JsonEspejo
 
@@ -47,17 +48,41 @@ DATA_DIR = Path(os.getenv("PIVOTE_DATA_DIR", "datos_pivote"))
 
 app = FastAPI(title="InfoObras Pivote API", version="0.2.0")
 repo = RepositorioArchivos(DATA_DIR)
+
+
+def _reportar_progreso(job_id: str, etapa, item_actual: int,
+                       items_total: int, descripcion: str) -> None:
+    """Puente motor → RegistroProgreso: las etapas reportan su avance fino y la
+    API lo lee en /progreso para pintar la barra. Volátil (en memoria)."""
+    REGISTRO.reportar(job_id, getattr(etapa, "value", str(etapa)),
+                      item_actual, items_total, descripcion)
+
+
 # PIVOTE_ETAPAS=esqueleto -> stubs (tests/desarrollo sin red); default: reales.
 if os.getenv("PIVOTE_ETAPAS", "real") == "esqueleto":
-    motor = Motor(etapas_esqueleto(), repo)
+    motor = Motor(etapas_esqueleto(), repo, reportar=_reportar_progreso)
 else:
-    motor = Motor(etapas_reales(DATA_DIR), repo)
+    motor = Motor(etapas_reales(DATA_DIR), repo, reportar=_reportar_progreso)
 
 ETAPA_FUENTE = {
     pipeline.Etapa.SUNAT: "SUNAT",
     pipeline.Etapa.INFOOBRAS: "InfoObras",
     pipeline.Etapa.VALIDACION: "revisión de consistencia",
     pipeline.Etapa.REGLAS: "cálculo de días efectivos",
+}
+
+# Etiqueta estable de cada etapa para el stepper del panel (palabras de evaluador,
+# sin jerga). El texto por-ítem en vivo (RegistroProgreso) la sobrescribe SOLO
+# mientras la etapa está en curso; una etapa ya OK muestra esta etiqueta.
+ETAPA_TEXTO = {
+    pipeline.Etapa.INGESTA: "Recepción de la propuesta",
+    pipeline.Etapa.VALIDACION: "Revisión de consistencia",
+    pipeline.Etapa.RESOLUCION_CUI: "Identificación de las obras",
+    pipeline.Etapa.INFOOBRAS: "Verificación en el registro de obras públicas",
+    pipeline.Etapa.SUNAT: "Verificación de los emisores",
+    pipeline.Etapa.REGLAS: "Cálculo de días efectivos",
+    pipeline.Etapa.EXCEL: "Armado del Excel de evaluación",
+    pipeline.Etapa.PERSISTENCIA: "Guardado del análisis",
 }
 
 
@@ -184,9 +209,15 @@ def _asegurar_descargas(job_id: str) -> None:
         except ValueError:
             maxd = None                              # basura en el .env → baja todo (seguro)
         t0 = time.time()
+
+        def _rep(i: int, total: int, nombre: str) -> None:
+            REGISTRO.reportar(job_id, "descargas", i, total,
+                              f"Descargando documentos de la obra {i} de {total} — {nombre}")
+
         try:
             from orquestador.etapas_reales import descargar_documentos_job
-            stats = descargar_documentos_job(espejo, enr, job_id, DATA_DIR, max_descargas=maxd)
+            stats = descargar_documentos_job(espejo, enr, job_id, DATA_DIR,
+                                             max_descargas=maxd, reportar=_rep)
             # arma el ZIP COMPLETO recién ahora que están TODOS los documentos
             # (atómico → reemplaza cualquier zip parcial previo).
             ruta_zip = DATA_DIR / f"{job_id}.infoobras.zip"
@@ -204,6 +235,7 @@ def _asegurar_descargas(job_id: str) -> None:
             job.zip_infoobras = f"/api/pivote/jobs/{job_id}/zip"
             job.descargas_estado = "listas"
             repo.guardar(job)
+            REGISTRO.limpiar(job_id)   # job terminal: suelta el progreso fino en memoria
             logger.info("DESCARGAS job %s · %d arch · %.0f MB · %d reintentos · %.0fs",
                         job_id, stats["descargas"], stats["bytes"] / 1_048_576,
                         stats["reintentos"], time.time() - t0)
@@ -212,6 +244,7 @@ def _asegurar_descargas(job_id: str) -> None:
             job = repo.cargar(job_id) or job
             job.descargas_estado = "error"
             repo.guardar(job)
+            REGISTRO.limpiar(job_id)
 
 
 def _correr_y_descargar(job_id: str) -> None:
@@ -225,6 +258,7 @@ def _correr_y_descargar(job_id: str) -> None:
             logger.info("PIPELINE job %s → %s · %d en revisión", job_id,
                         getattr(job.estado, "value", job.estado), len(job.items_revision))
         if job is not None and job.estado == pipeline.JobEstado.ERROR:
+            REGISTRO.limpiar(job_id)   # sin descargas que corran: libera el progreso aquí
             return  # el pipeline falló: no hay enriquecimiento útil que descargar
         try:
             logger.info("DESCARGAS job %s: bajando documentos de InfoObras…", job_id)
@@ -342,22 +376,20 @@ def borrar_job(job_id: str):
     return {"eliminado": job_id, "concurso_id": job.concurso_id}
 
 
-@app.get("/api/pivote/jobs/{job_id}/descargas")
-def avance_descargas(job_id: str):
-    """Avance real de las descargas InfoObras por experiencia (alimenta la barra del
-    ZIP): cuántas obras ya se bajaron vs las que deben bajar (las en revisión no bajan)."""
-    job = repo.cargar(job_id)
-    if job is None:
-        raise HTTPException(404, "análisis no existe")
-    espejo = repo.cargar_espejo(job_id) or {}
+def _avance_descargas_dict(job: pipeline.Job) -> dict:
+    """Avance de descargas (compartido por /descargas y /progreso): cuántas obras
+    ya están en disco vs las que deben bajar (las en revisión no bajan) + la obra
+    en curso (del RegistroProgreso, si hay una descarga corriendo)."""
+    espejo = repo.cargar_espejo(job.job_id) or {}
     todas = [(p["n_prof"], e["n"])
              for p in espejo.get("profesionales", [])
              for e in p.get("experiencias", [])]
     rev = {(it.n_prof, it.n_exp) for it in job.items_revision if not it.resuelto}
     bajan = [x for x in todas if x not in rev]
-    carpetas = _mapa_descargas(job_id)
+    carpetas = _mapa_descargas(job.job_id)
     descargadas = sum(1 for x in bajan if x in carpetas)
     total = len(bajan)
+    viva = REGISTRO.etapas(job.job_id).get("descargas")
     return {
         "estado": job.descargas_estado,
         "listo": job.descargas_estado == "listas",
@@ -365,7 +397,71 @@ def avance_descargas(job_id: str):
         "descargadas": descargadas,
         "faltan": total - descargadas,
         "en_revision": len(rev),
+        "obra_actual": (viva or {}).get("descripcion"),
     }
+
+
+def armar_progreso(job: pipeline.Job) -> dict:
+    """Todo lo que la barra del panel necesita en UN request: pct grueso por
+    etapas + texto/contador fino de la(s) etapa(s) en curso + avance de descargas.
+    Fusiona el checkpoint persistido (fuente de verdad del estado) con el
+    RegistroProgreso en memoria (el 'qué está pasando ahora'). INFOOBRAS ∥ SUNAT
+    pueden aparecer ambas 'en_curso' a la vez — es correcto, corren en paralelo."""
+    orden = pipeline.Etapa.orden()
+    _OK = (pipeline.EstadoEtapa.OK, pipeline.EstadoEtapa.OK_CON_REVISION,
+           pipeline.EstadoEtapa.ERROR_PARCIAL)
+    completas = sum(1 for e in job.etapas if e.estado in _OK)
+    vivas = REGISTRO.etapas(job.job_id)
+    etapas = []
+    for nombre in orden:
+        res = job.etapa(nombre)
+        viva = vivas.get(nombre.value)
+        item = {"etapa": nombre.value, "texto": ETAPA_TEXTO[nombre]}
+        if res is not None and res.estado in _OK:
+            item["estado"] = res.estado.value             # terminó → etiqueta estable
+        elif viva is not None:
+            item["estado"] = "en_curso"
+            if viva["descripcion"]:
+                item["texto"] = viva["descripcion"]       # texto fino en vivo
+            if viva["items_total"]:
+                item["item_actual"] = viva["item_actual"]
+                item["items_total"] = viva["items_total"]
+        elif res is not None:
+            item["estado"] = res.estado.value             # pendiente/error del checkpoint
+        else:
+            item["estado"] = "pendiente"
+        etapas.append(item)
+    return {
+        "job_id": job.job_id,
+        "estado": getattr(job.estado, "value", job.estado),
+        "pct": round(100 * completas / len(orden), 1),
+        "etapas": etapas,
+        "descargas": _avance_descargas_dict(job),
+        "eta": None,                                       # §4 (ETA por histórico) — futuro
+        "pendientes_humano": job.pendientes_humano,
+    }
+
+
+@app.get("/api/pivote/jobs/{job_id}/descargas")
+def avance_descargas(job_id: str):
+    """Avance real de las descargas InfoObras por experiencia (alimenta la barra del
+    ZIP): cuántas obras ya se bajaron vs las que deben bajar (las en revisión no bajan)."""
+    job = repo.cargar(job_id)
+    if job is None:
+        raise HTTPException(404, "análisis no existe")
+    return _avance_descargas_dict(job)
+
+
+@app.get("/api/pivote/jobs/{job_id}/progreso")
+def progreso(job_id: str):
+    """Avance del análisis para la barra del panel (el panel lo pollea mientras el
+    job corre). Fuente ÚNICA: fusiona checkpoints + progreso fino + descargas, así
+    el panel arma toda la barra con un solo request."""
+    REGISTRO.purgar_viejos()
+    job = repo.cargar(job_id)
+    if job is None:
+        raise HTTPException(404, "análisis no existe")
+    return armar_progreso(job)
 
 
 @app.get("/api/pivote/concursos/{concurso_id}")

@@ -192,3 +192,55 @@ def test_descargar_cui_no_resuelto_marca_error_y_zip_409(cliente, monkeypatch):
                        json={"cui": "9999999"}).json()["descarga_id"]
     assert cliente.get(f"/api/pivote/descargar-cui/{did}").json()["estado"] == "error"
     assert cliente.get(f"/api/pivote/descargar-cui/{did}/zip").status_code == 409
+
+
+# ── Progreso del análisis (barra del panel) ──────────────────────────────────
+
+def test_progreso_endpoint_job_terminado(cliente):
+    """Al terminar el pipeline (esqueleto), /progreso muestra 100% y las 8 etapas OK."""
+    cid = cliente.post("/api/pivote/concursos",
+                       json={"nomenclatura": "CP-PROG/2026"}).json()["concurso_id"]
+    job_id = _subir(cliente, cid).json()["job_id"]
+
+    r = cliente.get(f"/api/pivote/jobs/{job_id}/progreso")
+    assert r.status_code == 200
+    p = r.json()
+    assert p["job_id"] == job_id
+    assert p["estado"] == "completado"
+    assert p["pct"] == 100.0
+    assert [e["etapa"] for e in p["etapas"]] == [x.value for x in __import__(
+        "schemas.pipeline", fromlist=["Etapa"]).Etapa.orden()]
+    assert all(e["estado"] in ("ok", "ok_con_revision", "error_parcial")
+               for e in p["etapas"])
+    # descargas embebidas + obra en curso (None: ya no corre nada)
+    assert "descargas" in p and "obra_actual" in p["descargas"]
+    assert p["eta"] is None
+    assert p["pendientes_humano"] == 0
+
+
+def test_progreso_404_si_no_existe(cliente):
+    assert cliente.get("/api/pivote/jobs/nope/progreso").status_code == 404
+
+
+def test_armar_progreso_fusiona_vivo_y_checkpoint(cliente):
+    """Etapa ya OK (checkpoint) vs etapa en curso (RegistroProgreso) vs pendiente."""
+    import api.app as modulo
+    from schemas import pipeline
+
+    job = pipeline.Job(job_id="jx", analisis_id="a")
+    job.etapas.append(pipeline.ResultadoEtapa(
+        etapa=pipeline.Etapa.INGESTA, estado=pipeline.EstadoEtapa.OK))
+    modulo.REGISTRO.reportar("jx", "infoobras", 4, 9, "Verificando la obra 4 de 9")
+    try:
+        prog = modulo.armar_progreso(job)
+        et = {e["etapa"]: e for e in prog["etapas"]}
+        assert et["ingesta"]["estado"] == "ok"
+        assert et["ingesta"]["texto"] == "Recepción de la propuesta"      # etiqueta estable
+        assert et["infoobras"]["estado"] == "en_curso"
+        assert et["infoobras"]["item_actual"] == 4
+        assert et["infoobras"]["items_total"] == 9
+        assert et["infoobras"]["texto"] == "Verificando la obra 4 de 9"   # texto fino en vivo
+        assert et["sunat"]["estado"] == "pendiente"
+        assert prog["pct"] == round(100 / 8, 1)   # 1 de 8 etapas completa
+    finally:
+        modulo.REGISTRO.limpiar("jx")

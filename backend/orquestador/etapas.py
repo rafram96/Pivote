@@ -18,7 +18,7 @@ scrapers, reglas, Excel).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Protocol, runtime_checkable
+from typing import Callable, Optional, Protocol, runtime_checkable
 
 from pydantic import ValidationError
 
@@ -45,6 +45,12 @@ class Contexto:
     # Claves string para serializar: "n_prof:n_exp" por experiencia, "prof:n" por
     # profesional. El motor lo persiste tras cada etapa (sobrevive reanudaciones).
     enriquecimiento: dict = field(default_factory=dict)
+    # Progreso FINO (item por item) para la barra del panel. Firma:
+    # (etapa, item_actual, items_total, descripcion_sin_jerga). Incluye la etapa
+    # porque INFOOBRAS ∥ SUNAT corren sobre el MISMO ctx: cada una pasa su propio
+    # nombre y no se pisan. Default no-op → etapas del esqueleto y tests intactos.
+    reportar: Callable[[pipeline.Etapa, int, int, str], None] = field(
+        default=lambda *_: None)
 
     def items_experiencia(self):
         """Itera (exp_dict, (n_prof, n_exp)) respetando `solo_items`."""

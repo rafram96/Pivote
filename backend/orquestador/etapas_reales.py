@@ -51,6 +51,12 @@ def _clave(np_: int, ne: int) -> str:
     return f"{np_}:{ne}"
 
 
+def _recorte(texto, n: int = 40) -> str:
+    """Recorta un nombre largo para la línea de progreso, sin romper la barra."""
+    t = (texto or "").strip()
+    return (t[: n - 1] + "…") if len(t) > n else t
+
+
 def _fecha_iso(v) -> Optional[date]:
     if isinstance(v, date):
         return v
@@ -144,6 +150,7 @@ class EtapaValidacionReal:
     nombre = E.VALIDACION
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
+        ctx.reportar(self.nombre, 0, 0, "Revisando la consistencia de la propuesta")
         observaciones = verificar_espejo(ctx.espejo)
         n_exp = sum(len(p.get("experiencias", [])) for p in ctx.espejo.get("profesionales", []))
         return _res(self.nombre, EE.OK, _met(n_exp, n_exp), observaciones)
@@ -180,7 +187,10 @@ class EtapaResolucionCuiReal:
             else:
                 pendientes.append((e, (np_, ne)))
 
-        for (np_, ne), r in resolver_con_dedup(pendientes, consulta):
+        n_pend = len(pendientes)
+        for i, ((np_, ne), r) in enumerate(resolver_con_dedup(pendientes, consulta), 1):
+            ctx.reportar(self.nombre, i, n_pend,
+                         f"Ubicando la obra {i} de {n_pend} en el registro público")
             k = _clave(np_, ne)
             if r["estado"] == "resuelto":
                 # se persisten candidatos + decision también en los RESUELTOS (no
@@ -399,12 +409,20 @@ class EtapaInfoObrasReal:
 
         # 1ª pasada: procesar lo que responda; lo que cae por flakiness se aparta
         # (todavía NO se marca error) para reintentarlo al final.
+        n_fetch = sum(1 for _e, (np_, ne) in ctx.items_experiencia()
+                      if (ctx.enriquecimiento.get(_clave(np_, ne)) or {}).get("cui"))
+        i_fetch = 0
         fallidos: list[tuple] = []
         for _e, (np_, ne) in ctx.items_experiencia():
             enr = ctx.enriquecimiento.get(_clave(np_, ne)) or {}
             cui = enr.get("cui")
             if not cui:
                 continue  # sin obra identificada: nada que consultar
+            i_fetch += 1
+            _proy = _recorte(_e.get("proyecto"))
+            ctx.reportar(self.nombre, i_fetch, n_fetch,
+                         f"Verificando la obra {i_fetch} de {n_fetch}"
+                         + (f" — {_proy}" if _proy else ""))
             cert_ini, cert_fin = _fecha_iso(_e.get("fecha_inicial")), _fecha_iso(_e.get("fecha_final"))
             obra_id = enr.get("obra", {}).get("obra_id") if isinstance(enr.get("obra"), dict) else None
             obra = _fetch_obra(cui, cert_ini, cert_fin, obra_id)
@@ -418,7 +436,10 @@ class EtapaInfoObrasReal:
         # las que SIGUEN sin responder se marcan como error honesto.
         if fallidos:
             logger.info("InfoObras: 2da pasada para %d obra(s) caídas por flakiness", len(fallidos))
-            for _e, np_, ne, cui, cert_ini, cert_fin, obra_id in fallidos:
+            n_fall = len(fallidos)
+            for j, (_e, np_, ne, cui, cert_ini, cert_fin, obra_id) in enumerate(fallidos, 1):
+                ctx.reportar(self.nombre, j, n_fall,
+                             f"Reintentando la obra {j} de {n_fall} (el portal estaba inestable)")
                 obra = _fetch_obra(cui, cert_ini, cert_fin, obra_id)
                 if obra is None:
                     cont["err"] += 1
@@ -448,12 +469,16 @@ class EtapaInfoObrasReal:
 
 
 def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
-                             max_descargas=None, descargar=None):
+                             max_descargas=None, descargar=None, reportar=None):
     """Descarga DIFERIDA de los documentos InfoObras de TODAS las experiencias del
     job a {job}.descargas/P{n}_E{m}, usando el `obra_id` YA persistido en el
     enriquecimiento (sin re-fetch al portal). Idempotente: salta las carpetas que
     ya tienen archivos (skip-existing → re-runs rápidos y reentrada segura).
-    Devuelve {descargas, bytes, reintentos} medidos del folder + el scraper."""
+    Devuelve {descargas, bytes, reintentos} medidos del folder + el scraper.
+
+    `reportar(procesadas, total, nombre_obra)` (opcional): avance para la barra del
+    panel — se llama al empezar cada obra descargable. Un reintento NO reinicia el
+    contador; las obras sin `obra_id` no cuentan en `total`."""
     from entregables.zip_infoobras import (
         descargar_documentos_obra_por_hito, descargar_informes_control,
         descargar_datos_cierre, descargar_aprobacion_expediente,
@@ -462,6 +487,17 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
     base = Path(dir_descargas) / f"{job_id}.descargas"
     reset_descargas_stats()
     bajadas = saltados = 0
+
+    def _obra_id(np_, ne):
+        enr = enriquecimiento.get(_clave(np_, ne)) or {}
+        o = enr.get("obra") if isinstance(enr.get("obra"), dict) else None
+        return (o or {}).get("obra_id")
+
+    # total descargable = experiencias con obra_id resuelto (las que la barra cuenta)
+    total_desc = sum(1 for prof in espejo.get("profesionales", [])
+                     for e in (prof.get("experiencias", []) or [])
+                     if _obra_id(prof.get("n_prof"), e.get("n")))
+    procesadas = 0
     for prof in espejo.get("profesionales", []):
         np_ = prof.get("n_prof")
         for e in prof.get("experiencias", []) or []:
@@ -474,6 +510,11 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                 continue
             if max_descargas is not None and bajadas >= max_descargas:
                 break
+            procesadas += 1
+            if reportar is not None:
+                nombre_obra = (enr.get("obra_nombre") or (obra or {}).get("nombre")
+                               or f"obra {obra_id}")
+                reportar(procesadas, total_desc, _recorte(nombre_obra))
             destino = base / f"P{np_}_E{ne}"
             ok = base / f"P{np_}_E{ne}.ok"          # marca de descarga COMPLETA (no .part)
             if ok.exists():
@@ -620,8 +661,12 @@ class EtapaSunatReal:
         total = 0
         postor_rucs = _rucs_postor(ctx.espejo)
 
-        for e, (np_, ne) in ctx.items_experiencia():
+        n_tot = sum(1 for _ in ctx.items_experiencia())
+        for idx, (e, (np_, ne)) in enumerate(ctx.items_experiencia(), 1):
             entidad = str(e.get("entidad_emisora") or "")
+            ctx.reportar(self.nombre, idx, n_tot,
+                         f"Consultando el emisor {idx} de {n_tot}"
+                         + (f" — {_recorte(entidad)}" if entidad.strip() else ""))
             rucs_e = _RE_RUC.findall(f"{e.get('ruc_emisor') or ''} {entidad}")
             k = _clave(np_, ne)
             ini = _fecha_iso(e.get("fecha_inicial"))
@@ -719,6 +764,7 @@ class EtapaReglasReal:
     nombre = E.REGLAS
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
+        ctx.reportar(self.nombre, 0, 0, "Calculando los días efectivos de experiencia")
         obs: list[pipeline.Observacion] = []
         total = ok = 0
         for p in ctx.espejo.get("profesionales", []):
@@ -868,6 +914,7 @@ class EtapaExcelReal:
         self.dir_salida = Path(dir_salida)
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
+        ctx.reportar(self.nombre, 0, 0, "Armando el Excel de evaluación")
         # pasa los periodos CON su tipo (paralizado / sin valorización) para que
         # el Excel los muestre diferenciados; el generador normaliza las fechas.
         paral, cuis, fichas, sunat = desempaquetar_enriquecimiento(ctx.enriquecimiento)
