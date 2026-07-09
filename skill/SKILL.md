@@ -154,55 +154,64 @@ completo del certificado (establecimiento, ubicación, fechas, nivel del hospita
 desambiguas mejor. Corres en Claude Code con salida a internet (curl / navegador /
 búsqueda web). Después de consolidar `espejo.json`, recorre TODAS las experiencias:
 las que tienen `cui: null` (resolver) **y las que ya citan un CUI (verificar — un CUI
-citado puede estar desactualizado, ver punto 3)**.
+citado puede estar desactualizado, ver punto 4)**.
+
+**División de fuentes:** el **Banco de Inversiones del MEF** es el registro maestro —
+los CUI nacen ahí, tiene el nombre oficial, el estado (ACTIVO/CERRADO) y las
+reformulaciones. **InfoObras** es el registro de ejecución que consume el backend.
+Por eso el flujo es: **MEF para ENCONTRAR el CUI por nombre → InfoObras para
+CONFIRMARLO**.
 
 1. **Sonda primero (una sola vez):** haz una consulta de prueba a la búsqueda pública
    de InfoObras. Si no hay salida a internet o el portal no responde, **omite este
    paso completo** y sigue al Paso 5 — el backend resolverá como siempre (cero regresión).
-   La búsqueda es un POST simple (sin login):
+2. **Busca la experiencia POR NOMBRE en el Banco de Inversiones del MEF** (SSI —
+   Sistema de Seguimiento de Inversiones / Consulta de Inversiones, con el navegador
+   o búsqueda web `"<nombre de la obra>" CUI`). Usa 2-3 variantes del nombre: el
+   proyecto completo; sin el envoltorio de consultoría ("elaboración del expediente
+   técnico de…", "estudio de…"); solo establecimiento + localidad. Del resultado toma
+   el **CUI del proyecto con estado vigente** (ACTIVO/VIABLE) cuyo nombre coincide con
+   el objeto del certificado — si hay un par viejo/reformulado con el mismo nombre,
+   el vigente es el bueno.
+3. **Confirma ese CUI en InfoObras** (el backend solo consume InfoObras). La búsqueda
+   es un POST simple (sin login):
    ```
-   curl -s "https://infobras.contraloria.gob.pe/InfobrasWeb/Mapa/busqueda/obrasBasic?page=0&rowsPerPage=20&Parameters=%7B%22nombrObra%22%3A%22<NOMBRE+URL-ENCODED>%22%2C%22codSnip%22%3A%22%22%7D" -X POST
+   curl -s "https://infobras.contraloria.gob.pe/InfobrasWeb/Mapa/busqueda/obrasBasic?page=0&rowsPerPage=20&Parameters=%7B%22nombrObra%22%3A%22%22%2C%22codSnip%22%3A%22<CUI>%22%7D" -X POST
    ```
-   (el JSON `Parameters` admite también `codSnip` para buscar por código; los campos
-   no enviados se asumen vacíos). Cada resultado trae `codUniqInv` (el CUI, 7 díg.),
-   `codigoObra`, `nombrObra`, `nombrDepartamento`, `nombreEntidad`, `estObra`.
-2. **Busca con 2-3 variantes del nombre.** OJO: la búsqueda matchea por **substring
-   contiguo** del nombre oficial de la obra (no por palabras sueltas) — un fragmento
-   con el orden cambiado da 0. Usa fragmentos contiguos y distintivos: el proyecto
-   completo; sin el envoltorio de consultoría ("elaboración del expediente técnico
-   de…", "estudio de…"); solo el establecimiento ("centro de salud X"); solo la
-   localidad distintiva. Si InfoObras no da nada, busca el proyecto en el **Banco de
-   Inversiones del MEF (SSI — Sistema de Seguimiento de Inversiones)** o con una
-   búsqueda web general (`"<nombre de la obra>" CUI`) — los CUI nacen en el MEF —
-   para obtener el código, y vuelve al punto 4 a confirmarlo.
-3. **VERIFICA los CUI citados (no los tomes por buenos):** consulta `codSnip=<cui
-   citado>`. Si la obra devuelta **no solapa en absoluto** el periodo del certificado
-   (p.ej. obra ejecutada 2015-2016 vs certificado 2022-2023) o no existe, es probable
-   un **CUI desactualizado**: el proyecto se reformuló/re-registró con un CUI nuevo
-   (caso real: el cert citaba CUI 2140959 → obra vieja 2015-16; el proyecto vigente
-   con el MISMO nombre era CUI 2448758 en el Banco de Inversiones del MEF). Busca el
-   nombre en InfoObras y en el SSI del MEF; si encuentras el proyecto con nombre
-   coincidente y época que SÍ cuadra, usa ese CUI (`cui_fuente: "skill"`) y deja
-   constancia del reemplazo en `observaciones_claude` (citado X → vigente Y). Si no
-   encuentras reemplazo claro, deja el citado — el backend lo marcará a revisión por
-   cobertura.
-4. **Elige con tu contexto** entre los candidatos: departamento del certificado,
-   fechas (una obra cuyo estado/época no cuadra con el periodo certificado NO es),
-   establecimiento y nivel. Homónimos en distinta región o década: descártalos.
+   Cada resultado trae `codUniqInv` (el CUI, 7 díg.), `codigoObra`, `nombrObra`,
+   `nombrDepartamento`, `nombreEntidad`, `estObra`. Verifica nombre/departamento
+   contra el certificado. (`Parameters` admite también `nombrObra` para buscar por
+   nombre directamente en InfoObras — OJO: matchea por **substring contiguo** del
+   nombre oficial, no por palabras sueltas; útil como apoyo, pero el MEF es la
+   fuente primaria de identidad.)
+4. **VERIFICA los CUI citados (no los tomes por buenos):** consulta InfoObras con
+   `codSnip=<cui citado>`. Si la obra devuelta **no solapa en absoluto** el periodo
+   del certificado (p.ej. obra ejecutada 2015-2016 vs certificado 2022-2023) o no
+   existe, es probable un **CUI desactualizado**: el proyecto se reformuló/re-registró
+   con un CUI nuevo (caso real: el cert citaba CUI 2140959 → obra vieja 2015-16; el
+   proyecto vigente con el MISMO nombre era CUI 2448758 en el MEF). Ve al punto 2
+   (MEF por nombre); si aparece el proyecto con nombre coincidente y época que SÍ
+   cuadra, usa ese CUI (`cui_fuente: "skill"`) y deja constancia del reemplazo en
+   `observaciones_claude` (citado X → vigente Y). Sin reemplazo claro, deja el
+   citado — el backend lo marcará a revisión por cobertura.
+5. **Elige con tu contexto** cuando haya varios candidatos: departamento del
+   certificado, fechas (una obra cuyo estado/época no cuadra con el periodo
+   certificado NO es), establecimiento y nivel. Homónimos en distinta región o
+   década: descártalos.
    **Excepción — experiencias de EXPEDIENTE técnico/estudio:** esas obras suelen NO
    tener ejecución/valorizaciones (el trabajo fue el papel, no la construcción), así
    que el solape de época NO aplica como criterio; confirma solo por nombre/ubicación.
    El backend las acepta por el hito "Aprobación del proyecto" de InfoObras.
-5. **Confirma SIEMPRE antes de escribir** (anti-alucinación): re-consulta el endpoint
-   con `codSnip=<cui elegido>` y verifica que la obra devuelta coincide en nombre/
-   departamento con el certificado. El backend trata el CUI como **autoritativo** —
-   un CUI inventado o mal confirmado lo llevaría a la obra EQUIVOCADA. **Nunca
+6. **Confirma SIEMPRE antes de escribir** (anti-alucinación): todo CUI que escribas
+   debe haber pasado por el punto 3 (visto en la respuesta de InfoObras o del MEF,
+   coincidiendo en nombre/departamento). El backend trata el CUI como **autoritativo**
+   — un CUI inventado o mal confirmado lo llevaría a la obra EQUIVOCADA. **Nunca
    escribas un CUI que no confirmaste; jamás lo deduzcas "de memoria".**
-6. **Escribe en `espejo.json`**: `cui` (solo dígitos) + `cui_fuente: "skill"`. En las
+7. **Escribe en `espejo.json`**: `cui` (solo dígitos) + `cui_fuente: "skill"`. En las
    experiencias donde el cert ya citaba CUI y quedó verificado, deja
    `cui_fuente: "certificado"`. Si no hay candidato convincente, deja `cui: null` —
    caerá a "Por confirmar" en el panel, como hoy. **Mejor null que un CUI dudoso.**
-7. Re-valida el espejo (`node scripts/validar_espejo.js`) tras editarlo.
+8. Re-valida el espejo (`node scripts/validar_espejo.js`) tras editarlo.
 
 > **Alcance:** esto aplica a obras/proyectos PÚBLICOS (InfoObras/MEF). Las
 > experiencias con cliente PRIVADO no tienen CUI ni están en estos registros — déjalas
