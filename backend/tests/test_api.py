@@ -284,3 +284,32 @@ def test_buscar_profesionales_query_corta_o_sin_match(cliente):
     assert cliente.get("/api/pivote/profesionales", params={"q": ""}).json() == []
     assert cliente.get("/api/pivote/profesionales",
                        params={"q": "zzz-nadie-zzz"}).json() == []
+
+
+# ── Reanudación al arrancar (vía repo, no glob de archivos) ──────────────────
+
+def test_startup_reanuda_job_en_proceso(tmp_path, monkeypatch):
+    """Un job que quedó `en_proceso` (crash) se retoma al arrancar la app. La
+    reanudación lee del REPO (no glob *.job.json) → funciona igual con Postgres."""
+    import importlib
+    import time
+
+    monkeypatch.setenv("PIVOTE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("PIVOTE_ETAPAS", "esqueleto")
+    import api.app as modulo
+    importlib.reload(modulo)
+
+    # pre-sembrar un job interrumpido + su espejo, como los dejaría un corte
+    from schemas import pipeline as pl
+    job = modulo.motor.crear_job(ESPEJO)
+    job.estado = pl.JobEstado.EN_PROCESO
+    modulo.repo.guardar(job)
+
+    from fastapi.testclient import TestClient
+    with TestClient(modulo.app) as c:          # `with` dispara el evento startup
+        for _ in range(50):                     # el hilo de reanudación es async
+            estado = c.get(f"/api/pivote/jobs/{job.job_id}").json()["estado"]
+            if estado in ("completado", "requiere_revision"):
+                break
+            time.sleep(0.1)
+        assert estado == "completado"

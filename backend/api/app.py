@@ -279,22 +279,25 @@ def _reanudar_pendientes() -> None:
     """Si el backend se reinició con trabajo a medias, lo RETOMA al arrancar: un
     pipeline cortado (estado `en_proceso`) y/o descargas a medias (`en_progreso`).
     Sin esto, un job interrumpido quedaba colgado para siempre sin recuperación."""
-    for f in DATA_DIR.glob("*.job.json"):
-        try:
-            j = json.loads(f.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001
-            continue
-        jid = j.get("job_id") or f.name[: -len(".job.json")]
+    # Vía el repo (NO glob de *.job.json): con PIVOTE_DB_URL los jobs viven en
+    # Postgres y el glob no encontraría nada — la reanudación quedaba muerta.
+    try:
+        jobs = repo.listar()
+    except Exception:  # noqa: BLE001 — un arranque nunca debe caerse por esto
+        logger.exception("no se pudo listar jobs para reanudar")
+        return
+    for j in jobs:
+        jid = j.job_id
         # pipeline cortado a medias (crash/reinicio) → retomar. `motor.correr` es
         # reanudable (salta etapas ya hechas). Si no, el job queda en 'en_proceso'
         # para siempre, sin recuperación ni desde la UI.
-        if j.get("estado") == pipeline.JobEstado.EN_PROCESO.value:
+        if j.estado == pipeline.JobEstado.EN_PROCESO:
             threading.Thread(target=_correr_y_descargar, args=(jid,), daemon=True).start()
             logger.info("reanudando pipeline interrumpido del job %s tras reinicio", jid)
             continue
         # Solo "en_progreso" = descarga genuinamente interrumpida. "pendiente" puede
         # ser un job viejo (el campo se defaulteó) → NO lo re-disparamos.
-        if j.get("descargas_estado") == "en_progreso":
+        if j.descargas_estado == "en_progreso":
             threading.Thread(target=_asegurar_descargas, args=(jid,), daemon=True).start()
             logger.info("reanudando descargas pendientes del job %s tras reinicio", jid)
 

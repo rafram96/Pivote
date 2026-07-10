@@ -71,6 +71,14 @@ NO se borran: quedan como respaldo hasta verificar el panel.
   correr el backfill, y validar en el panel: histórico visible, búsqueda de
   profesionales, decidir una alerta (escribe en `documentos`).
 
+## Ojo: scripts de operador
+
+Los scripts de `backend/scripts/` (avance_descargas, limpiar_*, resubir_job,
+redescargar_documentos, backfill_representante) leen/escriben los `*.json` de
+DATA_DIR **directo**, sin pasar por el repo. Con Postgres activo operarían sobre
+archivos viejos (o inexistentes). Usarlos solo en modo archivos; el que haga
+falta en producción se adapta al repo en ese momento (no antes — YAGNI).
+
 ## Qué NO hace (a propósito)
 
 - No modela profesionales/experiencias como entidades relacionales (decisión
