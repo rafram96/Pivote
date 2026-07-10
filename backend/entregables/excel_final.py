@@ -803,33 +803,55 @@ def construir_hoja_profesional(
     banda("PARTE 5 — EXPERIENCIA DEL PROFESIONAL (días declarados y efectivos verificados)",
           F_PARTE, FILL_PARTE, 18)
 
-    # 8 columnas: N°(A) · Proyecto(B:H) · Cliente(I:K) · Objeto(M:N) · F.inicio(O)
-    #             · F.fin(P) · Declarado(R) · Efectivo(S). Largos en celdas anchas.
-    def _p5(n, proyecto, cliente, objeto, fini, ffin, decl, efec, *, head=False):
+    # 9 columnas: N°(A) · Proyecto(B:H) · Cliente(I:K) · Objeto(M) · Fuente(N)
+    #             · F.inicio(O) · F.fin(P) · Declarado(R) · Efectivo(S).
+    # Cabecera en 1 fila; cada experiencia ocupa 2 sub-filas (Certificado /
+    # InfoObras) con las fechas de cada fuente una debajo de la otra, para
+    # contrastarlas de un vistazo. Las demás celdas se combinan verticalmente.
+    def _p5_head():
         nonlocal r
-        ft = F_HEAD if head else F_CELL
-        for ci, cf, val in [(1, 1, n), (2, 8, proyecto), (9, 11, cliente),
-                            (13, 14, objeto), (15, 15, fini), (16, 16, ffin)]:
+        for ci, cf, val in [(1, 1, "N°"), (2, 8, "Proyecto / Obra"),
+                            (9, 11, "Cliente o Empleador"),
+                            (13, 13, "Objeto de contratación"), (14, 14, "Fuente"),
+                            (15, 15, "Fecha de inicio"), (16, 16, "Fecha de fin"),
+                            (18, 18, "Declarado (días)"), (19, 19, "Efectivo (días)")]:
             if cf > ci:
                 ws.merge_cells(start_row=r, start_column=ci, end_row=r, end_column=cf)
-            c = ws.cell(r, ci, val); c.font, c.border, c.alignment = ft, BORDER, AL_WRAP
-            if head:
-                c.fill = FILL_HEAD
-            elif ci in (15, 16) and isinstance(val, date):
-                c.number_format = FMT_FECHA
-        cd = ws.cell(r, 18, decl); cd.font, cd.border, cd.alignment = ft, BORDER, AL_HEAD
-        ce = ws.cell(r, 19, efec); ce.font, ce.border, ce.alignment = ft, BORDER, AL_HEAD
-        if head:
-            cd.fill = ce.fill = FILL_HEAD
-        else:
-            if isinstance(decl, (int, float)):
-                cd.number_format, cd.fill = FMT_INT, FILL_CLAUDE
-            if isinstance(efec, (int, float)):
-                ce.number_format, ce.fill = FMT_INT, FILL_EFECTIVO
-        lns = max(-(-len(str(proyecto)) // 74), -(-len(str(cliente)) // 43),
-                  -(-len(str(objeto)) // 26), 1)   # alto = celda más alta (texto envuelto)
-        ws.row_dimensions[r].height = 30 if head else max(28, lns * 13 + 3)
+            c = ws.cell(r, ci, val)
+            c.font, c.fill, c.border, c.alignment = F_HEAD, FILL_HEAD, BORDER, AL_WRAP
+        ws.row_dimensions[r].height = 30
         r += 1
+
+    def _p5(n, proyecto, cliente, objeto, fini, ffin, io_ini, io_fin, decl, efec):
+        nonlocal r
+        # celdas combinadas en vertical (2 sub-filas)
+        for ci, cf, val in [(1, 1, n), (2, 8, proyecto), (9, 11, cliente),
+                            (13, 13, objeto)]:
+            ws.merge_cells(start_row=r, start_column=ci, end_row=r + 1, end_column=cf)
+            c = ws.cell(r, ci, val); c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
+        # sub-fila 1: fechas del certificado (amarillo = declarado) · sub-fila 2:
+        # fechas según InfoObras (naranja = dato del backend). Sin ficha → "—".
+        io_falta = "— (obra no ubicada en InfoObras)"
+        for dr, fuente, fi, ff, fill in [
+                (0, "Certificado", fini or "—", ffin or "—", FILL_CLAUDE),
+                (1, "InfoObras", io_ini or io_falta,
+                 io_fin or ("(sin fin)" if io_ini else io_falta), FILL_BACKEND)]:
+            for ci, val in [(14, fuente), (15, fi), (16, ff)]:
+                c = ws.cell(r + dr, ci, val)
+                c.font, c.fill, c.border, c.alignment = F_CELL, fill, BORDER, AL_WRAP
+                if isinstance(val, date):
+                    c.number_format = FMT_FECHA
+        for ci, val, fill in [(18, decl, FILL_CLAUDE), (19, efec, FILL_EFECTIVO)]:
+            ws.merge_cells(start_row=r, start_column=ci, end_row=r + 1, end_column=ci)
+            c = ws.cell(r, ci, val); c.font, c.border, c.alignment = F_CELL, BORDER, AL_HEAD
+            if isinstance(val, (int, float)):
+                c.number_format, c.fill = FMT_INT, fill
+        lns = max(-(-len(str(proyecto)) // 74), -(-len(str(cliente)) // 43),
+                  -(-len(str(objeto)) // 14), 1)   # alto total = celda más alta, en 2 filas
+        alto = max(28, lns * 13 + 3)
+        ws.row_dimensions[r].height = max(15, alto // 2)
+        ws.row_dimensions[r + 1].height = max(15, alto - alto // 2)
+        r += 2
 
     def _p5_tot(label, decl_v, efec_v, fill_e=FILL_EFECTIVO):
         nonlocal r
@@ -843,15 +865,17 @@ def construir_hoja_profesional(
             ce.font, ce.fill, ce.border, ce.number_format = F_BOLD, fill_e, BORDER, FMT_INT
         r += 1
 
-    _p5("N°", "Proyecto / Obra", "Cliente o Empleador", "Objeto de contratación",
-        "Fecha de inicio", "Fecha de fin", "Declarado (días)", "Efectivo (días)", head=True)
+    _p5_head()
     _sd = _se = 0
     for e in prof.get("experiencias", []):
         ne = e.get("n")
         ini_, fin_ = _fecha_iso(e.get("fecha_inicial")), _fecha_iso(e.get("fecha_final"))
         decl, efec, _clamp = _dias_exp(ne, ini_, fin_)
+        fx_ = fichas.get((n_prof, ne)) or {}
         _p5(ne, e.get("proyecto") or "—", e.get("entidad_emisora") or "—",
-            e.get("cargo_ocupado") or "—", ini_, fin_, decl, efec)
+            e.get("cargo_ocupado") or "—", ini_, fin_,
+            _fecha_iso(fx_.get("fecha_inicio")), _fecha_iso(fx_.get("fecha_fin")),
+            decl, efec)
         if isinstance(decl, (int, float)):
             _sd += decl
         if isinstance(efec, (int, float)):
