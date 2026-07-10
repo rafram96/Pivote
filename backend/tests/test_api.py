@@ -244,3 +244,43 @@ def test_armar_progreso_fusiona_vivo_y_checkpoint(cliente):
         assert prog["pct"] == round(100 / 8, 1)   # 1 de 8 etapas completa
     finally:
         modulo.REGISTRO.limpiar("jx")
+
+
+# ── Búsqueda global de profesionales ─────────────────────────────────────────
+
+def test_buscar_profesionales_por_nombre_sin_tildes(cliente):
+    cid = cliente.post("/api/pivote/concursos",
+                       json={"nomenclatura": "CP-BUSCA/2026"}).json()["concurso_id"]
+    job_id = _subir(cliente, cid).json()["job_id"]
+
+    # "profesional uno" matchea "Profesional Uno" (case-insensitive); "unó" prueba tildes
+    for q in ("profesional uno", "UNÓ"):
+        r = cliente.get("/api/pivote/profesionales", params={"q": q})
+        assert r.status_code == 200
+        hits = r.json()
+        assert any(h["job_id"] == job_id for h in hits), f"sin match para {q!r}"
+    h = next(x for x in cliente.get("/api/pivote/profesionales",
+                                    params={"q": "profesional uno"}).json()
+             if x["job_id"] == job_id)
+    assert h["nombre"] == "Profesional Uno"
+    assert h["cargo"] == "JEFE DE SUPERVISIÓN"
+    assert h["n_prof"] == 1 and h["n_experiencias"] == 1
+    assert h["concurso_id"] == cid and h["concurso"] == "CP-BUSCA/2026"
+    assert h["postor"] == "POSTOR API DEMO"
+
+
+def test_buscar_profesionales_por_colegiatura_y_cargo(cliente):
+    cid = cliente.post("/api/pivote/concursos",
+                       json={"nomenclatura": "CP-BUSCA2/2026"}).json()["concurso_id"]
+    job_id = _subir(cliente, cid).json()["job_id"]
+    assert any(h["job_id"] == job_id for h in cliente.get(
+        "/api/pivote/profesionales", params={"q": "CIP 12345"}).json())
+    assert any(h["job_id"] == job_id for h in cliente.get(
+        "/api/pivote/profesionales", params={"q": "jefe de supervision"}).json())
+
+
+def test_buscar_profesionales_query_corta_o_sin_match(cliente):
+    assert cliente.get("/api/pivote/profesionales", params={"q": "x"}).json() == []
+    assert cliente.get("/api/pivote/profesionales", params={"q": ""}).json() == []
+    assert cliente.get("/api/pivote/profesionales",
+                       params={"q": "zzz-nadie-zzz"}).json() == []

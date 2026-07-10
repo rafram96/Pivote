@@ -581,6 +581,54 @@ def resolver_revision(job_id: str, tareas: BackgroundTasks, body: dict):
     return json.loads(job.model_dump_json())
 
 
+# ── Búsqueda global de profesionales ─────────────────────────────────────────
+
+def _sin_tildes(s: str) -> str:
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", s)
+                   if not unicodedata.combining(c)).lower()
+
+
+@app.get("/api/pivote/profesionales")
+def buscar_profesionales(q: str = ""):
+    """Busca un profesional por nombre/colegiatura/cargo en TODOS los análisis
+    (insensible a mayúsculas y tildes). Devuelve dónde aparece, con link directo
+    al análisis. Escanea los espejos persistidos — con decenas de jobs es barato;
+    en Postgres esto pasa a la tabla índice `profesionales` (mismo shape).
+
+    Nota: si el MISMO profesional está en varias propuestas, devuelve una fila por
+    aparición — eso es información, no ruido (el evaluador ve en qué concursos va)."""
+    q = (q or "").strip()
+    if len(q) < 2:
+        return []
+    qn = _sin_tildes(q)
+    concursos = {c.concurso_id: c.nomenclatura for c in repo.listar_concursos()}
+    out = []
+    for job in repo.listar():
+        espejo = repo.cargar_espejo(job.job_id)
+        if not espejo:
+            continue
+        for p in espejo.get("profesionales", []):
+            campos = [p.get("nombre"), p.get("colegiatura"), p.get("cargo")]
+            if not any(qn in _sin_tildes(str(v)) for v in campos if v):
+                continue
+            out.append({
+                "nombre": p.get("nombre"),
+                "cargo": p.get("cargo"),
+                "colegiatura": p.get("colegiatura"),
+                "n_prof": p.get("n_prof"),
+                "cumple": p.get("cumple"),
+                "n_experiencias": len(p.get("experiencias", []) or []),
+                "job_id": job.job_id,
+                "estado_job": getattr(job.estado, "value", job.estado),
+                "concurso_id": job.concurso_id,
+                "concurso": concursos.get(job.concurso_id) or job.concurso,
+                "postor": job.postor,
+            })
+    out.sort(key=lambda x: (_sin_tildes(str(x["nombre"] or "")), str(x["job_id"])))
+    return out[:50]                 # tope de cortesía; con 2+ letras alcanza y sobra
+
+
 # ── Vistas derivadas (extracción + resumen) ──────────────────────────────────
 
 @app.get("/api/pivote/jobs/{job_id}/espejo")
