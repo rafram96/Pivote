@@ -20,11 +20,14 @@ services:
       PIVOTE_ETAPAS: ${PIVOTE_ETAPAS:-real}        # real = cruces SUNAT/InfoObras
       PIVOTE_MAX_DESCARGAS: ${PIVOTE_MAX_DESCARGAS:-}  # vacío = baja TODO; N = tope solo en pruebas
       PIVOTE_DATA_DIR: /datos
+      # Persistencia PostgreSQL (jobs/espejos/decisiones + índice de profesionales).
+      # Los binarios (xlsx/zip/pdf) siguen en el volumen datos_pivote.
+      PIVOTE_DB_URL: postgresql://infoobras:${DB_PASSWORD:?define DB_PASSWORD en deploy/.env}@db/infoobras
       INFOOBRAS_DOWNLOAD_RETRIES: ${INFOOBRAS_DOWNLOAD_RETRIES:-5}  # portal intermitente → 5 reintentos
       SUNAT_MAX_RETRIES: ${SUNAT_MAX_RETRIES:-5}
       TZ: America/Lima
     volumes:
-      - datos_pivote:/datos          # jobs/espejos/entregables (datos del cliente)
+      - datos_pivote:/datos          # binarios/entregables (datos del cliente)
     ports:
       - "${BACKEND_PORT:-8001}:8001" # REQUERIDO en LAN: el browser baja el ZIP directo + el MCP de Manuel
     healthcheck:                     # smoke test integrado: docker compose ps → "healthy"
@@ -33,6 +36,9 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    depends_on:
+      db:
+        condition: service_healthy   # el backend arranca con la BD ya lista
     restart: unless-stopped
 
   panel:
@@ -61,20 +67,27 @@ services:
         condition: service_healthy   # el panel arranca cuando el backend ya responde
     restart: unless-stopped
 
-  # --- Persistencia PostgreSQL — PENDIENTE de cablear en el backend ------------
-  # Hoy el backend persiste en ARCHIVOS (volumen datos_pivote). Cuando se cablee
-  # un RepositorioPostgres (+ el caché SUNAT de sunat_cache.py), descomentar este
-  # servicio y apuntar el backend con DATABASE_URL=postgres://infoobras:...@db/infoobras
-  # db:
-  #   image: postgres:16
-  #   environment:
-  #     POSTGRES_DB: infoobras
-  #     POSTGRES_USER: infoobras
-  #     POSTGRES_PASSWORD: ${DB_PASSWORD:?define DB_PASSWORD en deploy/.env}
-  #   volumes:
-  #     - pgdata:/var/lib/postgresql/data
-  #   restart: unless-stopped
+  # Persistencia PostgreSQL (esquema básico: jobs + documentos JSONB +
+  # índice de profesionales — ver docs/backend/esquema_postgres.md). El backend
+  # crea las tablas solo al arrancar; para migrar datos previos en archivos:
+  #   docker compose exec backend python scripts/migrar_a_postgres.py
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: infoobras
+      POSTGRES_USER: infoobras
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?define DB_PASSWORD en deploy/.env}
+      TZ: America/Lima
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U infoobras -d infoobras"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    # sin `ports:` a propósito — solo la red interna de compose la alcanza
 
 volumes:
   datos_pivote:
-  # pgdata:
+  pgdata:

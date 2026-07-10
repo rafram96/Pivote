@@ -13,8 +13,9 @@ Pillow>=10.0           # openpyxl lo usa para embeber las imágenes
 requests>=2.31
 rapidfuzz>=3.0          # fuzzy match razón social (sunat.py)
 
-# Persistencia: hoy en ARCHIVOS (RepositorioArchivos). Cuando se cablee
-# PostgreSQL (repo + caché SUNAT) se re-agrega psycopg2-binary.
+# Persistencia PostgreSQL (RepositorioPostgres — activo solo con PIVOTE_DB_URL;
+# sin la variable se usa RepositorioArchivos y esta lib ni se importa).
+psycopg[binary,pool]>=3.1
 
 # API HTTP (backend/api/)
 fastapi>=0.115

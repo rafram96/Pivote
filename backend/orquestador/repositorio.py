@@ -49,6 +49,8 @@ class Repositorio(Protocol):
     def listar_concursos(self) -> list[pipeline.Concurso]: ...
     def guardar_enriquecimiento(self, job_id: str, datos: dict) -> None: ...
     def cargar_enriquecimiento(self, job_id: str) -> dict: ...
+    def guardar_decisiones(self, job_id: str, datos: dict) -> None: ...
+    def cargar_decisiones(self, job_id: str) -> dict: ...
     def eliminar(self, job_id: str) -> None: ...
     def eliminar_concurso(self, concurso_id: str) -> None: ...
 
@@ -95,10 +97,18 @@ class RepositorioMemoria:
         crudo = self._espejos.get(f"enr-{job_id}")
         return json.loads(crudo) if crudo else {}
 
+    def guardar_decisiones(self, job_id: str, datos: dict) -> None:
+        self._espejos[f"dec-{job_id}"] = json.dumps(datos, ensure_ascii=False)
+
+    def cargar_decisiones(self, job_id: str) -> dict:
+        crudo = self._espejos.get(f"dec-{job_id}")
+        return json.loads(crudo) if crudo else {}
+
     def eliminar(self, job_id: str) -> None:
         self._jobs.pop(job_id, None)
         self._espejos.pop(job_id, None)
         self._espejos.pop(f"enr-{job_id}", None)
+        self._espejos.pop(f"dec-{job_id}", None)
 
     def eliminar_concurso(self, concurso_id: str) -> None:
         self._concursos.pop(concurso_id, None)
@@ -160,6 +170,16 @@ class RepositorioArchivos:
 
     def cargar_enriquecimiento(self, job_id: str) -> dict:
         ruta = self._ruta(job_id, "enriquecimiento")
+        return json.loads(ruta.read_text(encoding="utf-8")) if ruta.exists() else {}
+
+    # Mismo nombre de archivo que escribía app.py directo ({id}.decisiones.json):
+    # las decisiones ya tomadas en jobs viejos se siguen leyendo sin migrar nada.
+    def guardar_decisiones(self, job_id: str, datos: dict) -> None:
+        _escribir_atomico(self._ruta(job_id, "decisiones"),
+                          json.dumps(datos, ensure_ascii=False, indent=1))
+
+    def cargar_decisiones(self, job_id: str) -> dict:
+        ruta = self._ruta(job_id, "decisiones")
         return json.loads(ruta.read_text(encoding="utf-8")) if ruta.exists() else {}
 
     def eliminar(self, job_id: str) -> None:

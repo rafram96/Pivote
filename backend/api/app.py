@@ -47,7 +47,14 @@ from schemas.espejo import JsonEspejo
 DATA_DIR = Path(os.getenv("PIVOTE_DATA_DIR", "datos_pivote"))
 
 app = FastAPI(title="InfoObras Pivote API", version="0.2.0")
-repo = RepositorioArchivos(DATA_DIR)
+# Persistencia: PIVOTE_DB_URL definida → PostgreSQL (servidor); ausente →
+# archivos JSON en DATA_DIR (esta laptop, tests). Los binarios van a DATA_DIR
+# en ambos casos. El motor no distingue: ambos implementan el mismo protocolo.
+if os.getenv("PIVOTE_DB_URL"):
+    from orquestador.repositorio_pg import RepositorioPostgres
+    repo = RepositorioPostgres(os.getenv("PIVOTE_DB_URL"), dir_datos=DATA_DIR)
+else:
+    repo = RepositorioArchivos(DATA_DIR)
 
 
 def _reportar_progreso(job_id: str, etapa, item_actual: int,
@@ -292,13 +299,10 @@ def _reanudar_pendientes() -> None:
             logger.info("reanudando descargas pendientes del job %s tras reinicio", jid)
 
 
-def _decisiones_path(job_id: str) -> Path:
-    return DATA_DIR / f"{job_id}.decisiones.json"
-
-
 def _decisiones(job_id: str) -> dict:
-    p = _decisiones_path(job_id)
-    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    # Vía el repo (antes escribía {id}.decisiones.json directo): así Postgres
+    # también las captura y RepositorioArchivos mantiene el mismo archivo.
+    return repo.cargar_decisiones(job_id)
 
 
 def _pendientes(job: pipeline.Job) -> int:
@@ -601,6 +605,10 @@ def buscar_profesionales(q: str = ""):
     q = (q or "").strip()
     if len(q) < 2:
         return []
+    # Con Postgres, la tabla índice `profesionales` resuelve esto con un LIKE
+    # (mismo shape); el escaneo de abajo es el camino del repo de archivos.
+    if hasattr(repo, "buscar_profesionales"):
+        return repo.buscar_profesionales(q)
     qn = _sin_tildes(q)
     concursos = {c.concurso_id: c.nomenclatura for c in repo.listar_concursos()}
     out = []
@@ -754,8 +762,7 @@ def decidir_alerta(job_id: str, body: dict):
         raise HTTPException(400, "alerta_id y relevante son obligatorios")
     decisiones = _decisiones(job_id)
     decisiones[alerta_id] = {"relevante": relevante, "razon": body.get("razon")}
-    _decisiones_path(job_id).write_text(
-        json.dumps(decisiones, ensure_ascii=False, indent=1), encoding="utf-8")
+    repo.guardar_decisiones(job_id, decisiones)
     return resumen(job_id)
 
 
