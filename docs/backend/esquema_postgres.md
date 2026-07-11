@@ -1,10 +1,14 @@
 # Esquema PostgreSQL — persistencia del pivote
 
-> **Status**: ✓ implementado (`backend/orquestador/repositorio_pg.py`) · 2026-07-10
+> **Status**: ✓ implementado (`backend/orquestador/repositorio_pg.py`) · act. 2026-07-11
 > **Decisión marco**: Postgres **básico** (2026-06-25, contraparte de no cobrar el
 > addendum): espejo JSONB de los documentos actuales, **sin modelado relacional**.
-> **Decisión de recorte** (2026-07-10, con el usuario): 3 tablas — `jobs` +
-> `profesionales` + `documentos` genérica — en vez de una tabla por documento.
+> **Decisión de recorte** (2026-07-10): 3 tablas — `jobs` + `profesionales` +
+> `documentos` genérica — en vez de una tabla por documento.
+> **Decisión de rol** (2026-07-11): la BD **NO reemplaza a los archivos** — es el
+> **respaldo lógico**. Los archivos (una carpeta por job) siguen siendo la fuente
+> de verdad; Postgres recibe cada escritura vía `RepositorioConRespaldo`
+> (write-through best-effort) y sirve para backup/restore y consulta ad-hoc.
 
 ## Las 3 tablas
 
@@ -32,35 +36,54 @@ arrancar, `CREATE TABLE IF NOT EXISTS` — sin migrador aparte, coherente con "b
   escriben SIEMPRE completos por id — una tabla por cada uno no aporta nada; el
   par `(clave, tipo)` da upsert idempotente y cero carreras (las decisiones antes
   se escribían con read-modify-write directo a disco desde `app.py`).
-- **Binarios fuera de la BD**: Excels, ZIPs y PDFs (`{job}.certs/`,
-  `{job}.descargas/`) siguen en el volumen `datos_pivote`. `eliminar()` limpia
-  tablas Y disco.
+- **Binarios fuera de la BD**: Excels, ZIPs y PDFs (`{job}/certs/`,
+  `{job}/descargas/`) viven en la carpeta del job. El borrado en disco lo hace
+  el primario (archivos); `eliminar()` de Postgres solo limpia sus tablas.
 - **`{id}.cui.json`** (descarga suelta por CUI) se queda en archivos: estado
   efímero de una tarea, no dato del negocio.
+
+## Estructura de archivos (la fuente de verdad)
+
+`datos_pivote/` dejó de ser una raíz con todo suelto: cada job tiene SU carpeta.
+
+```
+datos_pivote/
+  {concurso_id}.concurso.json     ← concursos en la raíz (livianos, pocos)
+  {job_id}/
+    job.json · espejo.json · enriquecimiento.json · decisiones.json
+    claude.xlsx · final.xlsx · infoobras.zip
+    certs/ · descargas/
+```
+
+La migración del layout viejo (todo suelto) es **automática e idempotente** al
+construir `RepositorioArchivos` (arranque del backend): mueve `{id}.tipo` →
+`{id}/tipo`. Las descargas sueltas por CUI (`{id}.cui.json`) quedan como están.
 
 ## Activación y switch
 
 ```
-PIVOTE_DB_URL definida   → RepositorioPostgres (server; compose la inyecta)
-PIVOTE_DB_URL ausente    → RepositorioArchivos (esta laptop, tests offline)
+PIVOTE_DB_URL definida   → RepositorioConRespaldo(archivos, Postgres)  (server)
+PIVOTE_DB_URL ausente    → RepositorioArchivos a secas  (esta laptop, tests)
 ```
 
-El motor y la API no distinguen (protocolo `Repositorio`). `psycopg` se importa
-perezoso: sin la variable, la lib ni se carga (la laptop no la necesita instalada).
+Con respaldo activo: toda LECTURA va a archivos; toda ESCRITURA va a archivos y
+luego, best-effort, a Postgres — si la BD se cae, se loguea y **el análisis
+sigue**. El motor y la API no distinguen (protocolo `Repositorio`). `psycopg`
+se importa perezoso: sin la variable, la lib ni se carga.
 
 En `deploy/docker-compose.yml`: servicio `db` (postgres:16-alpine, volumen
 `pgdata`, sin puerto publicado — solo red interna), `DB_PASSWORD` obligatoria en
 `deploy/.env`, y el backend arranca `depends_on: db healthy`.
 
-## Migración de los datos existentes
+## Sincronizar el respaldo (backfill inicial o tras una caída de la BD)
 
 ```bash
 docker compose exec backend python scripts/migrar_a_postgres.py
 ```
 
-Idempotente (upserts). Migra concursos, jobs, espejos (indexando profesionales),
-enriquecimientos y decisiones desde los `*.json` de DATA_DIR. Los `.json` viejos
-NO se borran: quedan como respaldo hasta verificar el panel.
+Idempotente (upserts): vuelca TODO lo que hay en archivos a Postgres. Sirve para
+el backfill inicial y para re-sincronizar si la BD estuvo caída un rato (el
+write-through es best-effort y no reintenta).
 
 ## Verificación
 
@@ -74,14 +97,19 @@ NO se borran: quedan como respaldo hasta verificar el panel.
 ## Ojo: scripts de operador
 
 Los scripts de `backend/scripts/` (avance_descargas, limpiar_*, resubir_job,
-redescargar_documentos, backfill_representante) leen/escriben los `*.json` de
-DATA_DIR **directo**, sin pasar por el repo. Con Postgres activo operarían sobre
-archivos viejos (o inexistentes). Usarlos solo en modo archivos; el que haga
-falta en producción se adapta al repo en ese momento (no antes — YAGNI).
+redescargar_documentos, backfill_representante) leen/escriben los JSON de
+DATA_DIR **directo**, sin pasar por el repo. Como los archivos son la fuente de
+verdad, eso sigue siendo correcto — PERO (1) asumen el layout viejo suelto
+(`{id}.espejo.json`), hay que adaptarles la ruta a `{id}/espejo.json` cuando se
+usen, y (2) lo que escriban NO llega al respaldo Postgres hasta re-correr
+`migrar_a_postgres.py`.
 
 ## Qué NO hace (a propósito)
 
 - No modela profesionales/experiencias como entidades relacionales (decisión
   comercial cerrada — la tabla `profesionales` es un índice de búsqueda, no un modelo).
 - No mueve el caché SUNAT ni los binarios a la BD.
+- No se LEE de Postgres en operación normal (solo restore/consulta ad-hoc) —
+  por eso la búsqueda de profesionales del panel escanea archivos (la verdad);
+  la tabla índice queda como copia consultable.
 - No versiona documentos (la última escritura gana, igual que los archivos).

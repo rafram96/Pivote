@@ -34,10 +34,10 @@ oficiales (SUNAT/InfoObras) y persiste → el **panel** lo muestra.
 
 | # | Pieza | Dónde corre | Código en este repo | Estado |
 |---|---|---|---|---|
-| 1 | **Skill** | PC del ingeniero (Cowork) | [`skill/`](../skill/) | 🔨 diseñada, sin código |
-| 2 | **MCP server** | PC del ingeniero | [`mcp-server/`](../mcp-server/) | 📐 POC funcional |
-| 3 | **Backend** | Servidor on-prem | [`backend/`](../backend/) | **8 componentes** → [mapa](backend/README.md) · [diagrama](backend/arquitectura_backend.html) · scrapers ✅ · resolución CUI ✅ · validador 🔨 |
-| 4 | **Frontend** | Servidor on-prem (panel) | ❌ NO aquí → `Panel-InfoObras` | ⏳ mockups |
+| 1 | **Skill** | PC del ingeniero (Cowork) | [`skill/`](../skill/) | ✅ construida y probada e2e (empaquetada como plugin de Cowork) |
+| 2 | **MCP server** | PC del ingeniero | [`mcp-server/`](../mcp-server/) | ✅ cableado al backend real (subir_analisis multipart, probado e2e) |
+| 3 | **Backend** | Servidor on-prem | [`backend/`](../backend/) | **8 componentes** → [mapa](backend/README.md) · [diagrama](backend/arquitectura_backend.html) · ✅ todos construidos y probados offline; falta validar en el server del cliente |
+| 4 | **Frontend** | Servidor on-prem (panel) | ❌ NO aquí → `Panel-InfoObras` | ✅ panel Next.js real, cableado al backend vía PIVOTE_API (validado e2e) |
 
 ### El MCP: solo construimos el *server*
 

@@ -1,8 +1,15 @@
 # Plan — Progreso y observabilidad del pipeline (backend + panel)
 
-> **Estado**: 📋 planeación (sin implementar) · 2026-07-09
-> **Alcance**: solo diseño detallado. La implementación se cotiza aparte
-> (candidatos a bolsa de horas / extras — ver `docs/comercial/estrategia-extras.html`).
+> **Estado** (act. 2026-07-11):
+> - **Paquete A — ✅ IMPLEMENTADO y mergeado a `demo`**: §1 progreso por ítem
+>   (`orquestador/progreso.py` + `Contexto.reportar`) · §2a endpoint `/progreso` ·
+>   §3 descargas con `obra_actual` · §8 panel (`StepperEtapas`, hook de polling,
+>   TabDescargas). Validado en navegador con mock; falta verlo contra portales
+>   vivos en el server del cliente.
+> - **Paquetes B (§4 ETA, §5 timeline) · C (§6 cancelar) · D (§2b SSE) — ⏳ NO
+>   implementados**: candidatos a bolsa de horas / extras
+>   (ver `docs/comercial/estrategia-extras.html`).
+> - §7 semáforo de salud: ya existía antes de este plan (quedó descartado aquí).
 > **Repos afectados**: este (`backend/`) y `Panel-InfoObras/frontend/`.
 
 ---

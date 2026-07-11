@@ -11,7 +11,13 @@
 
 ---
 
-## 0 · Status del refactor (al 2026-05-30)
+## 0 · Status del refactor (al 2026-05-30 — HISTÓRICO)
+
+> ⚠ **Act. 2026-07-11**: esta tabla quedó como foto de mayo. Hoy TODOS los
+> componentes están construidos y probados offline/e2e local (skill, MCP,
+> backend completo con progreso en vivo, búsqueda de profesionales, Postgres
+> como respaldo lógico, panel real). Lo único abierto: validación en el server
+> del cliente + hito final. Fuente vigente: `docs/backend/README.md`.
 
 Leyenda: ✅ probado empíricamente · 📐 diseñado/decidido · 🔨 por construir ·
 ❌ descartado.
@@ -447,7 +453,10 @@ paralizaciones. **Confiable.**
 ## 8 · Económico (resumen — detalle fino en la llamada)
 
 - Total acordado original: **S/. 9,600** (anticipo 2,880 ya cobrado).
-- Pendiente: **S/. 6,720** (hito intermedio 3,840 + final 2,880).
+- ~~Pendiente: S/. 6,720~~ → **act. 2026-07-11**: hito intermedio (3,840)
+  **PAGADO** el 2026-07-04 (conformidad de Manuel 2026-06-25). Pendiente
+  solo el **hito final: S/. 2,880** (despliegue + pruebas reales +
+  capacitación 2h + manual).
 - **Hito intermedio (3,840)**: corresponde a trabajo ya construido. El scraping
   —su componente más caro— es el **núcleo de este refactor**, no se tira.
 - **Hito final (2,880)**: se redirige **íntegro** a este refactor, sin costo
