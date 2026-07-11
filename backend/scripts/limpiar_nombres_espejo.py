@@ -17,6 +17,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import config  # noqa: E402 — carga el .env de la raíz
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 _RE_DNI = re.compile(r"DNI\s*[:.]?\s*(\d{6,8})", re.I)
@@ -66,7 +68,7 @@ def limpiar_espejo(ruta: Path) -> int:
 
 
 def main(job_id: str | None) -> None:
-    dd = Path(os.getenv("PIVOTE_DATA_DIR", "datos_pivote"))
+    dd = config.data_dir()
     patron = f"{job_id}.espejo.json" if job_id else "*.espejo.json"
     archivos = sorted(dd.glob(patron))
     tot_files = tot_profs = 0

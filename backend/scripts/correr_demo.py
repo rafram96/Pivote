@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import config  # noqa: E402 — carga el .env de la raíz
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from orquestador import Motor, RepositorioArchivos, etapas_reales  # noqa: E402
@@ -41,7 +43,7 @@ def main() -> int:
     nombre_concurso = sys.argv[2] if len(sys.argv) > 2 else (
         espejo.get("_meta", {}).get("concurso") or "Concurso demo")
 
-    data_dir = Path(os.getenv("PIVOTE_DATA_DIR", "datos_pivote"))
+    data_dir = config.data_dir()
     repo = RepositorioArchivos(data_dir)
 
     # concurso (reusa si ya existe uno con la misma nomenclatura)

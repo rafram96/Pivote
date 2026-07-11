@@ -20,6 +20,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import config  # noqa: E402 — carga el .env de la raíz
+
 from orquestador.repositorio import RepositorioArchivos          # noqa: E402
 from orquestador.repositorio_pg import RepositorioPostgres        # noqa: E402
 
@@ -29,7 +31,7 @@ def main() -> int:
     if not dsn:
         print("falta PIVOTE_DB_URL en el entorno")
         return 1
-    data_dir = Path(os.getenv("PIVOTE_DATA_DIR", "datos_pivote"))
+    data_dir = config.data_dir()
     archivos = RepositorioArchivos(data_dir)
     pg = RepositorioPostgres(dsn)
 

@@ -19,6 +19,8 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import config  # noqa: E402 — carga el .env de la raíz
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from scraping.infoobras import (  # noqa: E402
@@ -92,7 +94,7 @@ def representante_de_obra(sess, obra_id) -> dict:
 
 
 def main(job_id: str) -> None:
-    dd = Path(os.getenv("PIVOTE_DATA_DIR", "datos_pivote"))
+    dd = config.data_dir()
     ruta = dd / f"{job_id}.enriquecimiento.json"
     enr = json.loads(ruta.read_text(encoding="utf-8"))
     sess = _crear_session()

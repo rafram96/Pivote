@@ -24,12 +24,10 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-# Carga el .env de la raíz del repo ANTES de leer el entorno o importar módulos
+# config carga el .env de la raíz ANTES de leer el entorno o importar módulos
 # que fijan constantes desde os.getenv (retries, throttle…). override=False → el
 # entorno real y los tests (que setean su propio PIVOTE_ETAPAS) siempre ganan.
-from dotenv import load_dotenv  # noqa: E402
-
-load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+import config  # noqa: E402 — el import ejecuta load_dotenv
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile  # noqa: E402
 from fastapi.responses import FileResponse, JSONResponse
@@ -44,7 +42,9 @@ from orquestador.progreso import REGISTRO
 from schemas import pipeline
 from schemas.espejo import JsonEspejo
 
-DATA_DIR = Path(os.getenv("PIVOTE_DATA_DIR", "datos_pivote"))
+# Carpeta de datos: definible en el .env de la raíz (PIVOTE_DATA_DIR). Rutas
+# relativas quedan ancladas a backend/ — no al CWD (ver backend/config.py).
+DATA_DIR = config.data_dir()
 
 app = FastAPI(title="InfoObras Pivote API", version="0.2.0")
 # Persistencia: los ARCHIVOS son siempre la fuente de verdad (una carpeta por
