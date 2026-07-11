@@ -28,6 +28,7 @@ from resolucion import ConsultaInfoObras, resolver_con_dedup
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
 from entregables import desempaquetar_enriquecimiento, generar_excel_final, mapear_certificados
 from .etapas import Contexto, EtapaIngesta, EtapaStub
+from .repositorio import carpeta_job
 
 logger = logging.getLogger(__name__)
 
@@ -484,7 +485,7 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
         descargar_datos_cierre, descargar_aprobacion_expediente,
         reset_descargas_stats, descargas_stats, resumen_descargas)
     from scraping.errores_red import corto
-    base = Path(dir_descargas) / f"{job_id}.descargas"
+    base = carpeta_job(Path(dir_descargas), job_id) / "descargas"
     reset_descargas_stats()
     bajadas = saltados = 0
 
@@ -924,7 +925,7 @@ class EtapaExcelReal:
         for it in ctx.job.items_revision:
             if not it.resuelto and it.n_exp is not None:
                 revisiones.setdefault((it.n_prof, it.n_exp), it.motivo)
-        ruta = self.dir_salida / f"{ctx.job.job_id}.final.xlsx"
+        ruta = carpeta_job(self.dir_salida, ctx.job.job_id) / "final.xlsx"
         if ruta.exists():
             ruta.unlink()  # regenerar (re-disparo tras revisión humana)
         # certificados de las experiencias (imágenes) que subió la skill, si los hay
@@ -932,7 +933,7 @@ class EtapaExcelReal:
         generar_excel_final(ctx.espejo, ruta, paral, cuis, fichas, revisiones, sunat, certs)
         ctx.job.excel_final = f"/api/pivote/jobs/{ctx.job.job_id}/excel"
         ctx.job.zip_infoobras = f"/api/pivote/jobs/{ctx.job.job_id}/zip"
-        zip_previo = self.dir_salida / f"{ctx.job.job_id}.infoobras.zip"
+        zip_previo = carpeta_job(self.dir_salida, ctx.job.job_id) / "infoobras.zip"
         if zip_previo.exists():
             zip_previo.unlink()  # que el endpoint lo reconstruya con lo nuevo
         n_exp = sum(len(p.get("experiencias", [])) for p in ctx.espejo.get("profesionales", []))

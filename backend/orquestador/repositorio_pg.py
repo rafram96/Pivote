@@ -1,5 +1,10 @@
 """
-RepositorioPostgres — persistencia del orquestador en PostgreSQL (3 tablas).
+RepositorioPostgres — RESPALDO LÓGICO del orquestador en PostgreSQL (3 tablas).
+
+Rol (decisión 2026-07-11): NO reemplaza a los archivos — los espeja. Los archivos
+(RepositorioArchivos) siguen siendo la fuente de verdad; este repo recibe cada
+escritura vía RepositorioConRespaldo (write-through best-effort) y sirve como
+respaldo restaurable + copia consultable (pg_dump, SQL ad-hoc).
 
 Diseño "básico" acordado con el cliente (2026-06-25, sin modelado relacional):
 
@@ -12,19 +17,17 @@ Diseño "básico" acordado con el cliente (2026-06-25, sin modelado relacional):
                  se regenera al guardar el espejo. Columnas *_norm pre-normalizadas
                  en Python (sin tildes/minúsculas) → LIKE simple, sin extensiones.
 
-Los binarios (Excels, ZIPs, PDFs de {job}.certs/.descargas) NO viven en la BD:
-siguen en el volumen de disco (`dir_datos`), por eso `eliminar()` limpia ambos.
+Los binarios (Excels, ZIPs, PDFs de certs/ y descargas/) NO viven en la BD ni
+los toca este repo: viven en la carpeta del job y los administra el primario.
 
-Activación: PIVOTE_DB_URL en el entorno (api/app.py hace el switch). psycopg se
-importa perezoso para que este módulo sea importable en máquinas sin la lib
-(esta laptop corre con RepositorioArchivos).
+Activación: PIVOTE_DB_URL en el entorno (api/app.py envuelve el repo de archivos
+con RepositorioConRespaldo). psycopg se importa perezoso para que este módulo sea
+importable en máquinas sin la lib (esta laptop corre solo con archivos).
 """
 from __future__ import annotations
 
 import json
-import shutil
 import unicodedata
-from pathlib import Path
 from typing import Optional
 
 from schemas import pipeline
@@ -75,11 +78,9 @@ class RepositorioPostgres:
     """Implementa el protocolo `Repositorio` sobre PostgreSQL (upserts idempotentes,
     mismas semánticas que RepositorioArchivos)."""
 
-    def __init__(self, dsn: str, dir_datos: Path):
+    def __init__(self, dsn: str):
         # import perezoso: psycopg solo se exige donde este repo realmente corre
         from psycopg_pool import ConnectionPool
-        self.dir = Path(dir_datos)          # binarios (xlsx/zip/certs) siguen en disco
-        self.dir.mkdir(parents=True, exist_ok=True)
         self._pool = ConnectionPool(dsn, min_size=1, max_size=4, open=True)
         with self._pool.connection() as con:
             con.execute(_DDL)
@@ -222,20 +223,12 @@ class RepositorioPostgres:
     # ── borrado ───────────────────────────────────────────────────────────────
 
     def eliminar(self, job_id: str) -> None:
-        """Borra las filas del job en las 3 tablas Y sus binarios en disco
-        (.claude.xlsx, .final.xlsx, .infoobras.zip, .certs/, .descargas/…)."""
+        """Borra las filas del job en las 3 tablas. Los binarios/archivos los borra
+        el primario (RepositorioArchivos) — este repo es solo el respaldo lógico."""
         with self._pool.connection() as con:
             con.execute("DELETE FROM profesionales WHERE job_id = %s", (job_id,))
             con.execute("DELETE FROM documentos WHERE clave = %s", (job_id,))
             con.execute("DELETE FROM jobs WHERE job_id = %s", (job_id,))
-        for p in self.dir.glob(f"{job_id}.*"):
-            if p.is_dir():
-                shutil.rmtree(p, ignore_errors=True)
-            else:
-                try:
-                    p.unlink()
-                except OSError:
-                    pass
 
     def eliminar_concurso(self, concurso_id: str) -> None:
         with self._pool.connection() as con:

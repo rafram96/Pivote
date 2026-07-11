@@ -45,13 +45,31 @@ def test_decisiones_roundtrip_y_default_vacio(tmp_path):
         assert repo.cargar_decisiones("j1")["al-0"]["razon"] == "ok"
 
 
-def test_decisiones_archivo_compatible_con_los_viejos(tmp_path):
-    """Los {id}.decisiones.json que app.py escribió antes se siguen leyendo."""
+def test_migracion_layout_suelto_a_carpetas(tmp_path):
+    """El layout viejo (todo suelto: {id}.job.json, {id}.espejo.json, {id}.claude.xlsx,
+    {id}.certs/, {id}.decisiones.json) se migra a la carpeta {id}/ al construir el
+    repo — y todo se sigue leyendo igual. Idempotente en el segundo arranque."""
     import json
-    (tmp_path / "jx.decisiones.json").write_text(
+    j = _job("jm")
+    (tmp_path / "jm.job.json").write_text(j.model_dump_json(), encoding="utf-8")
+    (tmp_path / "jm.espejo.json").write_text(json.dumps(ESPEJO), encoding="utf-8")
+    (tmp_path / "jm.decisiones.json").write_text(
         json.dumps({"al-9": {"relevante": True}}), encoding="utf-8")
-    repo = RepositorioArchivos(tmp_path)
-    assert repo.cargar_decisiones("jx")["al-9"]["relevante"] is True
+    (tmp_path / "jm.claude.xlsx").write_bytes(b"PK")
+    (tmp_path / "jm.certs").mkdir()
+    (tmp_path / "jm.certs" / "P1_E1.pdf").write_bytes(b"%PDF")
+    (tmp_path / "otro.concurso.json").write_text("{}", encoding="utf-8")
+
+    repo = RepositorioArchivos(tmp_path)                      # ← migra al construir
+    assert repo.cargar("jm").job_id == "jm"
+    assert repo.cargar_espejo("jm")["_meta"]["analisis_id"] == "repo-001"
+    assert repo.cargar_decisiones("jm")["al-9"]["relevante"] is True
+    assert (tmp_path / "jm" / "claude.xlsx").exists()
+    assert (tmp_path / "jm" / "certs" / "P1_E1.pdf").exists()
+    assert not (tmp_path / "jm.job.json").exists()            # ya no hay sueltos
+    assert (tmp_path / "otro.concurso.json").exists()          # concursos quedan en raíz
+    RepositorioArchivos(tmp_path)                              # 2º arranque: no-op
+    assert repo.cargar("jm") is not None
 
 
 def test_eliminar_borra_tambien_las_decisiones(tmp_path):
@@ -70,9 +88,9 @@ pg = pytest.mark.skipif(not _DB, reason="sin PIVOTE_TEST_DB_URL (se prueba en el
 
 
 @pytest.fixture()
-def repo_pg(tmp_path):
+def repo_pg():
     from orquestador.repositorio_pg import RepositorioPostgres
-    repo = RepositorioPostgres(_DB, dir_datos=tmp_path)
+    repo = RepositorioPostgres(_DB)
     # limpiar restos de corridas previas (BD de prueba compartida)
     with repo._pool.connection() as con:
         con.execute("DELETE FROM profesionales; DELETE FROM documentos; DELETE FROM jobs;")
@@ -125,12 +143,58 @@ def test_pg_busqueda_profesionales_sin_tildes(repo_pg):
 
 
 @pg
-def test_pg_eliminar_limpia_tablas_y_disco(repo_pg, tmp_path):
+def test_pg_eliminar_limpia_las_tablas(repo_pg):
+    # solo tablas: los archivos/binarios los borra el PRIMARIO (es respaldo lógico)
     repo_pg.guardar(_job("pg-4"))
     repo_pg.guardar_espejo("pg-4", ESPEJO)
-    (tmp_path / "pg-4.final.xlsx").write_bytes(b"PK")   # binario en disco
     repo_pg.eliminar("pg-4")
     assert repo_pg.cargar("pg-4") is None
     assert repo_pg.cargar_espejo("pg-4") is None
     assert repo_pg.buscar_profesionales("perez") == []
-    assert not (tmp_path / "pg-4.final.xlsx").exists()
+
+
+# ── RepositorioConRespaldo (archivos = verdad · pg = espejo write-through) ────
+
+class _RespaldoEspia:
+    """Respaldo fake: registra llamadas; opcionalmente falla SIEMPRE."""
+    def __init__(self, falla=False):
+        self.llamadas: list[tuple] = []
+        self._falla = falla
+
+    def __getattr__(self, nombre):
+        def _metodo(*args):
+            if self._falla:
+                raise RuntimeError("pg caído")
+            self.llamadas.append((nombre, args))
+        return _metodo
+
+
+def test_respaldo_recibe_cada_escritura_y_lecturas_van_al_primario(tmp_path):
+    from orquestador.repositorio import RepositorioConRespaldo
+    espia = _RespaldoEspia()
+    repo = RepositorioConRespaldo(RepositorioArchivos(tmp_path), espia)
+
+    repo.guardar(_job("jw"))
+    repo.guardar_espejo("jw", ESPEJO)
+    repo.guardar_decisiones("jw", {"al-0": {"relevante": True}})
+    repo.eliminar("jw")
+
+    assert [n for n, _ in espia.llamadas] == [
+        "guardar", "guardar_espejo", "guardar_decisiones", "eliminar"]
+    # las lecturas NO tocan el respaldo (van al primario)
+    repo.guardar(_job("jw2"))
+    espia.llamadas.clear()
+    assert repo.cargar("jw2") is not None
+    assert repo.listar()[0].job_id == "jw2"
+    assert repo.cargar_espejo("jw2") is None
+    assert espia.llamadas == []
+
+
+def test_respaldo_caido_no_frena_la_operacion(tmp_path):
+    """La regla de oro: si Postgres se cae, el análisis SIGUE sobre archivos."""
+    from orquestador.repositorio import RepositorioConRespaldo
+    repo = RepositorioConRespaldo(RepositorioArchivos(tmp_path), _RespaldoEspia(falla=True))
+    repo.guardar(_job("jf"))                      # no lanza pese al respaldo roto
+    repo.guardar_espejo("jf", ESPEJO)
+    assert repo.cargar("jf").job_id == "jf"       # el primario tiene todo
+    assert repo.cargar_espejo("jf")["_meta"]["analisis_id"] == "repo-001"

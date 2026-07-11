@@ -133,11 +133,11 @@ def _render_cert_pages(cert_pdf, dpi=130, q=70, max_pag=12):
 
 
 def mapear_certificados(dir_base, job_id) -> dict:
-    """Lee la carpeta `{job_id}.certs/` (un PDF `P{n}_E{m}.pdf` por experiencia, con
+    """Lee la carpeta `{job_id}/certs/` (un PDF `P{n}_E{m}.pdf` por experiencia, con
     la página principal primero — lo recorta la skill) y devuelve
     `{(n_prof, n_exp): Path}` para pasarle a `generar_excel_final`."""
     certs: dict = {}
-    cdir = Path(dir_base) / f"{job_id}.certs"
+    cdir = Path(dir_base) / str(job_id) / "certs"
     if cdir.is_dir():
         for f in cdir.glob("P*_E*.pdf"):
             try:

@@ -178,7 +178,7 @@ def test_flujo_real_completo_con_revision_humana(tmp_path):
     assert enr["1:2"]["via"] == "MANUAL" and enr["1:2"]["cui"] == "777999"
 
     # Excel final regenerado CON las paralizaciones en la hoja de hitos
-    ruta = tmp_path / f"{job.job_id}.final.xlsx"
+    ruta = tmp_path / job.job_id / "final.xlsx"
     assert ruta.exists()
     ws = openpyxl.load_workbook(ruta)["P1 JEFE DE SUPERVISIÓN"]
     texto = "\n".join(str(c.value) for f in ws.iter_rows() for c in f if c.value)

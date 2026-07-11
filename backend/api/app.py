@@ -47,14 +47,20 @@ from schemas.espejo import JsonEspejo
 DATA_DIR = Path(os.getenv("PIVOTE_DATA_DIR", "datos_pivote"))
 
 app = FastAPI(title="InfoObras Pivote API", version="0.2.0")
-# Persistencia: PIVOTE_DB_URL definida → PostgreSQL (servidor); ausente →
-# archivos JSON en DATA_DIR (esta laptop, tests). Los binarios van a DATA_DIR
-# en ambos casos. El motor no distingue: ambos implementan el mismo protocolo.
+# Persistencia: los ARCHIVOS son siempre la fuente de verdad (una carpeta por
+# job en DATA_DIR). Con PIVOTE_DB_URL, Postgres se suma como RESPALDO LÓGICO
+# write-through (best-effort: si la BD se cae, el análisis sigue).
+repo = RepositorioArchivos(DATA_DIR)
 if os.getenv("PIVOTE_DB_URL"):
+    from orquestador.repositorio import RepositorioConRespaldo
     from orquestador.repositorio_pg import RepositorioPostgres
-    repo = RepositorioPostgres(os.getenv("PIVOTE_DB_URL"), dir_datos=DATA_DIR)
-else:
-    repo = RepositorioArchivos(DATA_DIR)
+    repo = RepositorioConRespaldo(repo, RepositorioPostgres(os.getenv("PIVOTE_DB_URL")))
+
+
+def _dir_job(job_id: str) -> Path:
+    """Carpeta única del job en DATA_DIR (ahí viven TODOS sus artefactos)."""
+    from orquestador.repositorio import carpeta_job
+    return carpeta_job(DATA_DIR, job_id)
 
 
 def _reportar_progreso(job_id: str, etapa, item_actual: int,
@@ -182,7 +188,7 @@ def _lock_descargas(job_id: str) -> threading.Lock:
 
 def _mapa_descargas(job_id: str) -> dict:
     """{(n_prof, n_exp): carpeta} de las descargas `P{n}_E{m}` en disco."""
-    d = DATA_DIR / f"{job_id}.descargas"
+    d = _dir_job(job_id) / "descargas"
     out: dict[tuple[int, int], Path] = {}
     if d.is_dir():
         for sub in d.iterdir():
@@ -227,7 +233,7 @@ def _asegurar_descargas(job_id: str) -> None:
                                              max_descargas=maxd, reportar=_rep)
             # arma el ZIP COMPLETO recién ahora que están TODOS los documentos
             # (atómico → reemplaza cualquier zip parcial previo).
-            ruta_zip = DATA_DIR / f"{job_id}.infoobras.zip"
+            ruta_zip = _dir_job(job_id) / "infoobras.zip"
             with _zip_build_lock:
                 construir_zip_infoobras(espejo, _mapa_descargas(job_id), ruta_zip,
                                         enriquecimiento=enr)
@@ -493,7 +499,7 @@ def _guardar_certificados(job_id: str, contenido: bytes) -> int:
     import zipfile
     if not contenido:
         return 0
-    cdir = DATA_DIR / f"{job_id}.certs"
+    cdir = _dir_job(job_id) / "certs"
     cdir.mkdir(parents=True, exist_ok=True)
     n = 0
     try:
@@ -545,7 +551,7 @@ async def analizar(
     job.origen = origen if origen in ("mcp", "dropzone") else "dropzone"
     repo.guardar(job)
     # guardar el Excel de Claude tal cual llegó (referencia/auditoría)
-    (DATA_DIR / f"{job.job_id}.claude.xlsx").write_bytes(
+    (_dir_job(job.job_id) / "claude.xlsx").write_bytes(
         await _leer_limitado(excel, _MAX_EXCEL, "el Excel"))
     # certificados de las experiencias (ZIP de PDFs que recortó la skill) → {job}.certs/
     if certificados is not None:
@@ -579,7 +585,7 @@ def resolver_revision(job_id: str, tareas: BackgroundTasks, body: dict):
             raise HTTPException(404, str(e))
         # La obra del item pudo cambiar al re-resolver → invalida SUS PDFs (carpeta
         # + marca .ok) para re-bajarlos frescos; los demás se saltan por su .ok.
-        base = DATA_DIR / f"{job_id}.descargas"
+        base = _dir_job(job_id) / "descargas"
         shutil.rmtree(base / f"P{n_prof}_E{n_exp}", ignore_errors=True)
         (base / f"P{n_prof}_E{n_exp}.ok").unlink(missing_ok=True)
         job.descargas_estado = "pendiente"
@@ -775,7 +781,7 @@ def decidir_alerta(job_id: str, body: dict):
 def descargar_excel(job_id: str):
     job = _job_o_404(job_id)
     espejo = _espejo_o_404(job_id)
-    ruta = DATA_DIR / f"{job_id}.final.xlsx"
+    ruta = _dir_job(job_id) / "final.xlsx"
     if not ruta.exists():
         # Las paralizaciones reales las inyecta la etapa de InfoObras; sin
         # ellas el Excel sale con brutos = efectivos (y se regenera después).
@@ -798,7 +804,7 @@ _zip_build_lock = threading.Lock()
 @app.get("/api/pivote/jobs/{job_id}/zip")
 def descargar_zip(job_id: str, tareas: BackgroundTasks):
     job = _job_o_404(job_id)
-    ruta = DATA_DIR / f"{job_id}.infoobras.zip"
+    ruta = _dir_job(job_id) / "infoobras.zip"
     en_prep = {"descargas_estado": job.descargas_estado,
                "mensaje": "El ZIP se está preparando: descargando los documentos de InfoObras."}
     # Descargando activamente → el zip (si existe) es PARCIAL → no servirlo: 202.

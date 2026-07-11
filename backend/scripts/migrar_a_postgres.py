@@ -1,5 +1,7 @@
 """
-Backfill: migra los datos existentes en archivos (DATA_DIR) a PostgreSQL.
+Sincroniza el RESPALDO: vuelca los datos en archivos (DATA_DIR, la fuente de
+verdad) a PostgreSQL. Sirve para el backfill inicial Y para re-sincronizar si
+la BD estuvo caída un rato (el write-through es best-effort).
 
 Idempotente (upserts): se puede correr N veces; la última corrida gana. Los
 binarios (xlsx/zip/certs/descargas) NO se mueven — se quedan en DATA_DIR, que
@@ -29,7 +31,7 @@ def main() -> int:
         return 1
     data_dir = Path(os.getenv("PIVOTE_DATA_DIR", "datos_pivote"))
     archivos = RepositorioArchivos(data_dir)
-    pg = RepositorioPostgres(dsn, dir_datos=data_dir)
+    pg = RepositorioPostgres(dsn)
 
     concursos = archivos.listar_concursos()
     for c in concursos:
