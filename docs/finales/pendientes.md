@@ -12,7 +12,7 @@
 | A1 | Desplegar en el servidor de Manuel | ✅ hecho (2026-07-12): compose backend+panel+Postgres, 3 contenedores healthy | — |
 | A3 | Capacitación (2 h) | ⏳ agendar (tras A6/A7) | 2 h |
 | A4 | Manual de usuario | ✅ hecho | — |
-| A5 | PostgreSQL cableado al backend | ✅ implementado (RepositorioConRespaldo write-through + carpeta por job). ⏳ falta **validar**: levantar el compose en local, correr un job de prueba y verificar que las tablas se llenan (tests gateados por PIVOTE_DB_URL) | ~0.5 d |
+| A5 | PostgreSQL cableado al backend | ✅ implementado Y **validado en local** (2026-07-13): 201 tests con pg real + job e2e en esqueleto → jobs/documentos/profesionales se llenan. OJO: en esta laptop hay un Postgres local de Windows en el 5432 — para pruebas usar otro puerto (55432). En el server no aplica (red interna del compose) | — |
 | A6 | Instalar skill + MCP en el Claude Code de Manuel | ⏳ `npm install` en mcp-server + `claude mcp add` con SERVER_URL=IP LAN del server. Skill ya sincronizada al repo | ~1 h (AnyDesk) |
 | A7 | Prueba de fuego: 1-2 propuestas REALES de punta a punta en su máquina (skill → MCP → server → panel → Excel/ZIP), ideal una con expedientes (ejercita el Paso 4.5/MEF) | ⏳ la validación que de verdad cuenta | ~2 h (AnyDesk) |
 
