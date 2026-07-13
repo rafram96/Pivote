@@ -1,6 +1,6 @@
 # Pendientes del proyecto — cierre del contrato
 
-> Fuente única de lo que falta para cerrar. Última actualización: 2026-07-07.
+> Fuente única de lo que falta para cerrar. Última actualización: 2026-07-13.
 > ✅ hecho · ⏳ pendiente · ❌ descartado.
 >
 > Los bloques B (core), C (deuda técnica) y D (alcance nuevo) se sacaron de
@@ -9,21 +9,31 @@
 ## 🔴 A — Cerrar el contrato (hito final S/. 2,880)
 | # | Pendiente | Estado | Esfuerzo |
 |---|---|---|---|
-| A1 | Desplegar en el servidor de Manuel | ⏳ runbook reescrito (Win11+Docker+LAN, 02-jul), listo para ejecutar | ~0.5 d |
-| A3 | Capacitación (2 h) | ⏳ agendar | 2 h |
+| A1 | Desplegar en el servidor de Manuel | ✅ hecho (2026-07-12): compose backend+panel+Postgres, 3 contenedores healthy | — |
+| A3 | Capacitación (2 h) | ⏳ agendar (tras A6/A7) | 2 h |
 | A4 | Manual de usuario | ✅ hecho | — |
-| A5 | PostgreSQL (lo cobra el contrato; hoy archivos) | ⏳ schema SQL existe; falta cablear el backend (o aceptar archivos v1) | ~1.5–2 d |
+| A5 | PostgreSQL cableado al backend | ✅ implementado (RepositorioConRespaldo write-through + carpeta por job). ⏳ falta **validar**: levantar el compose en local, correr un job de prueba y verificar que las tablas se llenan (tests gateados por PIVOTE_DB_URL) | ~0.5 d |
+| A6 | Instalar skill + MCP en el Claude Code de Manuel | ⏳ `npm install` en mcp-server + `claude mcp add` con SERVER_URL=IP LAN del server. Skill ya sincronizada al repo | ~1 h (AnyDesk) |
+| A7 | Prueba de fuego: 1-2 propuestas REALES de punta a punta en su máquina (skill → MCP → server → panel → Excel/ZIP), ideal una con expedientes (ejercita el Paso 4.5/MEF) | ⏳ la validación que de verdad cuenta | ~2 h (AnyDesk) |
 
-## ⚪ E — Side-projects (FUERA del analizador; vida y cobro propios)
-- **E1** Telegram bot (puente al Claude del Ingeniero) — en pruebas; falta acceso a red (E:/NAS) + PC prendida.
-- **E2** Claude-Odoo — integración de Claude con Odoo.
-- **E3** Cotizador (búsqueda diaria de convocatorias) — falla la búsqueda en la web del Estado.
-- **E4** Web HK.
+**Camino:** A5 (validar en local) → A6 → A7 → A3 (capacitación) → **cobrar hito 3**.
+
+## ⚪ E — Frentes aparte (FUERA del contrato; vida y cobro propios)
+| Ticket | Frente | Estado |
+|---|---|---|
+| T-003 | **Verificación SEACE + MEF** (expedientes: contrato/contratista/resolución) | demo probada por Manuel con Claude-en-Chrome; prompt afinado = regalo; módulo cotizado en `docs/comercial/cotizacion-verificacion-expedientes.html` (~S/2,100 skill / ~S/4,600 integrado) |
+| T-002 | **Radar SEACE** (concursos diarios, VR/plazo/cociente) | reunión por agendar; guion en `docs/comercial/radar-seace-reunion.html`. Reemplaza al viejo E3 (cotizador) |
+| — | **Jurisprudencia lexcontrataciones** (resoluciones TCP, control de calidad ≈ supervisión) | skill de Manuel por revisar; adaptar Playwright→Chrome MCP; login lo hace el humano; cotizar tras ver la skill |
+| T-004 | **Segundo cerebro oficina** (índice del NAS, 8 personas) | 🧊 ASPIRACIONAL — Manuel confirmó "ahora no es así, es para proyectar" (12-jul). NO trabajar hasta reunión + caso de uso + piloto cotizado. Diseño: índice local + NAS solo-lectura; consultas del equipo SIN IA (Excel/buscador en server) |
+| — | **RENIPRESS / obras privadas** | solo idea; discovery primero; frontera explícita: lo privado NO está en InfoObras/MEF/SEACE |
+| E1 | Telegram bot (puente al Claude del Ingeniero) | en pruebas; falta acceso a red (E:/NAS) + PC prendida |
+| E2 | Claude-Odoo | solo mención; discovery primero |
+| E4 | **Web HK** | cotización LISTA (S/1,500, `docs/comercial/cotizacion-web-hk.html`) — solo falta ENVIARLA; subida con dominio dispara el cobro |
+| — | **Bolsa mensual de horas** | diseñada (`docs/comercial/estrategia-extras.html`) — presentar CON la entrega final |
 
 ---
 
 ## Plan acordado
-- **Ahora:** cerrar el **bloque A**. Única decisión de fondo pendiente: **A5**
-  (cablear PostgreSQL o cerrar v1 con archivos).
-- **Camino:** A5 → deploy (A1) → capacitación (A3).
-- **D y E:** cotización aparte, no entran en este contrato.
+- **Ahora:** cerrar el **bloque A** (A5 local → A6/A7 por AnyDesk → capacitación) y **cobrar el hito 3**.
+- **En la entrega final:** presentar el paquete comercial de una vez — bolsa mensual + cotización T-003 + web HK.
+- **E y tickets:** cotización aparte, cada uno gana su lugar con reunión/caso de uso; nada se empieza sin OK y adelanto.
