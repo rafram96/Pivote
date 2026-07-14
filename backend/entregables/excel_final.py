@@ -399,8 +399,23 @@ def construir_hoja_profesional(
 
     def render_revision(top: int, motivo: str) -> int:
         """Bloque para una experiencia que NO se cruzó: explica por qué quedó en
-        revisión humana, en vez de dejar la columna de la obra vacía."""
+        revisión humana, en vez de dejar la columna de la obra vacía. El marcador
+        especial "[PRIVADA]" pinta el bloque de cliente/obra privada (no es
+        revisión: InfoObras no registra obra privada; el respaldo es el certificado)."""
         rr = top
+        if str(motivo).startswith("[PRIVADA]"):
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=10)
+            c = ws.cell(rr, 6, "OBRA / CLIENTE PRIVADO")
+            c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
+            rr += 1
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr + 3, end_column=10)
+            c = ws.cell(rr, 6, "Experiencia con cliente/obra privada: InfoObras solo "
+                               "registra obra pública, por lo que no hay cruce de "
+                               "valorizaciones.\n\nEl respaldo es el certificado "
+                               "presentado (verificación documental del evaluador).")
+            c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
+            rr += 4
+            return rr - 1
         ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=10)
         c = ws.cell(rr, 6, "EXPERIENCIA EN REVISIÓN")
         c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD

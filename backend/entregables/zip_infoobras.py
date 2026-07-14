@@ -701,8 +701,11 @@ def _motivo_sin_docs(via: Optional[str], cui: Optional[str]) -> str:
     NOMBRE/CUI_TEXTO/RUC/PROBABLE/MANUAL = resuelto · NA = no aplica ·
     NO_EXISTE = no está en InfoObras · None = pendiente."""
     v = (via or "").upper()
+    if v == "PRIVADA":
+        return ("Cliente/obra privada: InfoObras solo registra obra pública — "
+                "el respaldo es el certificado presentado (verificación documental).")
     if v == "NA":
-        return "No aplica: la experiencia no es de obra de salud (sin cruce InfoObras)."
+        return "No aplica: sin cruce InfoObras para esta experiencia."
     if v == "NO_EXISTE":
         return "Obra no encontrada en InfoObras (marcada por el evaluador)."
     if cui:

@@ -243,16 +243,43 @@ def fragmentos(proyecto: str) -> list[str]:
 RE_CODIGO = re.compile(r"\b(?:SNIP|CUI|C[oó]digo(?:\s+(?:SNIP|[uú]nico))?)\s*[:N°ºo.\-]*\s*(\d{4,8})\b", re.I)
 RE_RUC = re.compile(r"\b(\d{11})\b")
 
+# Palabras que NO identifican una obra (aparecen en miles de nombres). Sin esto,
+# un certificado educativo matcheaba cualquier obra con MEJORAMIENTO+INFRAESTRUCTURA
+# +EDUCATIVA aunque el nombre propio (KREAR, CATHOLIC…) no apareciera — queja real
+# del cliente 14-jul: "reporta un mal resultado / nada tiene que ver".
 _STOP = {"HOSPITAL", "PUESTO", "SALUD", "CENTRO", "ESTABLECIMIENTO", "REGIONAL",
-         "DE", "DEL", "LA", "EL", "LOS", "Y", "APOYO", "NIVEL"}
+         "DE", "DEL", "LA", "EL", "LOS", "Y", "APOYO", "NIVEL",
+         # verbos/genéricas de obra
+         "MEJORAMIENTO", "AMPLIACION", "CONSTRUCCION", "CREACION", "REHABILITACION",
+         "RECUPERACION", "INSTALACION", "IMPLEMENTACION", "EQUIPAMIENTO",
+         "MANTENIMIENTO", "REMODELACION", "SUPERVISION", "EJECUCION", "ELABORACION",
+         # sustantivos genéricos
+         "INFRAESTRUCTURA", "SERVICIO", "SERVICIOS", "SISTEMA", "OBRA", "PROYECTO",
+         "EXPEDIENTE", "TECNICO", "INTEGRAL", "ETAPA", "CALIDAD", "CAPACIDAD",
+         "RESOLUTIVA", "ATENCION", "COBERTURA",
+         # educación (tan genéricas como 'salud' en su rubro)
+         "INSTITUCION", "EDUCATIVA", "EDUCATIVO", "EDUCACION", "INICIAL",
+         "PRIMARIA", "SECUNDARIA", "COLEGIO", "ESCUELA",
+         # geografía administrativa (no identifican al establecimiento)
+         "DISTRITO", "PROVINCIA", "DEPARTAMENTO", "REGION", "LOCALIDAD", "SECTOR"}
 
 
 def _palabras(s: str) -> set[str]:
     return set(re.findall(r"[A-Z]+", norm(s)))
 
 
+# La cola geográfica del nombre ("…, distrito de Trujillo - Trujillo - La Libertad")
+# NO identifica al establecimiento: mil obras comparten distrito. Sin este corte,
+# "TRUJILLO" contaba como token distintivo y una obra ajena del mismo distrito
+# pasaba el gate (queja del cliente: matches "que nada tienen que ver").
+_RE_COLA_GEO = re.compile(
+    r"[,;]?\s*[–\-]?\s*\b(distrito|provincia|departamento|regi[oó]n|localidad(es)?)\b.*$",
+    re.I)
+
+
 def _tokens_clave(est_key: str) -> set[str]:
-    return {t for t in _palabras(est_key) if len(t) >= 4 and t not in _STOP}
+    sin_geo = _RE_COLA_GEO.sub("", est_key or "")
+    return {t for t in _palabras(sin_geo) if len(t) >= 4 and t not in _STOP}
 
 
 def _anio_de(fecha_iniobra) -> Optional[int]:
@@ -428,6 +455,26 @@ def _num(v) -> int:
     return int(s) if s.isdigit() else 10 ** 18
 
 
+# Cliente/obra PRIVADA: InfoObras solo registra obra PÚBLICA. Una experiencia con
+# promotor privado ("Institución Educativa Particular X", "I.E.P.", colegios
+# privados…) NO debe buscarse por nombre: siempre matchea alguna obra pública
+# parecida y reporta basura (queja real del cliente, 14-jul: Catholic High School
+# → una carretera; Trinity College → obra ajena). Señal CONSERVADORA: la palabra
+# particular/privada en el proyecto o en la entidad contratante (el emisor NO
+# cuenta: en obra pública el emisor es un privado — el contratista — siempre).
+_RE_PRIVADA = re.compile(
+    r"\b(particular(es)?|privad[ao]s?)\b|\bI\.?\s?E\.?\s?P\.?\b", re.I)
+
+
+def _es_experiencia_privada(exp: dict) -> bool:
+    """True si el CLIENTE/promotor de la experiencia es privado (no una entidad
+    pública). Mira proyecto + entidad_contratante (+ ubicación textual del cert);
+    NO mira al emisor (el contratista privado es lo normal en obra pública)."""
+    campos = " ".join(str(exp.get(k) or "") for k in
+                      ("proyecto", "entidad_contratante", "objeto"))
+    return bool(_RE_PRIVADA.search(campos))
+
+
 def resolver(exp: dict, consulta: Consulta) -> dict:
     """Resuelve UNA experiencia. Devuelve:
     {estado: 'resuelto'|'revision'|'na', cui, via, decision, candidatos[], obra}
@@ -482,7 +529,16 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
                                     "departamento": o.get("nombrDepartamento"), "score": 50}],
                     "obra": None}
 
-    # Sin gate de alcance: se resuelve TODO rubro y TODO tipo (obras y también
+    # PASO 1 · gate de PRIVADAS: si el cliente/promotor es privado, NO buscar por
+    # nombre (InfoObras solo registra obra pública; buscar siempre matchea basura).
+    # Un CUI citado (raro en privadas) ya se intentó arriba y gana si existe.
+    if _es_experiencia_privada(exp):
+        return {"estado": "na", "cui": None, "via": "PRIVADA",
+                "decision": "cliente/obra privada — InfoObras solo registra obra "
+                            "pública; verificación documental del certificado",
+                "candidatos": [], "obra": None}
+
+    # Sin gate de alcance por RUBRO: se resuelve TODO rubro y TODO tipo (obras y
     # consultorías/expedientes, que SÍ están en InfoObras — muchos con valorizaciones,
     # confirmado 2026-07-02). Un CUI citado ya se intentó arriba (PASO 0); acá se
     # intenta por nombre. Si no hay match fiable o la obra no tiene valorizaciones,
@@ -592,7 +648,11 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
         return {"estado": "resuelto", "cui": best["cui"], "via": "NOMBRE",
                 "decision": "establecimiento verificado por nombre",
                 "candidatos": candidatos, "obra": obra_best}
-    if best and (gate or best["score"] >= 90) and not loc_contra:
+    # PROBABLE exige al menos UN token distintivo compartido (n_hit≥1): un score
+    # alto de similitud entre dos nombres puramente genéricos ("mejoramiento del
+    # servicio educativo…" de dos lugares distintos) NO identifica la obra — de ahí
+    # salían los matches "que nada tienen que ver" (queja del cliente 14-jul).
+    if best and (gate or (best["score"] >= 90 and n_hit >= 1)) and not loc_contra:
         return {"estado": "resuelto", "cui": best["cui"], "via": "PROBABLE",
                 "decision": "candidato fuerte (conviene un vistazo)",
                 "candidatos": candidatos, "obra": obra_best}

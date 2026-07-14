@@ -7,7 +7,8 @@ from __future__ import annotations
 import itertools
 
 from resolucion.cui import (
-    _es_experiencia_expediente, _puntuar, _sin_prefijo, norm, resolver, ubicacion)
+    _es_experiencia_expediente, _es_experiencia_privada, _puntuar, _sin_prefijo,
+    norm, resolver, ubicacion)
 
 
 def test_ubicacion_no_confunde_ica_dentro_de_huancavelica():
@@ -191,6 +192,81 @@ def test_es_experiencia_expediente_detecta_por_nombre():
     assert not ee("Construcción del nuevo Centro de Salud Fortaleza")
     assert not ee("")
     assert not ee(None)
+
+
+# ── Casos REALES de la queja del cliente (14-jul): privadas + matches basura ──
+
+def test_privada_no_se_busca_en_infoobras():
+    """Queja real: colegios PRIVADOS (Catholic High School, Trinity College)
+    matcheaban obras públicas ajenas ('el código es de una carrera'). Si el
+    cliente/promotor es privado, NO se busca: via PRIVADA, sin obra, sin revisión."""
+    llamadas = []
+
+    class ConsultaEspia:
+        def por_codigo(self, c): return []
+        def buscar(self, n): llamadas.append(n); return [
+            {"nombrObra": "MEJORAMIENTO DE LA CARRETERA X", "codUniqInv": "2999999",
+             "codigoObra": 1, "nombrDepartamento": "LIMA"}]
+
+    casos = [
+        {"proyecto": "Ampliación de la Infraestructura Educativa de la Institución "
+                     "Educativa Particular 'Catholic High School' - Chimbote"},
+        {"proyecto": "Mejoramiento de la Infraestructura Educativa en la Institución "
+                     "Educativa Privada Trinity College, distrito de Cutervo"},
+        {"proyecto": "Ampliación del local institucional",
+         "entidad_contratante": "Institución Educativa Particular San José"},
+    ]
+    for exp in casos:
+        r = resolver(exp, ConsultaEspia())
+        assert r["estado"] == "na" and r["via"] == "PRIVADA", exp["proyecto"][:40]
+        assert r["obra"] is None
+    assert llamadas == []          # JAMÁS tocó la búsqueda por nombre
+
+
+def test_es_experiencia_privada_no_confunde_al_emisor():
+    # el EMISOR privado (contratista SAC) es lo normal en obra pública → NO privada
+    assert not _es_experiencia_privada({
+        "proyecto": "Mejoramiento del C.S. Lircay, Huancavelica",
+        "entidad_emisora": "VICTEN CONTRATISTAS S.A.C."})
+    assert _es_experiencia_privada({"proyecto": "IEP Santa María de Chota"})
+    assert not _es_experiencia_privada({"proyecto": "I.E. N° 105 San Antonio, Huarochirí"})
+
+
+def test_match_generico_sin_nombre_propio_va_a_revision():
+    """Queja real (KREAR / IE 105 El Ancko): el gate pasaba con palabras genéricas
+    (MEJORAMIENTO+INFRAESTRUCTURA+EDUCATIVA) y devolvía obras 'que nada tienen que
+    ver'. Ahora esas palabras son stopwords: sin el NOMBRE PROPIO compartido, el
+    candidato se rechaza → revisión (no un match basura)."""
+    class ConsultaBasura:
+        def por_codigo(self, c): return []
+        def buscar(self, n): return [
+            # obra educativa genérica de OTRO colegio (sin 'KREAR')
+            {"nombrObra": "MEJORAMIENTO Y AMPLIACION DE LA INFRAESTRUCTURA EDUCATIVA "
+                          "DE LA I.E. JOSE CARLOS MARIATEGUI, DISTRITO DE TRUJILLO",
+             "codUniqInv": "2888888", "codigoObra": 9, "nombrDepartamento": "LA LIBERTAD"}]
+
+    exp = {"proyecto": "Mejoramiento y Ampliación de la Infraestructura Educativa "
+                       "'KREAR', Distrito de Trujillo - Trujillo - La Libertad",
+           "fecha_inicial": "2018-06-01", "fecha_final": "2019-02-28"}
+    r = resolver(exp, ConsultaBasura())
+    assert r["estado"] == "revision", r     # sin 'KREAR' compartido → NO se acepta
+    assert r["cui"] is None
+
+
+def test_match_con_nombre_propio_si_resuelve():
+    # el mismo caso KREAR pero con la obra CORRECTA disponible → resuelve
+    class ConsultaBien:
+        def por_codigo(self, c): return []
+        def buscar(self, n): return [
+            {"nombrObra": "MEJORAMIENTO DE LA INFRAESTRUCTURA EDUCATIVA KREAR, "
+                          "DISTRITO DE TRUJILLO", "codUniqInv": "2777777",
+             "codigoObra": 7, "nombrDepartamento": "LA LIBERTAD"}]
+
+    exp = {"proyecto": "Mejoramiento y Ampliación de la Infraestructura Educativa "
+                       "'KREAR', Distrito de Trujillo - La Libertad",
+           "fecha_inicial": "2018-06-01"}
+    r = resolver(exp, ConsultaBien())
+    assert r["estado"] == "resuelto" and r["cui"] == "2777777", r
 
 
 def test_resolver_no_pre_bloquea_consultorias_ni_otros_rubros():

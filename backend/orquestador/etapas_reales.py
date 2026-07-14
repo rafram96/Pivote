@@ -207,12 +207,22 @@ class EtapaResolucionCuiReal:
                         codigo="CUI", severidad=pipeline.Severidad.ADVERTENCIA,
                         mensaje=f"obra identificada como probable — {r['decision']}",
                         origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
-            else:  # 'revision' o 'na': NADA se descarta en silencio — todo CUI no
+            elif r["estado"] == "na":
+                # Cliente/obra PRIVADA: InfoObras no aplica (solo registra obra
+                # pública). NO va a "Por confirmar" — no hay acción humana pendiente:
+                # el respaldo de una experiencia privada es su certificado. Se deja
+                # señalado (via PRIVADA + observación) para el Excel/panel/ZIP.
+                ctx.enriquecimiento[k] = {"cui": None, "via": r.get("via") or "NA"}
+                obs.append(pipeline.Observacion(
+                    codigo="PRIVADA", severidad=pipeline.Severidad.INFO,
+                    mensaje=f"experiencia con cliente/obra privada — sin cruce "
+                            f"InfoObras (no registra obra privada); el respaldo es "
+                            f"el certificado presentado",
+                    origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+            else:  # 'revision': NADA se descarta en silencio — todo CUI no
                    # resuelto surge en "Por confirmar" (elegir candidato, pegar el
                    # CUI a mano, o descartar la experiencia).
                 rev += 1
-                if r["estado"] == "na":                       # tipo fuera del alcance
-                    ctx.enriquecimiento[k] = {"cui": None, "via": "NA"}
                 ya = any(it.n_prof == np_ and it.n_exp == ne and not it.resuelto
                          for it in ctx.job.items_revision)
                 if not ya:
@@ -889,8 +899,8 @@ class EtapaReglasReal:
                 for e in p.get("experiencias", []):
                     tot_exp += 1
                     enr = ctx.enriquecimiento.get(_clave(p.get("n_prof"), e.get("n"))) or {}
-                    if str(enr.get("via") or "").upper() == "NA":
-                        na += 1                     # no aplica (no es obra verificable)
+                    if str(enr.get("via") or "").upper() in ("NA", "PRIVADA"):
+                        na += 1                     # no aplica (privada / sin cruce)
                         continue
                     obra = enr.get("obra") if isinstance(enr.get("obra"), dict) else None
                     if not (obra or {}).get("obra_id") or enr.get("sin_verificar"):
@@ -925,6 +935,13 @@ class EtapaExcelReal:
         for it in ctx.job.items_revision:
             if not it.resuelto and it.n_exp is not None:
                 revisiones.setdefault((it.n_prof, it.n_exp), it.motivo)
+        # experiencias PRIVADAS → bloque propio en el Excel (no es "revisión": el
+        # respaldo es el certificado; InfoObras no registra obra privada).
+        for k, e in ctx.enriquecimiento.items():
+            if isinstance(e, dict) and str(e.get("via") or "").upper() == "PRIVADA" \
+                    and ":" in k and not k.startswith("prof:"):
+                np_, ne = (int(x) for x in k.split(":"))
+                revisiones.setdefault((np_, ne), "[PRIVADA]")
         ruta = carpeta_job(self.dir_salida, ctx.job.job_id) / "final.xlsx"
         if ruta.exists():
             ruta.unlink()  # regenerar (re-disparo tras revisión humana)
