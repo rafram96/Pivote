@@ -678,6 +678,7 @@ def extraccion(job_id: str):
                 d["via_resolucion"] = ev.get("via")
                 d["representante_obra"] = ev.get("representante_obra")
                 d["sunat"] = ev.get("sunat")
+                d["verificacion_expediente"] = ev.get("verificacion_expediente")
             experiencias.append(d)
         profesionales.append({
             "n_prof": np_,
