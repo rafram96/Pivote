@@ -48,6 +48,9 @@ _PALETA_PROF = ["FFF2CC", "DDEBF7", "E2EFDA", "FCE4D6", "EDEDED", "D9E1F2",
 
 # Amarillo para resaltar las valorizaciones que caen dentro del certificado
 FILL_VALOR = PatternFill("solid", fgColor="FFFF00")
+# Veredicto de la verificación de expedientes (MEF) → texto de evaluador (sin jerga)
+_VER_TXT = {"ok": "✔ Coincide", "no_verificable": "Por confirmar",
+            "discrepancia": "✗ Discrepancia"}
 # Rojo: meses PARALIZADOS en la tabla de valorizaciones (la obra estuvo parada → no
 # cuentan para la experiencia; el ingeniero los marcaba así, a mano e incompleto).
 F_CELL_ROJO = Font(size=9, color="FF0000")
@@ -320,54 +323,97 @@ def construir_hoja_profesional(
 
         vals = sorted(fx.get("valorizaciones") or [],
                       key=lambda v: (v.get("anio") or 0, v.get("mes") or 0), reverse=True)
-        ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
-        c = ws.cell(rr, 6, "VALORIZACIONES — en amarillo, las del periodo del certificado")
-        c.font, c.fill = F_PARTE, FILL_PARTE
-        c.alignment = Alignment(vertical="center", wrap_text=True)
-        rr += 1
-        for i, h in enumerate(["N°", "AÑO / MES", "AVANCE FÍSICO REAL",
-                               "VALORIZADO REAL (S/)", "ESTADO", "ARCHIVOS (ZIP)"], start=6):
-            cc = ws.cell(rr, i, h)
-            cc.font, cc.fill, cc.border, cc.alignment = F_HEAD, FILL_HEAD, BORDER, AL_HEAD
-        rr += 1
-        for n, v in enumerate(vals, start=1):
-            anio, mes = v.get("anio") or 0, v.get("mes") or 0
-            resaltar = _mes_en_rango(anio, mes, ini, fin)
-            paraliz = "paraliz" in str(v.get("estado") or "").lower()
-            ndoc = v.get("docs") or 0
-            celdas = [n, f"{anio} / {_MES_ES.get(mes, mes)}",
-                      v.get("fisico_real"), v.get("valorizado_real"), v.get("estado") or "",
-                      f"Sí ({ndoc})" if ndoc else "—"]
-            for i, val in enumerate(celdas, start=6):
-                cc = ws.cell(rr, i, val)
-                cc.font = F_CELL_ROJO if paraliz else F_CELL    # rojo: mes paralizado (obra parada)
-                cc.border, cc.alignment = BORDER, AL_WRAP
-                if i == 8 and isinstance(val, (int, float)):
-                    cc.number_format = FMT_PCT
-                if i == 9 and isinstance(val, (int, float)):
-                    cc.number_format = FMT_SOLES
-                if resaltar:
-                    cc.fill = FILL_VALOR
+        verif = fx.get("verificacion_expediente")
+        aprob = fx.get("aprobacion_expediente")
+        # EXPEDIENTE técnico: no ejecutó obra → no hay valorizaciones. En su MISMO
+        # lugar (mismo formato, distinta info) va la verificación del expediente:
+        # la aprobación en InfoObras + el contrato/contratista/resolución del MEF.
+        if not vals and (verif or aprob):
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+            c = ws.cell(rr, 6, "EXPEDIENTE TÉCNICO — verificación (no hay valorizaciones: "
+                               "este cargo elaboró el expediente, no ejecutó la obra)")
+            c.font, c.fill = F_PARTE, FILL_PARTE
+            c.alignment = Alignment(vertical="center", wrap_text=True)
             rr += 1
-        if not vals:
-            aprob = fx.get("aprobacion_expediente")
-            if aprob:
-                # Experiencia de EXPEDIENTE técnico: no hay valorizaciones; su respaldo
-                # es la "Aprobación del proyecto" en InfoObras y cuenta por el periodo
-                # del certificado. En amarillo, igual que un mes válido.
-                f = aprob.get("fecha")                                   # ISO "AAAA-MM-DD"
+            if aprob:   # respaldo por la "Aprobación del proyecto" de InfoObras
+                f = aprob.get("fecha")
                 fm = f"{f[8:10]}/{f[5:7]}/{f[0:4]}" if f and len(f) == 10 else None
-                msg = ("Expediente técnico aprobado" + (f" el {fm}" if fm else "")
-                       + " — aceptada por el periodo del certificado "
-                         "(experiencia de expediente, sin valorizaciones)")
+                msg = ("Aprobación del proyecto (InfoObras)" + (f" — {fm}" if fm else "")
+                       + (f" · {aprob['nombre']}" if aprob.get("nombre") else ""))
                 ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
                 c = ws.cell(rr, 6, msg); c.font, c.alignment, c.fill = F_CELL, AL_WRAP, FILL_VALOR
                 rr += 1
-                if aprob.get("nombre"):
-                    ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
-                    ws.cell(rr, 6, f"Documento: {aprob['nombre']}").font = F_CELL
+            if verif:   # contraste contra el MEF (Banco de Inversiones)
+                ct, cn = verif.get("contratista") or {}, verif.get("contrato") or {}
+                rs = verif.get("resolucion") or {}
+                _f = cn.get("fecha")
+                _ffmt = f"{_f[8:10]}/{_f[5:7]}/{_f[0:4]}" if _f and len(_f) == 10 else None
+
+                def _fila(label, valor, veredicto=None, fmt=None):
+                    nonlocal rr
+                    ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=7)
+                    cl = ws.cell(rr, 6, label); cl.font, cl.border = F_BOLD, BORDER
+                    ws.merge_cells(start_row=rr, start_column=8, end_row=rr, end_column=9)
+                    cv = ws.cell(rr, 8, valor if valor not in (None, "") else "—")
+                    cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
+                    if fmt and isinstance(valor, (int, float)):
+                        cv.number_format = fmt
+                    ws.merge_cells(start_row=rr, start_column=10, end_row=rr, end_column=11)
+                    cver = ws.cell(rr, 10, _VER_TXT.get(veredicto, "") if veredicto else "")
+                    cver.font, cver.border, cver.alignment = F_CELL, BORDER, AL_HEAD
+                    if veredicto == "ok":
+                        cver.fill = FILL_VALOR
                     rr += 1
-            else:
+
+                ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+                c = ws.cell(rr, 6, "VERIFICACIÓN SEACE / MEF (Banco de Inversiones)")
+                c.font, c.fill = F_HEAD, FILL_HEAD; c.alignment = AL_HEAD
+                rr += 1
+                _fila("Contratista (MEF)", ct.get("valor"), ct.get("veredicto"))
+                _fila("N° de contrato", cn.get("numero"), cn.get("veredicto"))
+                if cn.get("monto") is not None:
+                    _fila("Monto del contrato (S/)", cn.get("monto"), None, FMT_SOLES)
+                if _ffmt:
+                    _fila("Fecha del contrato", _ffmt)
+                _fila("Resolución de aprobación", rs.get("numero") or rs.get("documento"),
+                      rs.get("veredicto"))
+                _fila("CUI confirmado (MEF)", verif.get("cui_confirmado"))
+                fuentes = ", ".join(verif.get("fuentes") or [])
+                if fuentes:
+                    ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+                    ws.cell(rr, 6, f"Fuente: {fuentes}").font = F_CELL
+                    rr += 1
+        else:
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+            c = ws.cell(rr, 6, "VALORIZACIONES — en amarillo, las del periodo del certificado")
+            c.font, c.fill = F_PARTE, FILL_PARTE
+            c.alignment = Alignment(vertical="center", wrap_text=True)
+            rr += 1
+            for i, h in enumerate(["N°", "AÑO / MES", "AVANCE FÍSICO REAL",
+                                   "VALORIZADO REAL (S/)", "ESTADO", "ARCHIVOS (ZIP)"], start=6):
+                cc = ws.cell(rr, i, h)
+                cc.font, cc.fill, cc.border, cc.alignment = F_HEAD, FILL_HEAD, BORDER, AL_HEAD
+            rr += 1
+            for n, v in enumerate(vals, start=1):
+                anio, mes = v.get("anio") or 0, v.get("mes") or 0
+                resaltar = _mes_en_rango(anio, mes, ini, fin)
+                paraliz = "paraliz" in str(v.get("estado") or "").lower()
+                ndoc = v.get("docs") or 0
+                celdas = [n, f"{anio} / {_MES_ES.get(mes, mes)}",
+                          v.get("fisico_real"), v.get("valorizado_real"), v.get("estado") or "",
+                          f"Sí ({ndoc})" if ndoc else "—"]
+                for i, val in enumerate(celdas, start=6):
+                    cc = ws.cell(rr, i, val)
+                    cc.font = F_CELL_ROJO if paraliz else F_CELL   # rojo: mes paralizado
+                    cc.border, cc.alignment = BORDER, AL_WRAP
+                    if i == 8 and isinstance(val, (int, float)):
+                        cc.number_format = FMT_PCT
+                    if i == 9 and isinstance(val, (int, float)):
+                        cc.number_format = FMT_SOLES
+                    if resaltar:
+                        cc.fill = FILL_VALOR
+                rr += 1
+            if not vals:
                 ws.cell(rr, 6, "Sin valorizaciones registradas en InfoObras").font = F_CELL
                 rr += 1
 
@@ -963,12 +1009,14 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
         if enr.get("sunat"):
             sunat[(np_, ne)] = enr["sunat"]
         if (enr.get("obra_ficha") or enr.get("valorizaciones")
-                or enr.get("representante_obra") or enr.get("aprobacion_expediente")):
+                or enr.get("representante_obra") or enr.get("aprobacion_expediente")
+                or enr.get("verificacion_expediente")):
             fichas[(np_, ne)] = {**(enr.get("obra_ficha") or {}),
                                  "valorizaciones": enr.get("valorizaciones") or [],
                                  "modificaciones_plazo": enr.get("modificaciones_plazo") or [],
                                  "representante_obra": enr.get("representante_obra"),
-                                 "aprobacion_expediente": enr.get("aprobacion_expediente")}
+                                 "aprobacion_expediente": enr.get("aprobacion_expediente"),
+                                 "verificacion_expediente": enr.get("verificacion_expediente")}
     return paral, cuis, fichas, sunat
 
 

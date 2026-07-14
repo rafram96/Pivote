@@ -785,6 +785,40 @@ def test_excel_muestra_modificaciones_de_plazo(tmp_path):
     assert "MODIFICACIONES DE PLAZO" in texto and "Ampliación del plazo" in texto
 
 
+def test_excel_expediente_muestra_verificacion_mef_en_vez_de_valorizaciones(tmp_path):
+    """F3: para un EXPEDIENTE (sin valorizaciones), el slot muestra la VERIFICACIÓN
+    SEACE/MEF (contrato/contratista/resolución) en lugar de la tabla de valorizaciones."""
+    from entregables.excel_final import generar_excel_final
+    espejo = {
+        "_meta": {}, "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N", "experiencias": [
+                {"n": 1, "proyecto": "Elaboración del Expediente Técnico C.S. Yuyapichis",
+                 "fecha_inicial": "2017-10-19", "fecha_final": "2019-04-04", "folio": "1"}]}],
+    }
+    fichas = {(1, 1): {
+        "cui": "2324482", "codigo_infoobras": "31212", "estado": "Finalizado",
+        "valorizaciones": [],   # expediente: sin valorizaciones
+        "verificacion_expediente": {
+            "cui_confirmado": "2324482", "fuentes": ["MEF-SEACE", "MEF-08A"],
+            "contratista": {"valor": "VELASQUEZ VASQUEZ EMILIO FELIX", "veredicto": "ok"},
+            "contrato": {"numero": "116-2017-GRH/GR", "monto": 612750.0,
+                         "fecha": "2017-10-19", "veredicto": "ok"},
+            "resolucion": {"numero": "121-2019", "veredicto": "no_verificable"},
+        },
+    }}
+    ruta = tmp_path / "exp.xlsx"
+    generar_excel_final(espejo, ruta, {}, {(1, 1): "2324482"}, fichas)
+    wb = openpyxl.load_workbook(ruta)
+    hoja = next(s for s in wb.sheetnames if s.startswith("P1"))
+    texto = "\n".join(str(c.value) for row in wb[hoja].iter_rows()
+                      for c in row if c.value)
+    assert "VERIFICACIÓN SEACE / MEF" in texto
+    assert "VELASQUEZ VASQUEZ EMILIO FELIX" in texto and "116-2017-GRH/GR" in texto
+    assert "✔ Coincide" in texto and "Por confirmar" in texto      # veredictos por campo
+    assert "VALORIZACIONES —" not in texto                          # el slot fue reemplazado
+
+
 def test_excel_marca_valorizaciones_con_archivos(tmp_path):
     from entregables.excel_final import generar_excel_final
     espejo = {
