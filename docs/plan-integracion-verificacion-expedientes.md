@@ -76,6 +76,12 @@ contrato** con requests (`%PDF-1.4`).
 | PDF del contrato | `URL_CONTRATO` del JSON (Oracle storage, directo) |
 | CUI/nombre/situación/UEI | ficha SSI / el mismo 08-A |
 
+**El `codsnip` importa (corrección de F0, medido en F5):** el DWH devuelve MÁS
+contratos con el SNIP real que con `codsnip=0` (ej. CUI 2303684/2107892/2088781:
+0 contratos con `0` → 3/11/6 con el SNIP). El SNIP se toma del `codSnip` de la obra
+de InfoObras (ya resuelta en el pipeline) y se pasa a `verificar_cui`. La descarga
+reusa ese SNIP (guardado como `cod_snip` en el bloque).
+
 → **Se elimina el riesgo R3** (no dependemos del JSF de SEACE ni de prod4). El
 único "no se puede" que queda es que la ENTIDAD no haya cargado datos (medido ~8%).
 
@@ -213,6 +219,12 @@ Mismo patrón que `infoobras.py` (session con UA, reintentos con backoff, thrott
 | **F4** | Panel: badge + tabla de contraste | 0.5 d |
 | **F5** | Regresión con los 13 CUIs (script `scripts/verificar_mef.py`, reusable en el server) + e2e + deploy | 0.5 d |
 | | **Total** | **4 d** |
+
+**F0–F5 IMPLEMENTADAS (rama `feat/verificacion-mef`)** — falta solo merge + deploy.
+Regresión F5 (13 CUIs reales, con SNIP vía InfoObras): **11/13 (84%) verificados en
+MEF · 8/13 con contrato de expediente · 7/13 con resolución**. Los no-verificados son
+entidades que no cargaron el 08-A (medido, ~cae en ⚠️ "por confirmar", no es fallo).
+Suite: 216 tests offline. Script reusable en el server: `python scripts/verificar_mef.py`.
 
 **Precio cerrado (ACORDADO 13-jul): S/ 2,600** — en la línea del cruce
 InfoObras+SUNAT del contrato original (S/2,400). 50% adelanto / 50% entrega.

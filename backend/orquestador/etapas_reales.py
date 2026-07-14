@@ -263,16 +263,17 @@ class EtapaInfoObrasReal:
         from scraping.infoobras import fetch_by_cui
         return fetch_by_cui(cui, cert_ini, cert_fin, obra_id)
 
-    def _verificar_expediente_mef(self, exp: dict, cui) -> Optional[dict]:
+    def _verificar_expediente_mef(self, exp: dict, cui, codsnip="") -> Optional[dict]:
         """Verifica un expediente contra el MEF (contrato/contratista/resolución).
         SOLO corre si hay un verificador cableado (`verificador_mef`): la app en
         modo real pasa `scraping.mef.verificar_cui`; los tests inyectan un fake; si
-        no está, se OMITE (así los tests offline no tocan red). Best-effort: si el
-        módulo falla o el portal no responde, devuelve None y el análisis sigue."""
+        no está, se OMITE (así los tests offline no tocan red). El `codsnip` (de la
+        obra de InfoObras) mejora la cobertura del endpoint de contratos. Best-effort:
+        si el módulo falla o el portal no responde, devuelve None y el análisis sigue."""
         if self._verificar_mef is None:
             return None
         try:
-            return self._verificar_mef(exp, cui)
+            return self._verificar_mef(exp, cui, codsnip)
         except Exception as e:  # noqa: BLE001
             from scraping.errores_red import corto
             logger.debug("verificación MEF CUI %s: %s", cui, corto(e))
@@ -380,8 +381,11 @@ class EtapaInfoObrasReal:
             # de expediente y hay CUI resuelto, cruzar contra el Banco de Inversiones
             # (contrato/contratista/resolución). Best-effort, no bloquea.
             if cui and _es_experiencia_expediente(_e.get("proyecto") or ""):
-                _vmef = self._verificar_expediente_mef(_e, cui)
+                # el SNIP de la obra de InfoObras mejora la cobertura de contratos del MEF
+                _snip = str((getattr(obra, "raw_busqueda", {}) or {}).get("codSnip") or "").strip()
+                _vmef = self._verificar_expediente_mef(_e, cui, _snip)
                 if _vmef and _vmef.get("verificado_en_mef"):
+                    _vmef.setdefault("cod_snip", _snip or None)   # para re-usar en la descarga
                     enr["verificacion_expediente"] = _vmef
                     _ct = (_vmef.get("contrato") or {}).get("numero")
                     obs.append(pipeline.Observacion(
@@ -584,7 +588,8 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                         try:
                             from scraping.mef import descargar_documentos_expediente
                             descargar_documentos_expediente(
-                                _vmef["cui_confirmado"], destino / "Verificación MEF")
+                                _vmef["cui_confirmado"], destino / "Verificación MEF",
+                                codsnip=_vmef.get("cod_snip") or "")
                         except Exception as ex:  # noqa: BLE001
                             logger.debug("verificación MEF obra %s: %s", obra_id, corto(ex))
                 base.mkdir(parents=True, exist_ok=True)

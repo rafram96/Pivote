@@ -391,7 +391,7 @@ def test_verificacion_mef_se_adjunta_al_enriquecimiento(tmp_path):
     }
     llamadas = []
 
-    def fake_mef(exp, cui):
+    def fake_mef(exp, cui, codsnip=""):
         llamadas.append((exp.get("n"), cui))
         return {"verificado_en_mef": True, "cui_confirmado": cui,
                 "fuentes": ["MEF-SEACE", "MEF-08A"],
@@ -438,7 +438,7 @@ def test_verificacion_mef_no_corre_en_experiencia_normal(tmp_path):
                                 fetcher_infoobras=fetcher_fake,
                                 consultor_sunat=lambda r: None,
                                 descargar=lambda *a, **k: None,
-                                verificador_mef=lambda e, c: llamadas.append(1)), repo)
+                                verificador_mef=lambda e, c, s="": llamadas.append(1)), repo)
     motor.correr(motor.crear_job(espejo).job_id)
     assert llamadas == []          # no es expediente → no se cruza el MEF
 
@@ -460,7 +460,7 @@ def test_verificacion_mef_falla_no_bloquea(tmp_path):
         "resumen_evaluacion": {"factores": []},
     }
 
-    def mef_rompe(exp, cui):
+    def mef_rompe(exp, cui, codsnip=""):
         raise ConnectionError("MEF caído")
 
     repo = RepositorioMemoria()
