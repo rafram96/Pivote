@@ -233,11 +233,17 @@ verificación SEACE quedó pendiente — no bloquees el análisis.
 2. **MEF — datos por el SSI** (ssi.mef.gob.pe, expone el Banco de Inversiones SIN
    código de verificación): estado del proyecto, situación, monto, unidad ejecutora,
    contrataciones registradas.
-3. **MEF — resolución de aprobación** (solo si hace falta el PDF): Consulta Pública
-   de Inversiones → CUI → "Registros en la Fase de Inversión" → **Formato N°08-A** →
-   sección "B. Datos de la fase de Ejecución: Expediente técnico" → descarga el PDF
-   (`03_Resolucion_Aprobacion…`). Si pide captcha, es la ÚNICA pausa permitida:
-   pide al usuario "escribe el código y avísame" y continúa.
+3. **MEF — resolución de aprobación (ruta SIN captcha, validada en vivo 13-jul con
+   el CUI 2324482):** abre el **Formato N°08-A en HTML** directo:
+   `https://ofi5.mef.gob.pe/invierte/ejecucion/verFichaEjecucion/<CUI>`
+   (también se llega desde la ficha del SSI → ícono del expediente técnico →
+   "Lista de modificaciones en Fase de Ejecución" → Ver). En la página busca los
+   enlaces **"APROBACIÓN DEL EXP. TEC"** (o similar, `downloadArchivoPublico?...`)
+   y descárgalos DESDE LA SESIÓN del navegador (el enlace lleva token de sesión —
+   un curl externo NO funciona, el click/fetch en la página SÍ). Guarda como
+   `03_Resolucion_Aprobacion…`. La Consulta Pública (que pide captcha desde el
+   primer paso) queda SOLO como último recurso; si la usas y pide el código, es la
+   ÚNICA pausa permitida: "escribe el código y avísame" y continúa.
 4. **Contraste** y registro: compara contratista / N° contrato / monto / fechas /
    resolución contra el certificado. Escribe el resultado en `observaciones_claude`
    de esa experiencia con el formato:

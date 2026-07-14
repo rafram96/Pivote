@@ -36,14 +36,16 @@ verificación). Si el certificado no trae CUI, encuéntralo ahí buscando por el
 nombre del proyecto. Anota: CUI, nombre oficial, estado (ACTIVO/CERRADO),
 situación (VIABLE), monto, unidad ejecutora, y las contrataciones registradas.
 
-PASO 3 — MEF, resolución de aprobación del expediente (puede pedir captcha):
-Solo si necesitas el PDF: entra a la Consulta Pública de Inversiones
-(https://ofi5.mef.gob.pe/invierte/consultapublica/consultainversiones), busca el
-CUI, click en el número → "REGISTROS EN LA FASE DE INVERSIÓN" → abre el PDF de la
-fila bajo "ver" (Formato N°08-A) → baja hasta "B. Datos de la fase de Ejecución:
-Expediente técnico o documento equivalente" y DESCARGA el PDF de la columna ET/DE
-(la resolución de aprobación del expediente). Si aquí sale el captcha, es la única
-pausa permitida.
+PASO 3 — MEF, resolución de aprobación del expediente (ruta SIN captcha):
+Abre el Formato N°08-A en HTML directo:
+https://ofi5.mef.gob.pe/invierte/ejecucion/verFichaEjecucion/<CUI>
+(también se llega desde la ficha del SSI → ícono del expediente técnico → "Lista
+de modificaciones en Fase de Ejecución" → Ver). En esa página busca los enlaces
+"APROBACIÓN DEL EXP. TEC" (o similar) y DESCÁRGALOS desde la misma sesión del
+navegador (llevan token de sesión: el click en la página funciona; un curl
+externo no). Esa es la resolución de aprobación. Solo como ÚLTIMO recurso usa la
+Consulta Pública (pide captcha desde el primer paso) — y si sale el código, es la
+única pausa permitida.
 
 PASO 4 — CONTRASTE con el certificado. Compara y repórtame en una tabla:
 - Contratista (¿es quien emite/respalda el certificado?)
