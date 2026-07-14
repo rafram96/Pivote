@@ -217,6 +217,38 @@ CONFIRMARLO**.
 > experiencias con cliente PRIVADO no tienen CUI ni están en estos registros — déjalas
 > con `cui: null` sin insistir; su verificación es otro flujo (fuera de este alcance).
 
+### Paso 4.6 — Verificación de EXPEDIENTES contra SEACE + MEF (módulo de verificación)
+Para cada experiencia de **EXPEDIENTE técnico/estudio** (las detectadas en 4.5 —
+nombre de expediente/consultoría de proyecto), además del CUI verifica el
+**contrato detrás del certificado**. Requiere NAVEGADOR (Chrome MCP); si no hay
+navegador disponible, omite este paso y anota en `observaciones_claude` que la
+verificación SEACE quedó pendiente — no bloquees el análisis.
+
+1. **SEACE** (buscador público:
+   `https://prod2.seace.gob.pe/seacebus-uiwd-pub/buscadorPublico/buscadorPublico.xhtml`):
+   busca el proceso por NOMBRE del proyecto y AÑO del contrato. De la convocatoria
+   DESCARGA las **Bases Integradas** y el **Contrato** a la carpeta del análisis
+   (`verificacion/P{n}_E{m}/01_Bases…`, `02_Contrato…`). Anota: contratista (empresa
+   o persona natural), N° de contrato, monto y fechas.
+2. **MEF — datos por el SSI** (ssi.mef.gob.pe, expone el Banco de Inversiones SIN
+   código de verificación): estado del proyecto, situación, monto, unidad ejecutora,
+   contrataciones registradas.
+3. **MEF — resolución de aprobación** (solo si hace falta el PDF): Consulta Pública
+   de Inversiones → CUI → "Registros en la Fase de Inversión" → **Formato N°08-A** →
+   sección "B. Datos de la fase de Ejecución: Expediente técnico" → descarga el PDF
+   (`03_Resolucion_Aprobacion…`). Si pide captcha, es la ÚNICA pausa permitida:
+   pide al usuario "escribe el código y avísame" y continúa.
+4. **Contraste** y registro: compara contratista / N° contrato / monto / fechas /
+   resolución contra el certificado. Escribe el resultado en `observaciones_claude`
+   de esa experiencia con el formato:
+   `VERIFICACION_EXPEDIENTE: contratista ✅|⚠️|❌ · contrato ✅|⚠️|❌ · resolución ✅|⚠️|❌ — detalle corto (fuente: SEACE/MEF)`.
+   Diferencias menores (valor referencial vs adjudicado) = esperables, no ❌.
+   **Mismas reglas de evidencia del 4.5**: solo datos vistos en pantalla, nada de
+   memoria; si algo no aparece, ⚠️ "no verificable en línea" y sigues.
+
+(Para verificar un expediente SUELTO sin correr el análisis completo existe el
+prompt manual: `docs/prompt-verificacion-expediente.md`.)
+
 ### Paso 5 — Transporte al backend (POR DEFECTO: MCP, automático)
 **El default es subir por el MCP, sin preguntar.** Tras consolidar y validar:
 1. `probar_conexion` del MCP `infoobras-onprem-bridge` (ver `mcp-server/`). Si
