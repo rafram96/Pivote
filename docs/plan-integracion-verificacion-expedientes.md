@@ -42,6 +42,14 @@ Los 2 casos flacos, explicados:
 Conclusión: **automatización 100% sin captcha (13/13); cobertura ~92% medida**, y
 lo no verificable se marca en vez de inventarse. Esto adelanta parte de la F5.
 
+**Sonda adicional (13-jul, por CÓDIGO):** el flujo MEF completo funciona con
+`requests` puro, sin navegador: `GET verFichaEjecucion/2324482` devuelve el HTML
+server-rendered (345 KB, sección B presente, 32 links de aprobación) y el PDF de
+la resolución **descarga con la misma session de requests** (HTTP 200,
+`application/force-download`, `%PDF-1.4`). El fallo del curl anterior era solo
+falta de cookies de sesión. → **La verificación MEF se implementa EN EL BACKEND**,
+mismo patrón que `scraping/infoobras.py`. El precio acordado quedó en **S/ 2,600**.
+
 ---
 
 ## 1 · Qué significa "integrado" (el objetivo)
@@ -50,25 +58,34 @@ Hoy (Opción A, construida): la skill verifica y deja el resultado como TEXTO en
 `observaciones_claude` + archivos en la carpeta local del análisis. El evaluador lo
 ve, pero el sistema no lo "entiende".
 
-Integrado (Opción B): el resultado es **dato estructurado** que viaja por todo el
-pipeline:
+Integrado (versión POR CÓDIGO, S/ 2,600): la verificación corre **en el backend**,
+determinística, en la misma etapa donde hoy se cruza InfoObras — sin navegador, sin
+skill de por medio:
 
 ```
-[Skill — Paso 4.6]                       [Backend on-prem]              [Entregables]
-verifica en SEACE/MEF (navegador)   →    valida e ingesta el bloque  →  Excel: bloque
-descarga bases/contrato/resolución  →    lo persiste en el           →  "VERIFICACIÓN
-escribe verificacion_expediente     →    enriquecimiento (+Postgres) →  SEACE/MEF" ✅⚠️❌
-en el espejo + adjunta archivos     →    copia archivos a descargas  →  ZIP: carpeta
-                                                                        "Verificación"
-                                         [Panel]
-                                         badge por experiencia:
-                                         "Contrato verificado ✓ SEACE"
+[Backend on-prem — etapa de verificación]                    [Entregables]
+detecta expediente (_es_experiencia_expediente, ya existe) → Excel: bloque
+GET verFichaEjecucion/{CUI}  (MEF, requests puro)          → "VERIFICACIÓN MEF" ✅⚠️❌
+parsea 08-A (estado, fechas, montos, sección B)            → ZIP: carpeta
+descarga PDF(s) de aprobación (misma session)              → "Verificación" con
+contraste vs certificado → enr["verificacion_expediente"]     la resolución
+        │
+        ▼
+[Panel]  badge por experiencia: "Expediente verificado ✓ MEF"
 ```
 
-**Principio arquitectónico (no negociable):** el scraping de SEACE/MEF vive en la
-**capa Claude** (navegador, máquina del usuario). El backend **consume** el
-resultado, jamás scrapea SEACE — esa web mató al cotizador E3 (JSF, anti-bot, sin
-API estable) y el riesgo no cambió. El backend se mantiene determinístico y on-prem.
+**Arquitectura (actualizada tras las sondas del 13-jul):**
+- **MEF → por código en el backend.** Probado: HTML server-rendered + descarga del
+  PDF con session de `requests`. Mismo patrón que `scraping/infoobras.py`
+  (session, reintentos, throttle, `errores_red.corto`).
+- **SEACE (JSF) → NO se scrapea. Nunca.** Ahí murió E3 y sigue igual. El dato de
+  contrato/contratista se busca por vías determinísticas alternativas (F0):
+  el SSI del MEF expone la sección "Contrataciones (fuente SEACE)" y el nuevo
+  buscador `prod4.seace.gob.pe` es una SPA (probable API JSON detrás). Si F0 no
+  encuentra endpoint estable → v1 entrega la verificación MEF completa y el
+  contrato queda ⚠️ "verificable manualmente" (con el prompt de cortesía).
+- **Bases Integradas de SEACE**: FUERA de v1 (viven en el JSF). Quedan por el
+  prompt manual o como fase 2 si Manuel las exige dentro del ZIP.
 
 ## 2 · Qué SE PUEDE y qué NO (límites honestos)
 
@@ -82,11 +99,11 @@ API estable) y el riesgo no cambió. El backend se mantiene determinístico y on
 ### NO se puede (y hay que decirlo al cliente tal cual)
 | Límite | Por qué | Consecuencia |
 |---|---|---|
-| **Automatizar el captcha** | Barrera anti-bot; no se debe ni se puede evadir | Si hace falta el PDF del Formato 08-A, habrá **una pausa humana** por caso. El flujo minimiza esto usando el SSI para los datos |
-| **Scrapear SEACE desde el backend** | JSF con viewstates, anti-bot, sin API — lección E3 | La verificación requiere una corrida de skill (Claude + navegador); no hay "botón re-verificar" server-side |
-| **Verificar obras/clientes PRIVADOS** | No existen en SEACE/MEF/InfoObras | Frente aparte (RENIPRESS/objeto social) — fuera de este módulo |
-| **Garantizar encontrar TODO proceso** | La búsqueda de SEACE es por texto y los procesos muy antiguos o mal registrados pueden no aparecer | Veredicto ⚠️ "no verificable en línea" — el humano decide |
-| **Corridas 100% desatendidas siempre** | El captcha del punto 1 | El análisis completo sí corre solo; solo el PDF de la resolución puede pedir una intervención |
+| **Automatizar el captcha** | Barrera anti-bot; no se debe ni se puede evadir | Irrelevante en v1: la ruta por código (`verFichaEjecucion/{CUI}`) no pasa por captcha. La Consulta Pública (con captcha) simplemente no se usa |
+| **Scrapear el JSF de SEACE (prod2)** | Viewstates, anti-bot, sin API — lección E3 | El contrato/contratista se busca por vías determinísticas (SSI/prod4, F0); las **Bases Integradas quedan fuera de v1** (prompt manual o fase 2) |
+| **Verificar obras/clientes PRIVADOS** | No existen en SEACE/MEF/InfoObras | Frente aparte (RENIPRESS/objeto social) — cotización separada |
+| **Garantizar que el 08-A esté cargado** | Depende de la entidad (medido: ~8% no lo llenó) | Veredicto ⚠️ "no verificable en línea" — el humano decide |
+| **Parsers inmunes a cambios del MEF** | HTML puede cambiar (como InfoObras) | Mismo trato que InfoObras: fixtures + reintentos + fallo → ⚠️, nunca crash. Mantenimiento vía bolsa |
 
 ## 3 · Cómo se integra al sistema actual (pieza por pieza)
 
@@ -108,58 +125,73 @@ como `cui_fuente`):
 ```
 `veredicto` ∈ `ok | discrepancia | no_verificable`. Campos ausentes = no se intentó.
 
-### 3.2 Skill (Paso 4.6 — ya construido, se ajusta la salida)
-- Además de `observaciones_claude`, escribe el bloque 3.1 en el espejo.
-- Los archivos descargados van DENTRO del ZIP de certificados que ya viaja al
-  backend (`verificacion/P{n}_E{m}/…`) — reutiliza el transporte existente
-  (multipart / subida por disco para lotes grandes).
+### 3.2 Scraper nuevo: `backend/scraping/mef.py` (el corazón del módulo)
+Mismo patrón que `infoobras.py` (session con UA, reintentos con backoff, throttle,
+`errores_red.corto`, NO corre en tests offline):
+- `fetch_ficha_ejecucion(cui, session=None) -> FichaMEF | None` — GET
+  `https://ofi5.mef.gob.pe/invierte/ejecucion/verFichaEjecucion/{cui}` (HTML
+  server-rendered, validado por requests el 13-jul).
+- `parsear_ficha_08a(html) -> dict` — función PURA (testeable offline con fixtures):
+  estado del registro, fechas de ejecución, montos (ET/supervisión/total),
+  sección B presente, y los documentos `downloadArchivoPublico` con su etiqueta
+  (identificar aprobación por CONTEXTO de sección, no por etiqueta fija — varía:
+  "APROBACIÓN DEL EXP. TEC" vs "RESOLUCIÓN JEFATURAL…").
+- `descargar_aprobaciones(session, docs, destino) -> int` — descarga con la MISMA
+  session (los links llevan token de sesión: probado que requests lo maneja);
+  streaming a `.part` + rename, reutilizando el helper de `zip_infoobras`.
+- `verificar_expediente(exp, ficha) -> dict` — el contraste puro (testeable):
+  fechas del certificado vs ejecución MEF, resolución (nº/fecha), montos; produce
+  el bloque `verificacion_expediente` (3.1) con veredictos.
+- **F0 decide** si se suma `contrataciones_por_cui()` (endpoint del SSI o API JSON
+  de prod4) para contratista/contrato. Si no hay vía estable → ese campo queda ⚠️.
 
-### 3.3 Backend (ingesta + persistencia)
-- `schemas/espejo.py` + `skill/schemas/espejo.js`: bloque nuevo con validación de
-  paridad (`tools/test_contrato.py` + espejo sintético).
-- La etapa de ingesta copia `verificacion_expediente` al **enriquecimiento**
-  (`enr["verificacion_expediente"]`) → write-through a Postgres gratis (ya existe).
-- `_guardar_certificados` ya descomprime el ZIP; los archivos de `verificacion/` se
-  copian a la carpeta de descargas de la experiencia para que el **ZIP InfoObras**
-  los incluya bajo `P{n}/E{m}/Verificación SEACE-MEF/`.
-- El backend NO re-verifica ni re-scrapea: confía en la skill (mismo principio que
-  el Paso 4 de evaluación).
+### 3.3 Orquestador (etapa)
+- En `etapas_reales._procesar` (o etapa hermana): si `_es_experiencia_expediente`
+  (helper ya existente) y hay CUI resuelto → `fetch_ficha_ejecucion` + contraste →
+  `enr["verificacion_expediente"]` → write-through a Postgres gratis (ya existe).
+- La DESCARGA de los PDFs se difiere a `descargar_documentos_job` (patrón actual)
+  → carpeta `Verificación MEF/` de la experiencia → el ZIP la incluye solo.
+- Cache por CUI (mismo esquema del fetch de InfoObras) y 2ª pasada para flakiness.
 
-### 3.4 Excel final
-- En la hoja del profesional, bloque nuevo **"VERIFICACIÓN SEACE / MEF"** para las
-  experiencias de expediente: 3 filas (contratista / contrato / resolución) con
-  ✅⚠️❌, el detalle y la fuente. Mismo estilo del bloque "OBRA EN INFOOBRAS".
-- Terminología de evaluador, sin jerga (regla de siempre).
+### 3.4 Schemas / contrato
+- El bloque 3.1 entra al **enriquecimiento** (backend-only), NO al espejo → **no
+  hay cambio del contrato skill↔backend** en v1 (el Paso 4.6 de la skill queda
+  como fallback manual/cortesía). Menos superficie, menos paridad que mantener.
 
-### 3.5 Panel (repo Panel-InfoObras)
-- La vista de extracción (`/jobs/{id}/espejo`) ya expone el enriquecimiento →
-  agregar el campo y un **badge por experiencia**: `Contrato verificado ✓ (SEACE)`
-  / `Verificación parcial ⚠` / sin badge si no aplica.
-- Detalle expandible con la tablita de contraste. Sin pantalla nueva — se monta en
-  la ficha de experiencia existente.
+### 3.5 Excel final
+- Bloque nuevo **"VERIFICACIÓN MEF (expediente)"** en la hoja del profesional:
+  filas resolución / fechas / montos (y contratista si F0 lo habilita) con ✅⚠️❌ +
+  fuente. Mismo estilo del bloque "OBRA EN INFOOBRAS". Sin jerga.
+
+### 3.6 Panel (repo Panel-InfoObras)
+- `/jobs/{id}/espejo` ya expone el enriquecimiento → añadir el campo y un **badge**:
+  `Expediente verificado ✓ MEF` / `Verificación parcial ⚠` / nada si no aplica.
+  Detalle expandible con la tabla de contraste en la ficha de experiencia existente.
 
 ## 4 · Plan de acción (fases y esfuerzo)
 
-| Fase | Qué | Esfuerzo |
+| Fase | Qué (archivos concretos) | Esfuerzo |
 |---|---|---|
-| **F1** | Contrato de datos: bloque en ambos schemas + test de paridad + ajuste del Paso 4.6 para emitirlo | 0.5 d |
-| **F2** | Backend: ingesta → enriquecimiento → Postgres; copia de archivos al árbol de descargas/ZIP | 1 d |
-| **F3** | Excel: bloque "VERIFICACIÓN SEACE/MEF" | 0.5 d |
-| **F4** | Panel: badge + tabla de contraste en la ficha de experiencia | 1 d |
-| **F5** | Pruebas: offline (schemas/ingesta/Excel con fixtures) + **e2e con 2 casos reales** (uno ✅ limpio, uno ⚠️ con captcha/no-verificable) + deploy al server | 1 d |
-| | **Total** | **4 d** (+ colchón ya incluido en el precio) |
+| **F0** | Descubrimiento: endpoint de Contrataciones del SSI y/o API JSON de prod4 (contrato/contratista); congelar **fixtures HTML reales** de 5 CUIs (ficha completa, flaca, reformulada) para los tests offline | 0.5 d |
+| **F1** | `scraping/mef.py`: fetch + parser puro + descarga con session + contraste. Tests offline contra los fixtures | 1 d |
+| **F2** | Etapa en `orquestador/etapas_reales.py`: detección → verificación → enriquecimiento; descarga diferida al árbol del ZIP | 1 d |
+| **F3** | `entregables/excel_final.py`: bloque de verificación | 0.5 d |
+| **F4** | Panel: badge + tabla de contraste | 0.5 d |
+| **F5** | Regresión con los 13 CUIs (script `scripts/verificar_mef.py`, reusable en el server) + e2e + deploy | 0.5 d |
+| | **Total** | **4 d** |
 
-Precio cerrado (cotización T-003, Opción B): **S/ 4,600** — incluye la Opción A ya
-construida. 50% adelanto / 50% entrega.
+**Precio cerrado (ACORDADO 13-jul): S/ 2,600** — en la línea del cruce
+InfoObras+SUNAT del contrato original (S/2,400). 50% adelanto / 50% entrega.
+Fase 2 opcional (cotización aparte si la pide): Bases Integradas de SEACE al ZIP.
 
 ## 5 · Riesgos y mitigaciones
 
 | # | Riesgo | Prob. | Impacto | Mitigación |
 |---|---|---|---|---|
-| R1 | **SEACE cambia su HTML/flujo** (histórico: mató a E3) | Media | La verificación deja de encontrar procesos | El scraping es vía Claude+navegador (se adapta al layout solo, no hay selectores frágiles); si aún así falla → ⚠️ pendiente, el análisis sigue. Mantenimiento vía bolsa mensual |
-| R2 | **Captcha del MEF** | ~~Alta~~ **Baja** (tras la validación del 13-jul) | Pausa humana solo en el último recurso | La ruta SSI → `verFichaEjecucion/{CUI}` llega a datos + 08-A + PDF de resolución **sin captcha** (probado 13/13); la Consulta Pública (con captcha) queda solo como fallback excepcional |
-| R3 | **La máquina de Manuel sin navegador/Chrome MCP** | Media | El 4.6 se omite | Instalarlo/verificarlo es parte del setup A6; el paso degrada con aviso, no rompe |
-| R4 | **Citas incorrectas (alucinación)** | Baja | Grave (informe con dato falso) | Regla de evidencia: solo datos VISTOS en pantalla + archivos descargados como prueba; sin confirmación → ⚠️, nunca inventar |
+| R1 | **El MEF cambia el HTML del 08-A** | Media | El parser deja de extraer | Mismo trato que InfoObras: parser puro + fixtures congelados (los tests avisan), reintentos, y fallo → ⚠️ "verificación pendiente", nunca crash. Mantenimiento vía bolsa mensual |
+| R2 | **Captcha del MEF** | **Eliminado en v1** | — | La ruta por código (`verFichaEjecucion/{CUI}`) no pasa por captcha (probado 13/13 + sonda requests). La Consulta Pública no se usa |
+| R3 | **F0 no encuentra vía estable para contratista/contrato (SEACE)** | Media | Ese campo queda ⚠️ en v1 | El módulo vale igual (resolución/fechas/montos verificados); el contrato se cubre con el prompt manual mientras tanto; se re-evalúa como fase 2 |
+| R4 | **El MEF bloquea/limita la IP del server** | Baja | Verificaciones fallan temporalmente | Throttle + backoff (patrón InfoObras), volumen bajo (solo expedientes), cache por CUI |
 | R5 | **Tiempo por análisis crece** (N expedientes × navegación) | Media | Análisis más lentos | Solo corre para experiencias de expediente (no todas); paralelizable a futuro; expectativa clara al cliente |
 | R6 | **Procesos antiguos no aparecen en SEACE** | Media | ⚠️ frecuentes en certificados viejos | Es información, no fallo: "no verificable en línea" es un veredicto útil para el evaluador |
 | R7 | **Scope creep** ("ya que verificas, agrega X") | Alta | Erosión del precio | El bloque 3.1 define el alcance EXACTO; lo demás = nueva cotización |

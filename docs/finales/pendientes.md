@@ -21,7 +21,7 @@
 ## ⚪ E — Frentes aparte (FUERA del contrato; vida y cobro propios)
 | Ticket | Frente | Estado |
 |---|---|---|
-| T-003 | **Verificación SEACE + MEF** (expedientes: contrato/contratista/resolución) | ✅ CONSTRUIDO (13-jul): Paso 4.6 en la skill (SEACE bases+contrato, SSI sin captcha, Formato 08-A, contraste en observaciones_claude) + prompt manual suelto (`docs/prompt-verificacion-expediente.md`). **Cobrar S/ 2,100** — enviar cotización ANTES de entregar. Upsell: integración panel/Excel (~S/4,600) |
+| T-003 | **Verificación de expedientes MEF (+SEACE vía F0)** | Skill 4.6 ✅ + validación 13/13 CUIs sin captcha ✅ + sonda requests ✅ (todo funciona por código). **PRECIO CERRADO S/ 2,600** — integración POR CÓDIGO en backend (plan: `docs/plan-integracion-verificacion-expedientes.md`, ~4d). Enviar cotización ANTES de entregar; 50/50. Bases SEACE = fase 2; RENIPRESS = cotización aparte |
 | T-002 | **Radar SEACE** (concursos diarios, VR/plazo/cociente) | reunión por agendar; guion en `docs/comercial/radar-seace-reunion.html`. Reemplaza al viejo E3 (cotizador) |
 | — | **Jurisprudencia lexcontrataciones** (resoluciones TCP, control de calidad ≈ supervisión) | skill de Manuel por revisar; adaptar Playwright→Chrome MCP; login lo hace el humano; cotizar tras ver la skill |
 | T-004 | **Segundo cerebro oficina** (índice del NAS, 8 personas) | 🧊 ASPIRACIONAL — Manuel confirmó "ahora no es así, es para proyectar" (12-jul). NO trabajar hasta reunión + caso de uso + piloto cotizado. Diseño: índice local + NAS solo-lectura; consultas del equipo SIN IA (Excel/buscador en server) |
