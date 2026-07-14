@@ -75,7 +75,13 @@ def _reportar_progreso(job_id: str, etapa, item_actual: int,
 if os.getenv("PIVOTE_ETAPAS", "real") == "esqueleto":
     motor = Motor(etapas_esqueleto(), repo, reportar=_reportar_progreso)
 else:
-    motor = Motor(etapas_reales(DATA_DIR), repo, reportar=_reportar_progreso)
+    # En modo real, la verificación de expedientes contra el MEF (T-003) se activa
+    # con PIVOTE_VERIFICAR_MEF=1 (default ON en real; poner 0 para desactivarla).
+    _verif_mef = None
+    if (os.getenv("PIVOTE_VERIFICAR_MEF", "1") or "1").strip() not in ("0", "no", "false"):
+        from scraping.mef import verificar_cui as _verif_mef
+    motor = Motor(etapas_reales(DATA_DIR, verificador_mef=_verif_mef),
+                  repo, reportar=_reportar_progreso)
 
 ETAPA_FUENTE = {
     pipeline.Etapa.SUNAT: "SUNAT",

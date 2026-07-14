@@ -367,6 +367,41 @@ def descargar_pdf(session: requests.Session, url: str, destino, *, timeout: floa
     return False
 
 
+def _nombre_archivo(base: str, ext: str = "pdf") -> str:
+    """Nombre de archivo seguro (sin caracteres ilegales, capado)."""
+    s = re.sub(r'[<>:"/\\|?*]', "-", (base or "documento").strip())
+    s = _RE_WS.sub(" ", s)[:80].strip(" .-")
+    return f"{s or 'documento'}.{ext}"
+
+
+def descargar_documentos_expediente(cui, destino, codsnip="",
+                                    session: Optional[requests.Session] = None) -> dict:
+    """Descarga a `destino/` la resolución de aprobación (del 08-A) y el PDF del
+    contrato de expediente (del DWH). RE-CONSULTA en fresco: los links del 08-A
+    llevan token de sesión que caduca, así que no sirve un URL guardado antes.
+    Best-effort: devuelve {resolucion, contrato} con lo que logró bajar. RED."""
+    from pathlib import Path
+    s = crear_session(session)
+    destino = Path(destino)
+    hecho = {"resolucion": 0, "contrato": 0}
+
+    html = fetch_ficha_08a(cui, s)
+    if html:
+        ficha = parsear_ficha_08a(html)
+        res = ficha.get("resolucion")
+        if res and res.get("url"):
+            nom = _nombre_archivo(res.get("numero") or res.get("documento") or "Resolucion aprobacion")
+            if descargar_pdf(s, res["url"], destino / nom):
+                hecho["resolucion"] += 1
+
+    c = contrato_de_expediente(normalizar_contratos(fetch_contratos(cui, codsnip, s)))
+    if c and c.get("url_pdf"):
+        nom = _nombre_archivo(f"Contrato {c['numero']}")
+        if descargar_pdf(s, c["url_pdf"], destino / nom):
+            hecho["contrato"] += 1
+    return hecho
+
+
 def verificar_cui(exp: dict, cui, codsnip="", session: Optional[requests.Session] = None) -> dict:
     """Orquesta el fetch (RED) + parseo + contraste para un CUI. Devuelve el
     bloque `verificacion_expediente`. Best-effort: si el portal falla, degrada a
