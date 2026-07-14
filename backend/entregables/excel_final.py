@@ -325,10 +325,13 @@ def construir_hoja_profesional(
                       key=lambda v: (v.get("anio") or 0, v.get("mes") or 0), reverse=True)
         verif = fx.get("verificacion_expediente")
         aprob = fx.get("aprobacion_expediente")
-        # EXPEDIENTE técnico: no ejecutó obra → no hay valorizaciones. En su MISMO
-        # lugar (mismo formato, distinta info) va la verificación del expediente:
-        # la aprobación en InfoObras + el contrato/contratista/resolución del MEF.
-        if not vals and (verif or aprob):
+        # EXPEDIENTE técnico: la experiencia es de ELABORACIÓN del expediente, no de
+        # ejecución de obra. En su MISMO lugar (mismo formato, distinta info) va la
+        # verificación: contrato/contratista/resolución del MEF + aprobación InfoObras.
+        # Si hay verificación MEF (la experiencia es expediente por nombre) se muestra
+        # AUNQUE la obra resuelta tenga valorizaciones (esas son de la CONSTRUCCIÓN, no
+        # del expediente que elaboró este cargo).
+        if verif or (aprob and not vals):
             ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
             c = ws.cell(rr, 6, "EXPEDIENTE TÉCNICO — verificación (no hay valorizaciones: "
                                "este cargo elaboró el expediente, no ejecutó la obra)")

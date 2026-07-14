@@ -410,4 +410,8 @@ def verificar_cui(exp: dict, cui, codsnip="", session: Optional[requests.Session
     html = fetch_ficha_08a(cui, s)
     ficha = parsear_ficha_08a(html) if html else {}
     contratos = normalizar_contratos(fetch_contratos(cui, codsnip, s))
-    return verificar_expediente(exp, ficha, contratos)
+    b = verificar_expediente(exp, ficha, contratos)
+    # el CUI CONSULTADO (7 díg., codUniqInv) manda sobre el del espejo: el skill a
+    # veces escribe el SNIP (6 díg.) y el backend lo corrige al resolver.
+    b["cui_confirmado"] = str(cui).strip() or b.get("cui_confirmado")
+    return b
