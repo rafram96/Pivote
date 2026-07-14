@@ -7,6 +7,43 @@
 
 ---
 
+## 0 · VALIDACIÓN EN VIVO (13-jul) — corrida sobre 13 CUIs reales
+
+Antes de integrar, el flujo MEF se probó en el navegador contra **13 CUIs reales
+de los jobs de producción** (salud, educación, saldos de obra, viejos y nuevos):
+
+| Métrica | Resultado |
+|---|---|
+| Formato 08-A responde (URL directa `verFichaEjecucion/{CUI}`, **sin captcha**) | **13/13** |
+| Ficha completa (sección B + documentos descargables, 34-151 PDFs por ficha) | **11/13** |
+| Descarga del PDF de resolución verificada (`%PDF-1.4`, 3.6 y 4.2 MB) | **2/2 probadas**, en CUIs distintos |
+| **Cobertura efectiva** | **12/13 (92%)** |
+
+Los 2 casos flacos, explicados:
+- **2140959** = CUI viejo reformulado (Tintay Puncu) — su data vive bajo el CUI
+  nuevo **2448758, que salió completo (89 PDFs)**. El Paso 4.5 ya maneja este caso
+  (detección de CUI desactualizado) → se auto-recupera.
+- **2148076** = la entidad nunca llenó el 08-A (ficha sin fechas) → "⚠️ por
+  confirmar" legítimo: el dato no existe en el Estado.
+
+**Hallazgos clave de la corrida:**
+1. **El captcha quedó eliminado del flujo típico.** La Consulta Pública lo pide
+   desde el PRIMER paso (el formulario de búsqueda), pero la ruta
+   **SSI → `verFichaEjecucion/{CUI}`** llega a TODO — datos, Formato 08-A en HTML
+   y el PDF de la resolución — sin ningún código. La Consulta Pública queda como
+   último recurso.
+2. **Los enlaces de descarga llevan token de sesión**: un `curl` externo devuelve
+   "Acceso denegado"; el click/fetch **desde la sesión del navegador** funciona.
+   Confirma la arquitectura: verificación en capa Claude, backend solo consume.
+3. **La etiqueta del documento varía por entidad** ("APROBACIÓN DEL EXP. TEC" vs
+   "RESOLUCIÓN JEFATURAL N° 07-2020-PRONIS-UED") → identificar por contexto de la
+   sección, nunca por etiqueta fija (la skill ya lo instruye así).
+
+Conclusión: **automatización 100% sin captcha (13/13); cobertura ~92% medida**, y
+lo no verificable se marca en vez de inventarse. Esto adelanta parte de la F5.
+
+---
+
 ## 1 · Qué significa "integrado" (el objetivo)
 
 Hoy (Opción A, construida): la skill verifica y deja el resultado como TEXTO en
@@ -120,7 +157,7 @@ construida. 50% adelanto / 50% entrega.
 | # | Riesgo | Prob. | Impacto | Mitigación |
 |---|---|---|---|---|
 | R1 | **SEACE cambia su HTML/flujo** (histórico: mató a E3) | Media | La verificación deja de encontrar procesos | El scraping es vía Claude+navegador (se adapta al layout solo, no hay selectores frágiles); si aún así falla → ⚠️ pendiente, el análisis sigue. Mantenimiento vía bolsa mensual |
-| R2 | **Captcha del MEF en el Formato 08-A** | Alta (por diseño) | Pausa humana por caso | SSI para los DATOS (sin captcha); el PDF es opcional — sin él, la resolución queda ⚠️ y el resto de la verificación vale |
+| R2 | **Captcha del MEF** | ~~Alta~~ **Baja** (tras la validación del 13-jul) | Pausa humana solo en el último recurso | La ruta SSI → `verFichaEjecucion/{CUI}` llega a datos + 08-A + PDF de resolución **sin captcha** (probado 13/13); la Consulta Pública (con captcha) queda solo como fallback excepcional |
 | R3 | **La máquina de Manuel sin navegador/Chrome MCP** | Media | El 4.6 se omite | Instalarlo/verificarlo es parte del setup A6; el paso degrada con aviso, no rompe |
 | R4 | **Citas incorrectas (alucinación)** | Baja | Grave (informe con dato falso) | Regla de evidencia: solo datos VISTOS en pantalla + archivos descargados como prueba; sin confirmación → ⚠️, nunca inventar |
 | R5 | **Tiempo por análisis crece** (N expedientes × navegación) | Media | Análisis más lentos | Solo corre para experiencias de expediente (no todas); paralelizable a futuro; expectativa clara al cliente |
