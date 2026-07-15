@@ -163,6 +163,11 @@ for (const i of nums) {
       entidad_contratante: pick(e.entidad_contratante),
       ubicacion: pick(e.ubicacion),
       observaciones: obs || pick(j.observaciones),
+      // cert multi-obra: pasa la lista de sub-proyectos {proyecto, cui} tal cual
+      // (el backend resuelve cada CUI). Ausente en el caso normal (1 obra → `cui`).
+      obras: (Array.isArray(e.obras) && e.obras.length)
+        ? e.obras.map((o) => ({ proyecto: pick(o.proyecto), cui: pick(o.cui) }))
+        : null,
       _backend: BACKEND(),
     };
   });

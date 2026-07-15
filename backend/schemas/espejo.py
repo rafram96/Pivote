@@ -152,6 +152,15 @@ class Backend(_ModelLax):
     alerta_experiencia_antigua: Optional[str] = None
 
 
+# Sub-proyecto de un cert MULTI-OBRA: un cert de rol de gestión/portafolio lista N
+# obras bajo un mismo vínculo continuo, cada una con su CUI. El tiempo se cuenta una
+# sola vez (el periodo de la experiencia); estas obras las verifica el backend por
+# código, cada una por separado. Genérico (no atado a un formato de cert).
+class SubObra(_Model):
+    proyecto: Optional[str] = None    # nombre del sub-proyecto/obra
+    cui: Optional[str] = None         # CUI/SNIP del sub-proyecto (solo dígitos) o None
+
+
 # ── Experiencia del profesional (Parte 4) ────────────────────────────────────
 class ExperienciaProf(_Model):
     n: int = Field(ge=1)
@@ -191,6 +200,9 @@ class ExperienciaProf(_Model):
     entidad_contratante: Optional[str] = None  # dueño de la obra (≠ emisor del cert) → score CUI
     ubicacion: Optional[str] = None       # dpto/prov/distrito si el cert lo cita → score CUI
     observaciones: Optional[str] = None
+    # Sub-proyectos si el cert es multi-obra (1 vínculo, N obras). None/vacío en el
+    # caso normal (1 experiencia = 1 obra, va en `cui`). Ver SubObra.
+    obras: Optional[list[SubObra]] = None
     backend: Backend = Field(default_factory=Backend, alias="_backend")
 
     @model_validator(mode="after")

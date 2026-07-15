@@ -60,6 +60,17 @@ const ExperienciaPostor = z.object({
 
 const Backend = z.object({}).passthrough();
 
+// Cert con VARIOS sub-proyectos bajo un mismo vínculo continuo (rol de gestión/
+// portafolio, p. ej. "gestión de proyectos de inversión"): 1 experiencia (1
+// periodo) que abarca N obras, cada una con su CUI. El TIEMPO se cuenta una sola
+// vez (el periodo de la experiencia); estas obras son para que el backend verifique
+// cada CUI por separado. Genérico: sirve a cualquier constancia que liste obras con
+// su código, no a un formato específico.
+const SubObra = z.object({
+  proyecto: txt,                 // nombre del sub-proyecto/obra
+  cui: txt,                      // CUI/SNIP del sub-proyecto (solo dígitos), o null si no lo cita
+}).strict();
+
 const ExperienciaProf = z.object({
   n: z.number().int().min(1),
   entidad_emisora: txt, ruc_emisor: txt,
@@ -85,6 +96,9 @@ const ExperienciaProf = z.object({
   entidad_contratante: txt,      // dueño de la obra (≠ emisor del cert) → score CUI
   ubicacion: txt,                // dpto/prov/distrito si el cert lo cita → score CUI
   observaciones: txt,
+  // Sub-proyectos si el cert es multi-obra (1 vínculo, N obras). Vacío/ausente en
+  // el caso normal (1 experiencia = 1 obra, va en `cui`). Ver SubObra.
+  obras: z.array(SubObra).nullable().optional(),
   _backend: Backend.optional(),
 }).strict().superRefine((e, ctx) => {
   const ini = e.fecha_inicial, fin = e.fecha_final;

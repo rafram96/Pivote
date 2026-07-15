@@ -41,6 +41,16 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
    - `cui`: si el texto cita "CUI NNNN" o "SNIP NNNN", pon **solo los dígitos**
      aquí. El `proyecto` queda con el nombre de la obra **verbatim y completo**,
      SIN pegarle la cola de metadata ("– SNIP 71857; 27,420 m²; S/.118M").
+   - **Cert MULTI-OBRA (varias obras, un solo vínculo)**: si la constancia
+     documenta **un periodo continuo** pero enumera **varios proyectos/obras
+     distintos, cada uno con su propio CUI/código** (típico de roles de *gestión
+     de proyectos / portafolio / coordinación*), es **UNA sola experiencia** (un
+     periodo) — **NO** la partas en una fila por proyecto (el tiempo se cuenta
+     **una vez**, no se multiplica). Lista cada sub-proyecto en
+     `obras: [{ "proyecto": "...", "cui": "NNNNNNN" }]` (nombre verbatim + CUI solo
+     dígitos; `"cui": null` si ese proyecto no cita código). El `cui` de la
+     experiencia queda `null` (los códigos viven en `obras[]`); el backend verifica
+     **cada** CUI por separado. Captura **TODOS** los que liste el cert, sin omitir.
    - `ruc_emisor`: el RUC (11 dígitos) del emisor **solo si aparece literal**;
      si está dentro del nombre ("Consorcio X (RUC 20605399194)"), extráelo igual.
    - la metadata desprendida va a sus campos: `area_construida_m2`,
