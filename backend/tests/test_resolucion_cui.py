@@ -335,9 +335,10 @@ def test_resolver_obras_multi_cui():
     obras = [
         {"proyecto": "Jorge Chávez", "cui": "2089754"},           # estudio → no figura
         {"proyecto": "Módulo 1516", "cui": "2089754"},            # mismo código (cacheado)
-        {"proyecto": "I.E. 616 Salaverry", "cui": "2118617"},     # obra real
+        {"proyecto": "I.E. 616 Salaverry", "cui": "2118617",      # obra real + rango POR obra
+         "fecha_inicial": "2019-06-01", "fecha_final": "2020-08-31"},
         {"proyecto": "Víctor Maldonado", "cui": None},            # sin CUI
-        {"proyecto": "I.E. 15510 Gálvez", "cui": "2036812"},      # obra real
+        {"proyecto": "I.E. 15510 Gálvez", "cui": "2036812"},      # obra real (sin rango por obra)
     ]
     res = resolver_obras(obras, ConsultaObras())
     assert [r["estado"] for r in res] == [
@@ -348,6 +349,9 @@ def test_resolver_obras_multi_cui():
     assert llamadas.count("2089754") == 1
     # cada entrada conserva SU proyecto (aunque compartan código)
     assert res[0]["proyecto"] == "Jorge Chávez" and res[1]["proyecto"] == "Módulo 1516"
+    # se ARRASTRA el rango POR obra cuando el cert lo da (para el cruce de cobertura)
+    assert res[2]["fecha_inicial"] == "2019-06-01" and res[2]["fecha_final"] == "2020-08-31"
+    assert res[4].get("fecha_inicial") is None   # sin rango por obra → None
 
 
 def test_resolver_no_pre_bloquea_consultorias_ni_otros_rubros():

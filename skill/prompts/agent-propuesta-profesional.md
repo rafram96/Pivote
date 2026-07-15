@@ -54,6 +54,12 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
      dígitos; `"cui": null` si ese proyecto no cita código). El `cui` de la
      experiencia queda `null` (los códigos viven en `obras[]`); el backend verifica
      **cada** CUI por separado. Captura **TODOS** los que liste el cert, sin omitir.
+     **Fechas por obra**: si —y SOLO si— el cert consigna el **rango de tiempo de
+     cada obra** (fechas propias de cada sub-proyecto, además del periodo total del
+     vínculo), inclúyelas: `{ "proyecto": "...", "cui": "...", "fecha_inicial":
+     "YYYY-MM-DD", "fecha_final": "YYYY-MM-DD" }`. Si el cert solo da el periodo
+     **total** del vínculo (lo usual), NO inventes fechas por obra: deja
+     `fecha_inicial`/`fecha_final` en `null` (el backend no cruzará tiempo por obra).
    - `ruc_emisor`: el RUC (11 dígitos) del emisor **solo si aparece literal**;
      si está dentro del nombre ("Consorcio X (RUC 20605399194)"), extráelo igual.
    - la metadata desprendida va a sus campos: `area_construida_m2`,

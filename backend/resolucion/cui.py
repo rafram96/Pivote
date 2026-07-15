@@ -688,18 +688,23 @@ def resolver_obras(obras: list[dict], consulta: Consulta) -> list[dict]:
     out: list[dict] = []
     cache: dict[str, dict] = {}
     for o in obras or []:
-        proy = (o or {}).get("proyecto")
-        cui = re.sub(r"\D", "", str((o or {}).get("cui") or ""))
+        o = o or {}
+        # se ARRASTRAN proyecto + fechas POR obra (si el cert las dio): la etapa
+        # InfoObras las usa para el cruce de cobertura por sub-obra.
+        extra = {"proyecto": o.get("proyecto"),
+                 "fecha_inicial": o.get("fecha_inicial"),
+                 "fecha_final": o.get("fecha_final")}
+        cui = re.sub(r"\D", "", str(o.get("cui") or ""))
         if not 4 <= len(cui) <= 8:
-            out.append({"proyecto": proy, "cui": None, "estado": "sin_cui", "obra": None})
+            out.append({"cui": None, "estado": "sin_cui", "obra": None, **extra})
             continue
         if cui in cache:
-            out.append({**cache[cui], "proyecto": proy})
+            out.append({**cache[cui], **extra})
             continue
         try:
             registros = consulta.por_codigo(cui)
         except PortalNoResponde:
-            out.append({"proyecto": proy, "cui": cui, "estado": "portal", "obra": None})
+            out.append({"cui": cui, "estado": "portal", "obra": None, **extra})
             continue
         if registros:
             ob = _elegir_obra(registros)
@@ -711,7 +716,7 @@ def resolver_obras(obras: list[dict], consulta: Consulta) -> list[dict]:
         else:
             res = {"cui": cui, "estado": "no_encontrado", "obra": None}
         cache[cui] = res
-        out.append({**res, "proyecto": proy})
+        out.append({**res, **extra})
     return out
 
 

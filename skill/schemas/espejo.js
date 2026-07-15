@@ -69,6 +69,10 @@ const Backend = z.object({}).passthrough();
 const SubObra = z.object({
   proyecto: txt,                 // nombre del sub-proyecto/obra
   cui: txt,                      // CUI/SNIP del sub-proyecto (solo dígitos), o null si no lo cita
+  // SOLO si el cert consigna el rango de tiempo POR obra (además del total del
+  // vínculo). Habilita el cruce de cobertura por sub-obra; si no, null.
+  fecha_inicial: fecha,
+  fecha_final: fecha,
 }).strict();
 
 const ExperienciaProf = z.object({

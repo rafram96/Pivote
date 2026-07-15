@@ -159,6 +159,10 @@ class Backend(_ModelLax):
 class SubObra(_Model):
     proyecto: Optional[str] = None    # nombre del sub-proyecto/obra
     cui: Optional[str] = None         # CUI/SNIP del sub-proyecto (solo dígitos) o None
+    # SOLO si el cert consigna el rango de tiempo POR obra (además del total del
+    # vínculo). Habilita el cruce de cobertura por sub-obra; si no, None.
+    fecha_inicial: FechaFlexible = None
+    fecha_final: FechaFlexible = None
 
 
 # ── Experiencia del profesional (Parte 4) ────────────────────────────────────

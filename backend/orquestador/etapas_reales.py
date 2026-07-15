@@ -433,6 +433,62 @@ class EtapaInfoObrasReal:
             # obra_id ya persistido en el enriquecimiento. Así el veredicto/Excel
             # quedan listos en ~1 min sin esperar ~1 GB de PDFs (que solo sirven al ZIP).
 
+        def _enriquecer_subobra(s: dict) -> dict:
+            """Cert MULTI-OBRA: para una sub-obra YA resuelta por código, baja su
+            ficha real de InfoObras (periodo de valorizaciones, estado, monto) para
+            mostrar info+verificación en el Excel. Si el cert consignó el rango de
+            tiempo POR esta obra (fecha_inicial/fecha_final de la sub-obra), computa
+            la cobertura; si no, solo trae la ficha (no hay tiempo por-obra que cruzar)."""
+            if s.get("estado") != "resuelto":
+                return s
+            cui = s.get("cui")
+            obra_id = (s.get("obra") or {}).get("obra_id")
+            si, sf = _fecha_iso(s.get("fecha_inicial")), _fecha_iso(s.get("fecha_final"))
+            obra = _fetch_obra(cui, si, sf, obra_id)
+            if obra is None:
+                s["sin_verificar"] = True   # portal flaky → ficha desconocida (no invalida)
+                return s
+            s.pop("sin_verificar", None)     # se trajo OK (quizá en la 2ª pasada)
+            avances = getattr(obra, "avances", []) or []
+            meses = [date(a.anio, a.mes, 1) for a in avances
+                     if getattr(a, "anio", 0) and getattr(a, "mes", 0)]
+            vi = min(meses) if meses else None
+            vf = _fin_de_mes(max(meses)) if meses else None
+            s["ficha"] = {
+                "estado": getattr(obra, "estado", None),
+                "monto": getattr(obra, "monto_ejecutado_acumulado", None)
+                         or getattr(obra, "monto_contrato", None),
+                "obra_nombre": getattr(obra, "nombre", None),
+                "periodo_valoriz": [vi.isoformat() if vi else None,
+                                    vf.isoformat() if vf else None],
+                "n_valorizaciones": len(meses),
+            }
+            # cruce de tiempo SOLO si el cert dio el rango POR esta obra (la regla
+            # del cliente: verificar el tiempo por obra únicamente si es explícito)
+            if si and sf:
+                if not meses:
+                    # obra sin valorizaciones → no hay contra qué cruzar el tiempo
+                    s["cobertura"] = {"pct": None, "cubierto": None,
+                                      "cert_ini": si.isoformat(), "cert_fin": sf.isoformat(),
+                                      "nota": "obra sin valorizaciones"}
+                else:
+                    cob = _cobertura_cert(avances, si, sf)
+                    s["cobertura"] = {
+                        "pct": round(cob * 100) if cob is not None else None,
+                        "cert_ini": si.isoformat(), "cert_fin": sf.isoformat(),
+                        "cubierto": bool(cob is not None and cob >= _COBERTURA_MIN),
+                    }
+            return s
+
+        # cert MULTI-OBRA: enriquece cada sub-obra resuelta con su ficha real (la
+        # etapa de resolución solo verificó existencia por código). Se hace ANTES del
+        # loop de cui único (esas experiencias tienen cui=None y se saltarían).
+        for _e, (np_, ne) in ctx.items_experiencia():
+            enr = ctx.enriquecimiento.get(_clave(np_, ne)) or {}
+            if enr.get("via") == "MULTI_OBRA" and enr.get("sub_obras"):
+                enr["sub_obras"] = [_enriquecer_subobra(s) for s in enr["sub_obras"]]
+                ctx.enriquecimiento[_clave(np_, ne)] = enr
+
         # 1ª pasada: procesar lo que responda; lo que cae por flakiness se aparta
         # (todavía NO se marca error) para reintentarlo al final.
         n_fetch = sum(1 for _e, (np_, ne) in ctx.items_experiencia()
@@ -485,6 +541,19 @@ class EtapaInfoObrasReal:
                         origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
                 else:
                     _procesar(_e, np_, ne, cui, cert_ini, cert_fin, obra)
+
+        # 2ª pasada para las sub-obras MULTI-OBRA cuya ficha cayó por flakiness en el
+        # pre-loop: mismo criterio que el loop de cui único (ya pasaron minutos → el
+        # bache del portal suele haberse disipado). Solo reintenta las sin_verificar.
+        for _e, (np_, ne) in ctx.items_experiencia():
+            enr = ctx.enriquecimiento.get(_clave(np_, ne)) or {}
+            if enr.get("via") != "MULTI_OBRA" or not enr.get("sub_obras"):
+                continue
+            if not any(s.get("sin_verificar") for s in enr["sub_obras"]):
+                continue
+            enr["sub_obras"] = [_enriquecer_subobra(s) if s.get("sin_verificar") else s
+                                for s in enr["sub_obras"]]
+            ctx.enriquecimiento[_clave(np_, ne)] = enr
 
         total = sum(1 for _ in ctx.items_experiencia())
         # Las métricas de descarga (archivos/bytes/reintentos) las RELLENA la
