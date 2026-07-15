@@ -39,8 +39,11 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
    (NOTA 12) → `"POR VERIFICAR (motivo)"`. Nada fuera de esas tres formas.
 5. **Identificadores para el cruce oficial (backend)** — campos dedicados:
    - `cui`: si el texto cita "CUI NNNN" o "SNIP NNNN", pon **solo los dígitos**
-     aquí. El `proyecto` queda con el nombre de la obra **verbatim y completo**,
-     SIN pegarle la cola de metadata ("– SNIP 71857; 27,420 m²; S/.118M").
+     aquí. Si el cert muestra **ambos** (un SNIP de 6 díg y un CUI de 7 díg del
+     mismo proyecto), captura **siempre el CUI de 7 díg** (código único estable) —
+     así la extracción es la misma entre corridas (evita que una vez tomes el SNIP
+     y otra el CUI). El `proyecto` queda con el nombre de la obra **verbatim y
+     completo**, SIN pegarle la cola de metadata ("– SNIP 71857; 27,420 m²; S/.118M").
    - **Cert MULTI-OBRA (varias obras, un solo vínculo)**: si la constancia
      documenta **un periodo continuo** pero enumera **varios proyectos/obras
      distintos, cada uno con su propio CUI/código** (típico de roles de *gestión
