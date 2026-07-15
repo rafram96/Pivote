@@ -673,6 +673,48 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
             "decision": motivo, "candidatos": candidatos, "obra": None}
 
 
+def resolver_obras(obras: list[dict], consulta: Consulta) -> list[dict]:
+    """Resuelve cada sub-obra de un cert MULTI-OBRA por su CUI citado (por_codigo,
+    DETERMINÍSTICO — sin adivinar por nombre). Un cert de rol de gestión/portafolio
+    lista N obras bajo un mismo vínculo; el tiempo se cuenta una vez (en la
+    experiencia), esto solo VERIFICA que cada obra exista en InfoObras.
+
+    Devuelve [{proyecto, cui, estado, obra}] con estado:
+      'resuelto'      → el código existe en InfoObras (`obra` = datos)
+      'no_encontrado' → el código no está en InfoObras (p. ej. un estudio/plan, no obra)
+      'sin_cui'       → el sub-proyecto no cita CUI en el cert
+      'portal'        → InfoObras no respondió (reintentar)
+    Cachea por CUI (el mismo código puede repetirse entre sub-proyectos)."""
+    out: list[dict] = []
+    cache: dict[str, dict] = {}
+    for o in obras or []:
+        proy = (o or {}).get("proyecto")
+        cui = re.sub(r"\D", "", str((o or {}).get("cui") or ""))
+        if not 4 <= len(cui) <= 8:
+            out.append({"proyecto": proy, "cui": None, "estado": "sin_cui", "obra": None})
+            continue
+        if cui in cache:
+            out.append({**cache[cui], "proyecto": proy})
+            continue
+        try:
+            registros = consulta.por_codigo(cui)
+        except PortalNoResponde:
+            out.append({"proyecto": proy, "cui": cui, "estado": "portal", "obra": None})
+            continue
+        if registros:
+            ob = _elegir_obra(registros)
+            cui_out = _cui_de(ob) or cui
+            res = {"cui": cui_out, "estado": "resuelto",
+                   "obra": {"cui": cui_out, "nombre_obra": ob.get("nombrObra"),
+                            "departamento": ob.get("nombrDepartamento"),
+                            "obra_id": ob.get("codigoObra") or ob.get("obraId")}}
+        else:
+            res = {"cui": cui, "estado": "no_encontrado", "obra": None}
+        cache[cui] = res
+        out.append({**res, "proyecto": proy})
+    return out
+
+
 def _folio_base(folio) -> Optional[str]:
     m = re.search(r"\d{2,}", str(folio or ""))
     return m.group(0) if m else None

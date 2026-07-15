@@ -427,6 +427,42 @@ def construir_hoja_profesional(
         rr += 4
         return rr - 1
 
+    _EST_SUBOBRA = {
+        "resuelto": "obra hallada en InfoObras",
+        "no_encontrado": "el código no figura como obra (posible estudio/plan)",
+        "sin_cui": "el certificado no cita CUI para este proyecto",
+        "portal": "InfoObras no respondió — reintentar",
+    }
+
+    def render_multi_obra(top: int, sub: list) -> int:
+        """Bloque para una experiencia MULTI-OBRA: un certificado (un vínculo
+        continuo) que lista VARIAS obras, cada una con su CUI. Se verifica cada
+        código por separado en InfoObras y se listan aquí (en vez de dejar la
+        experiencia como 'no ubicada')."""
+        rr = top
+        n_ok = sum(1 for s in (sub or []) if s.get("estado") == "resuelto")
+        ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=10)
+        c = ws.cell(rr, 6, f"OBRAS DEL CERTIFICADO — {n_ok}/{len(sub or [])} "
+                           f"verificada(s) en InfoObras por su código")
+        c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
+        rr += 1
+        for s in (sub or []):
+            est = _EST_SUBOBRA.get(s.get("estado"), s.get("estado") or "—")
+            obra_nom = (s.get("obra") or {}).get("nombre_obra") or ""
+            txt = f"• {s.get('proyecto') or '—'}"
+            if s.get("cui"):
+                txt += f"  (CUI {s['cui']})"
+            txt += f" → {est}"
+            if obra_nom:
+                txt += f": {obra_nom[:70]}"
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=10)
+            c = ws.cell(rr, 6, txt)
+            c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
+            lns = max(1, -(-len(txt) // 60))
+            ws.row_dimensions[rr].height = max(15, lns * 13 + 2)
+            rr += 1
+        return rr - 1
+
     def render_emisor(top: int, s: Optional[dict], fecha_emision, ini, ruc_espejo) -> int:
         """Cuadro del EMISOR del certificado (datos SUNAT) en columnas M:P desde
         `top`, al lado de las valorizaciones. Señala ALT04 (anomalía de antigüedad
@@ -787,7 +823,11 @@ def construir_hoja_profesional(
 
         # lado derecho: ficha de la obra; si la experiencia está en revisión, un
         # bloque que lo explica (en vez de dejar la columna vacía).
-        if fx:
+        if fx and fx.get("sub_obras"):
+            # cert multi-obra: lista cada sub-proyecto con su verificación por CUI
+            r_right = render_multi_obra(r_top, fx["sub_obras"])
+            r = max(r, r_right + 1)
+        elif fx:
             r_right = render_obra(r_top, fx, ini, fin)
             r = max(r, r_right + 1)
         elif (n_prof, n_exp) in revisiones:
@@ -984,6 +1024,11 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                                  "modificaciones_plazo": enr.get("modificaciones_plazo") or [],
                                  "representante_obra": enr.get("representante_obra"),
                                  "aprobacion_expediente": enr.get("aprobacion_expediente")}
+        # cert multi-obra: la lista de sub-obras verificadas viaja en `fichas` para
+        # que el render la muestre (sin cambiar la firma de generar_excel_final).
+        if enr.get("sub_obras"):
+            fichas[(np_, ne)] = {**(fichas.get((np_, ne)) or {}),
+                                 "sub_obras": enr["sub_obras"]}
     return paral, cuis, fichas, sunat
 
 

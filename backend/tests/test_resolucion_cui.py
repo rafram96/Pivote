@@ -8,7 +8,7 @@ import itertools
 
 from resolucion.cui import (
     _es_experiencia_expediente, _es_experiencia_privada, _puntuar, _sin_prefijo,
-    norm, resolver, ubicacion)
+    norm, resolver, resolver_obras, ubicacion)
 
 
 def test_ubicacion_no_confunde_ica_dentro_de_huancavelica():
@@ -310,6 +310,44 @@ def test_match_con_nombre_propio_si_resuelve():
            "fecha_inicial": "2018-06-01"}
     r = resolver(exp, ConsultaBien())
     assert r["estado"] == "resuelto" and r["cui"] == "2777777", r
+
+
+def test_resolver_obras_multi_cui():
+    """Cert MULTI-OBRA (queja real: el cert de Talara lista 7 sub-proyectos, cada
+    uno con su CUI, y el sistema no analizaba ninguno). resolver_obras verifica
+    CADA código por separado (por_codigo, determinístico), sin adivinar por nombre:
+    el que existe → resuelto; el que no (un estudio/plan) → no_encontrado; sin CUI
+    → sin_cui. Cachea el CUI repetido."""
+    llamadas = []
+
+    class ConsultaObras:
+        def por_codigo(self, c):
+            llamadas.append(c)
+            return {
+                "2118617": [{"nombrObra": "CONSTRUCCION ... I.E. 616 SALAVERRY",
+                             "codUniqInv": "2118617", "codigoObra": 1,
+                             "nombrDepartamento": "PIURA"}],
+                "2036812": [{"nombrObra": "MEJORAMIENTO ... I.E 15510",
+                             "codUniqInv": "2036812", "codigoObra": 2,
+                             "nombrDepartamento": "PIURA"}],
+            }.get(c, [])  # 2089754 (Plan Integral) y otros → []
+
+    obras = [
+        {"proyecto": "Jorge Chávez", "cui": "2089754"},           # estudio → no figura
+        {"proyecto": "Módulo 1516", "cui": "2089754"},            # mismo código (cacheado)
+        {"proyecto": "I.E. 616 Salaverry", "cui": "2118617"},     # obra real
+        {"proyecto": "Víctor Maldonado", "cui": None},            # sin CUI
+        {"proyecto": "I.E. 15510 Gálvez", "cui": "2036812"},      # obra real
+    ]
+    res = resolver_obras(obras, ConsultaObras())
+    assert [r["estado"] for r in res] == [
+        "no_encontrado", "no_encontrado", "resuelto", "sin_cui", "resuelto"]
+    assert res[2]["obra"]["cui"] == "2118617" and res[2]["cui"] == "2118617"
+    assert res[4]["obra"]["nombre_obra"].startswith("MEJORAMIENTO")
+    # el CUI repetido (2089754) se consultó UNA sola vez
+    assert llamadas.count("2089754") == 1
+    # cada entrada conserva SU proyecto (aunque compartan código)
+    assert res[0]["proyecto"] == "Jorge Chávez" and res[1]["proyecto"] == "Módulo 1516"
 
 
 def test_resolver_no_pre_bloquea_consultorias_ni_otros_rubros():

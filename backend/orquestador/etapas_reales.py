@@ -24,7 +24,7 @@ from typing import Callable, Optional
 
 from schemas import pipeline
 from validacion import verificar_espejo
-from resolucion import ConsultaInfoObras, resolver_con_dedup
+from resolucion import ConsultaInfoObras, resolver_con_dedup, resolver_obras
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
 from entregables import desempaquetar_enriquecimiento, generar_excel_final, mapear_certificados
 from .etapas import Contexto, EtapaIngesta, EtapaStub
@@ -185,6 +185,21 @@ class EtapaResolucionCuiReal:
             elif humano.get("accion") == "no_existe":
                 ctx.enriquecimiento[_clave(np_, ne)] = {"cui": None, "via": "NO_EXISTE"}
                 ok += 1
+            elif e.get("obras"):
+                # Cert MULTI-OBRA: un vínculo continuo con VARIAS obras, cada una con
+                # su CUI. El "identificador" de la experiencia es su portafolio, no un
+                # CUI único → NO va a "Por confirmar". Se verifica cada sub-obra por
+                # código (determinístico) y se guarda la lista para el Excel/panel.
+                sub = resolver_obras(e.get("obras"), consulta)
+                n_res = sum(1 for s in sub if s.get("estado") == "resuelto")
+                ctx.enriquecimiento[_clave(np_, ne)] = {
+                    "cui": None, "via": "MULTI_OBRA", "obra": None, "sub_obras": sub}
+                ok += 1
+                obs.append(pipeline.Observacion(
+                    codigo="MULTI_OBRA", severidad=pipeline.Severidad.INFO,
+                    mensaje=f"experiencia multi-obra ({len(sub)} sub-proyectos): "
+                            f"{n_res} verificado(s) en InfoObras por su código",
+                    origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
             else:
                 pendientes.append((e, (np_, ne)))
 
