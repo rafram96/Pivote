@@ -434,74 +434,66 @@ def construir_hoja_profesional(
         "portal": "InfoObras no respondió — reintentar",
     }
 
-    def render_multi_obra(top: int, sub: list) -> int:
-        """Bloque para una experiencia MULTI-OBRA: un certificado (un vínculo
-        continuo) que lista VARIAS obras, cada una con su CUI. Cada código se verifica
-        por separado; las obras HALLADAS muestran su ficha real (periodo de
-        valorizaciones, estado, monto) y —si el cert dio el rango de tiempo POR obra—
-        la cobertura de ese rango (verde=cubierto / rojo=parcial). Las no halladas
-        quedan en una línea compacta."""
+    def render_multi_obra(top: int, sub: list, ini, fin) -> int:
+        """Experiencia MULTI-OBRA (un cert que lista VARIAS obras con su CUI): cada
+        obra HALLADA se renderiza como un ÍTEM COMPLETO —ficha InfoObras + TODAS sus
+        valorizaciones, con render_obra, igual que una experiencia normal— más su
+        encabezado y —si el cert dio el rango de tiempo POR obra— la cobertura de ese
+        rango. Las no halladas quedan en una línea compacta. El resaltado de
+        valorizaciones usa el rango POR obra si el cert lo dio; si no, el periodo
+        total del certificado (ini/fin)."""
         rr = top
 
         def _linea(texto, fill=None):
             nonlocal rr
-            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=10)
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
             c = ws.cell(rr, 6, texto)
             c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
             if fill is not None:
                 c.fill = fill
-            ws.row_dimensions[rr].height = max(15, (-(-len(texto) // 58)) * 13 + 2)
+            ws.row_dimensions[rr].height = max(15, (-(-len(texto) // 70)) * 13 + 2)
             rr += 1
-
-        def _mmaaaa(iso):
-            return f"{iso[5:7]}/{iso[0:4]}" if iso and len(iso) >= 7 else "—"
 
         def _ddmmaaaa(iso):
             return f"{iso[8:10]}/{iso[5:7]}/{iso[0:4]}" if iso and len(iso) == 10 else "—"
 
         n_ok = sum(1 for s in (sub or []) if s.get("estado") == "resuelto")
-        ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=10)
-        c = ws.cell(rr, 6, f"OBRAS DEL CERTIFICADO — {n_ok}/{len(sub or [])} "
-                           f"verificada(s) en InfoObras por su código")
+        ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+        c = ws.cell(rr, 6, f"CERTIFICADO MULTI-OBRA — {n_ok} de {len(sub or [])} "
+                           f"obra(s) hallada(s) en InfoObras (una ficha por obra)")
         c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
         rr += 1
 
         for s in (sub or []):
             proy = s.get("proyecto") or "—"
-            if s.get("estado") == "resuelto":
-                f = s.get("ficha") or {}
-                obra_nom = f.get("obra_nombre") or (s.get("obra") or {}).get("nombre_obra") or ""
-                dep = (s.get("obra") or {}).get("departamento") or ""
-                _linea(f"✔ {proy}   ·   CUI {s.get('cui')}", fill=FILL_OK)
-                if s.get("sin_verificar"):
-                    _linea("    InfoObras: obra hallada; su ficha no cargó ahora (portal) — reintentar")
-                    continue
-                per = f.get("periodo_valoriz") or [None, None]
-                per_txt = (f"{_mmaaaa(per[0])} – {_mmaaaa(per[1])}" if per[0]
-                           else "sin valorizaciones registradas")
-                monto = f.get("monto")
-                monto_txt = f"S/ {monto:,.0f}" if isinstance(monto, (int, float)) else "—"
-                _linea(f"    InfoObras: {obra_nom[:56]}"
-                       + (f" [{dep}]" if dep else "")
-                       + f"  ·  Estado: {f.get('estado') or '—'}"
-                       + f"  ·  Valorizaciones: {per_txt}"
-                       + f"  ·  Monto ejec.: {monto_txt}")
-                cob = s.get("cobertura")
-                if cob:
-                    ok = cob.get("cubierto")
-                    pct = cob.get("pct")
-                    base = (f"    └ Tiempo del cert para esta obra: "
-                            f"{_ddmmaaaa(cob.get('cert_ini'))} – {_ddmmaaaa(cob.get('cert_fin'))}  →  ")
-                    if ok is None:   # obra sin valorizaciones → no hay tiempo que cruzar
-                        _linea(base + f"{cob.get('nota') or 'no verificable'} — no se puede cruzar el tiempo")
-                    else:
-                        _linea(base + f"cobertura {pct if pct is not None else '?'}%  —  "
-                               + ("cubierto" if ok else "PARCIAL, revisar"),
-                               fill=FILL_OK if ok else FILL_ALERTA)
-            else:
+            if s.get("estado") != "resuelto":
                 est = _EST_SUBOBRA.get(s.get("estado"), s.get("estado") or "—")
                 cui_txt = f"  (CUI {s['cui']})" if s.get("cui") else ""
                 _linea(f"• {proy}{cui_txt} → {est}")
+                continue
+            # encabezado del ítem de esta obra (verde)
+            _linea(f"▸ OBRA: {proy}   ·   CUI {s.get('cui')}", fill=FILL_OK)
+            if s.get("sin_verificar"):
+                _linea("    InfoObras: obra hallada; su ficha no cargó ahora (portal) — reintentar")
+                continue
+            # rango para resaltar: el POR obra si el cert lo dio, si no el total del cert
+            oi = _fecha_iso(s.get("fecha_inicial")) or ini
+            of = _fecha_iso(s.get("fecha_final")) or fin
+            # ÍTEM COMPLETO: ficha + TODAS las valorizaciones (mismo formato que una exp normal)
+            rr = render_obra(rr, s.get("ficha") or {}, oi, of) + 1
+            # cruce del tiempo del cert para esta obra (solo si el cert dio rango por obra)
+            cob = s.get("cobertura")
+            if cob:
+                ok = cob.get("cubierto")
+                pct = cob.get("pct")
+                base = (f"    └ Tiempo del cert para esta obra: "
+                        f"{_ddmmaaaa(cob.get('cert_ini'))} – {_ddmmaaaa(cob.get('cert_fin'))}  →  ")
+                if ok is None:   # obra sin valorizaciones → no hay tiempo que cruzar
+                    _linea(base + f"{cob.get('nota') or 'no verificable'} — no se puede cruzar el tiempo")
+                else:
+                    _linea(base + f"cobertura {pct if pct is not None else '?'}%  —  "
+                           + ("cubierto" if ok else "PARCIAL, revisar"),
+                           fill=FILL_OK if ok else FILL_ALERTA)
         return rr - 1
 
     def render_emisor(top: int, s: Optional[dict], fecha_emision, ini, ruc_espejo) -> int:
@@ -865,8 +857,8 @@ def construir_hoja_profesional(
         # lado derecho: ficha de la obra; si la experiencia está en revisión, un
         # bloque que lo explica (en vez de dejar la columna vacía).
         if fx and fx.get("sub_obras"):
-            # cert multi-obra: lista cada sub-proyecto con su verificación por CUI
-            r_right = render_multi_obra(r_top, fx["sub_obras"])
+            # cert multi-obra: cada obra hallada = un ítem completo (ficha + valoriz)
+            r_right = render_multi_obra(r_top, fx["sub_obras"], ini, fin)
             r = max(r, r_right + 1)
         elif fx:
             r_right = render_obra(r_top, fx, ini, fin)

@@ -145,6 +145,38 @@ def _motivo_cobertura(avances, cert_ini, cert_fin, cod, pct: int) -> str:
             f"la obra {cod} — posible obra complementaria o periodo en un hueco")
 
 
+def _fx_de_obra(obra, cui) -> dict:
+    """Dict-ficha que consume el Excel (render_obra) a partir de un WorkInfo:
+    código, CUI, estado, monto, fechas, TODAS las valorizaciones y las
+    modificaciones de plazo. Compartido por la ficha de una experiencia normal
+    (_procesar) y la de cada sub-obra de un cert multi-obra (_enriquecer_subobra),
+    para que ambas se rendericen con el MISMO formato."""
+    fi, ff = getattr(obra, "fecha_inicio", None), getattr(obra, "fecha_fin", None)
+    return {
+        "codigo_infoobras": getattr(obra, "codigo_infoobras", None),
+        "cui": cui,
+        "estado": getattr(obra, "estado", None),
+        "monto": getattr(obra, "monto_ejecutado_acumulado", None)
+                 or getattr(obra, "monto_contrato", None),
+        "fecha_inicio": fi.isoformat() if fi else None,
+        "fecha_fin": ff.isoformat() if ff else None,
+        "valorizaciones": [
+            {"anio": a.anio, "mes": a.mes, "estado": getattr(a, "estado", None),
+             "fisico_real": getattr(a, "avance_fisico_real", None),
+             "valorizado_real": getattr(a, "valorizado_real", None),
+             "docs": getattr(a, "num_documentos", 0)}
+            for a in (getattr(obra, "avances", []) or [])
+            if getattr(a, "anio", 0) and getattr(a, "mes", 0)
+        ],
+        "modificaciones_plazo": [
+            {"tipo": m.tipo, "causal": m.causal, "dias": m.dias_aprobados,
+             "fecha_aprobacion": m.fecha_aprobacion.isoformat() if m.fecha_aprobacion else None,
+             "fecha_fin": m.fecha_fin.isoformat() if m.fecha_fin else None}
+            for m in (getattr(obra, "modificaciones_plazo", []) or [])
+        ],
+    }
+
+
 # ── 1 · Revisión de consistencia (las notas puras del validador) ─────────────
 
 class EtapaValidacionReal:
@@ -343,34 +375,14 @@ class EtapaInfoObrasReal:
             enr.pop("sin_verificar", None)  # se trajo OK: ya no es incierta
             enr["codigo_infoobras"] = getattr(obra, "codigo_infoobras", None)
             enr["obra_nombre"] = getattr(obra, "nombre", None)
-            # ficha de la obra + todas las valorizaciones (para la hoja Excel)
-            fi, ff = getattr(obra, "fecha_inicio", None), getattr(obra, "fecha_fin", None)
-            enr["obra_ficha"] = {
-                "cui": cui,
-                "codigo_infoobras": getattr(obra, "codigo_infoobras", None),
-                "estado": getattr(obra, "estado", None),
-                "monto": getattr(obra, "monto_ejecutado_acumulado", None)
-                         or getattr(obra, "monto_contrato", None),
-                "fecha_inicio": fi.isoformat() if fi else None,
-                "fecha_fin": ff.isoformat() if ff else None,
-            }
-            enr["valorizaciones"] = [
-                {"anio": a.anio, "mes": a.mes, "estado": getattr(a, "estado", None),
-                 "fisico_real": getattr(a, "avance_fisico_real", None),
-                 "valorizado_real": getattr(a, "valorizado_real", None),
-                 "docs": getattr(a, "num_documentos", 0)}
-                for a in (getattr(obra, "avances", []) or [])
-                if getattr(a, "anio", 0) and getattr(a, "mes", 0)
-            ]
-            # modificaciones de plazo (ampliaciones/suspensiones): explican el
-            # hueco entre valorizaciones y la vida oficial de la obra. Solo para
-            # mostrar al evaluador — NO cuentan como experiencia (sin valorización).
-            enr["modificaciones_plazo"] = [
-                {"tipo": m.tipo, "causal": m.causal, "dias": m.dias_aprobados,
-                 "fecha_aprobacion": m.fecha_aprobacion.isoformat() if m.fecha_aprobacion else None,
-                 "fecha_fin": m.fecha_fin.isoformat() if m.fecha_fin else None}
-                for m in (getattr(obra, "modificaciones_plazo", []) or [])
-            ]
+            # ficha de la obra + todas las valorizaciones + modificaciones de plazo,
+            # con el helper compartido (misma forma que la ficha de cada sub-obra).
+            _fx = _fx_de_obra(obra, cui)
+            enr["obra_ficha"] = {k: _fx[k] for k in
+                                 ("cui", "codigo_infoobras", "estado", "monto",
+                                  "fecha_inicio", "fecha_fin")}
+            enr["valorizaciones"] = _fx["valorizaciones"]
+            enr["modificaciones_plazo"] = _fx["modificaciones_plazo"]
             if es_exp_aprobado:
                 enr["aprobacion_expediente"] = _aprob_exp   # {url,filename,nombre,extension,fecha}
                 _f = _aprob_exp.get("fecha")                # ISO "AAAA-MM-DD" | None
@@ -454,14 +466,14 @@ class EtapaInfoObrasReal:
                      if getattr(a, "anio", 0) and getattr(a, "mes", 0)]
             vi = min(meses) if meses else None
             vf = _fin_de_mes(max(meses)) if meses else None
+            # ficha COMPLETA (con TODAS las valorizaciones + modificaciones): el Excel
+            # renderiza cada sub-obra como un ítem full con render_obra, igual que una
+            # experiencia normal. obra_nombre/periodo_valoriz son extras para el encabezado.
             s["ficha"] = {
-                "estado": getattr(obra, "estado", None),
-                "monto": getattr(obra, "monto_ejecutado_acumulado", None)
-                         or getattr(obra, "monto_contrato", None),
+                **_fx_de_obra(obra, cui),
                 "obra_nombre": getattr(obra, "nombre", None),
                 "periodo_valoriz": [vi.isoformat() if vi else None,
                                     vf.isoformat() if vf else None],
-                "n_valorizaciones": len(meses),
             }
             # cruce de tiempo SOLO si el cert dio el rango POR esta obra (la regla
             # del cliente: verificar el tiempo por obra únicamente si es explícito)
