@@ -434,67 +434,76 @@ def construir_hoja_profesional(
         "portal": "InfoObras no respondió — reintentar",
     }
 
-    def render_multi_obra(top: int, sub: list, ini, fin) -> int:
-        """Experiencia MULTI-OBRA (un cert que lista VARIAS obras con su CUI): cada
-        obra HALLADA se renderiza como un ÍTEM COMPLETO —ficha InfoObras + TODAS sus
-        valorizaciones, con render_obra, igual que una experiencia normal— más su
-        encabezado y —si el cert dio el rango de tiempo POR obra— la cobertura de ese
-        rango. Las no halladas quedan en una línea compacta. El resaltado de
-        valorizaciones usa el rango POR obra si el cert lo dio; si no, el periodo
-        total del certificado (ini/fin)."""
+    def render_multi_obra(top: int, sub: list) -> int:
+        """RESUMEN (banda F:K de la experiencia madre) de un cert multi-obra: cuántas
+        obras se hallaron + las NO halladas en compacto. El DETALLE de cada obra
+        hallada va como una SubExperiencia FULL-WIDTH debajo (render_subexperiencias)."""
         rr = top
-
-        def _linea(texto, fill=None):
-            nonlocal rr
-            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
-            c = ws.cell(rr, 6, texto)
-            c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
-            if fill is not None:
-                c.fill = fill
-            ws.row_dimensions[rr].height = max(15, (-(-len(texto) // 70)) * 13 + 2)
-            rr += 1
-
-        def _ddmmaaaa(iso):
-            return f"{iso[8:10]}/{iso[5:7]}/{iso[0:4]}" if iso and len(iso) == 10 else "—"
-
         n_ok = sum(1 for s in (sub or []) if s.get("estado") == "resuelto")
         ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
-        c = ws.cell(rr, 6, f"CERTIFICADO MULTI-OBRA — {n_ok} de {len(sub or [])} "
-                           f"obra(s) hallada(s) en InfoObras (una ficha por obra)")
+        c = ws.cell(rr, 6, f"CERTIFICADO MULTI-OBRA — {n_ok} de {len(sub or [])} obra(s) "
+                           f"hallada(s); cada una se detalla abajo como SubExperiencia")
         c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
         rr += 1
-
         for s in (sub or []):
-            proy = s.get("proyecto") or "—"
-            if s.get("estado") != "resuelto":
-                est = _EST_SUBOBRA.get(s.get("estado"), s.get("estado") or "—")
-                cui_txt = f"  (CUI {s['cui']})" if s.get("cui") else ""
-                _linea(f"• {proy}{cui_txt} → {est}")
-                continue
-            # encabezado del ítem de esta obra (verde)
-            _linea(f"▸ OBRA: {proy}   ·   CUI {s.get('cui')}", fill=FILL_OK)
+            if s.get("estado") == "resuelto":
+                continue  # su detalle full-width va abajo (render_subexperiencias)
+            est = _EST_SUBOBRA.get(s.get("estado"), s.get("estado") or "—")
+            cui_txt = f"  (CUI {s['cui']})" if s.get("cui") else ""
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+            c = ws.cell(rr, 6, f"• {s.get('proyecto') or '—'}{cui_txt} → {est}")
+            c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
+            ws.row_dimensions[rr].height = max(15, (-(-len(str(c.value)) // 70)) * 13 + 2)
+            rr += 1
+        return rr - 1
+
+    def render_subexperiencias(n_exp, sub, ini, fin) -> None:
+        """Cada obra HALLADA de un cert multi-obra como SubExperiencia FULL-WIDTH:
+        encabezado + ficha InfoObras + TODAS sus valorizaciones (render_obra, igual
+        que una experiencia normal) + la cobertura del tiempo. El TIEMPO ya se contó
+        una vez en la experiencia madre (el vínculo); estas SubExperiencias son la
+        verificación por obra — NO suman tiempo (no se duplica una cartera simultánea)."""
+        nonlocal r
+        halladas = [s for s in (sub or []) if s.get("estado") == "resuelto"]
+        for j, s in enumerate(halladas, 1):
+            cab = f"SubExperiencia {n_exp}.{j}: {s.get('proyecto') or '—'}  (CUI {s.get('cui')})"
             if s.get("sin_verificar"):
-                _linea("    InfoObras: obra hallada; su ficha no cargó ahora (portal) — reintentar")
+                banda(cab + " — obra hallada; su ficha no cargó (portal), reintentar",
+                      F_HEAD, FILL_HEAD, 16)
+                separador()
                 continue
-            # rango para resaltar: el POR obra si el cert lo dio, si no el total del cert
+            banda(cab, F_HEAD, FILL_HEAD, 16)
+            r_top2 = r
+            # ítem completo: ficha + TODAS las valorizaciones (F:K). El resaltado usa
+            # el rango POR obra si el cert lo dio; si no, el periodo total del cert.
             oi = _fecha_iso(s.get("fecha_inicial")) or ini
             of = _fecha_iso(s.get("fecha_final")) or fin
-            # ÍTEM COMPLETO: ficha + TODAS las valorizaciones (mismo formato que una exp normal)
-            rr = render_obra(rr, s.get("ficha") or {}, oi, of) + 1
-            # cruce del tiempo del cert para esta obra (solo si el cert dio rango por obra)
+            r_right = render_obra(r_top2, s.get("ficha") or {}, oi, of)
+            r = max(r, r_right + 1)
+            # representante de obra (R:U) si la ficha lo trae
+            rep = (s.get("ficha") or {}).get("representante_obra")
+            if rep:
+                r = max(r, render_representante(r_top2, rep) + 1)
+            # cobertura del tiempo del cert para esta obra (si el cert dio rango por obra)
             cob = s.get("cobertura")
             if cob:
                 ok = cob.get("cubierto")
                 pct = cob.get("pct")
-                base = (f"    └ Tiempo del cert para esta obra: "
-                        f"{_ddmmaaaa(cob.get('cert_ini'))} – {_ddmmaaaa(cob.get('cert_fin'))}  →  ")
-                if ok is None:   # obra sin valorizaciones → no hay tiempo que cruzar
-                    _linea(base + f"{cob.get('nota') or 'no verificable'} — no se puede cruzar el tiempo")
-                else:
-                    _linea(base + f"cobertura {pct if pct is not None else '?'}%  —  "
-                           + ("cubierto" if ok else "PARCIAL, revisar"),
-                           fill=FILL_OK if ok else FILL_ALERTA)
-        return rr - 1
+                ci, cf = cob.get("cert_ini"), cob.get("cert_fin")
+                def _dd(iso):
+                    return f"{iso[8:10]}/{iso[5:7]}/{iso[0:4]}" if iso and len(iso) == 10 else "—"
+                base = f"Tiempo del cert para esta obra: {_dd(ci)} – {_dd(cf)}  →  "
+                txt = (base + f"{cob.get('nota') or 'no verificable'} — no se puede cruzar el tiempo"
+                       if ok is None else
+                       base + f"cobertura {pct if pct is not None else '?'}%  —  "
+                       + ("cubierto" if ok else "PARCIAL, revisar"))
+                ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=11)
+                c = ws.cell(r, 1, txt)
+                c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
+                if ok is not None:
+                    c.fill = FILL_OK if ok else FILL_ALERTA
+                r += 1
+            separador()
 
     def render_emisor(top: int, s: Optional[dict], fecha_emision, ini, ruc_espejo) -> int:
         """Cuadro del EMISOR del certificado (datos SUNAT) en columnas M:P desde
@@ -857,8 +866,9 @@ def construir_hoja_profesional(
         # lado derecho: ficha de la obra; si la experiencia está en revisión, un
         # bloque que lo explica (en vez de dejar la columna vacía).
         if fx and fx.get("sub_obras"):
-            # cert multi-obra: cada obra hallada = un ítem completo (ficha + valoriz)
-            r_right = render_multi_obra(r_top, fx["sub_obras"], ini, fin)
+            # cert multi-obra: la banda F:K muestra un RESUMEN (cuántas + no halladas);
+            # el detalle full-width de cada obra hallada va como SubExperiencia debajo.
+            r_right = render_multi_obra(r_top, fx["sub_obras"])
             r = max(r, r_right + 1)
         elif fx:
             r_right = render_obra(r_top, fx, ini, fin)
@@ -883,6 +893,11 @@ def construir_hoja_profesional(
             embeber_cert(cert_pdf)
 
         separador()   # 2 filas amarillas (A:Z) cerrando la experiencia
+
+        # cert multi-obra: cada obra hallada baja como SubExperiencia FULL-WIDTH
+        # (ficha InfoObras + valorizaciones + cobertura), como un ítem normal.
+        if fx and fx.get("sub_obras"):
+            render_subexperiencias(n_exp, fx["sub_obras"], ini, fin)
 
     # ── PARTE 5 (al FINAL): tabla por experiencia — declarado vs efectivo ──────
     # Es la conclusión del profesional (días efectivos del Paso 5). Flush-left;
