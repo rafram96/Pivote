@@ -27,6 +27,7 @@
  */
 const fs = require("fs");
 const path = require("path");
+const { matchCargoBases } = require("./match_cargo");
 
 const WS = process.argv[2];
 if (!WS) { console.error("uso: node scripts/consolidar_espejo.js <carpeta_analisis>"); process.exit(2); }
@@ -167,7 +168,21 @@ for (const i of nums) {
   });
 
   const rRow = ((roster.roster || []).find((r) => r.n_prof === i) || {});
-  const cargoNum = pick(pe.cargo_bases_num, rRow.cargo_bases_num, i);
+  // Correspondencia cargo↔bases: el número del LLM (agent-evaluador) se corría.
+  // Candado determinístico: matchea el `cargo` literal del profesional contra el
+  // nombre de cada cargo de `personal_clave`; ese match manda. El LLM es respaldo.
+  const cargoDeclarado = pick(pr.cargo, rRow.cargo);
+  const cargoLLM = pick(pe.cargo_bases_num, rRow.cargo_bases_num);
+  const matchDet = matchCargoBases(cargoDeclarado, bases.personal_clave);
+  const cargoNum = pick(matchDet && matchDet.numero, cargoLLM, i);
+  if (matchDet && cargoLLM != null && matchDet.numero !== cargoLLM) {
+    avisos.push({
+      severidad: "warning", tipo: "cargo_corregido",
+      mensaje: `n_prof ${i} "${cargoDeclarado}": el evaluador asignó cargo bases N°${cargoLLM}, `
+        + `pero el match por nombre da N°${matchDet.numero} (${matchDet.nombre}). Se usó el match por nombre.`,
+      referencia: `profesional ${i}`,
+    });
+  }
   const aniosAd = pe.anios_adicionales != null
     ? `${pe.anios_adicionales} años — ${pick(pe.factor_a_cuenta, "")}`.trim()
     : null;
@@ -176,7 +191,7 @@ for (const i of nums) {
     n_prof: i,
     cargo: pick(pr.cargo, rRow.cargo),
     cargo_bases_num: cargoNum,
-    cargo_bases_nombre: pick(pe.cargo_bases_nombre, rRow.cargo_bases_nombre),
+    cargo_bases_nombre: pick(matchDet && matchDet.nombre, pe.cargo_bases_nombre, rRow.cargo_bases_nombre),
     nombre: pick(pr.nombre, rRow.nombre),
     dni: pick(pr.dni),
     folio_nombre: pick(pr.folio_nombre, rRow.folio_nombre),
