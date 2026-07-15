@@ -232,6 +232,49 @@ def test_es_experiencia_privada_no_confunde_al_emisor():
     assert not _es_experiencia_privada({"proyecto": "I.E. N° 105 San Antonio, Huarochirí"})
 
 
+def test_privada_señal_precisa_sin_falsos_positivos():
+    """La palabra 'privada/particular' SUELTA disparaba falsos positivos en obra
+    pública (auditoría 14-jul). Debe atarse a un sustantivo de colegio; y I.E.P.
+    solo cuenta seguida de NOMBRE, no de número (esas son primarias públicas)."""
+    # obra PÚBLICA que solo MENCIONA lo privado → NO debe gatearse
+    publicas = [
+        "Mejoramiento de la carretera, liberación de predios de PROPIEDAD PRIVADA",
+        "Ampliación de redes bajo ASOCIACIÓN PÚBLICO PRIVADA (APP)",
+        "Obra por impuestos con INVERSIÓN PRIVADA - colegio nacional",
+        "Mejoramiento del servicio educativo I.E.P. N° 70480",   # primaria pública
+        "Mejoramiento de la I.E. N° 80672 del C.P. Pilancón",
+    ]
+    for p in publicas:
+        assert not _es_experiencia_privada({"proyecto": p}), p
+    # colegio PRIVADO de verdad (spelled-out o sigla + nombre) → SÍ
+    privadas = [
+        "Institución Educativa Particular Catholic High School",
+        "Institución Educativa Privada Trinity College",
+        "Construcción de la I.E.P. 'Crezco Jugando' - Trujillo",
+        "Institución Educativa de gestión privada San Marcos",
+        "C.E.P. San Agustín",
+    ]
+    for p in privadas:
+        assert _es_experiencia_privada({"proyecto": p}), p
+
+
+def test_publica_con_numero_colegio_distinto_va_a_revision():
+    """El gate ignora el número de I.E. (usa solo letras), pero el SCORING lo pesa
+    fuerte: una obra con OTRO número de colegio no debe reportarse como match."""
+    class ConsultaOtroColegio:
+        def por_codigo(self, c): return []
+        def buscar(self, n): return [
+            {"nombrObra": "AMPLIACION Y MEJORAMIENTO DEL SERVICIO EDUCATIVO EN LA "
+                          "I.E. N° 18115 DE LA CAMPIÑA", "codUniqInv": "2068524",
+             "codigoObra": 3, "nombrDepartamento": "CAJAMARCA"}]
+
+    exp = {"proyecto": "Ampliación y Mejoramiento del Servicio Educativo en la I.E. "
+                       "N° 80672 del C.P. Pilancón",
+           "fecha_inicial": "2019-01-01"}
+    r = resolver(exp, ConsultaOtroColegio())
+    assert r["estado"] == "revision", r    # 80672 ≠ 18115 → no es la obra
+
+
 def test_match_generico_sin_nombre_propio_va_a_revision():
     """Queja real (KREAR / IE 105 El Ancko): el gate pasaba con palabras genéricas
     (MEJORAMIENTO+INFRAESTRUCTURA+EDUCATIVA) y devolvía obras 'que nada tienen que

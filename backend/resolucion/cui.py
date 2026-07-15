@@ -459,11 +459,22 @@ def _num(v) -> int:
 # promotor privado ("Institución Educativa Particular X", "I.E.P.", colegios
 # privados…) NO debe buscarse por nombre: siempre matchea alguna obra pública
 # parecida y reporta basura (queja real del cliente, 14-jul: Catholic High School
-# → una carretera; Trinity College → obra ajena). Señal CONSERVADORA: la palabra
-# particular/privada en el proyecto o en la entidad contratante (el emisor NO
-# cuenta: en obra pública el emisor es un privado — el contratista — siempre).
+# → una carretera; Trinity College → obra ajena).
+#
+# La señal debe ser PRECISA: la palabra "privada/particular" suelta dispara falsos
+# positivos en obra pública ("predios de PROPIEDAD PRIVADA", "asociación PÚBLICO
+# PRIVADA", "obra por impuestos con INVERSIÓN PRIVADA"), y "I.E.P. N° 70480" es una
+# primaria PÚBLICA. Por eso se exige:
+#   1. el adjetivo pegado a un sustantivo de colegio (educativa/colegio/…/gestión),
+#      lo que descarta propiedad/inversión/público privada; o
+#   2. la sigla I.E.P./C.E.P. SOLO cuando le sigue un NOMBRE (no un número: los
+#      colegios públicos se citan por número, los privados por nombre).
+# Mira proyecto + entidad_contratante (el emisor NO cuenta: en obra pública el
+# emisor es un privado — el contratista — siempre).
 _RE_PRIVADA = re.compile(
-    r"\b(particular(es)?|privad[ao]s?)\b|\bI\.?\s?E\.?\s?P\.?\b", re.I)
+    r"\b(?:educativ[ao]|colegio|escuela|jard[ií]n|nido|instituto|gesti[oó]n)\s+"
+    r"(?:particular(?:es)?|privad[ao]s?)\b"
+    r"|\b[ic]\.?\s?e\.?\s?p\b(?!\.?\s*n?[°º]?\s*\d)", re.I)
 
 
 def _es_experiencia_privada(exp: dict) -> bool:
