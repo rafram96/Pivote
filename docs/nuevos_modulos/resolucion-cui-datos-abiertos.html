@@ -188,27 +188,27 @@
         <h4>RUC directo</h4>
         <p>El RUC del emisor (11 díg) aparece como party/tenderer/supplier del proceso.</p>
         <p style="margin-top:6px">Empresas que postularon solas.</p>
-        <div class="dato ok">✔ Medido: 33/107 (31%) confirmación dura inmediata</div>
+        <div class="dato ok">✔ Medido: 27/158 (17%) confirmación dura inmediata</div>
       </div>
       <div class="nivel">
         <span class="etiqueta">NIVEL 2</span>
         <h4>Nombre del consorcio</h4>
         <p>El nombre del emisor ("Consorcio Supervisor X") normalizado (tildes/orden) vs el <code>name</code> de los parties.</p>
         <p style="margin-top:6px">Los nombres de consorcios SÍ están completos en OCDS.</p>
-        <div class="dato ver">Diseño propuesto — estructura verificada en records reales</div>
+        <div class="dato ok">✔ Medido: +56/158 (35%) — el caballo de batalla de la cascada</div>
       </div>
       <div class="nivel">
         <span class="etiqueta">NIVEL 3</span>
         <h4>Conformación del consorcio</h4>
         <p>CONOSCE <code>consorcios/AAAA</code>: <code>ruc_consorcio</code> (código interno) → <code>ruc_miembro</code> + <code>miembro</code>. El RUC del emisor se busca entre los MIEMBROS del consorcio ganador.</p>
-        <div class="dato ver">Dataset verificado (20,973 filas en 2019) — cubre 2018+</div>
+        <div class="dato ver">Dataset verificado (96k consorcios 2018–26) · en este universo aportó 0: los consorcios problemáticos son pre-2018</div>
       </div>
     </div>
     <div class="flecha" style="margin-top:16px"></div>
     <div class="fin">Confirmado en cualquier nivel → CUI verificado con evidencia</div>
     <div class="flecha"></div>
-    <div class="fin rev">Ningún nivel confirma → señal legítima de revisión («Por confirmar» / posible CUI mal resuelto)</div>
-    <p class="nota">Bonus del candado: detecta CUIs mal resueltos silenciosos (candidato plausible pero equivocado) — hoy no hay nada que los detecte.</p>
+    <div class="fin rev">Ningún nivel confirma → NO penaliza: si el proceso del tipo/periodo no está en OCDS (pre-2018), el CUI conserva su validación actual (solape de valorizaciones)</div>
+    <p class="nota">Medido con datos reales (test_confirmacion_cascada.py): <b>83/158 (53%) confirmados</b> — N1 17% + N2 35% + N3 0%. El candado es <b>asimétrico por diseño</b>: la confirmación positiva es evidencia dura (y detecta CUIs mal resueltos silenciosos); la ausencia de match casi siempre significa que el proceso del emisor es pre-2018 y no está en la fuente, no que el CUI esté mal.</p>
   </div>
 </section>
 
@@ -294,7 +294,8 @@
     <tr><td><b>Experiencias cubiertas</b></td><td class="num"><b>553/641 — 86%</b></td></tr>
     <tr><td>… con Bases Integradas descargables</td><td class="num">155/194 — 80%</td><td>PDF directo verificado</td></tr>
     <tr><td>… con contrato firmado + fecha suscripción</td><td class="num">152/194 — 78%</td><td>T-005 sin OCR</td></tr>
-    <tr><td>Confirmación dura por RUC (nivel 1)</td><td class="num">33/107 — 31%</td><td>El resto son consorcios con código interno → niveles 2–3</td></tr>
+    <tr><td>Cascada de confirmación (N1 RUC + N2 nombre + N3 miembros)</td><td class="num">83/158 — <b>53%</b></td><td>N1 17% · N2 (nombres) 35% — el caballo de batalla · N3 0% en este universo (consorcios pre-2018, fuera de cobertura)</td></tr>
+    <tr><td>Sin confirmar (47%)</td><td class="num">75/158</td><td>Explicación dominante: el proceso que ganó el emisor es pre-2018 (seacev2 sin projectID) aunque el CUI tenga otros procesos → el candado debe ser <b>asimétrico</b>: confirmar suma evidencia, no confirmar NO penaliza si el proceso del tipo/periodo no está en OCDS</td></tr>
     <tr><td>Distribución temporal de experiencias</td><td class="num">50% ≥2021 · 80% ≥2016</td><td>La masa cae dentro de la cobertura 2018+ de datos abiertos</td></tr>
   </table>
   </div>
