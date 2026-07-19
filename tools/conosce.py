@@ -54,8 +54,9 @@ DATASETS = {
     "convocatorias": "CONVOCATORIAS",
     "adjudicaciones": "ADJUDICACIONES",
     "pac": "PAC",
-    "postores": "POSTORES",
-    "proveedores": "PROVEEDORES",
+    "postor": "POSTOR",            # "Listado de Ofertantes" (consorcios con código interno)
+    "proveedores": "PROVEEDORES",  # RNP proveedores individuales
+    "consorcios": "CONSORCIO",     # ¡CLAVE!: ruc_consorcio (código) → ruc_miembro + miembro
 }
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/144 Safari/537.36")

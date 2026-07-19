@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resolución de CUI + Datos Abiertos SEACE — flujo y evidencia</title>
+<style>
+  :root{
+    --bg:#f8f9fb; --panel:#ffffff; --ink:#1a2233; --muted:#5b6474;
+    --line:#d7dce4; --arrow:#9aa3b2;
+    --ok-bg:#e8f6ee; --ok-bd:#2f9e63; --ok-tx:#1d6f44;
+    --cot-bg:#fdf3e3; --cot-bd:#d99a2b; --cot-tx:#96660d;
+    --no-bg:#fbeaea; --no-bd:#cf5a5a; --no-tx:#a03434;
+    --ver-bg:#e9f0fb; --ver-bd:#3b6fd4; --ver-tx:#2a54a8;
+    --dec-bg:#eef1f6; --dec-bd:#8e99ab;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12151b; --panel:#1a1f28; --ink:#e8ebf1; --muted:#9aa3b2;
+      --line:#313947; --arrow:#5b6474;
+      --ok-bg:#15291e; --ok-bd:#2f9e63; --ok-tx:#6fd39e;
+      --cot-bg:#2c2312; --cot-bd:#d99a2b; --cot-tx:#eec06a;
+      --no-bg:#2e1a1a; --no-bd:#cf5a5a; --no-tx:#ef9a9a;
+      --ver-bg:#18233a; --ver-bd:#3b6fd4; --ver-tx:#8fb0f0;
+      --dec-bg:#222835; --dec-bd:#5b6474;
+    }
+  }
+  *{box-sizing:border-box; margin:0}
+  body{background:var(--bg); color:var(--ink); font:15px/1.5 "Segoe UI", system-ui, sans-serif;
+    padding:32px 24px 64px; max-width:1180px; margin:0 auto}
+  h1{font-size:1.5rem; margin-bottom:4px}
+  .sub{color:var(--muted); margin-bottom:20px; font-size:.92rem}
+  h2{font-size:1.15rem; margin-bottom:2px}
+  .h2sub{color:var(--muted); font-size:.88rem; margin-bottom:16px}
+  section{margin-bottom:52px}
+  code{font-size:.82em; background:var(--dec-bg); border:1px solid var(--line); border-radius:5px; padding:1px 6px}
+
+  .leyenda{display:flex; flex-wrap:wrap; gap:10px 22px; margin-bottom:34px;
+    background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 16px}
+  .leyenda span{display:inline-flex; align-items:center; gap:8px; font-size:.86rem; color:var(--muted)}
+  .chip{display:inline-block; min-width:14px; height:14px; border-radius:4px; border:1.5px solid}
+  .chip.ok{background:var(--ok-bg); border-color:var(--ok-bd)}
+  .chip.ver{background:var(--ver-bg); border-color:var(--ver-bd)}
+  .chip.no{background:var(--no-bg); border-color:var(--no-bd)}
+
+  .flujo{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:26px 22px}
+  .nodo{border:1.5px solid var(--line); border-radius:10px; background:var(--bg);
+    padding:10px 14px; text-align:center; max-width:520px; margin:0 auto}
+  .nodo b{display:block; font-size:.95rem}
+  .nodo small{color:var(--muted); font-size:.8rem}
+  .nodo.ok{border-color:var(--ok-bd); background:var(--ok-bg)}
+  .nodo.ok small{color:var(--ok-tx)}
+  .decision{background:var(--dec-bg); border-color:var(--dec-bd); border-style:dashed}
+  .decision .si{color:var(--ok-tx); font-size:.82rem; display:block; margin-top:6px}
+  .decision .nof{color:var(--muted); font-size:.82rem; display:block}
+  .flecha{width:0; height:22px; border-left:2px solid var(--arrow); margin:0 auto; position:relative}
+  .flecha::after{content:""; position:absolute; bottom:-1px; left:-5px;
+    border:5px solid transparent; border-top:7px solid var(--arrow)}
+  .flecha.lbl{height:30px}
+  .flecha.lbl > i{position:absolute; left:12px; top:4px; font-style:normal; font-size:.75rem;
+    color:var(--muted); white-space:nowrap}
+
+  .paso{border:1.5px solid var(--line); border-radius:10px; background:var(--bg);
+    padding:10px 13px; margin:0 auto; max-width:560px}
+  .paso .titulo{display:flex; align-items:baseline; gap:8px; flex-wrap:wrap}
+  .paso .num{flex:none; width:22px; height:22px; border-radius:50%; background:var(--ink); color:var(--bg);
+    font-size:.72rem; font-weight:700; display:inline-flex; align-items:center; justify-content:center; position:relative; top:3px}
+  .paso b{font-size:.92rem}
+  .paso p{font-size:.82rem; color:var(--muted); margin-top:5px}
+  .paso ul{list-style:none; margin-top:8px; display:flex; flex-direction:column; gap:6px}
+  .paso li{font-size:.84rem; border:1.2px solid var(--line); border-radius:7px; padding:5px 9px; background:var(--panel);
+    display:flex; justify-content:space-between; gap:10px; align-items:center}
+  li.ok {background:var(--ok-bg);  border-color:var(--ok-bd)}
+  li.ver{background:var(--ver-bg); border-color:var(--ver-bd)}
+  li.no {background:var(--no-bg);  border-color:var(--no-bd)}
+  .tag{flex:none; font-size:.72rem; font-weight:700; padding:1px 8px; border-radius:99px; white-space:nowrap}
+  .tag.ok {color:var(--ok-tx);  background:color-mix(in srgb, var(--ok-bd) 18%, transparent)}
+  .tag.ver{color:var(--ver-tx); background:color-mix(in srgb, var(--ver-bd) 18%, transparent)}
+  .tag.no {color:var(--no-tx);  background:color-mix(in srgb, var(--no-bd) 18%, transparent)}
+
+  .fin{margin:0 auto; max-width:560px; text-align:center; font-size:.85rem;
+    border:1.5px solid var(--ok-bd); background:var(--ok-bg); color:var(--ok-tx);
+    border-radius:99px; padding:7px 16px; font-weight:600}
+  .fin.rev{border-color:var(--cot-bd); background:var(--cot-bg); color:var(--cot-tx)}
+  .nota{margin-top:14px; font-size:.82rem; color:var(--muted)}
+  .callout{margin:0 auto 18px; max-width:680px; font-size:.85rem;
+    border:1.5px solid var(--ok-bd); background:var(--ok-bg); color:var(--ok-tx); border-radius:10px; padding:9px 14px}
+  .callout.rojo{border-color:var(--no-bd); background:var(--no-bg); color:var(--no-tx)}
+
+  .tabla-wrap{overflow-x:auto; border-radius:12px}
+  table{width:100%; border-collapse:collapse; background:var(--panel);
+    border:1px solid var(--line); border-radius:12px; overflow:hidden; font-size:.86rem}
+  th,td{padding:8px 12px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top}
+  th{font-size:.76rem; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); background:var(--bg)}
+  tr:last-child td{border-bottom:none}
+  td.num{white-space:nowrap; font-weight:600}
+
+  .split{display:grid; grid-template-columns:1fr 1fr 1fr; gap:18px; margin-top:16px}
+  .nivel{border:1.5px solid var(--ver-bd); border-radius:12px; padding:18px 14px 14px; position:relative}
+  .nivel > .etiqueta{position:absolute; top:-12px; left:14px; padding:1px 12px; border-radius:99px;
+    font-size:.76rem; font-weight:700; color:#fff; background:var(--ver-bd)}
+  .nivel h4{font-size:.92rem; margin-bottom:6px}
+  .nivel p{font-size:.82rem; color:var(--muted)}
+  .nivel .dato{margin-top:8px; font-size:.8rem; font-weight:600}
+  .nivel .dato.ok{color:var(--ok-tx)}
+  .nivel .dato.ver{color:var(--ver-tx)}
+  @media (max-width:860px){ .split{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+
+<h1>Resolución de CUI + Datos Abiertos SEACE</h1>
+<p class="sub">Cómo se enlaza cada experiencia con su proceso SEACE <b>sin captcha</b>: flujo de resolución/confirmación del CUI, fuentes, y evidencia medida con los 29 concursos reales de <code>datos_pivote</code> — 19&nbsp;jul&nbsp;2026 · rama <code>sonda/seace</code></p>
+
+<div class="leyenda">
+  <span><i class="chip ok"></i> Validado en vivo con datos reales</span>
+  <span><i class="chip ver"></i> Diseño propuesto (estructura verificada, falta integrarlo)</span>
+  <span><i class="chip no"></i> Límite conocido</span>
+</div>
+
+<!-- ============ 1. FLUJO PRINCIPAL ============ -->
+<section>
+  <h2>1 · Flujo por experiencia (obra pública)</h2>
+  <p class="h2sub">Insumos que el pipeline YA produce: nombre de obra, RUC/razón social del emisor (skill + SUNAT), periodo declarado. No se introduce ningún input nuevo.</p>
+
+  <div class="flujo">
+    <div class="nodo"><b>Experiencia del certificado</b><small>nombre de obra · RUC del emisor · periodo declarado · (CUI si el cert lo trae)</small></div>
+    <div class="flecha"></div>
+
+    <div class="paso">
+      <div class="titulo"><span class="num">1</span><b>Resolver CUI — MEF (T-003, en producción)</b></div>
+      <p>Búsqueda por nombre sin captcha (SSI por código). Candidatos → filtro exacto + preferencia 7 dígitos + solape de valorizaciones.</p>
+      <ul><li class="ok"><span>Si el certificado ya trae CUI → paso directo</span><span class="tag ok">✔ producción</span></li></ul>
+    </div>
+    <div class="flecha"></div>
+
+    <div class="paso">
+      <div class="titulo"><span class="num">2</span><b>Procesos del CUI — API OCDS (sin captcha)</b></div>
+      <p><code>GET /api/v1/records?projectID={CUI}</code> en <code>contratacionesabiertas.oece.gob.pe</code> → todos los procesos SEACE de esa inversión.</p>
+      <ul>
+        <li class="ok"><span>Cobertura real: 158/194 CUIs (81%) · 553/641 experiencias (86%)</span><span class="tag ok">✔ medido</span></li>
+      </ul>
+    </div>
+    <div class="flecha"></div>
+
+    <div class="paso">
+      <div class="titulo"><span class="num">3</span><b>Elegir el proceso correcto por TIPO</b></div>
+      <p>La distinción del flujograma del ingeniero, automática por la descripción/categoría del tender:</p>
+      <ul>
+        <li><span>Expediente técnico → consultoría con "ELABORACIÓN DEL EXPEDIENTE TÉCNICO" (services)</span></li>
+        <li><span>Supervisión → "SUPERVISIÓN DE…" (services)</span></li>
+        <li><span>Ejecución → categoría works</span></li>
+      </ul>
+    </div>
+    <div class="flecha"></div>
+
+    <div class="paso">
+      <div class="titulo"><span class="num">4</span><b>Candado de confirmación</b> <span class="tag ver">cascada de 3 niveles — sección 2</span></div>
+      <p>¿La empresa que emitió el certificado participó de verdad en ese proceso? Confirma el CUI con evidencia dura y mata homónimos.</p>
+    </div>
+    <div class="flecha lbl"><i>confirmado ↓ · no confirmado → «Por confirmar»</i></div>
+
+    <div class="paso">
+      <div class="titulo"><span class="num">5</span><b>Extraer documentos y fechas</b></div>
+      <ul>
+        <li class="ok"><span><b>Bases Integradas</b> (tender.documents / biddingDocuments) — PDF directo</span><span class="tag ok">✔ 7.4MB probado</span></li>
+        <li class="ok"><span><b>Contrato firmado</b> (contractSigned) — PDF directo</span><span class="tag ok">✔ probado</span></li>
+        <li class="ok"><span><b>Fecha de suscripción</b> + vigencias (CONOSCE contratos / OCDS)</span><span class="tag ok">✔ estructurada, sin OCR</span></li>
+        <li class="ok"><span>Pliego de consultas, buena pro, informes de evaluación (bonus)</span><span class="tag ok">✔ disponibles</span></li>
+      </ul>
+    </div>
+    <div class="flecha"></div>
+    <div class="fin">Cruces T-005: inicio profesional ≥ firma del contrato · término ≤ resolución del ET · cronología por proyecto</div>
+
+    <p class="nota">Fallbacks si el paso 2 devuelve 0 (14% de experiencias): ruta inversa por RUC en CONOSCE (sección 3) → buscador SEACE vía navegador (reCAPTCHA, solo procesos recientes) → «Por confirmar». Nunca se inventa.</p>
+  </div>
+</section>
+
+<!-- ============ 2. CASCADA ============ -->
+<section>
+  <h2>2 · Candado de confirmación — cascada de 3 niveles</h2>
+  <p class="h2sub">Medido con datos reales: los consorcios aparecen en OCDS con código interno de 6–7 dígitos (no RUC de 11), por eso el nivel 1 solo confirma al que postuló solo. Los niveles 2–3 rescatan a los consorcios.</p>
+
+  <div class="flujo">
+    <div class="split">
+      <div class="nivel">
+        <span class="etiqueta">NIVEL 1</span>
+        <h4>RUC directo</h4>
+        <p>El RUC del emisor (11 díg) aparece como party/tenderer/supplier del proceso.</p>
+        <p style="margin-top:6px">Empresas que postularon solas.</p>
+        <div class="dato ok">✔ Medido: 33/107 (31%) confirmación dura inmediata</div>
+      </div>
+      <div class="nivel">
+        <span class="etiqueta">NIVEL 2</span>
+        <h4>Nombre del consorcio</h4>
+        <p>El nombre del emisor ("Consorcio Supervisor X") normalizado (tildes/orden) vs el <code>name</code> de los parties.</p>
+        <p style="margin-top:6px">Los nombres de consorcios SÍ están completos en OCDS.</p>
+        <div class="dato ver">Diseño propuesto — estructura verificada en records reales</div>
+      </div>
+      <div class="nivel">
+        <span class="etiqueta">NIVEL 3</span>
+        <h4>Conformación del consorcio</h4>
+        <p>CONOSCE <code>consorcios/AAAA</code>: <code>ruc_consorcio</code> (código interno) → <code>ruc_miembro</code> + <code>miembro</code>. El RUC del emisor se busca entre los MIEMBROS del consorcio ganador.</p>
+        <div class="dato ver">Dataset verificado (20,973 filas en 2019) — cubre 2018+</div>
+      </div>
+    </div>
+    <div class="flecha" style="margin-top:16px"></div>
+    <div class="fin">Confirmado en cualquier nivel → CUI verificado con evidencia</div>
+    <div class="flecha"></div>
+    <div class="fin rev">Ningún nivel confirma → señal legítima de revisión («Por confirmar» / posible CUI mal resuelto)</div>
+    <p class="nota">Bonus del candado: detecta CUIs mal resueltos silenciosos (candidato plausible pero equivocado) — hoy no hay nada que los detecte.</p>
+  </div>
+</section>
+
+<!-- ============ 3. RUTA INVERSA ============ -->
+<section>
+  <h2>3 · Ruta inversa por RUC (fallback cuando el nombre no matchea)</h2>
+  <div class="flujo">
+    <div class="nodo"><b>El MEF no encuentra la obra por nombre</b><small>o el nombre del certificado está recortado/ambiguo</small></div>
+    <div class="flecha"></div>
+    <div class="paso">
+      <div class="titulo"><span class="num">1</span><b>Filtrar CONOSCE por el RUC del emisor</b></div>
+      <p><code>contratos.ruc_contratista = RUC emisor</code> (o adjudicaciones.ruc_proveedor; si es consorcio → vía <code>consorcios</code> primero). Excel anuales descargados una vez, consulta <b>offline</b>.</p>
+    </div>
+    <div class="flecha"></div>
+    <div class="paso">
+      <div class="titulo"><span class="num">2</span><b>Candidatos por ventana de fechas</b></div>
+      <p>Procesos que esa empresa ganó con <code>fecha_suscripcion</code>/vigencia solapando el periodo declarado.</p>
+    </div>
+    <div class="flecha"></div>
+    <div class="paso">
+      <div class="titulo"><span class="num">3</span><b>projectID del proceso = CUI candidato</b></div>
+      <p>Se matchea contra el nombre de obra del certificado. El RUC se vuelve una <b>segunda llave independiente</b> del nombre — las dos rutas se validan mutuamente.</p>
+    </div>
+    <div class="flecha"></div>
+    <div class="fin">CUI resuelto por la vía inversa → vuelve al flujo principal (paso 2)</div>
+  </div>
+</section>
+
+<!-- ============ 4. FUENTES ============ -->
+<section>
+  <h2>4 · Fuentes de datos (todas sin captcha)</h2>
+  <div class="tabla-wrap">
+  <table>
+    <tr><th>Fuente</th><th>Qué da</th><th>Acceso</th><th>Actualización / cobertura</th></tr>
+    <tr>
+      <td class="num">API OCDS (OECE)</td>
+      <td>Procesos por CUI (<code>?projectID=</code>) o por ocid; tender.documents (Bases Integradas/Administrativas, pliego, buena pro) + contracts (contrato firmado, dateSigned)</td>
+      <td><code>contratacionesabiertas.oece.gob.pe/api/v1</code> · ocid = <code>ocds-dgv273-seacev3-{codigoconvocatoria}</code></td>
+      <td>seacev3 (2017+) con projectID; seacev2 llega a ~2008 pero <b>sin projectID</b> (matching por nombre)</td>
+    </tr>
+    <tr>
+      <td class="num">CONOSCE contratos</td>
+      <td><b>fecha_suscripcion_contrato</b>, vigencias, montos, ruc_contratista, <b>urlcontrato</b> (PDF directo), codigoconvocatoria</td>
+      <td>Excel/año: <code>conosce.osce.gob.pe/buscador/assets/67ae6c4a/reportes/contratos/AAAA/…xlsx</code></td>
+      <td>2018–2026 · mensual (~3 sem de rezago) · 21.4k filas en 2026</td>
+    </tr>
+    <tr>
+      <td class="num">CONOSCE convocatorias</td>
+      <td>Entidad, nomenclatura, objeto, ubicación, monto ref., fecha_convocatoria, <b>fechaintegracionbases</b></td>
+      <td>ídem <code>convocatorias/AAAA</code></td>
+      <td>2018–2026 · 27.2k filas en 2026</td>
+    </tr>
+    <tr>
+      <td class="num">CONOSCE adjudicaciones</td>
+      <td>Proveedor ganador, RUC, fecha_buenapro, fecha_consentimiento_bp, montos</td>
+      <td>ídem <code>adjudicaciones/AAAA</code></td>
+      <td>2018–2026 · 27.3k filas en 2026</td>
+    </tr>
+    <tr>
+      <td class="num">CONOSCE consorcios</td>
+      <td><b>Conformación</b>: ruc_consorcio (código interno) → ruc_miembro + miembro — la llave del nivel 3</td>
+      <td>ídem <code>consorcios/AAAA/CONOSCE_CONSORCIOAAAA_0.xlsx</code></td>
+      <td>2018–2026 · 21k filas en 2019</td>
+    </tr>
+    <tr>
+      <td class="num">Buscador SEACE (fallback)</td>
+      <td>Procesos de las últimas semanas que aún no están en datos abiertos</td>
+      <td>reCAPTCHA v3 → solo vía navegador (mecánica JSF de <code>seace.py</code> sigue válida con sesión)</td>
+      <td>Al día · <span class="tag no">candado captcha</span></td>
+    </tr>
+  </table>
+  </div>
+</section>
+
+<!-- ============ 5. EVIDENCIA ============ -->
+<section>
+  <h2>5 · Evidencia medida (29 concursos reales de datos_pivote)</h2>
+  <div class="tabla-wrap">
+  <table>
+    <tr><th>Métrica</th><th>Resultado</th><th>Lectura</th></tr>
+    <tr><td>CUIs únicos resueltos analizados</td><td class="num">194 (641 experiencias con CUI)</td><td>Universo real, no ejemplos</td></tr>
+    <tr><td>CUIs con proceso en OCDS</td><td class="num">158/194 — 81%</td><td rowspan="2">Cuando el CUI está, está <b>completo</b>: bases + contrato + fecha vienen juntos</td></tr>
+    <tr><td><b>Experiencias cubiertas</b></td><td class="num"><b>553/641 — 86%</b></td></tr>
+    <tr><td>… con Bases Integradas descargables</td><td class="num">155/194 — 80%</td><td>PDF directo verificado</td></tr>
+    <tr><td>… con contrato firmado + fecha suscripción</td><td class="num">152/194 — 78%</td><td>T-005 sin OCR</td></tr>
+    <tr><td>Confirmación dura por RUC (nivel 1)</td><td class="num">33/107 — 31%</td><td>El resto son consorcios con código interno → niveles 2–3</td></tr>
+    <tr><td>Distribución temporal de experiencias</td><td class="num">50% ≥2021 · 80% ≥2016</td><td>La masa cae dentro de la cobertura 2018+ de datos abiertos</td></tr>
+  </table>
+  </div>
+  <p class="nota">Argumento de venta: <i>«con los datos reales de tus propios 29 concursos, el sistema obtendría automáticamente y sin captcha las bases integradas, el contrato firmado y la fecha de firma para ~8.5 de cada 10 experiencias públicas»</i>.</p>
+</section>
+
+<!-- ============ 6. LÍMITES ============ -->
+<section>
+  <h2>6 · Límites conocidos y su mitigación</h2>
+  <div class="tabla-wrap">
+  <table>
+    <tr><th>Límite</th><th>Impacto</th><th>Mitigación</th></tr>
+    <tr><td>Piso 2018 de CONOSCE (y seacev2 sin projectID)</td><td>~14% de experiencias (las pre-2017) sin vía CUI-directo</td><td>Matching por nombre en records seacev2 · buscador browser · «Por confirmar»</td></tr>
+    <tr><td>Rezago mensual de CONOSCE (~3 semanas)</td><td>Solo afecta procesos recientísimos — irrelevante para experiencias históricas</td><td>Buscador browser como fallback puntual</td></tr>
+    <tr><td>Consorcios con código interno en OCDS</td><td>Nivel 1 del candado solo confirma 31%</td><td>Niveles 2 (nombre) y 3 (conformación CONOSCE) — estructura verificada</td></tr>
+    <tr><td>reCAPTCHA v3 en el buscador SEACE</td><td>Sin búsqueda directa por requests</td><td><b>Ya no es bloqueante</b>: los datos abiertos lo esquivan; el buscador queda de último recurso vía navegador</td></tr>
+    <tr><td>Host OCDS viejo (osce.gob.pe) muerto</td><td>Docs/tutoriales antiguos apuntan a un dominio que no resuelve</td><td>Usar <code>oece.gob.pe</code> (migración verificada)</td></tr>
+    <tr><td>Obras privadas</td><td>Sin CUI no hay SEACE ni MEF</td><td>Gate de privadas existente → SUNAT + RENIPRESS (T-006)</td></tr>
+  </table>
+  </div>
+</section>
+
+<!-- ============ 7. ARTEFACTOS ============ -->
+<section>
+  <h2>7 · Scripts de sonda y pruebas (rama <code>sonda/seace</code>)</h2>
+  <div class="tabla-wrap">
+  <table>
+    <tr><th>Script</th><th>Qué hace</th><th>Estado</th></tr>
+    <tr><td class="num">tools/conosce.py</td><td>Descarga datasets CONOSCE por año + resumen de columnas; <code>--pdf</code> baja un contrato</td><td><span class="tag ok">✔ validado</span></td></tr>
+    <tr><td class="num">tools/ocds.py</td><td>Record por CUI/ocid + listado de documentos; <code>--bajar</code> descarga Bases Integradas + contrato</td><td><span class="tag ok">✔ validado</span></td></tr>
+    <tr><td class="num">tools/seace.py</td><td>Buscador JSF (proyecto previo) + veredicto reCAPTCHA v3 en cabecera — queda de fallback browser</td><td><span class="tag no">NO-GO requests puro</span></td></tr>
+    <tr><td class="num">backend/datos_pivote/test_cobertura_ocds.py</td><td>Mide cobertura OCDS sobre los CUIs reales (con cache re-corrible)</td><td><span class="tag ok">✔ corrido: 86%</span></td></tr>
+    <tr><td class="num">backend/datos_pivote/test_confirmacion_ruc.py</td><td>Mide el candado nivel 1 (RUC emisor vs parties del proceso)</td><td><span class="tag ok">✔ corrido: 31%</span></td></tr>
+  </table>
+  </div>
+  <p class="nota">Documentos hermanos en esta carpeta: <b>plan-desarrollo-extras.html</b> (cotización T-003…T-007) · <b>flujos-verificacion-experiencias.html</b> (qué se verifica por tipo) · <b>flujos-skills-excel.html</b> (las skills del Excel del ingeniero). Este documento actualiza de facto el riesgo de T-004/T-005: de «captcha/OCR» a «datos abiertos verificados».</p>
+</section>
+
+</body>
+</html>
