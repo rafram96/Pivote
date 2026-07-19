@@ -56,6 +56,7 @@ Thumbs.db
 !mcp-server/cowork-config-ejemplo.json
 !/plugin/.claude-plugin/plugin.json
 !/plugin/.mcp.json
+!/docs/nuevos_modulos/*.html
 
 # Plugin Cowork: se versiona el manifiesto + build.ps1 + README; las copias de
 # la skill y el MCP son build output (regenéralas con plugin/build.ps1).

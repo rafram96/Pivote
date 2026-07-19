@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flujos de las skills del Excel — CUI y Documentos del expediente</title>
+<style>
+  :root{
+    --bg:#f8f9fb; --panel:#ffffff; --ink:#1a2233; --muted:#5b6474;
+    --line:#d7dce4; --arrow:#9aa3b2;
+    --ok-bg:#e8f6ee; --ok-bd:#2f9e63; --ok-tx:#1d6f44;
+    --cot-bg:#fdf3e3; --cot-bd:#d99a2b; --cot-tx:#96660d;
+    --no-bg:#fbeaea; --no-bd:#cf5a5a; --no-tx:#a03434;
+    --dec-bg:#eef1f6; --dec-bd:#8e99ab;
+    --pub:#3b6fd4; --priv:#7d5bb8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12151b; --panel:#1a1f28; --ink:#e8ebf1; --muted:#9aa3b2;
+      --line:#313947; --arrow:#5b6474;
+      --ok-bg:#15291e; --ok-bd:#2f9e63; --ok-tx:#6fd39e;
+      --cot-bg:#2c2312; --cot-bd:#d99a2b; --cot-tx:#eec06a;
+      --no-bg:#2e1a1a; --no-bd:#cf5a5a; --no-tx:#ef9a9a;
+      --dec-bg:#222835; --dec-bd:#5b6474;
+      --pub:#7aa0ee; --priv:#a98be0;
+    }
+  }
+  *{box-sizing:border-box; margin:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font:15px/1.5 "Segoe UI", system-ui, sans-serif;
+    padding:32px 24px 64px; max-width:1180px; margin:0 auto;
+  }
+  h1{font-size:1.5rem; margin-bottom:4px}
+  .sub{color:var(--muted); margin-bottom:20px; font-size:.92rem}
+  .leyenda{display:flex; flex-wrap:wrap; gap:10px 22px; margin-bottom:34px;
+    background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 16px}
+  .leyenda span{display:inline-flex; align-items:center; gap:8px; font-size:.86rem; color:var(--muted)}
+  .chip{display:inline-block; min-width:14px; height:14px; border-radius:4px; border:1.5px solid}
+  .chip.ok{background:var(--ok-bg); border-color:var(--ok-bd)}
+  .chip.cot{background:var(--cot-bg); border-color:var(--cot-bd)}
+
+  section{margin-bottom:56px}
+  h2{font-size:1.15rem; margin-bottom:2px}
+  .h2sub{color:var(--muted); font-size:.88rem; margin-bottom:18px}
+
+  .flujo{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:26px 22px}
+  .nodo{
+    border:1.5px solid var(--line); border-radius:10px; background:var(--bg);
+    padding:10px 14px; text-align:center; max-width:430px; margin:0 auto;
+  }
+  .nodo b{display:block; font-size:.95rem}
+  .nodo small{color:var(--muted); font-size:.8rem}
+  .decision{background:var(--dec-bg); border-color:var(--dec-bd); border-style:dashed}
+  .decision .si{color:var(--ok-tx); font-size:.82rem; display:block; margin-top:6px}
+  .decision .nof{color:var(--muted); font-size:.82rem; display:block}
+
+  .flecha{width:0; height:22px; border-left:2px solid var(--arrow); margin:0 auto; position:relative}
+  .flecha::after{content:""; position:absolute; bottom:-1px; left:-5px;
+    border:5px solid transparent; border-top:7px solid var(--arrow)}
+  .flecha.lbl{height:30px}
+  .flecha.lbl > i{
+    position:absolute; left:10px; top:4px; font-style:normal; font-size:.75rem;
+    color:var(--muted); white-space:nowrap;
+  }
+
+  .split{display:grid; grid-template-columns:1fr 1fr; gap:26px; margin-top:18px}
+  .rama{border-radius:12px; border:1.5px solid var(--line); padding:22px 14px 20px; position:relative}
+  .rama > .etiqueta{
+    position:absolute; top:-12px; left:14px; padding:1px 12px; border-radius:99px;
+    font-size:.78rem; font-weight:700; letter-spacing:.4px; color:#fff;
+  }
+  .rama.pub  > .etiqueta{background:var(--pub)}
+  .rama.priv > .etiqueta{background:var(--priv)}
+  .rama.pub {border-color:var(--pub)}
+  .rama.priv{border-color:var(--priv)}
+  .rama > .estado{
+    position:absolute; top:-12px; right:14px; padding:1px 12px; border-radius:99px;
+    font-size:.75rem; font-weight:700;
+  }
+  .estado.ok {background:var(--ok-bg); border:1.5px solid var(--ok-bd); color:var(--ok-tx)}
+  .estado.cot{background:var(--cot-bg); border:1.5px solid var(--cot-bd); color:var(--cot-tx)}
+
+  .paso{
+    border:1.5px solid var(--line); border-radius:10px; background:var(--bg);
+    padding:10px 13px; margin:0 auto; max-width:430px;
+  }
+  .paso .titulo{display:flex; align-items:baseline; gap:8px; flex-wrap:wrap}
+  .paso .num{
+    flex:none; width:22px; height:22px; border-radius:50%; background:var(--ink); color:var(--bg);
+    font-size:.72rem; font-weight:700; display:inline-flex; align-items:center; justify-content:center;
+    position:relative; top:3px;
+  }
+  .paso b{font-size:.92rem}
+  .paso p{font-size:.82rem; color:var(--muted); margin-top:5px}
+  .paso ul{list-style:none; margin-top:8px; display:flex; flex-direction:column; gap:6px}
+  .paso li{
+    font-size:.84rem; border:1.2px solid var(--line); border-radius:7px; padding:5px 9px;
+    background:var(--panel);
+    display:flex; justify-content:space-between; gap:10px; align-items:center;
+  }
+  li.ok {background:var(--ok-bg);  border-color:var(--ok-bd)}
+  li.cot{background:var(--cot-bg); border-color:var(--cot-bd)}
+  .tag{flex:none; font-size:.72rem; font-weight:700; padding:1px 8px; border-radius:99px; white-space:nowrap}
+  .tag.ok {color:var(--ok-tx);  background:color-mix(in srgb, var(--ok-bd) 18%, transparent)}
+  .tag.cot{color:var(--cot-tx); background:color-mix(in srgb, var(--cot-bd) 18%, transparent)}
+
+  .fin{
+    margin:0 auto; max-width:430px; text-align:center; font-size:.85rem;
+    border:1.5px solid var(--ok-bd); background:var(--ok-bg); color:var(--ok-tx);
+    border-radius:99px; padding:7px 16px; font-weight:600;
+  }
+  .fin.priv{border-color:var(--priv); background:transparent; color:var(--priv)}
+  .nota{margin-top:14px; font-size:.82rem; color:var(--muted)}
+  .callout{
+    margin:0 auto 18px; max-width:640px; font-size:.85rem;
+    border:1.5px solid var(--ok-bd); background:var(--ok-bg); color:var(--ok-tx);
+    border-radius:10px; padding:9px 14px;
+  }
+  .callout.cot{border-color:var(--cot-bd); background:var(--cot-bg); color:var(--cot-tx)}
+
+  @media (max-width:760px){ .split{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+
+<h1>Flujos de las otras skills del Excel</h1>
+<p class="sub">Hojas «cui» y «contrato bases y resolucion» del Excel «para RAFAEL» (Ing. Manuel Echandía) · anotado con el estado real en el sistema — 18&nbsp;jul&nbsp;2026</p>
+
+<div class="leyenda">
+  <span><i class="chip ok"></i> Ya construido por código en el sistema (T-003)</span>
+  <span><i class="chip cot"></i> Cotizable — paquetes T-004 / T-005</span>
+</div>
+
+<!-- ============ SKILL 1: CUI ============ -->
+<section>
+  <h2>Skill 1 — Búsqueda de CUI en el Banco de Inversiones del MEF</h2>
+  <p class="h2sub">Hoja «cui»: la skill de navegador que Manuel redactó, paso a paso. Tres buscadores en cascada, con captcha manual en cada intento.</p>
+
+  <div class="flujo">
+    <div class="callout">Todo este flujo ya lo hace el sistema <b>por código y sin captcha</b> (T-003): resuelve el CUI de todas las experiencias de la corrida automáticamente. El diagrama muestra el proceso manual que la skill describe.</div>
+
+    <div class="nodo"><b>Entrada</b><small>nombre del proyecto · distrito/provincia/departamento · palabras clave distintivas · SNIP o CUI si ya es visible en el documento</small></div>
+    <div class="flecha"></div>
+
+    <div class="nodo decision"><b>Paso 0 — ¿Ya se tiene un CUI o SNIP?</b>
+      <span class="si">Sí → ir directo a la ficha (consultainversiones?cui=N) y reportar · FIN</span>
+      <span class="nof">No → continuar ↓</span>
+    </div>
+    <div class="flecha"></div>
+
+    <div class="paso">
+      <div class="titulo"><span class="num">1</span><b>Consulta Pública del MEF</b></div>
+      <p>Solo inversiones <b>viables y aprobadas</b>. Navegar, leer el captcha del screenshot, escribir una palabra clave distintiva (no el nombre completo) y buscar.</p>
+      <ul>
+        <li class="ok"><span class="txt">Equivalente en el sistema: consulta directa por código</span><span class="tag ok">T-003 ✔ sin captcha</span></li>
+      </ul>
+    </div>
+    <div class="flecha lbl"><i>¿apareció? Sí → reportar ficha · No ↓</i></div>
+
+    <div class="paso">
+      <div class="titulo"><span class="num">2</span><b>SSI — Sistema de Seguimiento de Inversiones</b></div>
+      <p>Incluye <b>todos los estados</b>. Modal «Búsqueda por nombre», escribir con teclado (la app filtra por evento de tecla), probar variantes: palabra clave única → distrito → fragmento del objeto.</p>
+      <ul>
+        <li class="ok"><span class="txt">Equivalente en el sistema: endpoint del SSI por código (13/13 CUIs validados)</span><span class="tag ok">T-003 ✔ sin captcha</span></li>
+      </ul>
+    </div>
+    <div class="flecha lbl"><i>¿apareció? Sí → reportar ficha · No ↓</i></div>
+
+    <div class="paso">
+      <div class="titulo"><span class="num">3</span><b>Validación anti-falso-negativo (obligatoria)</b></div>
+      <p>Antes de afirmar «no existe»: repetir la búsqueda con un término que seguro existe. Si ese sí devuelve filas y el proyecto no, el negativo es confiable.</p>
+    </div>
+    <div class="flecha"></div>
+
+    <div class="nodo decision"><b>¿Apareció en algún sistema?</b>
+      <span class="si">Sí → reportar: CUI · SNIP · nombre · estado · situación · monto · enlace a la ficha</span>
+      <span class="nof">No → no está registrado como inversión pública ↓</span>
+    </div>
+    <div class="flecha"></div>
+
+    <div class="fin priv">Conclusión: obra PRIVADA (sin CUI) → verificar por SUNAT / RENIPRESS · sugerir SEACE por N° de contrato u otras variantes del nombre</div>
+
+    <p class="nota">Homónimos: se desempatan con distrito/provincia/departamento. En el sistema esto ya está resuelto con el filtro exacto + selección por solape de valorizaciones y preferencia por CUI de 7 dígitos.</p>
+  </div>
+</section>
+
+<!-- ============ SKILL 2: BASES + CONTRATO + RESOLUCIÓN ============ -->
+<section>
+  <h2>Skill 2 — Descarga de Bases Integradas, Contrato y Resolución del ET</h2>
+  <p class="h2sub">Hoja «contrato bases y resolucion»: reunir los tres documentos base de la obra en una sola corrida, más un resumen cronológico por proyecto.</p>
+
+  <div class="flujo">
+    <div class="nodo"><b>Entrada</b><small>nombre del proyecto · fecha o año de la convocatoria · entidad convocante · CUI (si falta → correr antes la skill de CUI)</small></div>
+    <div class="flecha"></div>
+    <div class="nodo decision"><b>Dos rutas en paralelo</b><small>Parte A en el SEACE · Parte B en el MEF (Invierte.pe)</small></div>
+
+    <div class="split">
+      <!-- PARTE A -->
+      <div class="rama pub">
+        <span class="etiqueta">PARTE A — SEACE</span>
+        <span class="estado cot">T-004 · cotizable</span>
+        <div class="paso">
+          <div class="titulo"><span class="num">A1</span><b>Abrir el Buscador Público del SEACE</b></div>
+          <p>Formulario de búsqueda de procedimientos (app con captcha).</p>
+        </div>
+        <div class="flecha"></div>
+        <div class="paso">
+          <div class="titulo"><span class="num">A2</span><b>Buscar por nombre y fecha</b></div>
+          <p>Palabra clave distintiva en «Descripción del objeto» + rango de fechas. Si no hay resultados: ampliar al año completo y quitar filtros. Desempatar homónimos por entidad y fecha.</p>
+        </div>
+        <div class="flecha"></div>
+        <div class="paso">
+          <div class="titulo"><span class="num">A3</span><b>Entrar a la Ficha de Selección</b></div>
+          <p>Fila correcta → «Ficha de Selección» → «Documentos del procedimiento».</p>
+        </div>
+        <div class="flecha"></div>
+        <div class="paso">
+          <div class="titulo"><span class="num">A4</span><b>Descargar las BASES INTEGRADAS</b></div>
+          <ul>
+            <li class="cot"><span class="txt">Distinguir de «Bases» sin integrar y de bases administrativas → 01_BASES_INTEGRADAS_….pdf</span><span class="tag cot">T-004</span></li>
+          </ul>
+        </div>
+        <div class="flecha"></div>
+        <div class="paso">
+          <div class="titulo"><span class="num">A5</span><b>Descargar el CONTRATO firmado</b></div>
+          <ul>
+            <li class="cot"><span class="txt">Sección de ejecución contractual → 02_CONTRATO_FIRMADO_….pdf · si la entidad no lo publicó, se deja indicado (nunca se inventa)</span><span class="tag cot">T-004</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- PARTE B -->
+      <div class="rama priv">
+        <span class="etiqueta">PARTE B — MEF (Invierte.pe)</span>
+        <span class="estado ok">T-003 ✔ construido</span>
+        <div class="paso">
+          <div class="titulo"><span class="num">B1</span><b>Abrir la Consulta de Inversiones</b></div>
+          <p>Con CUI conocido: ir directo a la ficha (consultainversiones?cui=N).</p>
+        </div>
+        <div class="flecha"></div>
+        <div class="paso">
+          <div class="titulo"><span class="num">B2</span><b>Buscar por CUI y abrir la ficha</b></div>
+          <p>En la skill: captcha manual. En el sistema: acceso por código con sesión, sin captcha.</p>
+        </div>
+        <div class="flecha"></div>
+        <div class="paso">
+          <div class="titulo"><span class="num">B3</span><b>Registros en la Fase de Inversión</b></div>
+          <p>Abrir el <b>Formato N° 08-A</b> — Registros en la Fase de Ejecución (columna «Ver»).</p>
+        </div>
+        <div class="flecha"></div>
+        <div class="paso">
+          <div class="titulo"><span class="num">B4</span><b>Sección B — Expediente técnico</b></div>
+          <p>Cuadro «Expediente técnico o documento equivalente», columna <b>«ET o DE»</b>.</p>
+        </div>
+        <div class="flecha"></div>
+        <div class="paso">
+          <div class="titulo"><span class="num">B5</span><b>Descargar la RESOLUCIÓN de aprobación del ET</b></div>
+          <ul>
+            <li class="ok"><span class="txt">03_RESOLUCION_APROBACION_….pdf · verificar el «SE RESUELVE»; si hay varias filas, tomar la del ET vigente</span><span class="tag ok">T-003 ✔ validado en vivo</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="flecha" style="margin-top:22px"></div>
+    <div class="paso" style="max-width:640px">
+      <div class="titulo"><span class="num">✓</span><b>Entregable 1 — Paquete de documentos por obra</b></div>
+      <ul>
+        <li class="cot"><span class="txt">01 Bases Integradas (SEACE)</span><span class="tag cot">T-004</span></li>
+        <li class="cot"><span class="txt">02 Contrato firmado (SEACE)</span><span class="tag cot">T-004</span></li>
+        <li class="ok"><span class="txt">03 Resolución de aprobación del ET (MEF, Formato 08-A)</span><span class="tag ok">T-003 ✔</span></li>
+      </ul>
+    </div>
+    <div class="flecha"></div>
+    <div class="paso" style="max-width:640px">
+      <div class="titulo"><span class="num">✓</span><b>Entregable 2 — Resumen detallado por proyecto</b></div>
+      <p><b>Cronología del expediente</b> (lo más importante para Manuel): INICIO = fecha del contrato del ET (SEACE) · FIN = fecha de la resolución de aprobación (Formato 08-A) · registrar modificaciones del ET si las hay.</p>
+      <ul>
+        <li class="cot"><span class="txt">Ficha por proyecto: identificación, CUI/SNIP, ubicación, entidad, montos, modalidad, cronograma, documentos y notas</span><span class="tag cot">T-005</span></li>
+        <li class="cot"><span class="txt">Tabla comparativa final con INICIO y FIN de todos los proyectos</span><span class="tag cot">T-005</span></li>
+      </ul>
+    </div>
+    <div class="flecha"></div>
+    <div class="fin">Paquete 01/02/03 ordenado + resumen cronológico presentado al evaluador</div>
+
+    <p class="nota">Reglas de la skill que el sistema conserva: nunca inventar un archivo, CUI o número de resolución; lo no publicado se declara como pendiente; búsquedas por palabra clave, no por nombre exacto. Los cruces de fechas contra los certificados (inicio ≥ firma del contrato, término ≤ resolución) son el paquete T-005 y se muestran en el documento de flujos por tipo de experiencia.</p>
+  </div>
+</section>
+
+<p class="nota">Fuente: hojas «cui» y «contrato bases y resolucion» del Excel «para RAFAEL». Documento hermano: <b>flujos-verificacion-experiencias.html</b> (flujos por tipo de experiencia según la Hoja1).</p>
+
+</body>
+</html>
