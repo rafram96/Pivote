@@ -117,7 +117,7 @@
 <body>
 
 <h1>Plan de desarrollo y cotización de extras</h1>
-<p class="sub">Todo lo pedido en el Excel «para RAFAEL», organizado en componentes cotizables (T-003 … T-007) · tiempos aproximados, verificaciones previas e integración con el sistema en producción — 18&nbsp;jul&nbsp;2026</p>
+<p class="sub">Todo lo pedido en el Excel «para RAFAEL», organizado en componentes cotizables (T-003 … T-007) · <b>v2 — 19&nbsp;jul&nbsp;2026</b>: actualizado con las sondas SEACE/CONOSCE/OCDS ya ejecutadas y la evidencia medida sobre los 29 concursos reales (ver <b>resolucion-cui-datos-abiertos.html</b>)</p>
 
 <div class="leyenda">
   <span><i class="chip ok"></i> Ya construido (se cotiza como entregado)</span>
@@ -143,21 +143,21 @@
     </tr>
     <tr>
       <td class="num">T-004</td>
-      <td>SEACE: búsqueda del proceso + descarga de Bases Integradas y Contrato firmado (expediente y supervisión)</td>
-      <td><span class="tag cot">por desarrollar</span></td>
-      <td><span class="tag ver">sonda GO/NO-GO</span> captcha del buscador</td>
-      <td class="num">5–6 días<br><small>(28–32 h)</small></td>
+      <td>SEACE por <b>datos abiertos</b> (CONOSCE + API OCDS): Bases Integradas + Contrato firmado + candado de confirmación del CUI — sin captcha</td>
+      <td><span class="tag cot">por integrar</span> <span class="tag ok">sonda ✔ hecha</span></td>
+      <td>✔ Completada: GO validado, 86% de cobertura medida con datos reales</td>
+      <td class="num">4–5 días<br><small>(20–24 h)</small></td>
       <td>—</td>
-      <td class="num">S/ 2,600</td>
+      <td class="num">S/ 2,400</td>
     </tr>
     <tr>
       <td class="num">T-005</td>
-      <td>Cruces de fechas contrato/ET ↔ certificado + cronología del expediente en el Excel</td>
+      <td>Cruces de fechas contrato/ET ↔ certificado + cronología del expediente en el Excel — <b>sin OCR</b> (fecha de firma estructurada)</td>
       <td><span class="tag cot">por desarrollar</span></td>
-      <td>Muestra de contratos reales (calidad del OCR)</td>
-      <td class="num">3 días<br><small>(16–18 h)</small></td>
+      <td>✔ Ya no requiere: la fecha viene como campo del dataset</td>
+      <td class="num">2–2.5 días<br><small>(12–14 h)</small></td>
       <td>T-004 y T-003</td>
-      <td class="num">S/ 1,400</td>
+      <td class="num">S/ 1,200</td>
     </tr>
     <tr>
       <td class="num">T-006</td>
@@ -179,7 +179,7 @@
     </tr>
     <tr class="total">
       <td></td><td>Total del paquete</td><td></td><td></td>
-      <td class="num">~10–12 días</td><td></td><td class="num">S/ 7,400 + bolsa</td>
+      <td class="num">~7–9 días</td><td></td><td class="num">S/ 7,000 + bolsa</td>
     </tr>
   </table>
   </div>
@@ -263,44 +263,44 @@
 
   <!-- T-004 -->
   <div class="card">
-    <div class="head"><h3>T-004 — SEACE: Bases Integradas + Contrato firmado</h3><span class="tag cot">por desarrollar</span><span class="tag ver">GO/NO-GO</span><span class="precio">S/ 2,600 · 5–6 días</span></div>
-    <p class="meta">Módulo de scraping hermano del de InfoObras. Cubre los dos procesos por obra: consultoría del expediente técnico y supervisión/ejecución.</p>
+    <div class="head"><h3>T-004 — SEACE por datos abiertos: Bases Integradas + Contrato + candado del CUI</h3><span class="tag cot">por integrar</span><span class="tag ok">sonda ✔ hecha</span><span class="precio">S/ 2,400 · 4–5 días</span></div>
+    <p class="meta"><b>La sonda ya se ejecutó y dio GO</b>: el buscador SEACE tiene reCAPTCHA v3, pero se esquiva por completo con los datos abiertos oficiales — CONOSCE (datasets Excel/año) + API OCDS del OECE, que buscan <b>por CUI directo</b> (<code>records?projectID=</code>) y bajan los PDF sin captcha. Evidencia medida con los 29 concursos reales: <b>86% de las experiencias públicas cubiertas</b> (bases + contrato + fechas). Herramientas validadas: tools/conosce.py, tools/ocds.py.</p>
     <div class="cols">
       <div class="col">
-        <h4>Plan de desarrollo</h4>
+        <h4>Plan de desarrollo (la sonda ya está invertida)</h4>
         <ol>
-          <li><b>Sonda técnica</b> <span class="dias">· 1 día</span> — ¿hay ruta por código sin captcha? Probar ficha de selección server-rendered y los datos abiertos CONOSCE/OCDS del OSCE. <b>Aquí se decide GO/NO-GO.</b></li>
-          <li><b>Búsqueda del proceso</b> <span class="dias">· 1–1.5 días</span> — por palabra clave + rango de fechas + entidad; desambiguación de homónimos.</li>
-          <li><b>Descarga de documentos</b> <span class="dias">· 1.5 días</span> — Bases Integradas (distinguir de bases sin integrar) y Contrato firmado; renombrado 01_/02_; al ZIP por obra.</li>
-          <li><b>Resiliencia</b> <span class="dias">· 1 día</span> — reintentos (portal estatal flaky, como InfoObras); estado «No publicado en SEACE» sin inventar.</li>
-          <li><b>Prueba con obras reales</b> <span class="dias">· 0.5–1 día</span> — corrida completa sobre 3–5 obras de un caso conocido.</li>
+          <li><b>Módulo datos abiertos en el backend</b> <span class="dias">· 1.5 días</span> — portar conosce.py + ocds.py a src/scraping/: CUI → record OCDS → selección del proceso por tipo (expediente / supervisión / ejecución).</li>
+          <li><b>Candado de confirmación asimétrico</b> <span class="dias">· 1 día</span> — cascada RUC directo → nombre del consorcio → miembros (conformación CONOSCE); confirma el CUI sin penalizar cuando el proceso es pre-2018.</li>
+          <li><b>Descarga al ZIP + estados</b> <span class="dias">· 1 día</span> — Bases Integradas y Contrato al ZIP por obra (01_/02_); «No disponible en datos abiertos» sin inventar; cache de datasets anuales.</li>
+          <li><b>Prueba con corrida real</b> <span class="dias">· 0.5–1 día</span> — un concurso completo de datos_pivote end-to-end.</li>
         </ol>
       </div>
       <div class="col">
         <h4>Integración con el sistema</h4>
         <ul>
-          <li>Nuevo módulo en <b>src/scraping/</b> del backend, invocado después de resolver el CUI (misma etapa que InfoObras).</li>
-          <li>Los PDFs entran al <b>ZIP por obra</b> existente, con su estado por documento visible en el panel.</li>
-          <li>Lo no publicado cae a <b>«Por confirmar»</b> con la terminología sin jerga del panel.</li>
+          <li>Módulo hermano de InfoObras en <b>src/scraping/</b>, en la misma etapa post-resolución de CUI.</li>
+          <li>El candado se engancha al <b>resolver CUI existente</b> como evidencia adicional (53% de confirmación automática medida).</li>
+          <li>Los Excel de CONOSCE se descargan 1 vez por año y se consultan <b>offline</b> (cero carga por experiencia).</li>
+          <li>Lo no disponible cae a <b>«Por confirmar»</b>, terminología sin jerga.</li>
         </ul>
-        <h4 style="margin-top:12px">Verificación previa</h4>
+        <h4 style="margin-top:12px">Riesgo</h4>
         <ul>
-          <li>La sonda es la primera tarea: si el captcha no tiene ruta alterna en búsqueda <i>y</i> descarga → NO-GO.</li>
+          <li>Bajo: sin captcha, sin browser, fuentes oficiales estables. El buscador con reCAPTCHA queda fuera del alcance (solo mencionado como fallback futuro cotizable).</li>
         </ul>
       </div>
     </div>
-    <div class="aviso rojo">Cláusula NO-GO: si la sonda concluye que no hay ruta por código, se factura solo la sonda (~S/ 500) y se propone la alternativa semiautomática (el evaluador pega el enlace de la ficha y el sistema descarga los documentos).</div>
+    <div class="aviso">Ya no hay cláusula NO-GO: la verificación que la motivaba se ejecutó y dio GO con evidencia. El precio baja de S/ 2,600 a S/ 2,400 porque el riesgo desapareció, y la sonda ya invertida se refleja en que el paquete entra directo a integración.</div>
   </div>
 
   <!-- T-005 -->
   <div class="card">
-    <div class="head"><h3>T-005 — Cruces de fechas + cronología del expediente</h3><span class="tag cot">por desarrollar</span><span class="precio">S/ 1,400 · 3 días</span></div>
-    <p class="meta">Convierte los documentos de T-003/T-004 en verificaciones automáticas y en un entregable nuevo del Excel. Solo tiene sentido junto o después de T-004.</p>
+    <div class="head"><h3>T-005 — Cruces de fechas + cronología del expediente (sin OCR)</h3><span class="tag cot">por desarrollar</span><span class="precio">S/ 1,200 · 2–2.5 días</span></div>
+    <p class="meta">Convierte los datos de T-003/T-004 en verificaciones automáticas y en un entregable nuevo del Excel. <b>El riesgo de OCR desapareció</b>: la fecha de firma viene como campo estructurado (<code>fecha_suscripcion_contrato</code> en CONOSCE, <code>dateSigned</code> en OCDS) — verificado con datos reales. Solo tiene sentido junto o después de T-004.</p>
     <div class="cols">
       <div class="col">
         <h4>Plan de desarrollo</h4>
         <ol>
-          <li><b>Extracción de la fecha de firma</b> <span class="dias">· 1 día</span> — OCR dirigido a la cláusula de suscripción del contrato descargado (suelen ser escaneados).</li>
+          <li><b>Fechas desde datos abiertos</b> <span class="dias">· 0.5 día</span> — fecha de firma + vigencias del dataset/record (sin leer PDFs); el contrato PDF queda solo de sustento en el ZIP.</li>
           <li><b>Reglas nuevas</b> <span class="dias">· 0.5 día</span> — inicio del profesional ≥ firma del contrato · término ≤ fecha de la resolución del ET; entran al esquema de alertas existente.</li>
           <li><b>Hoja «Cronología de expedientes»</b> <span class="dias">· 1 día</span> — ficha por proyecto (inicio = contrato del ET, fin = resolución, modificaciones) + tabla comparativa final.</li>
           <li><b>Prueba con caso real</b> <span class="dias">· 0.5 día</span> — validar fechas contra lectura manual.</li>
@@ -311,11 +311,11 @@
         <ul>
           <li>Las 2 reglas se agregan al <b>motor de reglas</b> (mismo esquema ALT existente).</li>
           <li>La cronología es una <b>hoja nueva del Excel</b> — no toca las 5 hojas congeladas.</li>
-          <li>Si falta el documento fuente (contrato no publicado), el veredicto queda <b>provisional → revisión</b>, igual que hoy con los NO CUMPLE frágiles.</li>
+          <li>Si el proceso no está en datos abiertos (≈14% de experiencias, pre-2018), el veredicto queda <b>provisional → revisión</b>, igual que hoy con los NO CUMPLE frágiles — nunca se penaliza por ausencia de fuente.</li>
         </ul>
         <h4 style="margin-top:12px">Verificación previa</h4>
         <ul>
-          <li>Pedir a Manuel 2–3 contratos reales de SEACE para medir calidad del OCR sobre la cláusula de firmas antes de comprometer precisión.</li>
+          <li>Ya no se necesita muestra de contratos para calibrar OCR — la fecha es un campo del dataset.</li>
         </ul>
       </div>
     </div>
@@ -369,19 +369,19 @@
 
 <!-- ============ 4. CRONOGRAMA ============ -->
 <section>
-  <h2>4 · Cronograma sugerido (~4 semanas calendario)</h2>
-  <p class="h2sub">Arranca después de cerrar el hito final del contrato vigente. El GO/NO-GO de SEACE va primero porque condiciona T-004 y T-005.</p>
+  <h2>4 · Cronograma sugerido (~3 semanas calendario)</h2>
+  <p class="h2sub">Arranca después de cerrar el hito final del contrato vigente. La sonda SEACE ya se ejecutó (GO con evidencia), así que T-004 entra directo a integración — una semana menos que el plan v1.</p>
   <div class="pipe">
     <div class="gantt">
-      <div class="gfila cab"><div></div><div>Sem 1</div><div>Sem 2</div><div>Sem 3</div><div>Sem 4</div><div></div></div>
-      <div class="gfila"><div>Sonda SEACE (GO/NO-GO)</div><div class="barra ver"><span>1 día</span></div><div></div><div></div><div></div><div></div></div>
+      <div class="gfila cab"><div></div><div>Sem 1</div><div>Sem 2</div><div>Sem 3</div><div></div><div></div></div>
+      <div class="gfila"><div>Sondas SEACE/CONOSCE/OCDS</div><div class="barra ok"><span>✔ ya ejecutadas (GO, 86% medido)</span></div><div></div><div></div><div></div><div></div></div>
       <div class="gfila"><div>T-007 SUNAT habido</div><div class="barra cot"><span>0.5 día</span></div><div></div><div></div><div></div><div></div></div>
-      <div class="gfila"><div>T-004 SEACE</div><div class="barra cot"><span>inicio</span></div><div class="barra cot"><span>desarrollo + prueba real</span></div><div></div><div></div><div></div></div>
-      <div class="gfila"><div>T-005 Cruces + cronología</div><div></div><div></div><div class="barra cot"><span>3 días</span></div><div></div><div></div></div>
-      <div class="gfila"><div>T-006 RENIPRESS</div><div></div><div></div><div></div><div class="barra cot"><span>1.5–2 días</span></div><div></div></div>
-      <div class="gfila"><div>Prueba integral + entrega</div><div></div><div></div><div></div><div class="barra ok"><span>corrida completa real</span></div><div></div></div>
+      <div class="gfila"><div>T-004 datos abiertos + candado</div><div class="barra cot"><span>integración</span></div><div class="barra cot"><span>ZIP + prueba real</span></div><div></div><div></div><div></div></div>
+      <div class="gfila"><div>T-005 Cruces + cronología</div><div></div><div class="barra cot"><span>2–2.5 días</span></div><div></div><div></div><div></div></div>
+      <div class="gfila"><div>T-006 RENIPRESS</div><div></div><div></div><div class="barra cot"><span>1.5–2 días</span></div><div></div><div></div></div>
+      <div class="gfila"><div>Prueba integral + entrega</div><div></div><div></div><div class="barra ok"><span>corrida completa real</span></div><div></div><div></div></div>
     </div>
-    <p class="nota">Hitos de decisión: <b>fin de Sem 1</b> — resultado de la sonda SEACE (si NO-GO, se replantea T-004/T-005 con la alternativa semiautomática y el resto del paquete sigue igual) · <b>fin de Sem 4</b> — corrida integral sobre una propuesta real con todos los componentes activos.</p>
+    <p class="nota">Hito de decisión único: <b>fin de Sem 3</b> — corrida integral sobre una propuesta real con todos los componentes activos. El GO/NO-GO desapareció del cronograma porque ya se resolvió (sondas RENIPRESS ✔ GO y SEACE ✔ GO por datos abiertos, ambas validadas en vivo).</p>
   </div>
 </section>
 
@@ -393,9 +393,10 @@
     <tr><th>Punto</th><th>Detalle</th></tr>
     <tr><td class="num">Momento</td><td>Presentar junto con la entrega final del contrato vigente — no antes, para no mezclar alcances.</td></tr>
     <tr><td class="num">T-003</td><td>Se cobra como extra ya entregado: abrir la reunión con demo en vivo (es exactamente lo que su hoja «cui» describe hacer a mano, ya automatizado).</td></tr>
-    <tr><td class="num">Bloques</td><td>T-004 + T-005 se ofrecen como un solo bloque «Expediente SEACE y cruces de fechas» (S/ 4,000). T-006 aparte. T-007 como muestra del canal de bolsa de horas.</td></tr>
-    <tr><td class="num">Insumos del cliente</td><td>2–3 contratos reales de SEACE (para calibrar el OCR de T-005) y 1–2 casos de obras privadas de salud (para probar T-006).</td></tr>
-    <tr><td class="num">Riesgo declarado</td><td>Captcha del SEACE sin ruta alterna → cláusula NO-GO (solo la sonda, ~S/ 500, + alternativa semiautomática).</td></tr>
+    <tr><td class="num">Bloques</td><td>T-004 + T-005 se ofrecen como un solo bloque «Expediente SEACE y cruces de fechas» (<b>S/ 3,600</b>). T-006 aparte. T-007 como muestra del canal de bolsa de horas.</td></tr>
+    <tr><td class="num">Insumos del cliente</td><td>Ya no se necesitan contratos de muestra (el OCR salió del alcance). Solo 1–2 casos de obras privadas de salud (para probar T-006).</td></tr>
+    <tr><td class="num">Riesgo declarado</td><td><b>Resuelto antes de cotizar</b>: las sondas ya corrieron (SEACE con reCAPTCHA → esquivado por datos abiertos oficiales, GO medido con 86% de cobertura; RENIPRESS GO sin captcha). El precio v2 refleja el riesgo eliminado: T-004 S/ 2,600→2,400 y T-005 S/ 1,400→1,200.</td></tr>
+    <tr><td class="num">Argumento de venta</td><td>«Con los datos reales de tus propios 29 concursos: bases integradas + contrato + fecha de firma automáticos y sin captcha para ~8.5 de cada 10 experiencias públicas, y confirmación automática del CUI en la mitad de los casos.» Evidencia en <b>resolucion-cui-datos-abiertos.html</b>.</td></tr>
     <tr><td class="num">Cerrar expectativa</td><td>«Firmante = representante legal» no se cotiza: ya se construyó y se descartó con evidencia (falsos positivos).</td></tr>
   </table>
   </div>
