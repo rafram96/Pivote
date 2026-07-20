@@ -50,6 +50,46 @@ la resolución **descarga con la misma session de requests** (HTTP 200,
 falta de cookies de sesión. → **La verificación MEF se implementa EN EL BACKEND**,
 mismo patrón que `scraping/infoobras.py`. El precio acordado quedó en **S/ 2,600**.
 
+### ✅ F0 COMPLETADO (13-jul) — endpoints descubiertos + fixtures congelados
+
+**El hallazgo grande: contratista/contrato salen por JSON, NO hay que tocar SEACE.**
+El SSI expone un endpoint DWH con los contratos SEACE ya estructurados:
+
+```
+POST https://ofi5.mef.gob.pe/invierteWS/Ssi/traeContratoSeaceDWH
+     data = { id: <CUI>, codsnip: <SNIP>, vers: "v2" }   (form-urlencoded, XHR)
+     → application/json : lista de contratos, cada uno con
+       NUM_CONTRATO · NOM_CONTRATISTA · MTO_TOTAL · DES_PROCESO ·
+       NOMENCLATURA · VALOR_REFER · FEC_SUSCRIPCION · URL_CONTRATO (PDF directo)
+```
+Validado (CUI 2324482): 6 contratos, incluido `116-2017-GRH/GR · VELÁSQUEZ VÁSQUEZ
+EMILIO FÉLIX · S/612,750 · 19/10/2017` — **coincide exacto con el certificado de
+Yuyapichis**. El `URL_CONTRATO` (Oracle object storage) descarga el **PDF del
+contrato** con requests (`%PDF-1.4`).
+
+**Fuentes por código, definitivas (cero SEACE JSF):**
+| Dato | Fuente (requests) |
+|---|---|
+| Estado, fechas ejecución, montos, sección B | `GET /invierte/ejecucion/verFichaEjecucion/{CUI}` (HTML) |
+| PDF resolución de aprobación | link `downloadArchivoPublico` de esa misma página (session) |
+| Contratista, N° contrato, monto, fechas, nomenclatura | `POST /invierteWS/Ssi/traeContratoSeaceDWH` (JSON) |
+| PDF del contrato | `URL_CONTRATO` del JSON (Oracle storage, directo) |
+| CUI/nombre/situación/UEI | ficha SSI / el mismo 08-A |
+
+**El `codsnip` importa (corrección de F0, medido en F5):** el DWH devuelve MÁS
+contratos con el SNIP real que con `codsnip=0` (ej. CUI 2303684/2107892/2088781:
+0 contratos con `0` → 3/11/6 con el SNIP). El SNIP se toma del `codSnip` de la obra
+de InfoObras (ya resuelta en el pipeline) y se pasa a `verificar_cui`. La descarga
+reusa ese SNIP (guardado como `cod_snip` en el bloque).
+
+→ **Se elimina el riesgo R3** (no dependemos del JSF de SEACE ni de prod4). El
+único "no se puede" que queda es que la ENTIDAD no haya cargado datos (medido ~8%).
+
+**Fixtures congelados** en `backend/tests/fixtures/mef/` (5 CUIs: completo,
+flaco, reformulado, PRONIS, educación) — HTML del 08-A + JSON de contratos +
+`INDEX.json`. Versionados (excepción en `.gitignore`; es data pública). Script
+reutilizable: `backend/scripts/congelar_fixtures_mef.py`.
+
 ---
 
 ## 1 · Qué significa "integrado" (el objetivo)
@@ -179,6 +219,12 @@ Mismo patrón que `infoobras.py` (session con UA, reintentos con backoff, thrott
 | **F4** | Panel: badge + tabla de contraste | 0.5 d |
 | **F5** | Regresión con los 13 CUIs (script `scripts/verificar_mef.py`, reusable en el server) + e2e + deploy | 0.5 d |
 | | **Total** | **4 d** |
+
+**F0–F5 IMPLEMENTADAS (rama `feat/verificacion-mef`)** — falta solo merge + deploy.
+Regresión F5 (13 CUIs reales, con SNIP vía InfoObras): **11/13 (84%) verificados en
+MEF · 8/13 con contrato de expediente · 7/13 con resolución**. Los no-verificados son
+entidades que no cargaron el 08-A (medido, ~cae en ⚠️ "por confirmar", no es fallo).
+Suite: 216 tests offline. Script reusable en el server: `python scripts/verificar_mef.py`.
 
 **Precio cerrado (ACORDADO 13-jul): S/ 2,600** — en la línea del cruce
 InfoObras+SUNAT del contrato original (S/2,400). 50% adelanto / 50% entrega.

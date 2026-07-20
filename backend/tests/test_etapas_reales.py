@@ -371,6 +371,110 @@ def test_experiencia_de_expediente_se_acepta_por_su_aprobacion(tmp_path):
                    for p in enr["1:1"].get("paralizaciones", []))
 
 
+def test_verificacion_mef_se_adjunta_al_enriquecimiento(tmp_path):
+    """T-003 F2: una experiencia de EXPEDIENTE con CUI resuelto → el verificador MEF
+    (inyectado) corre y su bloque queda en el enriquecimiento + observación VERIF_MEF."""
+    espejo = {
+        "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
+        "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N",
+             "requisitos": {"tipo_experiencia": "mínimo 1 año"},
+             "experiencias": [
+                 {"n": 1, "cui": "2418877",
+                  "proyecto": "Elaboración del Expediente Técnico del C.S. Pillco Marca",
+                  "nombre_emisor": "Velásquez Vásquez Emilio Félix",
+                  "fecha_inicial": "2020-01-01", "fecha_final": "2020-12-31", "folio": "1"},
+             ]},
+        ],
+        "resumen_evaluacion": {"factores": []},
+    }
+    llamadas = []
+
+    def fake_mef(exp, cui, codsnip=""):
+        llamadas.append((exp.get("n"), cui))
+        return {"verificado_en_mef": True, "cui_confirmado": cui,
+                "fuentes": ["MEF-SEACE", "MEF-08A"],
+                "contratista": {"valor": "VELASQUEZ VASQUEZ EMILIO FELIX", "veredicto": "ok"},
+                "contrato": {"numero": "116-2017-GRH/GR", "monto": 612750.0, "veredicto": "ok"},
+                "resolucion": {"numero": "121-2019", "veredicto": "ok"}}
+
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
+                                fetcher_infoobras=fetcher_fake,
+                                consultor_sunat=lambda r: None,
+                                descargar=lambda *a, **k: None,
+                                verificador_mef=fake_mef), repo)
+    job = motor.correr(motor.crear_job(espejo).job_id)
+
+    assert llamadas == [(1, "2418877")]        # se llamó con el CUI resuelto
+    enr = repo.cargar_enriquecimiento(job.job_id)["1:1"]
+    assert enr["verificacion_expediente"]["contrato"]["numero"] == "116-2017-GRH/GR"
+    assert enr["verificacion_expediente"]["contratista"]["veredicto"] == "ok"
+    vm = [o for e in job.etapas for o in e.observaciones if o.codigo == "VERIF_MEF"]
+    assert len(vm) == 1 and "116-2017-GRH/GR" in vm[0].mensaje
+
+
+def test_verificacion_mef_no_corre_en_experiencia_normal(tmp_path):
+    """El MEF solo se cruza para EXPEDIENTES (por nombre). Una obra de supervisión
+    normal no dispara el verificador, aunque esté inyectado."""
+    espejo = {
+        "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
+        "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N",
+             "requisitos": {"tipo_experiencia": "mínimo 1 año"},
+             "experiencias": [
+                 {"n": 1, "cui": "2418877",
+                  "proyecto": "Supervisión del Centro de Salud Pillco Marca, Huanuco",
+                  "fecha_inicial": "2021-05-13", "fecha_final": "2023-05-06", "folio": "1"},
+             ]},
+        ],
+        "resumen_evaluacion": {"factores": []},
+    }
+    llamadas = []
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
+                                fetcher_infoobras=fetcher_fake,
+                                consultor_sunat=lambda r: None,
+                                descargar=lambda *a, **k: None,
+                                verificador_mef=lambda e, c, s="": llamadas.append(1)), repo)
+    motor.correr(motor.crear_job(espejo).job_id)
+    assert llamadas == []          # no es expediente → no se cruza el MEF
+
+
+def test_verificacion_mef_falla_no_bloquea(tmp_path):
+    """Si el verificador MEF revienta (portal caído), el análisis sigue sin bloque."""
+    espejo = {
+        "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
+        "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N",
+             "requisitos": {"tipo_experiencia": "mínimo 1 año"},
+             "experiencias": [
+                 {"n": 1, "cui": "2418877",
+                  "proyecto": "Elaboración del Expediente Técnico del C.S. Pillco Marca",
+                  "fecha_inicial": "2020-01-01", "fecha_final": "2020-12-31", "folio": "1"},
+             ]},
+        ],
+        "resumen_evaluacion": {"factores": []},
+    }
+
+    def mef_rompe(exp, cui, codsnip=""):
+        raise ConnectionError("MEF caído")
+
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
+                                fetcher_infoobras=fetcher_fake,
+                                consultor_sunat=lambda r: None,
+                                descargar=lambda *a, **k: None,
+                                verificador_mef=mef_rompe), repo)
+    job = motor.correr(motor.crear_job(espejo).job_id)
+    assert job.estado != JobEstado.ERROR
+    enr = repo.cargar_enriquecimiento(job.job_id)["1:1"]
+    assert "verificacion_expediente" not in enr
+
+
 def test_obra_de_construccion_sin_valorizaciones_no_usa_aprobacion(tmp_path):
     """El respaldo por aprobación es SOLO para expedientes (por nombre). Una obra de
     construcción sin valorizaciones NO se acepta por la aprobación → sigue a revisión."""
@@ -679,6 +783,40 @@ def test_excel_muestra_modificaciones_de_plazo(tmp_path):
     texto = "\n".join(str(c.value) for row in wb[hoja].iter_rows()
                       for c in row if c.value)
     assert "MODIFICACIONES DE PLAZO" in texto and "Ampliación del plazo" in texto
+
+
+def test_excel_expediente_muestra_verificacion_mef_en_vez_de_valorizaciones(tmp_path):
+    """F3: para un EXPEDIENTE (sin valorizaciones), el slot muestra la VERIFICACIÓN
+    SEACE/MEF (contrato/contratista/resolución) en lugar de la tabla de valorizaciones."""
+    from entregables.excel_final import generar_excel_final
+    espejo = {
+        "_meta": {}, "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N", "experiencias": [
+                {"n": 1, "proyecto": "Elaboración del Expediente Técnico C.S. Yuyapichis",
+                 "fecha_inicial": "2017-10-19", "fecha_final": "2019-04-04", "folio": "1"}]}],
+    }
+    fichas = {(1, 1): {
+        "cui": "2324482", "codigo_infoobras": "31212", "estado": "Finalizado",
+        "valorizaciones": [],   # expediente: sin valorizaciones
+        "verificacion_expediente": {
+            "cui_confirmado": "2324482", "fuentes": ["MEF-SEACE", "MEF-08A"],
+            "contratista": {"valor": "VELASQUEZ VASQUEZ EMILIO FELIX", "veredicto": "ok"},
+            "contrato": {"numero": "116-2017-GRH/GR", "monto": 612750.0,
+                         "fecha": "2017-10-19", "veredicto": "ok"},
+            "resolucion": {"numero": "121-2019", "veredicto": "no_verificable"},
+        },
+    }}
+    ruta = tmp_path / "exp.xlsx"
+    generar_excel_final(espejo, ruta, {}, {(1, 1): "2324482"}, fichas)
+    wb = openpyxl.load_workbook(ruta)
+    hoja = next(s for s in wb.sheetnames if s.startswith("P1"))
+    texto = "\n".join(str(c.value) for row in wb[hoja].iter_rows()
+                      for c in row if c.value)
+    assert "VERIFICACIÓN SEACE / MEF" in texto
+    assert "VELASQUEZ VASQUEZ EMILIO FELIX" in texto and "116-2017-GRH/GR" in texto
+    assert "✔ Coincide" in texto and "Por confirmar" in texto      # veredictos por campo
+    assert "VALORIZACIONES —" not in texto                          # el slot fue reemplazado
 
 
 def test_excel_marca_valorizaciones_con_archivos(tmp_path):

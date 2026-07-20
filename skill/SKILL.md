@@ -217,43 +217,26 @@ CONFIRMARLO**.
 > experiencias con cliente PRIVADO no tienen CUI ni están en estos registros — déjalas
 > con `cui: null` sin insistir; su verificación es otro flujo (fuera de este alcance).
 
-### Paso 4.6 — Verificación de EXPEDIENTES contra SEACE + MEF (módulo de verificación)
-Para cada experiencia de **EXPEDIENTE técnico/estudio** (las detectadas en 4.5 —
-nombre de expediente/consultoría de proyecto), además del CUI verifica el
-**contrato detrás del certificado**. Requiere NAVEGADOR (Chrome MCP); si no hay
-navegador disponible, omite este paso y anota en `observaciones_claude` que la
-verificación SEACE quedó pendiente — no bloquees el análisis.
+### Paso 4.6 — Verificación de EXPEDIENTES: la hace el BACKEND (no tú)
+Para las experiencias de **expediente técnico/estudio**, el contraste del contrato
+detrás del certificado (contratista / N° de contrato / monto / resolución de
+aprobación contra SEACE y el Banco de Inversiones del MEF) **lo hace el backend por
+código**, automáticamente, cuando recibe el espejo. NO lo hagas tú por navegador:
+sería trabajo duplicado y podría chocar con lo del backend.
 
-1. **SEACE** (buscador público:
-   `https://prod2.seace.gob.pe/seacebus-uiwd-pub/buscadorPublico/buscadorPublico.xhtml`):
-   busca el proceso por NOMBRE del proyecto y AÑO del contrato. De la convocatoria
-   DESCARGA las **Bases Integradas** y el **Contrato** a la carpeta del análisis
-   (`verificacion/P{n}_E{m}/01_Bases…`, `02_Contrato…`). Anota: contratista (empresa
-   o persona natural), N° de contrato, monto y fechas.
-2. **MEF — datos por el SSI** (ssi.mef.gob.pe, expone el Banco de Inversiones SIN
-   código de verificación): estado del proyecto, situación, monto, unidad ejecutora,
-   contrataciones registradas.
-3. **MEF — resolución de aprobación (ruta SIN captcha, validada en vivo 13-jul con
-   el CUI 2324482):** abre el **Formato N°08-A en HTML** directo:
-   `https://ofi5.mef.gob.pe/invierte/ejecucion/verFichaEjecucion/<CUI>`
-   (también se llega desde la ficha del SSI → ícono del expediente técnico →
-   "Lista de modificaciones en Fase de Ejecución" → Ver). En la página busca los
-   enlaces **"APROBACIÓN DEL EXP. TEC"** (o similar, `downloadArchivoPublico?...`)
-   y descárgalos DESDE LA SESIÓN del navegador (el enlace lleva token de sesión —
-   un curl externo NO funciona, el click/fetch en la página SÍ). Guarda como
-   `03_Resolucion_Aprobacion…`. La Consulta Pública (que pide captcha desde el
-   primer paso) queda SOLO como último recurso; si la usas y pide el código, es la
-   ÚNICA pausa permitida: "escribe el código y avísame" y continúa.
-4. **Contraste** y registro: compara contratista / N° contrato / monto / fechas /
-   resolución contra el certificado. Escribe el resultado en `observaciones_claude`
-   de esa experiencia con el formato:
-   `VERIFICACION_EXPEDIENTE: contratista ✅|⚠️|❌ · contrato ✅|⚠️|❌ · resolución ✅|⚠️|❌ — detalle corto (fuente: SEACE/MEF)`.
-   Diferencias menores (valor referencial vs adjudicado) = esperables, no ❌.
-   **Mismas reglas de evidencia del 4.5**: solo datos vistos en pantalla, nada de
-   memoria; si algo no aparece, ⚠️ "no verificable en línea" y sigues.
+**Tu única responsabilidad para que esto funcione:** entregar el **CUI bien resuelto**
+(Paso 4.5). Con el CUI, el backend detecta el expediente por el nombre, consulta el
+MEF (`traeContratoSeaceDWH` + Formato 08-A), descarga los PDFs al ZIP y muestra el
+bloque "VERIFICACIÓN SEACE/MEF" en el Excel y el panel. Si el CUI queda `null`, esa
+verificación no ocurre — por eso el Paso 4.5 es lo importante.
 
-(Para verificar un expediente SUELTO sin correr el análisis completo existe el
-prompt manual: `docs/prompt-verificacion-expediente.md`.)
+Diferenciación (la resuelve el backend, no la skill): si la experiencia tiene
+valorizaciones de obra → muestra valorizaciones; si es un expediente sin
+valorizaciones → en ese mismo lugar muestra la verificación MEF. Tú solo extraes y
+resuelves el CUI; el backend elige qué mostrar.
+
+(Para verificar un expediente SUELTO a mano, sin correr el análisis, existe el prompt
+manual: `docs/prompt-verificacion-expediente.md`.)
 
 ### Paso 5 — Transporte al backend (POR DEFECTO: MCP, automático)
 **El default es subir por el MCP, sin preguntar.** Tras consolidar y validar:
