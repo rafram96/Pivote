@@ -51,14 +51,14 @@
   .op-num{width:24px; height:24px; border-radius:50%; background:var(--panel2); border:1px solid var(--line);
        color:var(--muted); font-size:.72rem; font-weight:700; display:flex; align-items:center; justify-content:center}
   .op-titulo{min-width:0}
-  .op-titulo .nombre{font-weight:600; font-size:.9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-  .op-titulo .veredicto{font-size:.8rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .op-titulo .nombre{font-weight:600; font-size:.9rem; overflow-wrap:anywhere}
+  .op-titulo .veredicto{font-size:.8rem; color:var(--muted); overflow-wrap:anywhere}
   .op-dur{text-align:right; white-space:nowrap}
   .op-dur .n{font-variant-numeric:tabular-nums; font-size:.82rem}
   .op-dur .b{height:6px; border-radius:3px; background:var(--acc); opacity:.7; margin-top:3px; margin-left:auto}
 
   .op-cuerpo{border-top:1px solid var(--line); background:var(--panel2); padding:6px 0}
-  .fila{display:grid; grid-template-columns:86px 200px 120px 1fr; gap:0 14px;
+  .fila{display:grid; grid-template-columns:74px 170px 150px 1fr; gap:0 14px;
         padding:5px 14px; align-items:baseline}
   .fila + .fila{border-top:1px solid color-mix(in srgb,var(--line) 55%,transparent)}
   .fila .t{color:var(--muted); font-size:.76rem; font-variant-numeric:tabular-nums; text-align:right}
@@ -225,7 +225,7 @@ Autocontenido y genérico — reutilizable en cualquier proyecto.</p>
           const clase = e.ev === 'error' ? 'err' : e.ev === 'decision' ? 'dec'
                       : (e.ev || '').startsWith('veto') ? 'veto' : '';
           const ems = +e.ms || 0;
-          const wev = ems ? Math.max(2, 90 * ems / maxEv) : 0;
+          const wev = ems ? Math.max(2, 68 * ems / maxEv) : 0;
           filas += `<div class="fila ${clase}">
             <span class="t">+${(rel/1000).toFixed(2)}s</span>
             <span class="e"><span class="sang">${'│ '.repeat(prof)}</span>${esc(e.ev)}</span>

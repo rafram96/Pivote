@@ -411,7 +411,7 @@ class ConsultaInfoObras:
                 r.raise_for_status()
                 res = r.json().get("Result", [])
                 res = res if isinstance(res, list) else []
-                _traza().ev("infoobras_query", nombre=nombre[:40] or None,
+                _traza().ev("infoobras_query", nombre=nombre or None,
                             codsnip=codsnip or None, hits=len(res), intento=intento + 1,
                             ms=round((time.perf_counter() - _t0) * 1000, 1))
                 # solo al buscar por código: filtro exacto (la API matchea
@@ -543,10 +543,10 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
     Trazado: cada resolución deja su historia en la traza del job (span
     `resolver_cui` + evento `decision` con el porqué) — ver observabilidad/."""
     tr = _traza()
-    with tr.span("resolver_cui", proyecto=str(exp.get("proyecto") or "")[:80]):
+    with tr.span("resolver_cui", proyecto=str(exp.get("proyecto") or "")):
         r = _resolver(exp, consulta)
         tr.ev("decision", estado=r.get("estado"), via=r.get("via"),
-              cui=r.get("cui"), motivo=str(r.get("decision"))[:90],
+              cui=r.get("cui"), motivo=str(r.get("decision")),
               n_candidatos=len(r.get("candidatos") or []))
         return r
 
@@ -642,9 +642,9 @@ def _resolver(exp: dict, consulta: Consulta) -> dict:
             resultados = consulta.buscar(f)
         except PortalNoResponde:
             fallo_red = True  # un fragmento cayó; quizá otros respondan
-            _traza().ev("busqueda", fragmento=f[:50], resultado="portal_no_responde")
+            _traza().ev("busqueda", fragmento=f, resultado="portal_no_responde")
             continue
-        _traza().ev("busqueda", fragmento=f[:50], hits=len(resultados))
+        _traza().ev("busqueda", fragmento=f, hits=len(resultados))
         for o in resultados:
             if _cui_de(o):
                 vistos.setdefault(o.get("codigoObra") or o.get("obraId"), o)
@@ -680,7 +680,7 @@ def _resolver(exp: dict, consulta: Consulta) -> dict:
             _traza().ev("veto_rubro", cui=cui, score=cand["score"],
                         rubro_cert=sorted(rub_cert),
                         rubro_obra=sorted(rubros_de(cand["nombre_obra"])),
-                        obra=cand["nombre_obra"][:70])
+                        obra=cand["nombre_obra"])
             vetados.append(cand)
             continue
         prev = porcui.get(cui)
