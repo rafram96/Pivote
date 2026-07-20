@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Visor de Trazas · JSONL</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --panel:#fff; --ink:#1b2433; --muted:#66707f; --line:#dde2e9;
+    --acc:#3b6fd4; --ok:#2f9e63; --err:#cf5a5a; --warn:#d99a2b;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#12151b; --panel:#1a1f28; --ink:#e8ebf1; --muted:#96a0b0;
+           --line:#2e3542; --acc:#7aa0ee; --ok:#5ec78f; --err:#ef8d8d; --warn:#eec06a; }
+  }
+  *{box-sizing:border-box; margin:0}
+  body{background:var(--bg); color:var(--ink); font:14px/1.45 "Segoe UI",system-ui,sans-serif; padding:22px; max-width:1280px; margin:0 auto}
+  h1{font-size:1.2rem} .sub{color:var(--muted); font-size:.85rem; margin:2px 0 14px}
+  code{background:var(--line); border-radius:4px; padding:0 5px; font-size:.85em}
+
+  #drop{border:2px dashed var(--line); border-radius:12px; padding:34px; text-align:center;
+        color:var(--muted); background:var(--panel); cursor:pointer; transition:.15s}
+  #drop.over{border-color:var(--acc); color:var(--acc)}
+  #drop input{display:none}
+
+  .barra{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin:14px 0}
+  .barra input[type=text]{flex:1; min-width:180px; padding:6px 10px; border:1px solid var(--line);
+        border-radius:8px; background:var(--panel); color:var(--ink)}
+  .chip{border:1.5px solid var(--line); border-radius:99px; padding:3px 11px; font-size:.8rem;
+        cursor:pointer; user-select:none; background:var(--panel); color:var(--muted)}
+  .chip.on{border-color:var(--acc); color:var(--acc); font-weight:600}
+  .stats{color:var(--muted); font-size:.8rem}
+
+  .grupo{background:var(--panel); border:1px solid var(--line); border-radius:12px;
+         margin-bottom:12px; overflow:hidden}
+  .grupo > summary{padding:9px 14px; cursor:pointer; display:flex; gap:10px; align-items:baseline;
+         list-style:none; flex-wrap:wrap}
+  .grupo > summary::-webkit-details-marker{display:none}
+  .grupo > summary b{font-size:.92rem}
+  .mini{color:var(--muted); font-size:.78rem}
+  .pill{font-size:.72rem; font-weight:700; border-radius:99px; padding:1px 9px; margin-left:auto}
+  .pill.ok{background:color-mix(in srgb,var(--ok) 18%,transparent); color:var(--ok)}
+  .pill.err{background:color-mix(in srgb,var(--err) 18%,transparent); color:var(--err)}
+
+  table{width:100%; border-collapse:collapse; font-size:.82rem}
+  td,th{padding:5px 12px; border-top:1px solid var(--line); vertical-align:top; text-align:left}
+  th{color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.4px; border-top:none}
+  td.ts{white-space:nowrap; color:var(--muted); font-variant-numeric:tabular-nums}
+  td.ev b{font-size:.82rem}
+  .tag{display:inline-block; font-size:.7rem; font-weight:700; border-radius:5px; padding:0 7px; margin-right:6px}
+  .barra-ms{height:8px; border-radius:4px; background:var(--acc); opacity:.75; min-width:2px}
+  td.ms{white-space:nowrap; width:170px}
+  td.ms span{color:var(--muted); font-size:.74rem; margin-left:6px}
+  .attrs{color:var(--muted); font-size:.78rem; word-break:break-word}
+  .attrs b{color:var(--ink); font-weight:600}
+  tr.err td.ev b{color:var(--err)}
+  tr.span td.ev b{color:var(--acc)}
+</style>
+</head>
+<body>
+
+<h1>Visor de Trazas</h1>
+<p class="sub">Arrastra un <code>traza.jsonl</code> (o varios). Formato: una línea JSON por evento con
+<code>ts</code>, <code>ev</code>, opcionales <code>trace</code>/<code>en</code>/<code>span</code>/<code>ms</code> y atributos libres.
+Genérico y autocontenido — reutilizable en cualquier proyecto.</p>
+
+<label id="drop">Suelta aquí el archivo de traza · o haz clic para elegir
+  <input type="file" multiple accept=".jsonl,.json,.log,.txt">
+</label>
+
+<div class="barra" id="controles" style="display:none">
+  <input type="text" id="filtro" placeholder="filtrar por texto (evento, atributo, valor)…">
+  <span id="chips"></span>
+  <span class="stats" id="stats"></span>
+</div>
+<div id="salida"></div>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const drop = $('#drop'), inp = drop.querySelector('input');
+  let eventos = [];
+  let tiposOff = new Set();
+
+  const COLORES = {};
+  function colorDe(tag){
+    if (!COLORES[tag]){
+      let h = 0; for (const c of tag) h = (h*31 + c.charCodeAt(0)) % 360;
+      COLORES[tag] = `hsl(${h} 55% 45%)`;
+    }
+    return COLORES[tag];
+  }
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); cargar(e.dataTransfer.files); });
+  inp.addEventListener('change', () => cargar(inp.files));
+  $('#filtro') && $('#filtro').addEventListener('input', render);
+
+  async function cargar(files){
+    eventos = [];
+    for (const f of files){
+      const txt = await f.text();
+      for (const linea of txt.split(/\r?\n/)){
+        if (!linea.trim()) continue;
+        try { const o = JSON.parse(linea); o._archivo = f.name; eventos.push(o); } catch {}
+      }
+    }
+    eventos.sort((a,b) => String(a.ts||'').localeCompare(String(b.ts||'')));
+    $('#controles').style.display = 'flex';
+    armarChips(); render();
+  }
+
+  function armarChips(){
+    const tipos = [...new Set(eventos.map(e => e.ev || '?'))].sort();
+    $('#chips').innerHTML = tipos.map(t =>
+      `<span class="chip on" data-t="${esc(t)}">${esc(t)}</span>`).join(' ');
+    $('#chips').querySelectorAll('.chip').forEach(ch => ch.onclick = () => {
+      const t = ch.dataset.t;
+      if (tiposOff.has(t)) { tiposOff.delete(t); ch.classList.add('on'); }
+      else { tiposOff.add(t); ch.classList.remove('on'); }
+      render();
+    });
+  }
+
+  function render(){
+    const q = ($('#filtro').value || '').toLowerCase();
+    const vis = eventos.filter(e => !tiposOff.has(e.ev || '?'))
+      .filter(e => !q || JSON.stringify(e).toLowerCase().includes(q));
+    const maxMs = Math.max(1, ...vis.map(e => +e.ms || 0));
+
+    // agrupar por trace y, dentro, por span raíz consecutivo
+    const porTrace = new Map();
+    for (const e of vis){
+      const k = e.trace || e._archivo || '(sin trace)';
+      if (!porTrace.has(k)) porTrace.set(k, []);
+      porTrace.get(k).push(e);
+    }
+    let html = '';
+    for (const [trace, evs] of porTrace){
+      const errores = evs.filter(e => e.ev === 'error').length;
+      const spans = evs.filter(e => e.ev === 'span');
+      const total = spans.reduce((s,e) => s + (+e.ms || 0), 0);
+      html += `<details class="grupo" open><summary>
+        <b>${esc(trace)}</b>
+        <span class="mini">${evs.length} eventos · ${spans.length} spans · ${total.toFixed(0)} ms medidos</span>
+        <span class="pill ${errores ? 'err' : 'ok'}">${errores ? errores + ' error(es)' : 'sin errores'}</span>
+      </summary><table>
+        <tr><th>hora</th><th>evento</th><th>duración</th><th>detalle</th></tr>`;
+      for (const e of evs){
+        const tag = (e.span || e.en || '').split('/')[0] || '·';
+        const ms = +e.ms || 0;
+        const w = ms ? Math.max(2, 130 * ms / maxMs) : 0;
+        const attrs = Object.entries(e)
+          .filter(([k]) => !['ts','ev','ms','trace','en','span','_archivo'].includes(k))
+          .map(([k,v]) => `<b>${esc(k)}</b>=${esc(typeof v === 'object' ? JSON.stringify(v) : v)}`)
+          .join(' · ');
+        html += `<tr class="${e.ev === 'error' ? 'err' : e.ev === 'span' ? 'span' : ''}">
+          <td class="ts">${esc((e.ts || '').slice(11))}</td>
+          <td class="ev"><span class="tag" style="background:color-mix(in srgb,${colorDe(tag)} 20%,transparent);color:${colorDe(tag)}">${esc(tag)}</span><b>${esc(e.ev || '?')}</b>${e.span ? ` <span class="mini">${esc(e.span)}</span>` : ''}</td>
+          <td class="ms">${ms ? `<div class="barra-ms" style="width:${w}px"></div><span>${ms} ms</span>` : ''}</td>
+          <td class="attrs">${attrs}</td></tr>`;
+      }
+      html += '</table></details>';
+    }
+    $('#stats').textContent = `${vis.length}/${eventos.length} eventos`;
+    $('#salida').innerHTML = html || '<p class="sub">Sin eventos que coincidan con el filtro.</p>';
+  }
+})();
+</script>
+</body>
+</html>

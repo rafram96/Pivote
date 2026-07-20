@@ -57,6 +57,7 @@ Thumbs.db
 !/plugin/.claude-plugin/plugin.json
 !/plugin/.mcp.json
 !/docs/nuevos_modulos/*.html
+!/backend/observabilidad/*.html
 # Fixtures MEF: data PÚBLICA (Banco de Inversiones), necesarios para los tests
 # offline de scraping/mef.py — deben versionarse para correr en el server.
 !/backend/tests/fixtures/mef/

@@ -23,6 +23,8 @@ import unicodedata
 from datetime import date
 from typing import Optional, Protocol
 
+from observabilidad.traza import actual as _traza
+
 logger = logging.getLogger(__name__)
 
 
@@ -403,11 +405,15 @@ class ConsultaInfoObras:
              "Parameters": json.dumps(params, separators=(",", ":"))}
         for intento in range(3):
             try:
+                _t0 = time.perf_counter()
                 r = self._ses().post(f"{BASE_MAPA}/Mapa/busqueda/obrasBasic",
                                      params=q, timeout=25)
                 r.raise_for_status()
                 res = r.json().get("Result", [])
                 res = res if isinstance(res, list) else []
+                _traza().ev("infoobras_query", nombre=nombre[:40] or None,
+                            codsnip=codsnip or None, hits=len(res), intento=intento + 1,
+                            ms=round((time.perf_counter() - _t0) * 1000, 1))
                 # solo al buscar por código: filtro exacto (la API matchea
                 # codSnip por substring; '95555' traería '2595555'). En la
                 # búsqueda por nombre NO se filtra (el código no es la query).
@@ -532,7 +538,20 @@ def _es_experiencia_privada(exp: dict) -> bool:
 def resolver(exp: dict, consulta: Consulta) -> dict:
     """Resuelve UNA experiencia. Devuelve:
     {estado: 'resuelto'|'revision'|'na', cui, via, decision, candidatos[], obra}
-    candidatos = [{cui, nombre_obra, departamento, score}] para la cola humana."""
+    candidatos = [{cui, nombre_obra, departamento, score}] para la cola humana.
+
+    Trazado: cada resolución deja su historia en la traza del job (span
+    `resolver_cui` + evento `decision` con el porqué) — ver observabilidad/."""
+    tr = _traza()
+    with tr.span("resolver_cui", proyecto=str(exp.get("proyecto") or "")[:80]):
+        r = _resolver(exp, consulta)
+        tr.ev("decision", estado=r.get("estado"), via=r.get("via"),
+              cui=r.get("cui"), motivo=str(r.get("decision"))[:90],
+              n_candidatos=len(r.get("candidatos") or []))
+        return r
+
+
+def _resolver(exp: dict, consulta: Consulta) -> dict:
     proyecto = exp.get("proyecto") or ""
 
     # PASO 0 · CUI/SNIP citado → SIEMPRE primero. Un CUI en el certificado es
@@ -548,6 +567,7 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
             return {"estado": "revision", "cui": None, "via": "PORTAL",
                     "decision": "el portal de InfoObras no respondió — reintentar",
                     "candidatos": [], "obra": None}
+        _traza().ev("paso0_codigo_citado", codigo=codigo, hits=len(obras))
         if obras:
             # un CUI puede traer varias obras: preferir la finalizada que cubre
             # el periodo del certificado (de ahí salen los hitos correctos)
@@ -591,6 +611,7 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
     # nombre (InfoObras solo registra obra pública; buscar siempre matchea basura).
     # Un CUI citado (raro en privadas) ya se intentó arriba y gana si existe.
     if _es_experiencia_privada(exp):
+        _traza().ev("gate_privada")
         return {"estado": "na", "cui": None, "via": "PRIVADA",
                 "decision": "cliente/obra privada — InfoObras solo registra obra "
                             "pública; verificación documental del certificado",
@@ -621,7 +642,9 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
             resultados = consulta.buscar(f)
         except PortalNoResponde:
             fallo_red = True  # un fragmento cayó; quizá otros respondan
+            _traza().ev("busqueda", fragmento=f[:50], resultado="portal_no_responde")
             continue
+        _traza().ev("busqueda", fragmento=f[:50], hits=len(resultados))
         for o in resultados:
             if _cui_de(o):
                 vistos.setdefault(o.get("codigoObra") or o.get("obraId"), o)
@@ -654,6 +677,10 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
         # el RUC del emisor en la obra es evidencia más fuerte que el rubro
         # inferido del texto → el veto no aplica a ruc_match
         if not ruc_match and _rubro_contradice(rub_cert, cand["nombre_obra"]):
+            _traza().ev("veto_rubro", cui=cui, score=cand["score"],
+                        rubro_cert=sorted(rub_cert),
+                        rubro_obra=sorted(rubros_de(cand["nombre_obra"])),
+                        obra=cand["nombre_obra"][:70])
             vetados.append(cand)
             continue
         prev = porcui.get(cui)
@@ -696,6 +723,8 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
         ranked = sorted(topk, key=lambda c: tiers[id(c)]) + ranked[4:]
 
     best = ranked[0] if ranked else None
+    _traza().ev("ranking", top=[f"{c['cui']}·{c['score']}" for c in ranked[:3]],
+                vetados=len(vetados))
 
     n_hit = len(toks & _palabras(best["full"])) if best else 0
     gate = bool(best and toks and n_hit >= max(1, (len(toks) + 1) // 2))
