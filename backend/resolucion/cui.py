@@ -261,7 +261,50 @@ _STOP = {"HOSPITAL", "PUESTO", "SALUD", "CENTRO", "ESTABLECIMIENTO", "REGIONAL",
          "INSTITUCION", "EDUCATIVA", "EDUCATIVO", "EDUCACION", "INICIAL",
          "PRIMARIA", "SECUNDARIA", "COLEGIO", "ESCUELA",
          # geografía administrativa (no identifican al establecimiento)
-         "DISTRITO", "PROVINCIA", "DEPARTAMENTO", "REGION", "LOCALIDAD", "SECTOR"}
+         "DISTRITO", "PROVINCIA", "DEPARTAMENTO", "REGION", "LOCALIDAD", "SECTOR",
+         # "CENTRO POBLADO" es tan genérico como "localidad" — con POBLADO como
+         # token, un Puesto de Salud del C.P. X matcheaba la losa deportiva del
+         # mismo C.P. X (caso Chinchinga, auditoría 20-jul)
+         "POBLADO"}
+
+
+# ── RUBRO del servicio: compuerta ORTOGONAL a los tokens ─────────────────────
+# Las palabras de rubro (SALUD, EDUCATIVA…) están en _STOP a propósito: dentro de
+# su rubro no identifican la obra (queja 14-jul). Pero descartarlas del todo dejó
+# al resolver CIEGO al TIPO de servicio: un Puesto de SALUD resolvió a una losa
+# DEPORTIVA del mismo centro poblado (caso Chinchinga — error SILENCIOSO, quedó
+# como BAJO riesgo). El rubro no suma puntos: VETA contradicciones. Un candidato
+# de rubro contradictorio jamás puede ganar, sin importar el score de topónimos.
+_RUBROS: dict[str, re.Pattern] = {
+    "salud": re.compile(r"\b(SALUD|HOSPITAL(ES)?|POSTA|CLINICA|ESSALUD)\b"),
+    "educacion": re.compile(r"\b(EDUCATIV[AO]S?|EDUCACION|ESCUELA|COLEGIO|PRONOEI|"
+                            r"INICIAL|PRIMARIA|SECUNDARIA|UNIVERSIDAD|PEDAGOGIC\w*|"
+                            r"I\s?E\s?[PS]?\b|INSTITUTO)\b"),
+    "deporte": re.compile(r"\b(DEPORTIV[AO]S?|RECREATIV[AO]S?|ESTADIO|COLISEO|"
+                          r"LOSA(S)?|GRADERI\w*|POLIDEPORTIVO)\b"),
+    "saneamiento": re.compile(r"\b(SANEAMIENTO|ALCANTARILLADO|DESAGUE|LETRINA(S)?|"
+                              r"AGUA POTABLE|RESIDUOS)\b"),
+    "vial": re.compile(r"\b(CARRETERA|CAMINO(S)?|TRANSITABILIDAD|VECINAL(ES)?|"
+                       r"PUENTE(S)?|PAVIMENT\w*|PISTAS|VEREDAS|TROCHA|VIAL)\b"),
+    "riego": re.compile(r"\b(RIEGO|IRRIGACION|REPRESA)\b"),
+    "electrico": re.compile(r"\b(ELECTRIFICACION|REDES (PRIMARIAS|SECUNDARIAS))\b"),
+}
+
+
+def rubros_de(texto: str) -> set[str]:
+    """Rubros de servicio detectados en un nombre de obra/certificado (puede ser
+    más de uno; vacío = indeterminado, que NUNCA veta)."""
+    n = norm(texto or "")
+    return {r for r, pat in _RUBROS.items() if pat.search(n)}
+
+
+def _rubro_contradice(rub_cert: set[str], texto_obra: str) -> bool:
+    """True si ambos lados declaran rubro y NO comparten ninguno. Un lado
+    indeterminado (set vacío) jamás veta — el veto exige contradicción positiva."""
+    if not rub_cert:
+        return False
+    rub_obra = rubros_de(texto_obra)
+    return bool(rub_obra) and not (rub_cert & rub_obra)
 
 
 def _palabras(s: str) -> set[str]:
@@ -527,7 +570,11 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
                 re.sub(r"\D", "", str(o.get("codUniqInv") or "")),
                 re.sub(r"\D", "", str(o.get("codSnip") or "")),
             }
-            nombre_ok = (toks and n_hit >= max(1, (len(toks) + 1) // 2)) or depmatch
+            # el rubro contradictorio VETA la aceptación por nombre/depto (un CUI
+            # citado exacto sigue siendo autoritativo aunque el rubro difiera:
+            # el certificado suele citar un componente del proyecto integral)
+            nombre_ok = ((toks and n_hit >= max(1, (len(toks) + 1) // 2)) or depmatch) \
+                and not _rubro_contradice(rubros_de(proyecto), o.get("nombrObra") or "")
             if cui_exacto or nombre_ok:
                 via = "CUI_TEXTO" if nombre_ok else "PROBABLE"
                 decision = ("código CUI verificado contra la obra" if nombre_ok else
@@ -536,7 +583,7 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
                         "decision": decision, "candidatos": [], "obra": obra}
             return {"estado": "revision", "cui": None, "via": "CUI_TEXTO",
                     "decision": "el código CUI del certificado no coincide con la obra — confirmar",
-                    "candidatos": [{"cui": cui_out, "nombre_obra": (o.get("nombrObra") or "")[:90],
+                    "candidatos": [{"cui": cui_out, "nombre_obra": (o.get("nombrObra") or ""),
                                     "departamento": o.get("nombrDepartamento"), "score": 50}],
                     "obra": None}
 
@@ -586,19 +633,29 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
                 "candidatos": [], "obra": None}
 
     # puntuar cada registro y agrupar por CUI (clave codUniqInv preferida),
-    # conservando el de mayor score como representante de su CUI
+    # conservando el de mayor score como representante de su CUI.
+    # VETO DE RUBRO: un candidato cuyo rubro contradice al del certificado
+    # (salud vs deportivo, etc.) NO compite — se aparta a `vetados` para que la
+    # cola de revisión pueda mostrarlo, pero jamás gana en silencio.
+    rub_cert = rubros_de(proyecto)
     porcui: dict[str, dict] = {}
+    vetados: list[dict] = []
     for o in vistos.values():
         cui = _cui_de(o)
         rej = str(o.get("rucEjecutor") or "").strip()
         rsup = str(o.get("rucSupervisor") or "").strip()
         ruc_match = bool(ruc_cert and ruc_cert in (rej, rsup))
         sc = _puntuar(o, pn, deptos_hint, anio_cert, nums_cert) + (30 if ruc_match else 0)
-        cand = {"cui": cui, "nombre_obra": (o.get("nombrObra") or "")[:90],
+        cand = {"cui": cui, "nombre_obra": (o.get("nombrObra") or ""),
                 "full": norm(o.get("nombrObra") or ""),
                 "departamento": o.get("nombrDepartamento"),
                 "obra_id": o.get("codigoObra") or o.get("obraId"),
                 "ruc_match": ruc_match, "score": round(sc, 1)}
+        # el RUC del emisor en la obra es evidencia más fuerte que el rubro
+        # inferido del texto → el veto no aplica a ruc_match
+        if not ruc_match and _rubro_contradice(rub_cert, cand["nombre_obra"]):
+            vetados.append(cand)
+            continue
         prev = porcui.get(cui)
         # representante de cada CUI = el de mayor score; ante EMPATE, menor
         # obra_id (el orden que devuelve la API no es estable entre corridas).
@@ -667,8 +724,18 @@ def resolver(exp: dict, consulta: Consulta) -> dict:
         return {"estado": "resuelto", "cui": best["cui"], "via": "PROBABLE",
                 "decision": "candidato fuerte (conviene un vistazo)",
                 "candidatos": candidatos, "obra": obra_best}
-    motivo = ("la ubicación del certificado contradice al candidato"
-              if loc_contra else "sin candidato fiable en InfoObras")
+    if loc_contra:
+        motivo = "la ubicación del certificado contradice al candidato"
+    elif not ranked and vetados:
+        # todos los candidatos eran de OTRO rubro (p.ej. deportivo cuando el
+        # certificado es de salud): revisión con los vetados visibles — antes
+        # esto era un mal-resuelto SILENCIOSO (caso Chinchinga)
+        motivo = "los candidatos hallados son de otro rubro de servicio — confirmar"
+        vetados.sort(key=lambda c: -c["score"])
+        candidatos = [{k: c[k] for k in ("cui", "nombre_obra", "departamento", "score")}
+                      for c in vetados[:3]]
+    else:
+        motivo = "sin candidato fiable en InfoObras"
     return {"estado": "revision", "cui": None, "via": "NOMBRE",
             "decision": motivo, "candidatos": candidatos, "obra": None}
 
