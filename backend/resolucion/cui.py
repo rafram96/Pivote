@@ -353,6 +353,58 @@ def _puntuar(cand: dict, proyecto_norm: str, deptos_hint: set[str],
     return round(score, 1)
 
 
+def _ficha_mef(cui: Optional[str], base, fichas_mef: dict) -> Optional[dict]:
+    """Ficha MEF de un CUI: primero el mapa recolectado en la fusión
+    (`exp['_fichas_mef']`), luego `base.existe_cui` (rescata CUIs que InfoObras
+    trajo por nombre pero la fusión no fetcheó). None si no hay base o no existe."""
+    if not cui:
+        return None
+    f = (fichas_mef or {}).get(cui)
+    if f is not None:
+        return f
+    if base and base.disponible():
+        return base.existe_cui(cui)
+    return None
+
+
+def _bonus_mef(cand: dict, cui: Optional[str], exp: dict, base, fichas_mef: dict,
+               proyecto_norm: str, deptos_hint: set[str]) -> float:
+    """F3 · Señales de identidad de la ficha MEF del CUI (delta ADITIVO al score):
+
+      1. Nombre: si el nombre OFICIAL del MEF se parece más al certificado que el
+         (a veces corrupto) de InfoObras, se suma la diferencia → el score de nombre
+         efectivo es max(sim_infoobras, sim_mef) (rescata el caso Chinchinga).
+      2. Dpto/ubigeo oficial: +10 si el dpto de la ficha MEF coincide con los hints
+         del certificado; −10 EXTRA (una sola vez) solo si InfoObras Y MEF contradicen.
+      3. Entidad: +15 si la entidad de la ficha MEF calza (token_set_ratio ≥ 90) con
+         `entidad_contratante` del certificado. NUNCA resta (la UEI puede diferir).
+
+    Devuelve 0.0 sin base/ficha → comportamiento actual intacto."""
+    ficha = _ficha_mef(cui, base, fichas_mef)
+    if not ficha:
+        return 0.0
+    bonus = 0.0
+    nombre_mef = norm(ficha.get("nombre") or "")
+    if nombre_mef:
+        sim_io = _sim(proyecto_norm, norm(cand.get("nombrObra") or ""))
+        sim_mef = _sim(proyecto_norm, nombre_mef)
+        if sim_mef > sim_io:
+            bonus += sim_mef - sim_io
+    dpto_mef = norm(ficha.get("dpto") or "")
+    dpto_io = norm(cand.get("nombrDepartamento") or "")
+    if deptos_hint and dpto_mef:
+        if dpto_mef in deptos_hint:
+            bonus += 10
+        elif dpto_io and dpto_io not in deptos_hint:
+            # tanto InfoObras como MEF contradicen la ubicación del cert → −10 extra
+            bonus -= 10
+    ent_cert = norm(exp.get("entidad_contratante") or "")
+    ent_mef = norm(ficha.get("entidad") or "")
+    if ent_cert and ent_mef and fuzz.token_set_ratio(ent_cert, ent_mef) >= 90:
+        bonus += 15
+    return round(bonus, 1)
+
+
 # ── acceso a InfoObras (inyectable) ──────────────────────────────────────────
 
 class Consulta(Protocol):
@@ -594,6 +646,17 @@ def _paso_codigo_citado(exp: dict, consulta: Consulta, base=None) -> Optional[di
                 "candidatos": [], "obra": None}
     _traza().ev("paso0_codigo_citado", codigo=codigo, hits=len(obras))
     if not obras:
+        # el CUI citado no está en InfoObras, pero la base MEF puede tener su ficha:
+        # NO se resuelve por ello (InfoObras es la fuente del cruce), pero el nombre
+        # oficial del MEF se guarda como PISTA para el motivo de revisión y como
+        # ficha para el scoring por nombre (más abajo). Solo con base disponible.
+        if base and base.disponible():
+            ficha = base.existe_cui(codigo)
+            if ficha:
+                _traza().ev("cui_citado_solo_en_mef", cui=codigo,
+                            nombre=ficha.get("nombre"))
+                exp["_ficha_mef_citado"] = ficha
+                exp.setdefault("_fichas_mef", {}).setdefault(codigo, ficha)
         return None
     # un CUI puede traer varias obras: preferir la finalizada que cubre
     # el periodo del certificado (de ahí salen los hitos correctos)
@@ -651,7 +714,12 @@ def _gate_privada(exp: dict) -> Optional[dict]:
 def _recolectar_candidatos(exp: dict, consulta: Consulta, base=None) -> tuple[dict, bool]:
     """Recolecta TODOS los registros distintos por fragmentos de nombre (sin
     descartar por CUI todavía: un CUI puede tener varias obras y la 1ª devuelta no
-    es la mejor). Devuelve (vistos, fallo_red)."""
+    es la mejor). Devuelve (vistos, fallo_red).
+
+    Con `base` disponible (F3) fusiona además los candidatos de la base local del
+    MEF: rescata CUIs que InfoObras NO trajo por nombre (nombres corruptos, cola
+    geográfica que despistó al buscador). Cada registro queda marcado con `_origen`
+    ('infoobras' / 'mef' / 'ambos')."""
     proyecto = exp.get("proyecto") or ""
     vistos: dict = {}
     fallo_red = False
@@ -666,7 +734,72 @@ def _recolectar_candidatos(exp: dict, consulta: Consulta, base=None) -> tuple[di
         for o in resultados:
             if _cui_de(o):
                 vistos.setdefault(o.get("codigoObra") or o.get("obraId"), o)
+    if base and base.disponible():
+        _fusionar_mef(exp, consulta, base, vistos)
     return vistos, fallo_red
+
+
+def _codigos_de(o: dict) -> set[str]:
+    """CUI y SNIP normalizados (solo dígitos, sin ceros) de un registro InfoObras."""
+    out: set[str] = set()
+    for campo in ("codUniqInv", "codSnip"):
+        v = re.sub(r"\D", "", str(o.get(campo) or ""))
+        if v and int(v) != 0:
+            out.add(v)
+    return out
+
+
+def _fusionar_mef(exp: dict, consulta: Consulta, base, vistos: dict) -> None:
+    """F3 · Fusión con la base local del MEF. Solo se invoca con `base` disponible.
+    Marca el origen de cada registro y trae por código (`por_codigo`) los CUIs que
+    el MEF sugiere y que InfoObras no encontró por nombre — tope de 5 fetches por
+    experiencia, capturando `PortalNoResponde` POR candidato (se descarta ese, la
+    experiencia sigue). Guarda las fichas MEF por CUI en `exp['_fichas_mef']` para
+    el paso de scoring (señal de nombre/dpto/entidad)."""
+    proyecto = exp.get("proyecto") or ""
+    fichas_mef = exp.setdefault("_fichas_mef", {})
+    # todo lo ya recolectado vino de InfoObras (por nombre)
+    for o in vistos.values():
+        o.setdefault("_origen", "infoobras")
+    ya = set().union(*(_codigos_de(o) for o in vistos.values())) if vistos else set()
+
+    fetches = 0
+    for c in base.buscar_candidatos(_sin_prefijo(proyecto), topn=10):
+        cui = re.sub(r"\D", "", str(c.get("cui") or "")) \
+            or re.sub(r"\D", "", str(c.get("snip") or ""))
+        if not cui or int(cui) == 0 or float(c.get("score") or 0) < 75:
+            continue
+        fichas_mef.setdefault(cui, c)  # ficha MEF por CUI → scoring (aunque no se fetchee)
+        if cui in ya:
+            # el CUI ya estaba en InfoObras (por nombre): pasa a origen 'ambos'
+            for o in vistos.values():
+                if cui in _codigos_de(o):
+                    o["_origen"] = "ambos"
+            continue
+        if fetches >= 5:
+            break  # tope de fetches al portal por experiencia
+        fetches += 1
+        try:
+            registros = consulta.por_codigo(cui)
+        except PortalNoResponde:
+            _traza().ev("fusion_mef_portal", cui=cui)
+            continue  # se descarta ESTE candidato; la experiencia sigue
+        if not registros:
+            _traza().ev("fusion_mef_sin_obra", cui=cui, nombre=c.get("nombre"))
+            continue
+        nuevos = 0
+        for o in registros:
+            if not _cui_de(o):
+                continue
+            key = o.get("codigoObra") or o.get("obraId")
+            if key in vistos:
+                vistos[key]["_origen"] = "ambos"
+            else:
+                o["_origen"] = "mef"
+                vistos[key] = o
+                nuevos += 1
+        _traza().ev("fusion_mef_candidato", cui=cui, score=c.get("score"),
+                    nombre=c.get("nombre"), nuevos=nuevos)
 
 
 def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
@@ -685,7 +818,10 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
     ruc_cert = mruc.group(1) if mruc else None
     nums_cert = frozenset(_numero_obra(proyecto))   # N° de I.E./C.E. del certificado
     rub_cert = rubros_de(proyecto)
+    base_ok = bool(base) and base.disponible()
+    fichas_mef = exp.get("_fichas_mef") if base_ok else None
     porcui: dict[str, dict] = {}
+    origenes: dict[str, set] = {}          # orígenes vistos por CUI (para 'ambos')
     vetados: list[dict] = []
     for o in vistos.values():
         cui = _cui_de(o)
@@ -693,11 +829,22 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
         rsup = str(o.get("rucSupervisor") or "").strip()
         ruc_match = bool(ruc_cert and ruc_cert in (rej, rsup))
         sc = _puntuar(o, pn, deptos_hint, anio_cert, nums_cert) + (30 if ruc_match else 0)
+        full = norm(o.get("nombrObra") or "")
+        if base_ok:
+            # el score de nombre y la compuerta de tokens se apoyan también en el
+            # nombre OFICIAL del MEF (rescata nombres corruptos en InfoObras)
+            sc += _bonus_mef(o, cui, exp, base, fichas_mef, pn, deptos_hint)
+            ficha = _ficha_mef(cui, base, fichas_mef)
+            if ficha and ficha.get("nombre"):
+                full = (full + " " + norm(ficha["nombre"])).strip()
         cand = {"cui": cui, "nombre_obra": (o.get("nombrObra") or ""),
-                "full": norm(o.get("nombrObra") or ""),
+                "full": full,
                 "departamento": o.get("nombrDepartamento"),
                 "obra_id": o.get("codigoObra") or o.get("obraId"),
                 "ruc_match": ruc_match, "score": round(sc, 1)}
+        if o.get("_origen"):
+            cand["origen"] = o["_origen"]
+            origenes.setdefault(cui, set()).add(o["_origen"])
         # el RUC del emisor en la obra es evidencia más fuerte que el rubro
         # inferido del texto → el veto no aplica a ruc_match
         if not ruc_match and _rubro_contradice(rub_cert, cand["nombre_obra"]):
@@ -715,6 +862,13 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
                 or (cand["score"] == prev["score"]
                     and _num(cand["obra_id"]) < _num(prev["obra_id"]))):
             porcui[cui] = cand
+
+    # un CUI presente en InfoObras Y en el MEF se marca 'ambos' aunque su
+    # representante (mayor score) venga de un solo lado.
+    for cui, cand in porcui.items():
+        origs = origenes.get(cui)
+        if origs:
+            cand["origen"] = "ambos" if len(origs) > 1 else next(iter(origs))
 
     # orden DETERMINÍSTICO: score desc y, ante empate, menor CUI y menor obra_id.
     # Sin la clave secundaria, dos CUIs con el mismo score quedaban en el orden de
@@ -768,8 +922,15 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
                       and norm(best["departamento"]) not in deptos_hint
                       and not best.get("ruc_match"))
 
-    candidatos = [{k: c[k] for k in ("cui", "nombre_obra", "departamento", "score")}
-                  for c in ranked[:3]]
+    def _proj(c: dict) -> dict:
+        # `origen` (F3) viaja ADITIVO: solo si el candidato lo trae (con base=None
+        # nunca está → proyección idéntica a la histórica).
+        d = {k: c[k] for k in ("cui", "nombre_obra", "departamento", "score")}
+        if "origen" in c:
+            d["origen"] = c["origen"]
+        return d
+
+    candidatos = [_proj(c) for c in ranked[:3]]
     obra_best = best and {"cui": best["cui"], "nombre_obra": best["nombre_obra"],
                           "departamento": best["departamento"], "obra_id": best.get("obra_id")}
 
@@ -797,10 +958,14 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
         # esto era un mal-resuelto SILENCIOSO (caso Chinchinga)
         motivo = "los candidatos hallados son de otro rubro de servicio — confirmar"
         vetados.sort(key=lambda c: -c["score"])
-        candidatos = [{k: c[k] for k in ("cui", "nombre_obra", "departamento", "score")}
-                      for c in vetados[:3]]
+        candidatos = [_proj(c) for c in vetados[:3]]
     else:
         motivo = "sin candidato fiable en InfoObras"
+    # PISTA MEF (F3 · A1): si el CUI citado no estaba en InfoObras pero sí en el
+    # MEF, su nombre oficial ayuda al humano a confirmar en la cola de revisión.
+    fmc = exp.get("_ficha_mef_citado")
+    if fmc and fmc.get("nombre"):
+        motivo += f" (según el MEF, el CUI citado corresponde a: {fmc['nombre']})"
     return {"estado": "revision", "cui": None, "via": "NOMBRE",
             "decision": motivo, "candidatos": candidatos, "obra": None}
 

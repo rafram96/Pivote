@@ -199,6 +199,15 @@ class EtapaResolucionCuiReal:
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
         consulta = self._consulta or ConsultaInfoObras()
+        # base local del MEF (F3): se construye UNA vez por etapa. Import perezoso
+        # para no pagar la carga al importar el módulo; `instancia()` es perezosa
+        # (no lee el índice hasta la primera consulta). Si algo falla al construirla,
+        # se sigue con base=None — el análisis JAMÁS debe caerse por la base.
+        try:
+            from resolucion import base_mef
+            base = base_mef.instancia()
+        except Exception:  # noqa: BLE001 — la base MEF es opcional
+            base = None
         ok = rev = 0
         obs: list[pipeline.Observacion] = []
 
@@ -222,7 +231,7 @@ class EtapaResolucionCuiReal:
                 # su CUI. El "identificador" de la experiencia es su portafolio, no un
                 # CUI único → NO va a "Por confirmar". Se verifica cada sub-obra por
                 # código (determinístico) y se guarda la lista para el Excel/panel.
-                sub = resolver_obras(e.get("obras"), consulta)
+                sub = resolver_obras(e.get("obras"), consulta, base=base)
                 n_res = sum(1 for s in sub if s.get("estado") == "resuelto")
                 ctx.enriquecimiento[_clave(np_, ne)] = {
                     "cui": None, "via": "MULTI_OBRA", "obra": None, "sub_obras": sub}
@@ -236,7 +245,7 @@ class EtapaResolucionCuiReal:
                 pendientes.append((e, (np_, ne)))
 
         n_pend = len(pendientes)
-        for i, ((np_, ne), r) in enumerate(resolver_con_dedup(pendientes, consulta), 1):
+        for i, ((np_, ne), r) in enumerate(resolver_con_dedup(pendientes, consulta, base=base), 1):
             ctx.reportar(self.nombre, i, n_pend,
                          f"Ubicando la obra {i} de {n_pend} en el registro público")
             k = _clave(np_, ne)
