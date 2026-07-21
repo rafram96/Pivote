@@ -19,11 +19,16 @@ import json
 import logging
 import re
 import time
-import unicodedata
 from datetime import date
 from typing import Optional, Protocol
 
 from observabilidad.traza import actual as _traza
+
+# `norm`, `expandir_abrev` y la tabla `ABREV` viven ahora en `resolucion.texto`
+# (extraídas para que la base local del MEF las reutilice sin arrastrar cui.py).
+# Se re-exportan aquí con el mismo nombre: los tests y `etapas_reales` siguen
+# importándolas desde `resolucion.cui`, y `_sim`/`establecimiento`/etc. las usan.
+from resolucion.texto import ABREV, expandir_abrev, norm  # noqa: F401  (re-export)
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +51,7 @@ def _sim(a: str, b: str) -> float:
 
 
 # ── normalización y limpieza (idéntico al prototipo medido) ─────────────────
-
-def norm(s: str) -> str:
-    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode()
-    return re.sub(r"\s+", " ", s).strip().upper()
-
+# `norm` se importa arriba de `resolucion.texto` (re-exportada en este namespace).
 
 PREFIJOS = [
     r"consultor[ií]a de obra para la supervisi[oó]n de la obra\s*:?",
@@ -86,22 +87,7 @@ DEPTOS = [
 # departamento, para que "Lircay - HVCA" cuente como Huancavelica.
 DEPTO_ALIAS = {"HVCA": "HUANCAVELICA"}
 
-ABREV = [
-    (re.compile(r"\bEE\.?\s?SS\.?\b", re.I), "Establecimientos de Salud"),
-    (re.compile(r"\bC\.\s?S\.?\b", re.I), "Centro de Salud"),
-    (re.compile(r"\bE\.\s?S\.?\b", re.I), "Establecimiento de Salud"),
-    (re.compile(r"\bP\.\s?S\.?\b", re.I), "Puesto de Salud"),
-    (re.compile(r"\bCMI\b", re.I), "Centro Materno Infantil"),
-    (re.compile(r"\bH\.\s?R\.?\b", re.I), "Hospital Regional"),
-    (re.compile(r"\bH\.\s(?=\w)", re.I), "Hospital "),
-]
-
-
-def expandir_abrev(t: str) -> str:
-    for pat, full in ABREV:
-        t = pat.sub(full, t)
-    return t
-
+# `ABREV` y `expandir_abrev` se importan arriba de `resolucion.texto`.
 
 _RE_EST = re.compile(
     r"(hospital[^,(]*|puesto de salud[^,(]*|centro de salud[^,(]*|"
@@ -535,87 +521,38 @@ def _es_experiencia_privada(exp: dict) -> bool:
     return bool(_RE_PRIVADA.search(campos))
 
 
-def resolver(exp: dict, consulta: Consulta) -> dict:
+def resolver(exp: dict, consulta: Consulta, base=None) -> dict:
     """Resuelve UNA experiencia. Devuelve:
     {estado: 'resuelto'|'revision'|'na', cui, via, decision, candidatos[], obra}
     candidatos = [{cui, nombre_obra, departamento, score}] para la cola humana.
+
+    `base` (opcional) es la costura para la base local del MEF; las fases F3+ la
+    cablearán — por ahora se arrastra por la cadena sin usarse.
 
     Trazado: cada resolución deja su historia en la traza del job (span
     `resolver_cui` + evento `decision` con el porqué) — ver observabilidad/."""
     tr = _traza()
     with tr.span("resolver_cui", proyecto=str(exp.get("proyecto") or "")):
-        r = _resolver(exp, consulta)
+        r = _resolver(exp, consulta, base)
         tr.ev("decision", estado=r.get("estado"), via=r.get("via"),
               cui=r.get("cui"), motivo=str(r.get("decision")),
               n_candidatos=len(r.get("candidatos") or []))
         return r
 
 
-def _resolver(exp: dict, consulta: Consulta) -> dict:
-    proyecto = exp.get("proyecto") or ""
+def _resolver(exp: dict, consulta: Consulta, base=None) -> dict:
+    """Secuencia legible de los pasos de resolución. Cada helper devuelve el
+    resultado final o `None`/una tupla para que este orquestador continúe.
+    `base` es la costura del MEF (F3+): se arrastra por la cadena, aún sin usar."""
+    # PASO 0 · CUI/SNIP citado
+    r = _paso_codigo_citado(exp, consulta, base)
+    if r is not None:
+        return r
 
-    # PASO 0 · CUI/SNIP citado → SIEMPRE primero. Un CUI en el certificado es
-    # autoritativo: se intenta sin importar el tipo de obra (el filtro de tipo solo
-    # acota la búsqueda POR NOMBRE, más abajo). Si el CUI no resuelve, cae al filtro.
-    cui_campo = re.sub(r"\D", "", str(exp.get("cui") or ""))
-    mcod = RE_CODIGO.search(proyecto)
-    codigo = cui_campo if 4 <= len(cui_campo) <= 8 else (mcod.group(1) if mcod else None)
-    if codigo:
-        try:
-            obras = consulta.por_codigo(codigo)
-        except PortalNoResponde:
-            return {"estado": "revision", "cui": None, "via": "PORTAL",
-                    "decision": "el portal de InfoObras no respondió — reintentar",
-                    "candidatos": [], "obra": None}
-        _traza().ev("paso0_codigo_citado", codigo=codigo, hits=len(obras))
-        if obras:
-            # un CUI puede traer varias obras: preferir la finalizada que cubre
-            # el periodo del certificado (de ahí salen los hitos correctos)
-            ci, cf = _fecha_cert(exp.get("fecha_inicial")), _fecha_cert(exp.get("fecha_final"))
-            o = _elegir_obra(obras, ci, cf)
-            cui_out = _cui_de(o) or codigo  # preferir CUI único de 7 díg
-            full = norm(o.get("nombrObra") or "")
-            toks = _tokens_clave(establecimiento(proyecto))
-            n_hit = len(toks & _palabras(full))
-            depmatch = norm(o.get("nombrDepartamento") or "") in ubicacion(proyecto)
-            obra = {"cui": cui_out, "nombre_obra": o.get("nombrObra"),
-                    "departamento": o.get("nombrDepartamento"),
-                    "obra_id": o.get("codigoObra") or o.get("obraId")}
-            # ¿el CUI citado coincide EXACTO con el de la obra hallada? El CUI
-            # (codUniqInv 7 díg / codSnip) es código único nacional → autoritativo:
-            # si calza exacto, ES la obra, aunque el nombre difiera (el certificado
-            # suele citar un componente, p.ej. "C.S. Fortaleza", dentro de la red
-            # integrada). Solo el chequeo por nombre podía rechazar un CUI correcto.
-            cui_exacto = bool(codigo) and codigo in {
-                re.sub(r"\D", "", str(o.get("codUniqInv") or "")),
-                re.sub(r"\D", "", str(o.get("codSnip") or "")),
-            }
-            # el rubro contradictorio VETA la aceptación por nombre/depto (un CUI
-            # citado exacto sigue siendo autoritativo aunque el rubro difiera:
-            # el certificado suele citar un componente del proyecto integral)
-            nombre_ok = ((toks and n_hit >= max(1, (len(toks) + 1) // 2)) or depmatch) \
-                and not _rubro_contradice(rubros_de(proyecto), o.get("nombrObra") or "")
-            if cui_exacto or nombre_ok:
-                via = "CUI_TEXTO" if nombre_ok else "PROBABLE"
-                decision = ("código CUI verificado contra la obra" if nombre_ok else
-                            "CUI exacto hallado en InfoObras; el nombre de la obra difiere — verificar")
-                return {"estado": "resuelto", "cui": cui_out, "via": via,
-                        "decision": decision, "candidatos": [], "obra": obra}
-            return {"estado": "revision", "cui": None, "via": "CUI_TEXTO",
-                    "decision": "el código CUI del certificado no coincide con la obra — confirmar",
-                    "candidatos": [{"cui": cui_out, "nombre_obra": (o.get("nombrObra") or ""),
-                                    "departamento": o.get("nombrDepartamento"), "score": 50}],
-                    "obra": None}
-
-    # PASO 1 · gate de PRIVADAS: si el cliente/promotor es privado, NO buscar por
-    # nombre (InfoObras solo registra obra pública; buscar siempre matchea basura).
-    # Un CUI citado (raro en privadas) ya se intentó arriba y gana si existe.
-    if _es_experiencia_privada(exp):
-        _traza().ev("gate_privada")
-        return {"estado": "na", "cui": None, "via": "PRIVADA",
-                "decision": "cliente/obra privada — InfoObras solo registra obra "
-                            "pública; verificación documental del certificado",
-                "candidatos": [], "obra": None}
+    # PASO 1 · gate de PRIVADAS
+    r = _gate_privada(exp)
+    if r is not None:
+        return r
 
     # Sin gate de alcance por RUBRO: se resuelve TODO rubro y TODO tipo (obras y
     # consultorías/expedientes, que SÍ están en InfoObras — muchos con valorizaciones,
@@ -624,17 +561,98 @@ def _resolver(exp: dict, consulta: Consulta) -> dict:
     # cae a revisión por su estado REAL, no por un bloqueo previo.
 
     # PASO 2 · por nombre + RUC + ubicación
-    pn = norm(proyecto)
-    deptos_hint = ubicacion(proyecto)
-    fi = str(exp.get("fecha_inicial") or "")
-    anio_cert = int(fi[:4]) if fi[:4].isdigit() else None
-    mruc = RE_RUC.search(str(exp.get("ruc_emisor") or "") + " " + str(exp.get("entidad_emisora") or ""))
-    ruc_cert = mruc.group(1) if mruc else None
-    toks = _tokens_clave(establecimiento(proyecto))
-    nums_cert = frozenset(_numero_obra(proyecto))   # N° de I.E./C.E. del certificado
+    vistos, fallo_red = _recolectar_candidatos(exp, consulta, base)
+    # si NINGÚN fragmento trajo nada y hubo caída de red, no degradar: es
+    # "el portal no respondió", no "sin candidato" (motivo de revisión honesto).
+    if not vistos and fallo_red:
+        return {"estado": "revision", "cui": None, "via": "PORTAL",
+                "decision": "el portal de InfoObras no respondió — reintentar",
+                "candidatos": [], "obra": None}
 
-    # recolectar TODOS los registros distintos (sin descartar por CUI todavía:
-    # un CUI puede tener varias obras y la 1ª devuelta no es la mejor)
+    ranked, vetados = _rankear(vistos, exp, base)
+    ranked = _reordenar_por_solape(ranked, exp, consulta)
+    best = ranked[0] if ranked else None
+    return _compuertas(best, ranked, vetados, exp, base)
+
+
+def _paso_codigo_citado(exp: dict, consulta: Consulta, base=None) -> Optional[dict]:
+    """PASO 0 · CUI/SNIP citado → SIEMPRE primero. Un CUI en el certificado es
+    autoritativo: se intenta sin importar el tipo de obra (el filtro de tipo solo
+    acota la búsqueda POR NOMBRE, más abajo). Si el CUI no resuelve, cae al filtro.
+    Devuelve el dict resultado, o `None` para continuar con el siguiente paso."""
+    proyecto = exp.get("proyecto") or ""
+    cui_campo = re.sub(r"\D", "", str(exp.get("cui") or ""))
+    mcod = RE_CODIGO.search(proyecto)
+    codigo = cui_campo if 4 <= len(cui_campo) <= 8 else (mcod.group(1) if mcod else None)
+    if not codigo:
+        return None
+    try:
+        obras = consulta.por_codigo(codigo)
+    except PortalNoResponde:
+        return {"estado": "revision", "cui": None, "via": "PORTAL",
+                "decision": "el portal de InfoObras no respondió — reintentar",
+                "candidatos": [], "obra": None}
+    _traza().ev("paso0_codigo_citado", codigo=codigo, hits=len(obras))
+    if not obras:
+        return None
+    # un CUI puede traer varias obras: preferir la finalizada que cubre
+    # el periodo del certificado (de ahí salen los hitos correctos)
+    ci, cf = _fecha_cert(exp.get("fecha_inicial")), _fecha_cert(exp.get("fecha_final"))
+    o = _elegir_obra(obras, ci, cf)
+    cui_out = _cui_de(o) or codigo  # preferir CUI único de 7 díg
+    full = norm(o.get("nombrObra") or "")
+    toks = _tokens_clave(establecimiento(proyecto))
+    n_hit = len(toks & _palabras(full))
+    depmatch = norm(o.get("nombrDepartamento") or "") in ubicacion(proyecto)
+    obra = {"cui": cui_out, "nombre_obra": o.get("nombrObra"),
+            "departamento": o.get("nombrDepartamento"),
+            "obra_id": o.get("codigoObra") or o.get("obraId")}
+    # ¿el CUI citado coincide EXACTO con el de la obra hallada? El CUI
+    # (codUniqInv 7 díg / codSnip) es código único nacional → autoritativo:
+    # si calza exacto, ES la obra, aunque el nombre difiera (el certificado
+    # suele citar un componente, p.ej. "C.S. Fortaleza", dentro de la red
+    # integrada). Solo el chequeo por nombre podía rechazar un CUI correcto.
+    cui_exacto = bool(codigo) and codigo in {
+        re.sub(r"\D", "", str(o.get("codUniqInv") or "")),
+        re.sub(r"\D", "", str(o.get("codSnip") or "")),
+    }
+    # el rubro contradictorio VETA la aceptación por nombre/depto (un CUI
+    # citado exacto sigue siendo autoritativo aunque el rubro difiera:
+    # el certificado suele citar un componente del proyecto integral)
+    nombre_ok = ((toks and n_hit >= max(1, (len(toks) + 1) // 2)) or depmatch) \
+        and not _rubro_contradice(rubros_de(proyecto), o.get("nombrObra") or "")
+    if cui_exacto or nombre_ok:
+        via = "CUI_TEXTO" if nombre_ok else "PROBABLE"
+        decision = ("código CUI verificado contra la obra" if nombre_ok else
+                    "CUI exacto hallado en InfoObras; el nombre de la obra difiere — verificar")
+        return {"estado": "resuelto", "cui": cui_out, "via": via,
+                "decision": decision, "candidatos": [], "obra": obra}
+    return {"estado": "revision", "cui": None, "via": "CUI_TEXTO",
+            "decision": "el código CUI del certificado no coincide con la obra — confirmar",
+            "candidatos": [{"cui": cui_out, "nombre_obra": (o.get("nombrObra") or ""),
+                            "departamento": o.get("nombrDepartamento"), "score": 50}],
+            "obra": None}
+
+
+def _gate_privada(exp: dict) -> Optional[dict]:
+    """PASO 1 · gate de PRIVADAS: si el cliente/promotor es privado, NO buscar por
+    nombre (InfoObras solo registra obra pública; buscar siempre matchea basura).
+    Un CUI citado (raro en privadas) ya se intentó arriba y gana si existe.
+    Devuelve el dict 'na' si es privada, o `None` para continuar."""
+    if _es_experiencia_privada(exp):
+        _traza().ev("gate_privada")
+        return {"estado": "na", "cui": None, "via": "PRIVADA",
+                "decision": "cliente/obra privada — InfoObras solo registra obra "
+                            "pública; verificación documental del certificado",
+                "candidatos": [], "obra": None}
+    return None
+
+
+def _recolectar_candidatos(exp: dict, consulta: Consulta, base=None) -> tuple[dict, bool]:
+    """Recolecta TODOS los registros distintos por fragmentos de nombre (sin
+    descartar por CUI todavía: un CUI puede tener varias obras y la 1ª devuelta no
+    es la mejor). Devuelve (vistos, fallo_red)."""
+    proyecto = exp.get("proyecto") or ""
     vistos: dict = {}
     fallo_red = False
     for f in fragmentos(proyecto):
@@ -648,18 +666,24 @@ def _resolver(exp: dict, consulta: Consulta) -> dict:
         for o in resultados:
             if _cui_de(o):
                 vistos.setdefault(o.get("codigoObra") or o.get("obraId"), o)
-    # si NINGÚN fragmento trajo nada y hubo caída de red, no degradar: es
-    # "el portal no respondió", no "sin candidato" (motivo de revisión honesto).
-    if not vistos and fallo_red:
-        return {"estado": "revision", "cui": None, "via": "PORTAL",
-                "decision": "el portal de InfoObras no respondió — reintentar",
-                "candidatos": [], "obra": None}
+    return vistos, fallo_red
 
-    # puntuar cada registro y agrupar por CUI (clave codUniqInv preferida),
-    # conservando el de mayor score como representante de su CUI.
-    # VETO DE RUBRO: un candidato cuyo rubro contradice al del certificado
-    # (salud vs deportivo, etc.) NO compite — se aparta a `vetados` para que la
-    # cola de revisión pueda mostrarlo, pero jamás gana en silencio.
+
+def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
+    """Puntúa cada registro, aplica el VETO de rubro, agrupa por CUI (representante
+    de mayor score) y ordena determinísticamente. Devuelve (ranked, vetados).
+
+    VETO DE RUBRO: un candidato cuyo rubro contradice al del certificado (salud vs
+    deportivo, etc.) NO compite — se aparta a `vetados` para que la cola de revisión
+    pueda mostrarlo, pero jamás gana en silencio."""
+    proyecto = exp.get("proyecto") or ""
+    pn = norm(proyecto)
+    deptos_hint = ubicacion(proyecto)
+    fi = str(exp.get("fecha_inicial") or "")
+    anio_cert = int(fi[:4]) if fi[:4].isdigit() else None
+    mruc = RE_RUC.search(str(exp.get("ruc_emisor") or "") + " " + str(exp.get("entidad_emisora") or ""))
+    ruc_cert = mruc.group(1) if mruc else None
+    nums_cert = frozenset(_numero_obra(proyecto))   # N° de I.E./C.E. del certificado
     rub_cert = rubros_de(proyecto)
     porcui: dict[str, dict] = {}
     vetados: list[dict] = []
@@ -697,15 +721,18 @@ def _resolver(exp: dict, consulta: Consulta) -> dict:
     # inserción de `porcui` (no reproducible) → `best` variaba entre corridas.
     ranked = sorted(porcui.values(),
                     key=lambda x: (-x["score"], _num(x["cui"]), _num(x["obra_id"])))
+    return ranked, vetados
 
-    # Refinar por SOLAPE de valorizaciones: el score de nombre ignora CUÁNDO la obra
-    # tuvo valorizaciones, así que un homónimo VIEJO (mismo nombre/depto) puede ganar
-    # el ranking — y el filtro de cobertura de aguas abajo es POR-CUI, nunca compara
-    # entre CUIs distintos (caso obra 4653). Si la consulta puede dar el rango real,
-    # se prefiere el candidato cuyo periodo SOLAPA el del certificado sobre uno con
-    # solape CERO. Degradación SEGURA: sin `rango` (fakes/tests), sin fechas del
-    # cert, o si el fetch falla → se conserva el orden por score (comportamiento
-    # actual). `sorted` es estable → dentro de un tier se respeta el orden por score.
+
+def _reordenar_por_solape(ranked: list, exp: dict, consulta: Consulta) -> list:
+    """Refinar por SOLAPE de valorizaciones: el score de nombre ignora CUÁNDO la obra
+    tuvo valorizaciones, así que un homónimo VIEJO (mismo nombre/depto) puede ganar
+    el ranking — y el filtro de cobertura de aguas abajo es POR-CUI, nunca compara
+    entre CUIs distintos (caso obra 4653). Si la consulta puede dar el rango real,
+    se prefiere el candidato cuyo periodo SOLAPA el del certificado sobre uno con
+    solape CERO. Degradación SEGURA: sin `rango` (fakes/tests), sin fechas del
+    cert, o si el fetch falla → se conserva el orden por score (comportamiento
+    actual). `sorted` es estable → dentro de un tier se respeta el orden por score."""
     _rango = getattr(consulta, "rango", None)
     cert_i, cert_f = _fecha_cert(exp.get("fecha_inicial")), _fecha_cert(exp.get("fecha_final"))
     if callable(_rango) and cert_i and cert_f and len(ranked) > 1:
@@ -721,8 +748,17 @@ def _resolver(exp: dict, consulta: Consulta) -> dict:
         topk = ranked[:4]          # solo los mejores por nombre (acota fetches al portal)
         tiers = {id(c): _tier(c) for c in topk}
         ranked = sorted(topk, key=lambda c: tiers[id(c)]) + ranked[4:]
+    return ranked
 
-    best = ranked[0] if ranked else None
+
+def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict:
+    """Bloque final de decisión: compuerta de tokens, RUC, NOMBRE, PROBABLE,
+    loc_contra y motivos de revisión. Emite el evento `ranking` y devuelve el
+    dict resultado."""
+    proyecto = exp.get("proyecto") or ""
+    deptos_hint = ubicacion(proyecto)
+    toks = _tokens_clave(establecimiento(proyecto))
+
     _traza().ev("ranking", top=[f"{c['cui']}·{c['score']}" for c in ranked[:3]],
                 vetados=len(vetados))
 
@@ -769,7 +805,7 @@ def _resolver(exp: dict, consulta: Consulta) -> dict:
             "decision": motivo, "candidatos": candidatos, "obra": None}
 
 
-def resolver_obras(obras: list[dict], consulta: Consulta) -> list[dict]:
+def resolver_obras(obras: list[dict], consulta: Consulta, base=None) -> list[dict]:
     """Resuelve cada sub-obra de un cert MULTI-OBRA por su CUI citado (por_codigo,
     DETERMINÍSTICO — sin adivinar por nombre). Un cert de rol de gestión/portafolio
     lista N obras bajo un mismo vínculo; el tiempo se cuenta una vez (en la
@@ -821,12 +857,14 @@ def _folio_base(folio) -> Optional[str]:
     return m.group(0) if m else None
 
 
-def resolver_con_dedup(experiencias: list[tuple[dict, object]], consulta: Consulta):
+def resolver_con_dedup(experiencias: list[tuple[dict, object]], consulta: Consulta,
+                       base=None):
     """Itera [(exp, clave), …] resolviendo con herencia por folio (el '2º periodo
-    del mismo certificado' hereda el CUI del hermano). Yields (clave, resultado)."""
+    del mismo certificado' hereda el CUI del hermano). Yields (clave, resultado).
+    `base` (opcional) se arrastra a `resolver` — costura del MEF para F3+."""
     por_folio: dict[str, dict] = {}
     for exp, clave in experiencias:
-        r = resolver(exp, consulta)
+        r = resolver(exp, consulta, base)
         fb = _folio_base(exp.get("folio"))
         if r["estado"] == "revision" and fb and fb in por_folio:
             heredado = por_folio[fb]
