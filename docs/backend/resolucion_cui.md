@@ -19,8 +19,32 @@ a paralizaciones → Paso 5. El método y los umbrales quedan **congelados** aqu
 port es mecánico. No se persigue el ~5–10% irreducible (obras ausentes de InfoObras
 o de nombre ambiguo) — esos van a REVISIÓN con candidatos a la vista, como se diseñó.
 
-Prototipo y métrica: `tools/buscar_cui_por_nombre.py` + `tools/medir_resolucion.py`
-+ `tools/diag_casos.py` (diagnóstico).
+Código vigente: `backend/resolucion/cui.py` (resolver) + `backend/resolucion/base_mef.py`
+(base local del MEF) + `backend/resolucion/texto.py`. Golden y comparación:
+`backend/scripts/golden_cui.py`.
+
+> ## ⚠ REDISEÑO 2026-07 (público-primero + base MEF) — leer antes del resto
+>
+> El flujo por capas descrito abajo (§2) se **rediseñó**. Lo vigente:
+> 1. **Público-primero**: ya **no** hay gate de PRIVADAS al inicio. Una experiencia
+>    —incluso privada— agota SIEMPRE la resolución pública (InfoObras + MEF); la
+>    clasificación de privada ocurre al **FINAL**, solo si no hubo candidato fiable.
+> 2. **Sin gate de alcance por rubro**: se resuelve TODO rubro y TODO tipo (obras y
+>    consultorías/expedientes, que sí están en InfoObras). El veto de rubro pasó de
+>    ser un gate previo a ser una **compuerta** que veta un mal-match al final.
+> 3. **Base local del MEF**: el nombre del certificado (abreviado) se busca también
+>    en la base MEF y sus candidatos se **fusionan** con los de InfoObras antes de
+>    rankear — sube el recall sin tocar la escritura del nombre. Ver
+>    `docs/backend/README.md` §"Base local MEF".
+> 4. **Solape fuera de la selección**: el solape de valorizaciones YA NO reordena
+>    candidatos (usaba el periodo declarado —el dato bajo auditoría— → circularidad).
+>    El ranking es 100% por **identidad**; el homónimo cae a revisión por cobertura
+>    <50% aguas abajo (clamp de valorizaciones, intacto), nunca como falso CUMPLE.
+> 5. **Candado de entidad**: con base MEF, una entidad contratante que no se reconoce
+>    como pública marca `posible_privada` (revisión) en vez de arriesgar un CUI.
+>
+> Las secciones históricas (§3–§4) conservan los hallazgos que moldearon el método;
+> el pseudocódigo §6 refleja el flujo NUEVO.
 
 ---
 
@@ -34,11 +58,17 @@ búsqueda por nombre es por **substring contiguo** del nombre oficial. Por eso r
 
 ## 2 · El método — pipeline por capas
 
+> Flujo VIGENTE (rediseño 2026-07). NO hay gate de privadas al inicio: se agota
+> siempre la vía pública y lo privado se clasifica al final.
+
 ```
-PASO 0 · ¿hay "SNIP/CUI NNNN" en el texto?  → fetch_by_cui + VERIFICAR → determinístico
+PASO 0 · ¿hay "SNIP/CUI NNNN" en el texto/campo?  → por_codigo + VERIFICAR → autoritativo
+         (si InfoObras no lo tiene pero el MEF sí → guarda la ficha como pista, sigue)
 PASO 1 · dedup: mismo folio/certificado o mismo CUI entre experiencias → resolver 1 vez
-PASO 2 · (sin código) nombre → multi-fragmento + cruce RUC + ubicación + ranking difuso + compuerta
-PASO 3 · spot-check (candidato fuerte, marca opcional) / manual (sin candidato fiable)
+PASO 2 · (sin código) nombre → fragmentos en InfoObras + FUSIÓN con base MEF
+         → ranking por IDENTIDAD (difuso + RUC + ubicación); SIN solape de valorizaciones
+PASO 3 · compuertas: veto de rubro · gate de tokens del establecimiento · candado de entidad
+PASO 4 · clasificación final: privada (léxico o entidad no pública) → N/A · resto → revisión
 ```
 
 ### Paso 0 — CUI/SNIP en el texto (la vía más fuerte)
@@ -95,13 +125,21 @@ PASO 3 · spot-check (candidato fuerte, marca opcional) / manual (sin candidato 
 La presencia de CUI-en-texto **varía mucho** por certificado (0–100% según el
 profesional), por eso se necesitan **ambos caminos** (código y nombre+RUC).
 
-### Regla N/A — obras fuera de scope (no cuentan en la métrica)
-InfoObras solo tiene **obra pública de salud**. Las experiencias en obras
-**privadas** (ej. "Edificio Pacific Tower") o **ajenas a salud** (ej. "Complejo
-Penitenciario") **no son cruzables** y se marcan **N/A** — se **excluyen del
-denominador** (no son falla del método; el humano las maneja por definición).
-Detección: `es_aplicable(proyecto)` (expande abreviaturas → busca términos de
-salud; reconoce "H.", "C.S.", "E.S.", "EE.SS.", CMI, INSN, INEN).
+### Regla N/A — obras privadas (clasificadas al FINAL, público-primero)
+> **Cambio del rediseño**: ya **no** hay gate previo `es_aplicable`/alcance por
+> salud. InfoObras registra obra pública de **cualquier rubro** (no solo salud) y
+> **consultorías/expedientes** (confirmado 2026-07-02) → todo se intenta resolver.
+
+La clasificación de **privada** ocurre al **final** (`_clasificar_privada`), solo
+cuando la vía pública ya se agotó sin candidato fiable:
+- **léxico** `_RE_PRIVADA` (cliente/promotor privado explícito, colegio particular,
+  I.E.P. + nombre) → **N/A** vía `PRIVADA` (el respaldo es el certificado).
+- con base MEF, **entidad contratante no reconocida como pública** → revisión con
+  `posible_privada=True` (S.A.C., ONG, órdenes religiosas…).
+- resto → revisión normal con candidatos a la vista.
+
+Las N/A se **excluyen del denominador** de la métrica (no son falla del método; el
+humano las maneja por definición).
 
 ### Tres datasets reales
 | Dataset | Formato | Aplic. | Sin humano | CUI en texto |
@@ -218,36 +256,46 @@ En el Libertador: 1/14 profesionales con traslape (2 días).
 ## 6 · Pseudocódigo para el backend
 
 ```python
-def resolver_cui(exp, cache, hermanos_por_folio):
-    # FUERA DE SCOPE — obra privada o ajena a salud (no está en InfoObras)
-    if not es_aplicable(exp.proyecto):
-        return NoAplica(exp)                      # N/A · no cuenta en la métrica
+def resolver_cui(exp, consulta, base, hermanos_por_folio):
+    # NO hay gate de privadas/alcance al inicio: se agota la vía pública primero.
 
-    # PASO 0
-    cod = extraer_codigo(exp.proyecto)          # "SNIP/CUI NNNN"
+    # PASO 0 — CUI/SNIP citado (autoritativo)
+    cod = extraer_codigo(exp)                     # campo `cui` o "SNIP/CUI NNNN" en el texto
     if cod:
-        obra = fetch_by_cui(cod)                  # (cacheado)
-        if obra and (nombre_coincide(obra, exp) or departamento_coincide(obra, exp)):
-            return Resuelto(cod, via="cui_texto")
-        # si no verifica → manual (código sospechoso)
-        return Manual(exp, motivo="cui_no_verifica", candidato=cod)
+        obras = consulta.por_codigo(cod)          # (cacheado)
+        if obras:
+            o = elegir_obra(obras, exp)           # la que cubre el periodo del certificado
+            if cui_exacto(o, cod) or (nombre_ok(o, exp) and not rubro_contradice(o, exp)):
+                return Resuelto(cui_de(o), via="CUI_TEXTO")   # cui_exacto manda aunque el nombre difiera
+            return Revision(exp, motivo="cui_no_verifica", candidato=cui_de(o))
+        if base.disponible() and base.existe_cui(cod):        # InfoObras no lo tiene, MEF sí
+            exp["_ficha_mef_citado"] = base.existe_cui(cod)   # solo PISTA para el motivo/scoring; NO resuelve
 
-    # PASO 1 — dedup por folio (hermano ya resuelto)
+    # PASO 1 — dedup por folio (hermano ya resuelto)  [resolver_con_dedup]
     fb = folio_base(exp.folio)
     if fb in hermanos_por_folio:
         return Resuelto(hermanos_por_folio[fb], via="dedup")
 
-    # PASO 2 — nombre + RUC + ubicación
-    cands = buscar_por_fragmentos(exp.proyecto)   # (cacheado)
-    ranked = rankear(cands, exp)                   # difuso + departamento + año + RUC(+30)
+    # PASO 2 — nombre: InfoObras + FUSIÓN base MEF → ranking por IDENTIDAD
+    vistos, fallo_red = recolectar_candidatos(exp, consulta, base)   # fragmentos InfoObras
+    fusionar_mef(exp, consulta, base, vistos)     # + candidatos del MEF (por_codigo de sus CUIs)
+    if not vistos and fallo_red:
+        return Revision(exp, via="PORTAL")        # el portal no respondió ≠ sin candidato
+    ranked, vetados = rankear(vistos, exp, base)  # difuso + RUC(+30) + ubicación; SIN solape de valorizaciones
+
+    # PASO 3 — compuertas
     best = ranked[0] if ranked else None
-    if best and ruc_match(best, exp):              return Resuelto(best.cui, via="ruc")
+    if best and ruc_match(best, exp):              return Resuelto(best.cui, via="RUC")
     if best and compuerta_establecimiento(best, exp) and best.score >= 70:
-        return Resuelto(best.cui, via="nombre")    # gate fuerte manda (aunque ubicación discrepe)
-    loc_contra = ubicacion(exp) and best and depto(best) not in ubicacion(exp)
-    if best and (compuerta(best, exp) or best.score >= 90) and not loc_contra:
-        return SpotCheck(best.cui, candidatos=ranked[:3])
-    return Manual(exp, candidatos=ranked[:3])      # ← el humano pega el CUI aquí
+        return Resuelto(best.cui, via="NOMBRE")    # gate fuerte manda (aunque ubicación discrepe)
+    # el rubro contradictorio VETA; loc_contra baja un match débil a revisión
+
+    # PASO 4 — clasificación final (privada al final, con catálogo de entidades MEF)
+    if es_experiencia_privada(exp):                            # léxico: cliente/colegio privado
+        return NoAplica(exp, via="PRIVADA")                    # N/A · el respaldo es el certificado
+    if base.disponible() and not es_entidad_publica(exp.entidad_contratante):
+        return Revision(exp, posible_privada=True, candidatos=ranked[:3])
+    return Revision(exp, candidatos=ranked[:3])    # ← el humano elige candidato o pega el CUI
 ```
 
 ---

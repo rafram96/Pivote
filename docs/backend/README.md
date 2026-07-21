@@ -38,6 +38,54 @@ Leyenda de estado: ✅ probado · 📐 diseñado/decidido · 🔨 por construir 
 | 5 | **Excel final enriquecido** | **Regenera** el Excel formato Manuel (no parchea) + hojas por profesional. Resalta Claude (amarillo) vs backend (naranja). Certs embebidos + Mejora Paso 5 (fechas Certificado vs InfoObras). | Excel final + reporte | ✅ probado | [../contrato/contrato_refactor.md §3](../contrato/contrato_refactor.md) |
 | 6 | **Persistencia + panel** | Archivos = fuente de verdad (carpeta por job) + PostgreSQL como respaldo lógico write-through (`PIVOTE_DB_URL`). El panel se entera por polling (`/progreso`). | job listo → descarga | ✅ archivos · ⏳ respaldo pg por validar en server | [../frontend/README.md](../frontend/README.md) |
 
+## Base local MEF (resolución de CUI)
+
+El componente **2 · Resolución de CUI** se apoya en una **base local del MEF** (el
+Banco de Inversiones) para no depender solo de la búsqueda por substring de
+InfoObras. Es un espejo consolidado de las inversiones públicas (~490k filas, 452k
+CUIs distintos) que vive en `<PIVOTE_DATA_DIR>/referencia/mef/` como tres
+artefactos: `inversiones.csv.gz`, `entidades_publicas.csv` y `metadata.json`.
+
+**Para qué sirve** (tres usos, todos en `resolucion/base_mef.py`):
+- `buscar_candidatos(nombre)` — índice invertido token→filas + `rapidfuzz`: propone
+  CUIs cuyo nombre oficial se parece al del certificado (que suele venir abreviado).
+  El resolver **fusiona** esos candidatos con los de InfoObras antes de rankear.
+- `existe_cui(codigo)` — ficha oficial de un CUI/SNIP citado que InfoObras no tenga
+  (se usa como **pista** en el motivo de revisión, no para resolver).
+- `es_entidad_publica(nombre)` — catálogo de entidades del Estado: si la entidad
+  contratante **no** se reconoce como pública, la experiencia sin candidato fiable
+  se marca `posible_privada` en la clasificación final.
+
+**Cómo generarla / refrescarla**:
+```
+python backend/scripts/actualizar_base_mef.py                 # descarga desde el MEF
+python backend/scripts/actualizar_base_mef.py --desde-dir DIR # usa CSV locales (sin red)
+```
+La escritura es **atómica** (tmp + `os.replace`) y valida el volumen: si la descarga
+falla o queda corta, la versión anterior queda intacta. Refresco recomendado en el
+**host** (no en el contenedor) vía crontab semanal, p. ej. domingos 03:00:
+```
+0 3 * * 0  cd /ruta/backend && python scripts/actualizar_base_mef.py
+```
+
+**RAM / carga**: ~370 MB residentes, **carga perezosa ~60 s** en el primer uso (se
+comparte como singleton por proceso — ver `base_mef.instancia()`). Diseño de memoria
+en `base_mef.py` (columnas paralelas + `sys.intern` + `array('i')` en el índice).
+
+**Degradación**: si los artefactos no existen, `disponible()` es `False` y todos los
+métodos devuelven vacío/None **sin lanzar** — el resolver sigue funcionando
+**solo con InfoObras en vivo** (sin fusión MEF ni candado de entidad). La base es una
+mejora, no una dependencia dura.
+
+**Flujo público-primero (5 líneas)**: (1) si el certificado cita un CUI/SNIP, se
+verifica contra InfoObras y manda si calza (autoritativo). (2) Si no, se busca por
+nombre en InfoObras **y** en el MEF, y se **fusionan** los candidatos. (3) Se rankea
+100% por **identidad** (nombre + RUC + ubicación); el solape de valorizaciones ya
+**no** entra en la selección (evita circularidad). (4) Las compuertas (veto de rubro,
+gate de tokens, candado de entidad) protegen contra falsos positivos. (5) Solo al
+**final**, agotada la vía pública, se clasifica lo privado (léxico o entidad no
+pública) — todo lo demás cae a revisión con candidatos a la vista.
+
 ## Regla de oro (constraint on-prem)
 
 El servidor hace lo **determinístico** y lo que toca **fuentes oficiales** (SUNAT/
@@ -49,7 +97,7 @@ hizo Claude en la PC del cliente.
 
 | Componente | Archivo base a reusar |
 |---|---|
-| 2 · Resolución CUI | prototipo en `tools/buscar_cui_por_nombre.py` (este repo) → portar a `src/scraping/infoobras/` |
+| 2 · Resolución CUI | `backend/resolucion/cui.py` (resolver) + `base_mef.py` (base local MEF) + `texto.py` |
 | 3a · InfoObras | `src/scraping/infoobras/` (fetch por CUI, paralizaciones) |
 | 3b · SUNAT | `src/scraping/sunat.py` (`consultar_ruc`, `getRepLeg`) |
 | 4 · Motor de reglas | `src/validation/rules.py` (ALT01-ALT11; ALT11 = fusión periodos) |
