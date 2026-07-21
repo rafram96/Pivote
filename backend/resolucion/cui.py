@@ -484,8 +484,10 @@ class ConsultaInfoObras:
         DatosEjecucion/lAvances — el dato que dice CUÁNDO la obra tuvo plata
         moviéndose (a diferencia de `fechaIniObra`, que miente). Devuelve
         (None, None) si no hay avances o el portal no respondió. Cacheado por obra.
-        Lo usa el resolver para preferir, entre candidatos por NOMBRE, el que solapa
-        el periodo del certificado (y no un homónimo viejo)."""
+
+        YA NO participa en la SELECCIÓN de CUI (se eliminó el re-rank por solape:
+        usaba el periodo declarado —el dato bajo auditoría— para reordenar). Solo
+        queda para consumidores externos (p. ej. `scripts/golden_cui.py`)."""
         if obra_id in self._rango_cache:
             return self._rango_cache[obra_id]
         r: tuple = (None, None)
@@ -622,7 +624,12 @@ def _resolver(exp: dict, consulta: Consulta, base=None) -> dict:
                 "candidatos": [], "obra": None}
 
     ranked, vetados = _rankear(vistos, exp, base)
-    ranked = _reordenar_por_solape(ranked, exp, consulta)
+    # El ranking queda 100% por IDENTIDAD (score + orden determinístico). El solape
+    # de valorizaciones se ELIMINÓ de la selección: usaba el periodo DECLARADO por el
+    # certificado —el dato bajo auditoría— para reordenar candidatos, así un periodo
+    # mentiroso podía hacer ganar a un homónimo que "le cuadre" (circularidad). El
+    # caso del homónimo viejo cae ahora a revisión por cobertura <50% aguas abajo
+    # (clamp de valorizaciones, intacto): ruido seguro, nunca un falso CUMPLE.
     best = ranked[0] if ranked else None
     return _compuertas(best, ranked, vetados, exp, base)
 
@@ -876,33 +883,6 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
     ranked = sorted(porcui.values(),
                     key=lambda x: (-x["score"], _num(x["cui"]), _num(x["obra_id"])))
     return ranked, vetados
-
-
-def _reordenar_por_solape(ranked: list, exp: dict, consulta: Consulta) -> list:
-    """Refinar por SOLAPE de valorizaciones: el score de nombre ignora CUÁNDO la obra
-    tuvo valorizaciones, así que un homónimo VIEJO (mismo nombre/depto) puede ganar
-    el ranking — y el filtro de cobertura de aguas abajo es POR-CUI, nunca compara
-    entre CUIs distintos (caso obra 4653). Si la consulta puede dar el rango real,
-    se prefiere el candidato cuyo periodo SOLAPA el del certificado sobre uno con
-    solape CERO. Degradación SEGURA: sin `rango` (fakes/tests), sin fechas del
-    cert, o si el fetch falla → se conserva el orden por score (comportamiento
-    actual). `sorted` es estable → dentro de un tier se respeta el orden por score."""
-    _rango = getattr(consulta, "rango", None)
-    cert_i, cert_f = _fecha_cert(exp.get("fecha_inicial")), _fecha_cert(exp.get("fecha_final"))
-    if callable(_rango) and cert_i and cert_f and len(ranked) > 1:
-        def _tier(c) -> int:
-            try:
-                oi, of = _rango(c.get("obra_id"))
-            except Exception:      # noqa: BLE001 — portal flaky → desconocido
-                return 1
-            if not oi or not of:
-                return 1           # rango desconocido → tier medio (no castigar)
-            solapa = (min(of, cert_f) - max(oi, cert_i)).days > 0
-            return 0 if solapa else 2   # 0 solapa (mejor) · 1 desconocido · 2 sin solape
-        topk = ranked[:4]          # solo los mejores por nombre (acota fetches al portal)
-        tiers = {id(c): _tier(c) for c in topk}
-        ranked = sorted(topk, key=lambda c: tiers[id(c)]) + ranked[4:]
-    return ranked
 
 
 def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict:

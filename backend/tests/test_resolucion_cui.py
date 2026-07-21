@@ -105,12 +105,13 @@ class _FakeConCodigo:
 
 
 class _FakeConRango:
-    """buscar() devuelve dos obras HOMÓNIMAS (mismo nombre/depto → mismo score);
-    rango() da valorizaciones distintas: la vieja NO solapa el certificado, la
-    correcta SÍ. Ejercita el re-rank por solape del PASO 2."""
-    def __init__(self, obras, rangos):
+    """buscar() devuelve dos obras HOMÓNIMAS; expone rango() para verificar que la
+    selección YA NO lo consulta (contador `rango_llamado`). El solape se eliminó de
+    la selección: usaba el periodo DECLARADO por el cert —el dato bajo auditoría—
+    para reordenar, así un periodo mentiroso podía lavar un homónimo que le cuadre."""
+    def __init__(self, obras):
         self.obras = obras
-        self.rangos = rangos
+        self.rango_llamado = 0
 
     def por_codigo(self, codigo):
         return []
@@ -119,23 +120,28 @@ class _FakeConRango:
         return list(self.obras)
 
     def rango(self, obra_id):
-        return self.rangos.get(obra_id, (None, None))
+        self.rango_llamado += 1
+        return (None, None)
 
 
-def test_resolver_prefiere_la_obra_que_solapa_valorizaciones():
-    # Regresión (caso obra 4653): dos obras con nombre idéntico; sin el re-rank gana
-    # la de menor CUI (desempate) aunque sus valorizaciones sean VIEJAS y no cubran
-    # el certificado. Con el re-rank, gana la que SOLAPA el periodo del cert.
-    from datetime import date
+def test_solape_no_reordena_la_seleccion():
+    # El solape de valorizaciones NO debe reordenar la selección. Dos homónimas:
+    # la de MAYOR score de identidad (RUC del emisor calza) NO solapa el periodo
+    # declarado; la de MENOR score SÍ solaparía. La elección debe ser la de mayor
+    # identidad — nunca cambiar por el solape. Y `rango()` no debe ni consultarse.
     exp = {"proyecto": "MEJORAMIENTO DEL PUESTO DE SALUD DE POMACOCHAS",
-           "fecha_inicial": "2022-06-01", "fecha_final": "2023-01-31"}
-    vieja = _obra("1111111", 100, "MEJORAMIENTO DEL PUESTO DE SALUD DE POMACOCHAS")
-    nueva = _obra("2222222", 200, "MEJORAMIENTO DEL PUESTO DE SALUD DE POMACOCHAS")
-    rangos = {100: (date(2015, 1, 1), date(2016, 4, 1)),     # vieja: NO solapa
-              200: (date(2022, 1, 1), date(2023, 3, 1))}     # nueva: SÍ solapa
-    r = resolver(exp, _FakeConRango([vieja, nueva], rangos))
+           "fecha_inicial": "2022-06-01", "fecha_final": "2023-01-31",
+           "ruc_emisor": "20100010001"}
+    # ganadora: mayor identidad (RUC del emisor = ejecutor de la obra → +30)
+    ganadora = _obra("1111111", 100, "MEJORAMIENTO DEL PUESTO DE SALUD DE POMACOCHAS")
+    ganadora["rucEjecutor"] = "20100010001"
+    # homónima sin RUC: menor score de identidad (sería la que "solaparía" el cert)
+    homonima = _obra("2222222", 200, "MEJORAMIENTO DEL PUESTO DE SALUD DE POMACOCHAS")
+    fake = _FakeConRango([homonima, ganadora])
+    r = resolver(exp, fake)
     assert r["estado"] == "resuelto"
-    assert r["cui"] == "2222222", r     # la que solapa, pese a tener CUI mayor
+    assert r["cui"] == "1111111", r     # gana la de mayor identidad, no el solape
+    assert fake.rango_llamado == 0      # la selección NO consultó valorizaciones
 
 
 def test_resolver_cui_exacto_resuelve_aunque_nombre_difiera():
