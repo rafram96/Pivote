@@ -295,6 +295,165 @@ def _rubro_contradice(rub_cert: set[str], texto_obra: str) -> bool:
     return bool(rub_obra) and not (rub_cert & rub_obra)
 
 
+# ── UBIGEO del certificado: provincia/distrito (veto de ubicación, F8) ────────
+# Señal ORTOGONAL al DEPARTAMENTO: dos obras del MISMO departamento pero de
+# PROVINCIAS distintas son proyectos DISTINTOS (auditoría job c9c769976750:
+# San Agustín-Huancayo→El Tambo, Jaén-Cajamarca→Magdalena-Lima, PTAR Jauja→Tarma).
+# El MEF trae prov/dist por CUI (base_mef); el certificado los declara en el texto
+# ("provincia de X", "Municipalidad Distrital de Y") y en su cola geográfica
+# ("…, Jauja, Junín") o el campo `ubicacion` del espejo.
+#
+# CUIDADO (documentado, ver _puntuar): el MEF a veces registra la inversión bajo la
+# sede de la entidad EJECUTORA, no la ubicación física de la obra. Por eso:
+#   • el VETO exige contradicción de PROVINCIA con AMBAS partes declaradas
+#     explícitamente (nunca por ausencia de datos de un lado);
+#   • una contradicción SOLO de distrito (misma provincia) PENALIZA (−25), no veta
+#     (obras intermunicipales existen);
+#   • sin ficha MEF del candidato la señal es INERTE (no cambia nada).
+_DEPTOS_SET = set(DEPTOS)
+
+_RE_PROV_KW = re.compile(
+    r"provincia(?:l)?\s+de\s+([A-Za-zÁÉÍÓÚÜÑ.' ]+?)"
+    r"(?=\s*[,;\-–|(/]|\s+provincia|\s+distrit|\s+departamento|\s+regi[oó]n|\s+dpto|$)",
+    re.I)
+_RE_DIST_KW = re.compile(
+    r"distrit(?:o|al)\s+de\s+([A-Za-zÁÉÍÓÚÜÑ.' ]+?)"
+    r"(?=\s*[,;\-–|(/]|\s+provincia|\s+distrit|\s+departamento|\s+regi[oó]n|\s+dpto|$)",
+    re.I)
+
+# rótulos que preceden a un topónimo en la cola geográfica; se quitan para dejar
+# el nombre limpio ("PROVINCIA DE JAUJA" → "JAUJA")
+_RE_ROTULO_GEO = re.compile(
+    r"^(provincia|prov|distrito|dist|departamento|dpto|regi[oó]n|reg|localidad|"
+    r"sector|centro poblado|c\.?p\.?)\s+(de\s+)?", re.I)
+
+
+def _deptos_en(texto: str) -> set[str]:
+    """Departamentos nombrados en un texto (con alias HVCA→HUANCAVELICA)."""
+    n = norm(texto or "")
+    for ab, full in DEPTO_ALIAS.items():
+        n = re.sub(rf"\b{ab}\b", full, n)
+    return {d for d in DEPTOS if re.search(rf"\b{d}\b", n)}
+
+
+def _terminos_geo(texto: str) -> list[str]:
+    """Términos de ubicación (limpios de rótulo) en el orden del texto, partiendo
+    por separadores geográficos (coma, guion, barra, paréntesis)."""
+    t = norm(expandir_abrev(texto or ""))
+    for ab, full in DEPTO_ALIAS.items():
+        t = re.sub(rf"\b{ab}\b", full, t)
+    out: list[str] = []
+    for p in re.split(r"[,;\-–|()/]", t):
+        p = _RE_ROTULO_GEO.sub("", p.strip()).strip(" .-")
+        p = re.sub(r"^DE\s+", "", p).strip()
+        if p:
+            out.append(p)
+    return out
+
+
+def _provincia_desde_cola(terminos: list[str]) -> set[str]:
+    """Provincia por ANCLA de departamento: en "…, <dist>, <prov>, <depto>" el
+    término inmediatamente ANTES de un departamento conocido es la provincia.
+    Exige al menos TRES niveles (algo, prov, depto): con solo dos ("…HUARI,
+    ANCASH") el término previo puede ser distrito o localidad y un falso
+    positivo de provincia VETA — mejor no inferir."""
+    provs: set[str] = set()
+    for i, t in enumerate(terminos):
+        if (t in _DEPTOS_SET and i - 2 >= 0
+                and terminos[i - 1] not in _DEPTOS_SET
+                and terminos[i - 2] not in _DEPTOS_SET):
+            provs.add(terminos[i - 1])
+    return provs
+
+
+def ubigeo_cert(exp: dict) -> dict:
+    """Señales de ubicación DECLARADAS por el certificado: provincia(s),
+    distrito(s), departamento(s) y el pool completo de términos de ubicación.
+    Mira `proyecto` + `ubicacion` + `entidad_contratante` del espejo."""
+    proyecto = str(exp.get("proyecto") or "")
+    ubic = str(exp.get("ubicacion") or "")
+    ent = str(exp.get("entidad_contratante") or "")
+    texto = " || ".join((proyecto, ubic, ent))
+    prov = {norm(m) for m in _RE_PROV_KW.findall(texto) if len(norm(m)) >= 3}
+    dist = {norm(m) for m in _RE_DIST_KW.findall(texto) if len(norm(m)) >= 3}
+    terms_proj = _terminos_geo(proyecto)
+    terms_ubic = _terminos_geo(ubic)
+    prov |= _provincia_desde_cola(terms_proj)
+    prov |= _provincia_desde_cola(terms_ubic)
+    depto = ubicacion(proyecto) | _deptos_en(ubic) | _deptos_en(ent)
+    loc = set(prov) | set(dist) | set(terms_proj) | set(terms_ubic) | set(depto)
+    return {"prov": prov, "dist": dist, "depto": depto, "loc": loc}
+
+
+_RE_MUNI = re.compile(r"\bMUNICIPALIDAD\s+(DISTRITAL|PROVINCIAL)\s+DE\s+"
+                      r"([A-Z' ]+?)(?=\s*[,;()/|]|\s+PROVINCIA|\s+DISTRITO|"
+                      r"\s+DEPARTAMENTO|\s+REGION|$)")
+
+
+def _munis_de(texto_norm: str) -> set[tuple[str, str]]:
+    """Municipalidades (tipo, nombre) mencionadas en un texto YA normalizado.
+    "MUNICIPALIDAD DISTRITAL DE SAN AGUSTIN" → {("DISTRITAL", "SAN AGUSTIN")}."""
+    return {(t, n.strip()) for t, n in _RE_MUNI.findall(texto_norm or "") if n.strip()}
+
+
+def _muni_contradice(exp: dict, ficha: Optional[dict]) -> bool:
+    """True si el CONTRATANTE del certificado es una municipalidad y la entidad
+    MEF del candidato es OTRA municipalidad del mismo tipo (distrital vs distrital):
+    dos municipalidades distintas no contratan la misma obra (caso auditado
+    San Agustín→El Tambo). Exige municipalidad EN AMBOS lados; cualquier otra
+    combinación (gobierno regional, ministerio, ausencia) es inerte."""
+    if not ficha:
+        return False
+    munis_cert = _munis_de(norm(str(exp.get("entidad_contratante") or "")))
+    if not munis_cert:
+        return False
+    munis_mef = _munis_de(norm(str(ficha.get("entidad") or "")))
+    if not munis_mef:
+        return False
+    for tc, nc in munis_cert:
+        for tm, nm in munis_mef:
+            if tc == tm and _loc_eq(nc, nm):
+                return False           # misma municipalidad → sin contradicción
+    return True
+
+
+def _loc_eq(a: str, b: str) -> bool:
+    """Igualdad de topónimo: normalizado idéntico o uno contenido en el otro (con
+    largo ≥ 4 para evitar coincidencias triviales)."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    corto, largo = (a, b) if len(a) <= len(b) else (b, a)
+    return len(corto) >= 4 and re.search(rf"\b{re.escape(corto)}\b", largo) is not None
+
+
+def _ubigeo_contra(sig: dict, ficha: Optional[dict]) -> tuple[bool, bool, bool]:
+    """(prov_contra, dist_contra, depto_contra) del certificado vs la ficha MEF de
+    un candidato. Cada contradicción exige AMBAS partes declaradas y que el valor
+    del MEF no aparezca en NINGÚN término de ubicación del certificado (evita vetar
+    cuando el MEF registra la provincia donde el cert la nombró como distrito)."""
+    if not ficha:
+        return (False, False, False)
+    loc = sig["loc"]
+    prov_mef = norm(ficha.get("prov") or "")
+    dist_mef = norm(ficha.get("dist") or "")
+    depto_mef = norm(ficha.get("dpto") or "")
+
+    def _contra(cert_set: set[str], val_mef: str) -> bool:
+        if not cert_set or not val_mef:
+            return False
+        if any(_loc_eq(c, val_mef) for c in cert_set):
+            return False               # el MEF coincide con lo declarado
+        if any(_loc_eq(x, val_mef) for x in loc):
+            return False               # el MEF aparece en otra parte de la ubicación
+        return True
+
+    return (_contra(sig["prov"], prov_mef),
+            _contra(sig["dist"], dist_mef),
+            _contra(sig["depto"], depto_mef))
+
+
 def _palabras(s: str) -> set[str]:
     return set(re.findall(r"[A-Z]+", norm(s)))
 
@@ -693,6 +852,15 @@ def _paso_codigo_citado(exp: dict, consulta: Consulta, base=None) -> Optional[di
     # el certificado suele citar un componente del proyecto integral)
     nombre_ok = ((toks and n_hit >= max(1, (len(toks) + 1) // 2)) or depmatch) \
         and not _rubro_contradice(rubros_de(proyecto), o.get("nombrObra") or "")
+    # F8 · DECISIÓN sobre el CUI citado (caso 2:27, COAR Cusco → CUI Pasco): NO se
+    # degrada por contradicción de ubicación. Un CUI escrito en el certificado y
+    # hallado EXACTO en InfoObras es un código único nacional → autoritativo, aunque
+    # su ubicación oficial (MEF) difiera de la del certificado: las concesiones
+    # multi-región (COAR) y las inversiones registradas bajo la sede de la entidad
+    # ejecutora hacen que provincia/departamento legítimamente NO coincidan con la
+    # obra física. El golden auditado confirma este CUI como CORRECTO (verdad=2429909
+    # vía PROBABLE). El veto de ubicación (F8) actúa SOLO sobre resoluciones POR
+    # NOMBRE, donde la evidencia es inferida, nunca sobre un CUI citado exacto.
     if cui_exacto or nombre_ok:
         via = "CUI_TEXTO" if nombre_ok else "PROBABLE"
         decision = ("código CUI verificado contra la obra" if nombre_ok else
@@ -861,6 +1029,7 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
     rub_cert = rubros_de(proyecto)
     base_ok = bool(base) and base.disponible()
     fichas_mef = exp.get("_fichas_mef") if base_ok else None
+    sig_geo = ubigeo_cert(exp) if base_ok else None   # señales prov/dist del cert (F8)
     porcui: dict[str, dict] = {}
     origenes: dict[str, set] = {}          # orígenes vistos por CUI (para 'ambos')
     vetados: list[dict] = []
@@ -877,6 +1046,8 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
         nums_cand = _numero_obra(o.get("nombrObra") or "")
         num_match = bool(nums_cert and nums_cand and (nums_cert & nums_cand))
         ent_match = False
+        ficha = None
+        veto_geo = False
         if base_ok:
             # el score de nombre y la compuerta de tokens se apoyan también en el
             # nombre OFICIAL del MEF (rescata nombres corruptos en InfoObras)
@@ -888,6 +1059,18 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
             ent_mef = norm((ficha or {}).get("entidad") or "")
             if ent_cert and ent_mef and fuzz.token_set_ratio(ent_cert, ent_mef) >= 90:
                 ent_match = True
+            # F8 · ubicación: contradicción de PROVINCIA (ambas declaradas) → veto;
+            # solo de DISTRITO (misma provincia) → penaliza, no veta (obras
+            # intermunicipales; y el MEF a veces registra la sede de la entidad).
+            prov_c, dist_c, _dep_c = _ubigeo_contra(sig_geo, ficha)
+            if prov_c and not ruc_match:
+                veto_geo = True
+            elif dist_c:
+                sc -= 25
+            # contratante municipal ≠ entidad municipal del CUI (mismo tipo):
+            # dos municipalidades distintas no contratan la misma obra
+            if not veto_geo and not ruc_match and _muni_contradice(exp, ficha):
+                veto_geo = True
         cand = {"cui": cui, "nombre_obra": (o.get("nombrObra") or ""),
                 "full": full,
                 "departamento": o.get("nombrDepartamento"),
@@ -900,9 +1083,18 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
         # el RUC del emisor en la obra es evidencia más fuerte que el rubro
         # inferido del texto → el veto no aplica a ruc_match
         if not ruc_match and _rubro_contradice(rub_cert, cand["nombre_obra"]):
+            cand["veto"] = "rubro"
             _traza().ev("veto_rubro", cui=cui, score=cand["score"],
                         rubro_cert=sorted(rub_cert),
                         rubro_obra=sorted(rubros_de(cand["nombre_obra"])),
+                        obra=cand["nombre_obra"])
+            vetados.append(cand)
+            continue
+        if veto_geo:
+            cand["veto"] = "ubigeo"
+            _traza().ev("veto_ubigeo", cui=cui, score=cand["score"],
+                        prov_cert=sorted(sig_geo["prov"]),
+                        prov_mef=(ficha or {}).get("prov"),
                         obra=cand["nombre_obra"])
             vetados.append(cand)
             continue
@@ -1020,6 +1212,22 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
                         "varios proyectos homónimos sin señal que los distinga "
                         "(nombres casi idénticos) — elegir el candidato correcto"),
                     "candidatos": candidatos, "obra": None}
+        # Un gemelo VETADO POR UBICACIÓN a punto similar también es ambigüedad: el
+        # veto pudo apartar al correcto (el MEF a veces registra la sede de la
+        # entidad, no la obra física — golden F8: 2131082, 2186244) y dejar ganar
+        # al homónimo equivocado. Peor que abstenerse → revisión con ambos visibles.
+        rival_geo = next((c for c in vetados
+                          if c.get("veto") == "ubigeo" and c["cui"] != best["cui"]
+                          and (best["score"] - c["score"]) <= _DELTA_EMPATE), None)
+        if rival_geo is not None and not _senal_dura(best):
+            _traza().ev("guard_empate_geo", best=best["cui"], vetado=rival_geo["cui"],
+                        gap=round(best["score"] - rival_geo["score"], 1))
+            return {"estado": "revision", "cui": None, "via": "NOMBRE",
+                    "decision": _con_pista_mef(exp,
+                        "un proyecto homónimo quedó apartado por estar en otra "
+                        "provincia y ninguna señal separa a los candidatos — "
+                        "confirmar cuál corresponde"),
+                    "candidatos": candidatos + [_proj(rival_geo)], "obra": None}
 
     if best and gate and best["score"] >= 70:
         return {"estado": "resuelto", "cui": best["cui"], "via": "NOMBRE",
@@ -1051,11 +1259,23 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
         return {"estado": "revision", "cui": None, "via": "NOMBRE",
                 "decision": motivo, "candidatos": candidatos, "obra": None}
     if not ranked and vetados:
-        # todos los candidatos eran de OTRO rubro (p.ej. deportivo cuando el
-        # certificado es de salud): revisión con los vetados visibles — antes
-        # esto era un mal-resuelto SILENCIOSO (caso Chinchinga)
-        motivo = _con_pista_mef(exp, "los candidatos hallados son de otro rubro de "
-                                     "servicio — confirmar")
+        # todos los candidatos fueron vetados: por RUBRO (deportivo vs salud, caso
+        # Chinchinga) o por UBICACIÓN (provincia contradictoria, F8) — revisión con
+        # los vetados visibles; antes esto era un mal-resuelto SILENCIOSO.
+        # Una experiencia PRIVADA con todos sus candidatos vetados sigue siendo
+        # privada (Trinity College): clasificarla, no mandarla a revisión de CUI.
+        if _es_experiencia_privada(exp):
+            return _clasificar_privada(exp, [_proj(c) for c in vetados[:3]],
+                                       vetados, base)
+        if all(c.get("veto") == "rubro" for c in vetados):
+            motivo = "los candidatos hallados son de otro rubro de servicio — confirmar"
+        elif all(c.get("veto") == "ubigeo" for c in vetados):
+            motivo = ("los candidatos hallados están en otra provincia que la del "
+                      "certificado — confirmar")
+        else:
+            motivo = ("los candidatos hallados contradicen el rubro o la ubicación "
+                      "del certificado — confirmar")
+        motivo = _con_pista_mef(exp, motivo)
         vetados.sort(key=lambda c: -c["score"])
         return {"estado": "revision", "cui": None, "via": "NOMBRE",
                 "decision": motivo, "candidatos": [_proj(c) for c in vetados[:3]],
