@@ -603,11 +603,13 @@ def _resolver(exp: dict, consulta: Consulta, base=None) -> dict:
     if r is not None:
         return r
 
-    # PASO 1 · gate de PRIVADAS
-    r = _gate_privada(exp)
-    if r is not None:
-        return r
-
+    # PÚBLICO-PRIMERO: ya NO hay gate de PRIVADAS aquí. Antes se cortaba por léxico
+    # (_gate_privada) ANTES de buscar; ahora se agota SIEMPRE toda la resolución
+    # pública y la clasificación de privada ocurre al FINAL (_clasificar_privada),
+    # solo cuando no hubo candidato público fiable. Una experiencia privada busca en
+    # InfoObras primero (decisión del cliente); el veto de rubro, el gate de tokens y
+    # el candado de entidad la protegen de resolverse mal (caso Catholic High School).
+    #
     # Sin gate de alcance por RUBRO: se resuelve TODO rubro y TODO tipo (obras y
     # consultorías/expedientes, que SÍ están en InfoObras — muchos con valorizaciones,
     # confirmado 2026-07-02). Un CUI citado ya se intentó arriba (PASO 0); acá se
@@ -704,18 +706,50 @@ def _paso_codigo_citado(exp: dict, consulta: Consulta, base=None) -> Optional[di
             "obra": None}
 
 
-def _gate_privada(exp: dict) -> Optional[dict]:
-    """PASO 1 · gate de PRIVADAS: si el cliente/promotor es privado, NO buscar por
-    nombre (InfoObras solo registra obra pública; buscar siempre matchea basura).
-    Un CUI citado (raro en privadas) ya se intentó arriba y gana si existe.
-    Devuelve el dict 'na' si es privada, o `None` para continuar."""
+def _con_pista_mef(exp: dict, motivo: str) -> str:
+    """Anexa al motivo de revisión el nombre oficial del MEF del CUI citado, si el
+    certificado citó un CUI que InfoObras no tenía pero el MEF sí (F3 · A1). Ayuda
+    al humano a confirmar en la cola de revisión."""
+    fmc = exp.get("_ficha_mef_citado")
+    if fmc and fmc.get("nombre"):
+        motivo += f" (según el MEF, el CUI citado corresponde a: {fmc['nombre']})"
+    return motivo
+
+
+def _clasificar_privada(exp: dict, candidatos: list, vetados: list, base=None) -> dict:
+    """PÚBLICO-PRIMERO · clasificación de PRIVADA al FINAL. Se invoca SOLO cuando la
+    resolución pública ya se agotó sin candidato fiable (no en loc_contra ni en
+    vetados-por-rubro, que conservan su propio motivo). Decide entre:
+
+      a. léxico `_RE_PRIVADA` (cliente/promotor privado explícito) → 'na' vía PRIVADA
+         (mismo retorno que el antiguo gate; el marcador lo consume el Excel/ZIP).
+      b. base MEF disponible + entidad_contratante NO vacía que NO se reconoce como
+         pública → revisión con `posible_privada=True` (posible obra privada sin
+         señal léxica: S.A.C., ONG, "ORDEN DE SAN AGUSTIN"…).
+      c. resto → revisión normal ("sin candidato fiable en InfoObras").
+    """
+    # a. señal léxica de cliente/obra privada (colegios particulares, I.E.P. + nombre…)
     if _es_experiencia_privada(exp):
         _traza().ev("gate_privada")
         return {"estado": "na", "cui": None, "via": "PRIVADA",
                 "decision": "cliente/obra privada — InfoObras solo registra obra "
                             "pública; verificación documental del certificado",
                 "candidatos": [], "obra": None}
-    return None
+    # b. sin señal léxica, pero la entidad contratante no se reconoce como pública
+    entidad = str(exp.get("entidad_contratante") or "").strip()
+    if base and base.disponible() and entidad and not base.es_entidad_publica(entidad)[0]:
+        _, score = base.es_entidad_publica(entidad)
+        _traza().ev("posible_privada", entidad=entidad, score=score)
+        motivo = _con_pista_mef(exp,
+                                "sin candidato público fiable; la entidad contratante "
+                                "no se reconoce como pública — posible obra privada")
+        return {"estado": "revision", "cui": None, "via": "NOMBRE",
+                "decision": motivo, "candidatos": candidatos, "obra": None,
+                "posible_privada": True}
+    # c. revisión normal
+    return {"estado": "revision", "cui": None, "via": "NOMBRE",
+            "decision": _con_pista_mef(exp, "sin candidato fiable en InfoObras"),
+            "candidatos": candidatos, "obra": None}
 
 
 def _recolectar_candidatos(exp: dict, consulta: Consulta, base=None) -> tuple[dict, bool]:
@@ -927,27 +961,39 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
     # servicio educativo…" de dos lugares distintos) NO identifica la obra — de ahí
     # salían los matches "que nada tienen que ver" (queja del cliente 14-jul).
     if best and (gate or (best["score"] >= 90 and n_hit >= 1)) and not loc_contra:
+        # CANDADO DE ENTIDAD PÚBLICA (público-primero): un candidato fuerte SOLO por
+        # similitud de nombre, cuya entidad contratante NO se reconoce como pública,
+        # se degrada a revisión — la evidencia de PROBABLE es más débil que RUC/NOMBRE.
+        # Las vías RUC y NOMBRE (arriba) no pasan por aquí: su evidencia es más fuerte.
+        # Sin base o entidad vacía → comportamiento actual (resuelve PROBABLE).
+        entidad = str(exp.get("entidad_contratante") or "").strip()
+        if base and base.disponible() and entidad \
+                and not base.es_entidad_publica(entidad)[0]:
+            _traza().ev("candado_entidad_probable", cui=best["cui"], entidad=entidad)
+            return {"estado": "revision", "cui": None, "via": "NOMBRE",
+                    "decision": "candidato fuerte pero la entidad contratante no se "
+                                "reconoce como pública — confirmar",
+                    "candidatos": candidatos, "obra": None}
         return {"estado": "resuelto", "cui": best["cui"], "via": "PROBABLE",
                 "decision": "candidato fuerte (conviene un vistazo)",
                 "candidatos": candidatos, "obra": obra_best}
     if loc_contra:
-        motivo = "la ubicación del certificado contradice al candidato"
-    elif not ranked and vetados:
+        motivo = _con_pista_mef(exp, "la ubicación del certificado contradice al candidato")
+        return {"estado": "revision", "cui": None, "via": "NOMBRE",
+                "decision": motivo, "candidatos": candidatos, "obra": None}
+    if not ranked and vetados:
         # todos los candidatos eran de OTRO rubro (p.ej. deportivo cuando el
         # certificado es de salud): revisión con los vetados visibles — antes
         # esto era un mal-resuelto SILENCIOSO (caso Chinchinga)
-        motivo = "los candidatos hallados son de otro rubro de servicio — confirmar"
+        motivo = _con_pista_mef(exp, "los candidatos hallados son de otro rubro de "
+                                     "servicio — confirmar")
         vetados.sort(key=lambda c: -c["score"])
-        candidatos = [_proj(c) for c in vetados[:3]]
-    else:
-        motivo = "sin candidato fiable en InfoObras"
-    # PISTA MEF (F3 · A1): si el CUI citado no estaba en InfoObras pero sí en el
-    # MEF, su nombre oficial ayuda al humano a confirmar en la cola de revisión.
-    fmc = exp.get("_ficha_mef_citado")
-    if fmc and fmc.get("nombre"):
-        motivo += f" (según el MEF, el CUI citado corresponde a: {fmc['nombre']})"
-    return {"estado": "revision", "cui": None, "via": "NOMBRE",
-            "decision": motivo, "candidatos": candidatos, "obra": None}
+        return {"estado": "revision", "cui": None, "via": "NOMBRE",
+                "decision": motivo, "candidatos": [_proj(c) for c in vetados[:3]],
+                "obra": None}
+    # Sin candidato público fiable: recién AQUÍ, agotada la resolución pública, se
+    # clasifica la PRIVADA (léxico → 'na'; entidad no-pública → posible_privada).
+    return _clasificar_privada(exp, candidatos, vetados, base)
 
 
 def resolver_obras(obras: list[dict], consulta: Consulta, base=None) -> list[dict]:

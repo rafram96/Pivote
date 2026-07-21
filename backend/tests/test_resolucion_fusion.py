@@ -184,6 +184,82 @@ def test_cui_citado_solo_en_mef_agrega_pista(base_real):
     assert "CHINCHINGA" in (r["decision"] or ""), r["decision"]
 
 
+# ── F5 · público-primero: candado de entidad + clasificación de privada al final ──
+
+def _fake_por_nombre(obras):
+    """InfoObras falso: `buscar` devuelve `obras`, `por_codigo` nada (fuerza el
+    PASO 2 por nombre para ejercitar las compuertas de _compuertas)."""
+    class _C:
+        def por_codigo(self, c): return []
+        def buscar(self, n): return list(obras)
+    return _C()
+
+
+# proyecto con 3 tokens distintivos (ALFA/BETA/GAMMA); la obra comparte SOLO ALFA
+# (n_hit=1) pero es muy similar en texto (score ≥ 90) → cae en la rama PROBABLE,
+# el único punto donde actúa el candado de entidad. La obra es de salud → el rubro
+# no la veta.
+_PROY_PROBABLE = "MEJORAMIENTO DEL HOSPITAL REGIONAL ALFA BETA GAMMA DE ICA"
+_OBRA_PROBABLE = _obra("2000001", 5, "MEJORAMIENTO DEL HOSPITAL REGIONAL ALFA DE ICA",
+                       depto="ICA")
+
+
+def test_candado_probable_no_bloquea_entidad_publica(base_real):
+    """(2) El candado de entidad NO degrada un PROBABLE cuya entidad contratante SÍ
+    se reconoce como pública (INEN / IMARPE están en las fixtures mini)."""
+    for entidad in ("INSTITUTO NACIONAL DE ENFERMEDADES NEOPLASICAS - INEN", "IMARPE"):
+        exp = {"proyecto": _PROY_PROBABLE, "fecha_inicial": "2020-01-01",
+               "entidad_contratante": entidad}
+        r = resolver(exp, _fake_por_nombre([_OBRA_PROBABLE]), base=base_real)
+        assert r["estado"] == "resuelto" and r["via"] == "PROBABLE", (entidad, r)
+        assert r["cui"] == "2000001"
+        assert "posible_privada" not in r
+
+
+def test_candado_probable_degrada_entidad_no_reconocida(base_real):
+    """(4) Un candidato fuerte por nombre cuya entidad contratante NO se reconoce
+    como pública (una S.A.C.) se degrada de PROBABLE a revisión — sin resolver."""
+    exp = {"proyecto": _PROY_PROBABLE, "fecha_inicial": "2020-01-01",
+           "entidad_contratante": "CONSTRUCTORA ALFA BETA S.A.C."}
+    r = resolver(exp, _fake_por_nombre([_OBRA_PROBABLE]), base=base_real)
+    assert r["estado"] == "revision", r
+    assert r["cui"] is None
+    assert "no se reconoce como pública" in r["decision"]
+    # los candidatos siguen visibles para el humano
+    assert any(c["cui"] == "2000001" for c in r["candidatos"]), r
+
+
+def test_candado_probable_inerte_sin_base():
+    """(3) Sin base (base=None) el candado es INERTE: el mismo PROBABLE resuelve, y
+    la clasificación de privada solo puede ser léxica (comportamiento como hoy salvo
+    el orden — la búsqueda ya ocurrió)."""
+    exp = {"proyecto": _PROY_PROBABLE, "fecha_inicial": "2020-01-01",
+           "entidad_contratante": "CONSTRUCTORA ALFA BETA S.A.C."}
+    r = resolver(exp, _fake_por_nombre([_OBRA_PROBABLE]), base=None)
+    assert r["estado"] == "resuelto" and r["via"] == "PROBABLE", r
+    assert r["cui"] == "2000001"
+    # sin base, una experiencia sin señal léxica y sin match NO es posible_privada:
+    # cae a la revisión normal "sin candidato fiable".
+    r2 = resolver({"proyecto": "Construccion del local comunal de Santa Rosa",
+                   "entidad_contratante": "ORDEN DE SAN AGUSTIN"},
+                  _fake_por_nombre([]), base=None)
+    assert r2["estado"] == "revision" and "posible_privada" not in r2, r2
+    assert "sin candidato fiable" in r2["decision"]
+
+
+def test_posible_privada_entidad_no_publica(base_real):
+    """(1) Experiencia SIN señal léxica de privada, SIN match público y con entidad
+    contratante no reconocida como pública ('ORDEN DE SAN AGUSTIN', score 82 < 90)
+    → revisión con `posible_privada=True` y el motivo nuevo."""
+    exp = {"proyecto": "Construccion del local comunal de Santa Rosa",
+           "entidad_contratante": "ORDEN DE SAN AGUSTIN"}
+    r = resolver(exp, _fake_por_nombre([]), base=base_real)
+    assert r["estado"] == "revision" and r["via"] == "NOMBRE", r
+    assert r.get("posible_privada") is True, r
+    assert "no se reconoce como pública" in r["decision"]
+    assert "posible obra privada" in r["decision"]
+
+
 # ── base=None: forma IDÉNTICA a la histórica (sin 'origen', sin pista) ────────
 
 def test_base_none_no_agrega_origen_ni_pista():

@@ -202,17 +202,21 @@ def test_es_experiencia_expediente_detecta_por_nombre():
 
 # ── Casos REALES de la queja del cliente (14-jul): privadas + matches basura ──
 
-def test_privada_no_se_busca_en_infoobras():
-    """Queja real: colegios PRIVADOS (Catholic High School, Trinity College)
-    matcheaban obras públicas ajenas ('el código es de una carrera'). Si el
-    cliente/promotor es privado, NO se busca: via PRIVADA, sin obra, sin revisión."""
+def test_privada_se_clasifica_al_final():
+    """PÚBLICO-PRIMERO: colegios PRIVADOS (Catholic High School, Trinity College)
+    AHORA SÍ se buscan en InfoObras (se agota primero toda la resolución pública),
+    pero al no haber candidato público fiable se clasifican al FINAL como privadas:
+    via PRIVADA, sin obra, sin revisión — y ninguna obra basura sale resuelta."""
     llamadas = []
 
     class ConsultaEspia:
         def por_codigo(self, c): return []
+        # devuelve una obra educativa AJENA (mismo rubro → no la veta el rubro, pero
+        # sin nombre propio compartido → no pasa el gate): jamás debe resolverse.
         def buscar(self, n): llamadas.append(n); return [
-            {"nombrObra": "MEJORAMIENTO DE LA CARRETERA X", "codUniqInv": "2999999",
-             "codigoObra": 1, "nombrDepartamento": "LIMA"}]
+            {"nombrObra": "MEJORAMIENTO DEL SERVICIO EDUCATIVO INICIAL DE LA I.E. 1234, "
+                          "DISTRITO DE SANTA", "codUniqInv": "2999999",
+             "codigoObra": 1, "nombrDepartamento": "ANCASH"}]
 
     casos = [
         {"proyecto": "Ampliación de la Infraestructura Educativa de la Institución "
@@ -226,7 +230,8 @@ def test_privada_no_se_busca_en_infoobras():
         r = resolver(exp, ConsultaEspia())
         assert r["estado"] == "na" and r["via"] == "PRIVADA", exp["proyecto"][:40]
         assert r["obra"] is None
-    assert llamadas == []          # JAMÁS tocó la búsqueda por nombre
+        assert r["cui"] is None
+    assert llamadas != []          # AHORA sí busca (público-primero), pero clasifica al final
 
 
 def test_es_experiencia_privada_no_confunde_al_emisor():
