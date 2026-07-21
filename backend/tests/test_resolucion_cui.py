@@ -67,14 +67,22 @@ _EXP = {"proyecto": "Mejoramiento del Hospital Regional de Tacna, Tacna",
 _NOMBRE = "MEJORAMIENTO DEL HOSPITAL REGIONAL DE TACNA"
 
 
-def test_resolver_determinista_entre_cuis_con_score_igual():
-    # 3 CUIs distintos con nombre/departamento idénticos → mismo score. El
-    # desempate por menor CUI debe elegir SIEMPRE el mismo, sin importar el orden.
+def test_empate_entre_cuis_identicos_abstiene_deterministamente():
+    # 3 CUIs distintos con nombre/departamento idénticos → mismo score y ninguna
+    # señal dura los distingue: es el caso HOMÓNIMO puro. El guard de empate (F7)
+    # NO arriesga un CUI — abstiene (revisión). La DETERMINÍSTICA se conserva: el
+    # resultado es el mismo en las 6 permutaciones y el candidato de cabecera es
+    # siempre el CUI menor (orden reproducible para la cola humana).
     obras = [_obra("2000003", 80, _NOMBRE), _obra("2000001", 50, _NOMBRE),
              _obra("2000002", 65, _NOMBRE)]
-    elegidos = {resolver(_EXP, _FakeConsulta(list(p)))["cui"]
-                for p in itertools.permutations(obras)}
-    assert elegidos == {"2000001"}  # el CUI menor, en las 6 permutaciones
+    estados, cabeceras = set(), set()
+    for p in itertools.permutations(obras):
+        r = resolver(_EXP, _FakeConsulta(list(p)))
+        assert r["estado"] == "revision" and r["cui"] is None, r
+        estados.add(r["estado"])
+        cabeceras.add(r["candidatos"][0]["cui"])
+    assert estados == {"revision"}       # abstención estable en las 6 permutaciones
+    assert cabeceras == {"2000001"}      # cabecera = CUI menor, orden determinístico
 
 
 def test_resolver_determinista_mismo_cui_varias_obras():

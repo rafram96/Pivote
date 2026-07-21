@@ -90,20 +90,24 @@ def _mef_cand(cui, nombre, score, dpto="LIMA", entidad="GOBIERNO REGIONAL"):
 
 # ── A2 · Chinchinga: nombre corrupto en InfoObras, rescatado por el MEF ───────
 
-def test_chinchinga_fusion_rescata_por_codigo(base_real):
-    """InfoObras solo trae basura por nombre; el CUI correcto (salud) existe en el
-    MEF. La fusión lo trae por `por_codigo` y, con el nombre oficial del MEF, resuelve
-    al CUI correcto marcado origen 'mef'."""
+def test_chinchinga_fusion_rescata_pero_no_resuelve_sin_corroborar(base_real):
+    """CANDADO MEF (F7): InfoObras solo trae basura por nombre; el CUI correcto
+    existe en el MEF y la fusión lo TRAE por `por_codigo` (queda VISIBLE en la cola
+    de revisión, origen 'mef'), pero un candidato que SOLO existe por la fusión NO
+    puede GANAR por puro score de nombre — sin señal dura (RUC / N° de institución /
+    entidad) va a REVISIÓN, no se auto-resuelve. Esto ataca los homónimos estatales
+    de nombre limpio que inflaban el score (diagnóstico F7)."""
     proyecto = ("MEJORAMIENTO Y AMPLIACION DE LOS SERVICIOS DEL PUESTO DE SALUD DEL "
                 "CENTRO POBLADO DE CHINCHINGA DEL DISTRITO DE SAN PABLO DE PILLAO - "
                 "PROVINCIA DE HUANUCO")
-    # por_codigo del CUI correcto devuelve un registro con NOMBRE CORRUPTO
     consulta = _Consulta(por_cod={
         "2376130": [_obra("2376130", 55, "REGISTRO SIN NOMBRE 44821", depto="HUANUCO")]})
     r = resolver({"proyecto": proyecto}, consulta, base=base_real)
-    assert r["estado"] == "resuelto", r
-    assert r["cui"] == "2376130", r
-    assert any(c.get("origen") == "mef" for c in r["candidatos"]), r
+    assert r["estado"] == "revision", r          # no resuelve sin corroboración
+    assert r["cui"] is None, r
+    # pero el candidato rescatado por la fusión SIGUE visible para el humano
+    assert any(c.get("cui") == "2376130" and c.get("origen") == "mef"
+               for c in r["candidatos"]), r
 
 
 # ── A2 · umbral de score: candidato débil NO dispara fetch ───────────────────
@@ -141,7 +145,9 @@ def test_portal_no_responde_en_un_fetch_no_rompe():
     exp = {"proyecto": "Creación del Hospital Regional de Lircay, Huancavelica"}
     r = resolver(exp, consulta, base=base)     # no debe lanzar
     assert set(consulta.llamadas) == {"2000001", "2200145"}   # ambos intentados
-    assert r["cui"] == "2200145", r            # el bueno resolvió pese a la caída
+    # la caída de un fetch no rompe: el otro candidato mef se recolecta y queda
+    # VISIBLE. Sin corroboración no gana (candado F7), pero la experiencia no crashea.
+    assert any(c.get("cui") == "2200145" for c in r["candidatos"]), r
 
 
 # ── A3 · señal de entidad: +15 solo con match ≥ 90 ───────────────────────────
@@ -280,3 +286,68 @@ def test_base_none_no_agrega_origen_ni_pista():
     assert r["estado"] == "resuelto" and r["cui"] == "2777777"
     # sin base: los candidatos NO llevan 'origen' (contrato idéntico al histórico)
     assert all("origen" not in c for c in r["candidatos"]), r
+
+
+# ── F7 · CANDADO MEF: solo-mef gana SOLO con corroboración dura ───────────────
+
+def test_mef_con_num_de_institucion_si_resuelve():
+    """Un candidato de origen 'mef' (solo la fusión lo trajo) SÍ resuelve cuando una
+    señal DURA lo corrobora: aquí el N° de I.E. del certificado también está en el
+    nombre de la obra que trajo `por_codigo`. Es el contrapunto del candado."""
+    base = FakeBase([_mef_cand("2000050", "IE 1234 SANTA ROSA", 90, dpto="TACNA")])
+    consulta = _Consulta(por_cod={"2000050": [_obra(
+        "2000050", 9, "MEJORAMIENTO DE LA I.E. N 1234 SANTA ROSA DE TACNA", "TACNA")]})
+    exp = {"proyecto": "Mejoramiento de la I.E. N° 1234 Santa Rosa de Tacna",
+           "fecha_inicial": "2019-01-01"}
+    r = resolver(exp, consulta, base=base)
+    assert r["estado"] == "resuelto" and r["cui"] == "2000050", r
+    assert any(c.get("origen") == "mef" for c in r["candidatos"]), r
+
+
+def test_mef_con_ruc_del_emisor_si_resuelve():
+    """Otra corroboración dura: el RUC del emisor es ejecutor/supervisor de la obra
+    mef → resuelve vía RUC pese a venir solo de la fusión."""
+    base = FakeBase([_mef_cand("2000060", "OBRA X", 88, dpto="TACNA")])
+    obra = _obra("2000060", 9, "REGISTRO SIN NOMBRE 771", "TACNA")
+    obra["rucEjecutor"] = "20123456789"
+    consulta = _Consulta(por_cod={"2000060": [obra]})
+    exp = {"proyecto": "Mejoramiento del servicio X de Tacna",
+           "ruc_emisor": "20123456789", "fecha_inicial": "2019-01-01"}
+    r = resolver(exp, consulta, base=base)
+    assert r["estado"] == "resuelto" and r["via"] == "RUC" and r["cui"] == "2000060", r
+
+
+# ── F7 · GUARD DE EMPATE entre CUIs distintos ────────────────────────────────
+
+def _fake_lista(obras):
+    class _C:
+        def por_codigo(self, c): return []
+        def buscar(self, n): return list(obras)
+    return _C()
+
+
+def test_empate_homonimos_sin_senal_abstiene():
+    """Dos CUIs distintos con nombre casi idéntico, score ≈ igual y SIN señal que
+    los separe → el guard de empate manda a REVISIÓN (no arriesga un CUI). Funciona
+    sin base (base=None): el candado no depende del MEF."""
+    obras = [_obra("2000010", 1, "MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL "
+                   "HOSPITAL SANTA ROSA DE ICA", "ICA"),
+             _obra("2000011", 2, "MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL "
+                   "HOSPITAL SANTA ROSA DE ICA", "ICA")]
+    exp = {"proyecto": "Mejoramiento de los Servicios de Salud del Hospital "
+                       "Santa Rosa de Ica", "fecha_inicial": "2019-01-01"}
+    r = resolver(exp, _fake_lista(obras), base=None)
+    assert r["estado"] == "revision" and r["cui"] is None, r
+    assert "homónimos" in r["decision"], r["decision"]
+    assert len(r["candidatos"]) >= 2, r          # ambos visibles para la cola humana
+
+
+def test_empate_roto_por_numero_de_institucion_resuelve():
+    """El mismo empate PERO una obra trae el N° de I.E. del certificado y la otra no:
+    la señal dura rompe el empate → resuelve al candidato corroborado (no abstiene)."""
+    obras = [_obra("2000020", 1, "MEJORAMIENTO DE LA I.E. N 555 SANTA ROSA DE ICA", "ICA"),
+             _obra("2000021", 2, "MEJORAMIENTO DE LA I.E. N 999 SANTA ROSA DE ICA", "ICA")]
+    exp = {"proyecto": "Mejoramiento de la I.E. N° 555 Santa Rosa de Ica",
+           "fecha_inicial": "2019-01-01"}
+    r = resolver(exp, _fake_lista(obras), base=None)
+    assert r["estado"] == "resuelto" and r["cui"] == "2000020", r

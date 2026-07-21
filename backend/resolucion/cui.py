@@ -871,6 +871,12 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
         ruc_match = bool(ruc_cert and ruc_cert in (rej, rsup))
         sc = _puntuar(o, pn, deptos_hint, anio_cert, nums_cert) + (30 if ruc_match else 0)
         full = norm(o.get("nombrObra") or "")
+        # señales DURAS de identidad (para la corroboración del candado mef, abajo):
+        # el N° de institución del cert que también está en la obra, y la entidad
+        # contratante que calza con la ficha MEF. El RUC (ruc_match) ya se calculó.
+        nums_cand = _numero_obra(o.get("nombrObra") or "")
+        num_match = bool(nums_cert and nums_cand and (nums_cert & nums_cand))
+        ent_match = False
         if base_ok:
             # el score de nombre y la compuerta de tokens se apoyan también en el
             # nombre OFICIAL del MEF (rescata nombres corruptos en InfoObras)
@@ -878,11 +884,16 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
             ficha = _ficha_mef(cui, base, fichas_mef)
             if ficha and ficha.get("nombre"):
                 full = (full + " " + norm(ficha["nombre"])).strip()
+            ent_cert = norm(exp.get("entidad_contratante") or "")
+            ent_mef = norm((ficha or {}).get("entidad") or "")
+            if ent_cert and ent_mef and fuzz.token_set_ratio(ent_cert, ent_mef) >= 90:
+                ent_match = True
         cand = {"cui": cui, "nombre_obra": (o.get("nombrObra") or ""),
                 "full": full,
                 "departamento": o.get("nombrDepartamento"),
                 "obra_id": o.get("codigoObra") or o.get("obraId"),
-                "ruc_match": ruc_match, "score": round(sc, 1)}
+                "ruc_match": ruc_match, "num_match": num_match,
+                "ent_match": ent_match, "score": round(sc, 1)}
         if o.get("_origen"):
             cand["origen"] = o["_origen"]
             origenes.setdefault(cui, set()).add(o["_origen"])
@@ -930,6 +941,35 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
     _traza().ev("ranking", top=[f"{c['cui']}·{c['score']}" for c in ranked[:3]],
                 vetados=len(vetados))
 
+    # ── CANDADO MEF (F7) ─────────────────────────────────────────────────────
+    # Un candidato de origen 'mef' (solo la FUSIÓN lo trajo; InfoObras NO lo
+    # devolvió por nombre) NO es elegible como `best` para RESOLVER salvo una señal
+    # DURA que lo confirme: RUC del emisor en la obra, N° de institución del cert
+    # presente en la obra, o entidad contratante ≈ ficha MEF (token_set_ratio ≥ 90).
+    #
+    # Diagnóstico F7: la fusión mete homónimos estatales con nombre oficial limpio;
+    # `_bonus_mef` les subía el score Y les prestaba tokens al `full`, así el
+    # homónimo (mismo departamento, otra obra) pasaba la compuerta y ganaba por puro
+    # nombre → +15 mal-resueltos silenciosos, casi todos via=NOMBRE sobre prefijos
+    # genéricos ("MEJORAMIENTO DE LA CAPACIDAD RESOLUTIVA…", "…EDUCACIÓN… I.E. N°…").
+    # El departamento NO corrobora: los homónimos estatales viven en el MISMO dpto
+    # que la obra real, así que un match de dpto no los distingue (medido en el golden).
+    #
+    # Se DEMOTA, no se descarta: el candidato mef sigue visible en `candidatos` para
+    # la cola humana; el mejor candidato ELEGIBLE de más abajo ocupa el lugar de best.
+    # Esto además DESBLOQUEA correctos que un mef sin compuerta tapaba en el #1
+    # (p. ej. Pichanaki, San Ignacio: el mef gate=0 quedaba #1 por 0.3 pts y hundía
+    # al InfoObras correcto a revisión).
+    def _mef_sin_corroborar(c: dict) -> bool:
+        return (c.get("origen") == "mef"
+                and not (c.get("ruc_match") or c.get("num_match") or c.get("ent_match")))
+
+    best = next((c for c in ranked if not _mef_sin_corroborar(c)), None)
+    if ranked and (best is None or ranked[0] is not best):
+        _traza().ev("candado_mef_demote", best=(best or {}).get("cui"),
+                    demotados=[f"{c['cui']}·{c['score']}" for c in ranked
+                               if _mef_sin_corroborar(c)][:3])
+
     n_hit = len(toks & _palabras(best["full"])) if best else 0
     gate = bool(best and toks and n_hit >= max(1, (len(toks) + 1) // 2))
     loc_contra = bool(deptos_hint and best and best.get("departamento")
@@ -952,6 +992,35 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
         return {"estado": "resuelto", "cui": best["cui"], "via": "RUC",
                 "decision": "el RUC del emisor es ejecutor/supervisor de la obra",
                 "candidatos": candidatos, "obra": obra_best}
+
+    # ── GUARD DE EMPATE ENTRE CUIs DISTINTOS (F7) ────────────────────────────
+    # Si el mejor candidato ELEGIBLE y otro CUI distinto quedan a ≤ DELTA puntos y
+    # NINGUNA señal DURA los separa (RUC / N° de institución / entidad ≈ ficha MEF
+    # en exactamente uno), NO se resuelve: son proyectos homónimos con nombre casi
+    # idéntico (mismo prefijo genérico "MEJORAMIENTO DE LA CAPACIDAD RESOLUTIVA…" o
+    # "…EDUCACIÓN… I.E. N°…") y el orden entre ellos es ruido de similitud, no
+    # identidad. Se manda a revisión con los candidatos visibles para que el humano
+    # elija. El departamento NO cuenta como señal separadora (los homónimos viven en
+    # el mismo dpto). DELTA=4 calibrado contra el golden: corta 6 mal-resueltos y
+    # solo roza 3 correctos contestados (best==verdad a <4 pts de un gemelo), coste
+    # honesto — un falso "a revisión" cuesta minutos; un falso CUMPLE, el producto.
+    _DELTA_EMPATE = 4.0
+    if best and not _es_experiencia_privada(exp):
+        def _senal_dura(c: dict) -> bool:
+            return bool(c.get("ruc_match") or c.get("num_match") or c.get("ent_match"))
+        elegibles = [c for c in ranked if not _mef_sin_corroborar(c)]
+        otro = next((c for c in elegibles if c["cui"] != best["cui"]), None)
+        if (otro is not None
+                and (best["score"] - otro["score"]) <= _DELTA_EMPATE
+                and _senal_dura(best) == _senal_dura(otro)):
+            _traza().ev("guard_empate", best=best["cui"], otro=otro["cui"],
+                        gap=round(best["score"] - otro["score"], 1))
+            return {"estado": "revision", "cui": None, "via": "NOMBRE",
+                    "decision": _con_pista_mef(exp,
+                        "varios proyectos homónimos sin señal que los distinga "
+                        "(nombres casi idénticos) — elegir el candidato correcto"),
+                    "candidatos": candidatos, "obra": None}
+
     if best and gate and best["score"] >= 70:
         return {"estado": "resuelto", "cui": best["cui"], "via": "NOMBRE",
                 "decision": "establecimiento verificado por nombre",
@@ -991,6 +1060,14 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
         return {"estado": "revision", "cui": None, "via": "NOMBRE",
                 "decision": motivo, "candidatos": [_proj(c) for c in vetados[:3]],
                 "obra": None}
+    if best is None and ranked and not _es_experiencia_privada(exp):
+        # todos los candidatos de arriba son de origen 'mef' sin corroborar (candado
+        # F7): no se resuelve, pero quedan visibles para que el humano elija.
+        motivo = _con_pista_mef(exp, "el/los candidato(s) hallados provienen solo de "
+                                "la base MEF y ninguna señal (RUC, N° de institución o "
+                                "entidad) los confirma en InfoObras — elegir en revisión")
+        return {"estado": "revision", "cui": None, "via": "NOMBRE",
+                "decision": motivo, "candidatos": candidatos, "obra": None}
     # Sin candidato público fiable: recién AQUÍ, agotada la resolución pública, se
     # clasifica la PRIVADA (léxico → 'na'; entidad no-pública → posible_privada).
     return _clasificar_privada(exp, candidatos, vetados, base)
