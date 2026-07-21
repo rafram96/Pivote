@@ -44,6 +44,16 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
      así la extracción es la misma entre corridas (evita que una vez tomes el SNIP
      y otra el CUI). El `proyecto` queda con el nombre de la obra **verbatim y
      completo**, SIN pegarle la cola de metadata ("– SNIP 71857; 27,420 m²; S/.118M").
+     **PERO conserva el ENVOLTORIO del desempeño cuando exista**: si el cert dice
+     "…en la **Elaboración del Expediente Técnico**: «MEJORAMIENTO…»" (o "estudio
+     de…", "supervisión del estudio…"), el `proyecto` empieza con ese envoltorio
+     ("Elaboración del Expediente Técnico: MEJORAMIENTO…"). El backend clasifica
+     expediente-vs-obra por esa frase (un expediente enruta a verificación
+     MEF/contrato; una obra, a valorizaciones) y su resolver ya sabe quitarse el
+     prefijo para buscar el CUI — omitirlo hace que un expediente se trate como
+     obra (caso real San Isidro P1:E2, Mórrope). Captura también el
+     `cargo_ocupado` tal cual ("JEFE DE PROYECTO en la Elaboración del ET" →
+     cargo "Jefe de Proyecto"; el desempeño va en el `proyecto`).
    - **Cert MULTI-OBRA (varias obras, un solo vínculo)**: si la constancia
      documenta **un periodo continuo** pero enumera **varios proyectos/obras
      distintos, cada uno con su propio CUI/código** (típico de roles de *gestión

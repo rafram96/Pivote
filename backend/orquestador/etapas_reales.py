@@ -319,6 +319,15 @@ class EtapaInfoObrasReal:
         # 0 = ninguna (solo transporte). N>0 = tope (solo para acotar pruebas).
         _raw = os.getenv("PIVOTE_MAX_DESCARGAS")
         self.max_descargas = None if _raw is None or not _raw.strip() else int(_raw)
+        # MODO EXPEDIENTES (camino A): el concurso completo es de elaboración de
+        # expedientes técnicos/estudios → TODA experiencia se trata como expediente
+        # (verificación MEF/contrato + hito de aprobación; sin clamp por
+        # valorizaciones de la construcción posterior). Caso San Isidro: el cert
+        # dice "Elaboración del ET: «X»" pero la skill guardó solo «X» y el
+        # clasificador por nombre enrutaba 51/68 como obra. La detección por texto
+        # (es_expediente_exp) sigue siendo el default cuando el modo no está.
+        self.forzar_expedientes = (os.getenv("PIVOTE_FORZAR_EXPEDIENTES") or "") \
+            .strip() in ("1", "true", "si", "sí")
 
     def _fetch(self, cui: str, cert_ini=None, cert_fin=None, obra_id=None):
         if self._fetcher:
@@ -382,11 +391,11 @@ class EtapaInfoObrasReal:
             # valorizaciones + nombre de expediente + el hito "Aprobación del proyecto"
             # trajo el documento. Solo entonces cuenta por el periodo del certificado
             # (no se le aplica el clamp fuera_de_ventana ni se manda a revisión).
-            from resolucion.cui import _es_experiencia_expediente
+            from resolucion.cui import es_expediente_exp
             _avances = getattr(obra, "avances", []) or []
             _aprob_exp = getattr(obra, "aprobacion_expediente", None)
-            es_exp_aprobado = (not _avances and _aprob_exp is not None
-                               and _es_experiencia_expediente(_e.get("proyecto") or ""))
+            _es_exped = self.forzar_expedientes or es_expediente_exp(_e)
+            es_exp_aprobado = (not _avances and _aprob_exp is not None and _es_exped)
             periodos = periodos_inactividad(getattr(obra, "avances", []) or [])
             enr["paralizaciones"] = [
                 {"inicio": p["inicio"].isoformat(), "fin": p["fin"].isoformat(),
@@ -396,7 +405,9 @@ class EtapaInfoObrasReal:
             # valorizaciones no cuenta como experiencia (sin valoriz que lo
             # respalde). Se inyecta como descuento para que reglas/ lo reste sin
             # tocar su firma. Disjunto de los huecos internos → sin doble conteo.
-            if not es_exp_aprobado:
+            # A un EXPEDIENTE no se le aplica: el estudio precede a la construcción
+            # y sus fechas jamás caen dentro de las valorizaciones de la obra.
+            if not (es_exp_aprobado or _es_exped):
                 enr["paralizaciones"] += [
                     {"inicio": a.isoformat(), "fin": b.isoformat(), "tipo": "fuera_de_ventana"}
                     for a, b in _fuera_de_ventana(getattr(obra, "avances", []) or [], cert_ini, cert_fin)
@@ -426,7 +437,7 @@ class EtapaInfoObrasReal:
             # Verificación de EXPEDIENTES contra el MEF (T-003): si la experiencia es
             # de expediente y hay CUI resuelto, cruzar contra el Banco de Inversiones
             # (contrato/contratista/resolución). Best-effort, no bloquea.
-            if cui and _es_experiencia_expediente(_e.get("proyecto") or ""):
+            if cui and _es_exped:
                 # el SNIP de la obra de InfoObras mejora la cobertura de contratos del MEF
                 _snip = str((getattr(obra, "raw_busqueda", {}) or {}).get("codSnip") or "").strip()
                 _vmef = self._verificar_expediente_mef(_e, cui, _snip)

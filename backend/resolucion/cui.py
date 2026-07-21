@@ -144,6 +144,20 @@ def _es_experiencia_expediente(proyecto: str) -> bool:
                 or _RE_EXPEDIENTE.search(expandir_abrev(proyecto)))
 
 
+def es_expediente_exp(exp: dict) -> bool:
+    """Clasificación expediente/obra mirando TODA la evidencia de la experiencia,
+    no solo `proyecto`. Caso real (San Isidro P1:E2): el certificado dice "se ha
+    desempeñado … en la Elaboración del Expediente Técnico: «MEJORAMIENTO …»" y
+    la skill guarda en `proyecto` solo el nombre entre comillas — la palabra
+    "expediente" vive en el DESEMPEÑO (objeto/cargo), y clasificar solo por el
+    nombre enruta el expediente como obra (descarga valorizaciones en vez del
+    contrato/resolución del MEF). Campos: proyecto + objeto + cargo_ocupado
+    (NO observaciones: mencionan "expediente" de pasada)."""
+    texto = " ".join(str(exp.get(k) or "") for k in
+                     ("proyecto", "objeto", "cargo_ocupado"))
+    return _es_experiencia_expediente(texto)
+
+
 def establecimiento(proyecto: str) -> str:
     t = _sin_prefijo(proyecto)
     m = _RE_EST.search(t)
