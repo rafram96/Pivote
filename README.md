@@ -8,6 +8,11 @@ propuestas OSCE, y el backend on-prem verifica, enriquece con cruces oficiales
 > las 4 piezas. El contrato técnico detallado está en
 > [`docs/contrato/contrato_refactor.md`](docs/contrato/contrato_refactor.md).
 
+> 🤖 **Agentes de IA** (Claude Code, Gemini CLI, Codex…): la base de
+> conocimiento persistente del proyecto vive en **[`.ai/`](.ai/README.md)** —
+> empezar por [`.ai/handoffs/current.md`](.ai/handoffs/current.md). Es la única
+> fuente de verdad de contexto; manténla sincronizada con cada cambio.
+
 ## Las 4 piezas
 
 | # | Pieza | Corre en | Código |

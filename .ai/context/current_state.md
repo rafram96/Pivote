@@ -1,0 +1,51 @@
+# Estado actual del proyecto
+
+> Última actualización: **2026-07-22** · rama de trabajo: `sonda/refactor-cui`
+
+## Terminado y validado (sin desplegar)
+
+- **Refactor del resolver de CUI (T-008)** — rama `sonda/refactor-cui`, 13
+  commits (`a732936…f2bde36`): base local MEF + público-primero + vetos de
+  identidad + candados de abstención + camino A/B. Golden 277 casos: errores
+  silenciosos **16 → 10**, cero regresiones. 268 tests verdes.
+- **Camino A (expedientes)**: clasificador por toda la evidencia + modo
+  `PIVOTE_FORZAR_EXPEDIENTES=1`; validado con el concurso San Isidro.
+- **Skill optimizada**: Paso 4.5 acotado (elimina fuga de ~3M tokens/corrida);
+  prompt del extractor conserva el envoltorio "Elaboración del ET:".
+- **Análisis San Isidro CP-01-2026 entregado** al usuario: job `b4f385c31811`
+  (camino A), Excel 12.5 MB con imágenes, 44 CUIs, 28 verificados en MEF.
+- **Documentos del paquete de extras v3** (docs/nuevos_modulos/): 4 HTML
+  actualizados con T-008 + `arquitectura-sistema.html` nuevo.
+- Cotización interna lista: `docs/comercial/planeacion-v2-para-rafael.md`
+  (gitignored — no va al repo).
+
+## En progreso
+
+- Nada activo en código. Fase comercial: presentar extras a Manuel
+  (T-003+T-008 entregados S/5,400; T-004/005/006 por desarrollar S/4,400).
+
+## Problemas abiertos
+
+- Corridas camino A: aún se **descargan y pintan** secciones de obra
+  (valorizaciones ~805 archivos) en expedientes — cosmético/pesado, no afecta
+  veredictos. Advertencias COBERTURA se emiten para expedientes (no descuentan).
+- 2 casos de la auditoría con "verdad" dudosa (2195439 Tocache/Loreto,
+  2064566 Cotabambas/Antabamba) — re-revisar con Manuel.
+- Divergencia schema.sql vs DDL real de Postgres (ver architecture/database.md).
+- SUNAT con error_parcial intermitente en corridas largas (portal, no bug).
+
+## Riesgos
+
+- La rama `sonda/refactor-cui` NO está mergeada a `demo` ni desplegada: el
+  server corre el código viejo. La skill optimizada requiere el backend nuevo
+  (si se entrega el plugin sin desplegar backend, los CUIs null no se resuelven
+  bien para expedientes).
+- Límite de gasto mensual de Claude alcanzado el 21-jul (los subagentes pueden
+  morir a mitad — el trabajo F8 se terminó a mano por eso).
+
+## Siguiente prioridad recomendada
+
+1. Merge `sonda/refactor-cui` → `demo` + deploy al server (base MEF de 26 MB +
+   crontab) + rebuild del plugin (`build.ps1`) para Manuel — **como paquete**.
+2. Filtro de secciones de descarga/Excel en modo camino A.
+3. Reunión de cotización con los 5 HTML de docs/nuevos_modulos/.
