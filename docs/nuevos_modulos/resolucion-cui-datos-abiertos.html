@@ -110,7 +110,7 @@
 <body>
 
 <h1>Resolución de CUI + Datos Abiertos SEACE</h1>
-<p class="sub">Cómo se enlaza cada experiencia con su proceso SEACE <b>sin captcha</b>: flujo de resolución/confirmación del CUI, fuentes, y evidencia medida con los 29 concursos reales de <code>datos_pivote</code> — 19&nbsp;jul&nbsp;2026 · rama <code>sonda/seace</code></p>
+<p class="sub">Cómo se enlaza cada experiencia con su proceso SEACE <b>sin captcha</b>: flujo de resolución/confirmación del CUI, fuentes, y evidencia medida con los 29 concursos reales de <code>datos_pivote</code> — <b>v2 · 22&nbsp;jul&nbsp;2026</b>: el paso 1 ya es el resolver NUEVO (T-008, rama <code>sonda/refactor-cui</code>, construido y validado)</p>
 
 <div class="leyenda">
   <span><i class="chip ok"></i> Validado en vivo con datos reales</span>
@@ -128,9 +128,12 @@
     <div class="flecha"></div>
 
     <div class="paso">
-      <div class="titulo"><span class="num">1</span><b>Resolver CUI — MEF (T-003, en producción)</b></div>
-      <p>Búsqueda por nombre sin captcha (SSI por código). Candidatos → filtro exacto + preferencia 7 dígitos + solape de valorizaciones.</p>
-      <ul><li class="ok"><span>Si el certificado ya trae CUI → paso directo</span><span class="tag ok">✔ producción</span></li></ul>
+      <div class="titulo"><span class="num">1</span><b>Resolver CUI — base local MEF + identidad (T-008, construido)</b></div>
+      <p>Base local del Banco de Inversiones (452,793 CUIs — activas, cerradas y desactivadas; refresco semanal, sin captcha ni red): candidatos fuzzy en ~0.2&nbsp;s, ranking 100% por IDENTIDAD (N° de institución, RUC del emisor, ubigeo oficial, entidad) con vetos de rubro/ubicación. <b>El solape de fechas declaradas quedó FUERA de la selección</b> (era circular: usaba el dato bajo auditoría). Homónimos indistinguibles → «Por confirmar», nunca se adivina.</p>
+      <ul>
+        <li class="ok"><span>Si el certificado ya trae CUI → verificado y preferido (SNIP viejo → CUI canónico)</span><span class="tag ok">✔ construido</span></li>
+        <li class="ok"><span>Auditoría golden de 277 casos: errores silenciosos 16 → 10, cero regresiones</span><span class="tag ok">✔ medido</span></li>
+      </ul>
     </div>
     <div class="flecha"></div>
 
@@ -207,7 +210,7 @@
     <div class="flecha" style="margin-top:16px"></div>
     <div class="fin">Confirmado en cualquier nivel → CUI verificado con evidencia</div>
     <div class="flecha"></div>
-    <div class="fin rev">Ningún nivel confirma → NO penaliza: si el proceso del tipo/periodo no está en OCDS (pre-2018), el CUI conserva su validación actual (solape de valorizaciones)</div>
+    <div class="fin rev">Ningún nivel confirma → NO penaliza: si el proceso del tipo/periodo no está en OCDS (pre-2018), el CUI conserva su validación actual (identidad del resolver + cobertura de valorizaciones en el VEREDICTO)</div>
     <p class="nota">Medido con datos reales (test_confirmacion_cascada.py): <b>83/158 (53%) confirmados</b> — N1 17% + N2 35% + N3 0%. El candado es <b>asimétrico por diseño</b>: la confirmación positiva es evidencia dura (y detecta CUIs mal resueltos silenciosos); la ausencia de match casi siempre significa que el proceso del emisor es pre-2018 y no está en la fuente, no que el CUI esté mal.</p>
   </div>
 </section>

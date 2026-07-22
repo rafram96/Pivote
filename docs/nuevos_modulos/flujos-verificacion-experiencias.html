@@ -111,11 +111,11 @@
 <body>
 
 <h1>Flujos de verificación por tipo de experiencia</h1>
-<p class="sub">Según el flujograma del Ing. Manuel (Excel "para RAFAEL", Hoja1) · anotado con el estado real de cada verificación en el sistema — 18&nbsp;jul&nbsp;2026</p>
+<p class="sub">Según el flujograma del Ing. Manuel (Excel "para RAFAEL-V2", Hoja1) · anotado con el estado real de cada verificación en el sistema — <b>v2 · 22&nbsp;jul&nbsp;2026</b>: el sistema ya distingue automáticamente expediente vs obra (y tiene modo «concurso de expedientes» para casos como San Isidro)</p>
 
 <div class="leyenda">
   <span><i class="chip ok"></i> Ya en producción (sin costo adicional)</span>
-  <span><i class="chip cot"></i> Cotizable — paquete T-003 … T-007</span>
+  <span><i class="chip cot"></i> Cotizable — paquete T-004 … T-007 (T-003 y T-008 ya construidos)</span>
   <span><i class="chip no"></i> Descartado con evidencia (falsos positivos)</span>
 </div>
 
@@ -136,7 +136,8 @@
         <div class="paso">
           <div class="titulo"><span class="num">1</span><b>Ubicar el CUI del proyecto</b></div>
           <ul>
-            <li class="ok"><span class="txt">Búsqueda por nombre en el MEF, sin captcha, por código</span><span class="tag ok">T-003 ✔ construido</span></li>
+            <li class="ok"><span class="txt">Base local del Banco de Inversiones (452,793 CUIs, sin captcha) + vetos de identidad · errores silenciosos 16→10 en auditoría de 277 casos</span><span class="tag ok">T-008 ✔ construido</span></li>
+            <li class="ok"><span class="txt">La experiencia se clasifica como EXPEDIENTE automáticamente (o por el modo «concurso de expedientes»)</span><span class="tag ok">T-008 ✔ camino A</span></li>
           </ul>
         </div>
         <div class="flecha"></div>
@@ -144,7 +145,8 @@
           <div class="titulo"><span class="num">2</span><b>Validez del contrato (SEACE + MEF)</b></div>
           <ul>
             <li class="cot"><span class="txt">Bajar contrato DEL EXPEDIENTE y sus bases (SEACE)</span><span class="tag cot">T-004</span></li>
-            <li class="ok"><span class="txt">Bajar resolución de aprobación del expediente (Formato 08-A)</span><span class="tag ok">T-003 ✔ construido</span></li>
+            <li class="ok"><span class="txt">Bajar resolución de aprobación del expediente (Formato 08-A) + contrato del MEF cuando el Banco lo registra</span><span class="tag ok">T-003 ✔ construido</span></li>
+            <li class="ok"><span class="txt">Al expediente NO se le exigen valorizaciones de la construcción posterior</span><span class="tag ok">T-008 ✔ camino A</span></li>
           </ul>
         </div>
         <div class="flecha"></div>
@@ -205,7 +207,7 @@
         <div class="paso">
           <div class="titulo"><span class="num">1</span><b>Ubicar el CUI del proyecto</b></div>
           <ul>
-            <li class="ok"><span class="txt">Búsqueda por nombre en el MEF, sin captcha, por código</span><span class="tag ok">T-003 ✔ construido</span></li>
+            <li class="ok"><span class="txt">Base local del Banco de Inversiones (452,793 CUIs, sin captcha) + vetos de identidad</span><span class="tag ok">T-008 ✔ construido</span></li>
           </ul>
         </div>
         <div class="flecha"></div>
@@ -263,13 +265,13 @@
         </div>
         <div class="flecha"></div>
         <div class="fin">Veredicto + alertas en Excel y panel</div>
-        <p class="nota">Las obras privadas no aparecen en InfoObras ni tienen CUI; el sistema ya las excluye del scraping (gate de privadas) y las manda a «Por confirmar».</p>
+        <p class="nota">Las obras privadas no aparecen en InfoObras ni tienen CUI. Desde el 21&nbsp;jul el sistema primero AGOTA la búsqueda pública y recién al final clasifica la privada — con un catálogo de 11,004 entidades públicas (del propio MEF) que atrapa clientes privados aunque el certificado no diga «privada» (asociaciones, S.A.C., ONGs). Lo no clasificable queda en «Por confirmar» con la marca «posible obra privada».</p>
       </div>
     </div>
   </div>
 </section>
 
-<p class="nota">Fuente del flujo: Hoja1 del Excel «para RAFAEL» (Ing. Manuel Echandía). Los rótulos T-003…T-007 corresponden al paquete de extras por cotizar; «✔ en producción» es lo ya cubierto por el contrato vigente o por T-003 (ya construido, pendiente de acordar precio).</p>
+<p class="nota">Fuente del flujo: Hoja1 del Excel «para RAFAEL-V2» (Ing. Manuel Echandía). Los rótulos T-003…T-008 corresponden al paquete de extras; «✔ construido» (T-003 y T-008) es trabajo ya ejecutado y validado, pendiente de acordar precio; el resto es por desarrollar (ver <b>plan-desarrollo-extras.html</b>).</p>
 
 </body>
 </html>

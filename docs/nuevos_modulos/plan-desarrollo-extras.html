@@ -117,7 +117,7 @@
 <body>
 
 <h1>Plan de desarrollo y cotización de extras</h1>
-<p class="sub">Todo lo pedido en el Excel «para RAFAEL», organizado en componentes cotizables (T-003 … T-007) · <b>v2 — 19&nbsp;jul&nbsp;2026</b>: actualizado con las sondas SEACE/CONOSCE/OCDS ya ejecutadas y la evidencia medida sobre los 29 concursos reales (ver <b>resolucion-cui-datos-abiertos.html</b>)</p>
+<p class="sub">Todo lo pedido en el Excel «para RAFAEL-V2», organizado en componentes cotizables (T-003 … T-008) · <b>v3 — 22&nbsp;jul&nbsp;2026</b>: incorpora el <b>refactor de resolución de CUI ya construido y validado</b> (T-008: base local MEF + camino expedientes/obra + optimización de la skill) además de las sondas SEACE/CONOSCE/OCDS (ver <b>resolucion-cui-datos-abiertos.html</b>)</p>
 
 <div class="leyenda">
   <span><i class="chip ok"></i> Ya construido (se cotiza como entregado)</span>
@@ -142,6 +142,15 @@
       <td class="num">S/ 2,600</td>
     </tr>
     <tr>
+      <td class="num">T-008</td>
+      <td>Refactor de resolución de CUI: <b>base local del Banco de Inversiones</b> (452,793 CUIs offline, refresco semanal, sin captcha) + vetos de identidad (rubro/ubicación/entidad) + clasificación <b>expediente vs obra</b> con modo «concurso de expedientes» + optimización de la skill (corrige la fuga de ~3M tokens por corrida)</td>
+      <td><span class="tag ok">✔ construido</span></td>
+      <td>Ya validado: auditoría golden de 277 casos reales (errores silenciosos 16→10, cero regresiones) + 2 corridas completas (105 y 68 experiencias)</td>
+      <td class="num">— (invertido)</td>
+      <td>—</td>
+      <td class="num">S/ 2,800</td>
+    </tr>
+    <tr>
       <td class="num">T-004</td>
       <td>SEACE por <b>datos abiertos</b> (CONOSCE + API OCDS): Bases Integradas + Contrato firmado + candado de confirmación del CUI — sin captcha</td>
       <td><span class="tag cot">por integrar</span> <span class="tag ok">sonda ✔ hecha</span></td>
@@ -156,7 +165,7 @@
       <td><span class="tag cot">por desarrollar</span></td>
       <td>✔ Ya no requiere: la fecha viene como campo del dataset</td>
       <td class="num">2–2.5 días<br><small>(12–14 h)</small></td>
-      <td>T-004 y T-003</td>
+      <td>T-004, T-003 y T-008</td>
       <td class="num">S/ 1,200</td>
     </tr>
     <tr>
@@ -179,7 +188,7 @@
     </tr>
     <tr class="total">
       <td></td><td>Total del paquete</td><td></td><td></td>
-      <td class="num">~7–9 días</td><td></td><td class="num">S/ 7,000 + bolsa</td>
+      <td class="num">~7–9 días por desarrollar</td><td></td><td class="num">S/ 9,800 + bolsa<br><small>(S/ 5,400 ya construido: T-003 + T-008 · S/ 4,400 por desarrollar)</small></td>
     </tr>
   </table>
   </div>
@@ -203,8 +212,8 @@
     </div>
     <div class="flecha"></div>
     <div class="fila">
-      <div class="etapa"><b>Resolver CUI (MEF)</b><small>búsqueda por nombre sin captcha · homónimos por solape</small></div>
-      <div class="plugs"><span class="plug ok">T-003 ya vive aquí</span></div>
+      <div class="etapa"><b>Resolver CUI (base local MEF)</b><small>452k CUIs offline · vetos de identidad · público-primero · expediente vs obra</small></div>
+      <div class="plugs"><span class="plug ok">T-008 ✔ resolver nuevo (golden 277)</span><span class="plug ok">T-003 verificación MEF de expedientes</span></div>
     </div>
     <div class="flecha"></div>
     <div class="fila">
@@ -218,8 +227,8 @@
     </div>
     <div class="flecha"></div>
     <div class="fila">
-      <div class="etapa"><b>Gate de privadas</b><small>obras privadas no van a InfoObras → «Por confirmar»</small></div>
-      <div class="plugs"><span class="plug cot">T-006: si es privada de salud → RENIPRESS antes de «Por confirmar»</span></div>
+      <div class="etapa"><b>Clasificación de privadas (al final)</b><small>primero se agota lo público; catálogo de 11k entidades públicas → «posible obra privada»</small></div>
+      <div class="plugs"><span class="plug ok">T-008 ✔ catálogo + público-primero</span><span class="plug cot">T-006: si es privada de salud → RENIPRESS antes de «Por confirmar»</span></div>
     </div>
     <div class="flecha"></div>
     <div class="fila">
@@ -256,6 +265,31 @@
         <ul>
           <li>Etapa «Resolver CUI» del backend + descarga al ZIP por obra.</li>
           <li>Corre automáticamente para cada experiencia de la corrida.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- T-008 -->
+  <div class="card ok">
+    <div class="head"><h3>T-008 — Refactor de resolución de CUI + base local MEF + camino expedientes</h3><span class="tag ok">✔ construido y validado</span><span class="precio">S/ 2,800</span></div>
+    <p class="meta">Construido el 20-21&nbsp;jul (rama <code>sonda/refactor-cui</code>, 11 commits). El sistema ya no depende de los buscadores web del MEF: lleva una copia local del Banco de Inversiones completo (activas + cerradas + desactivadas) y resuelve por IDENTIDAD — nunca por conveniencia de fechas. Incluye la clasificación automática expediente/obra que pide el flujograma V2, con modo «concurso de expedientes» (usado en San Isidro).</p>
+    <div class="cols">
+      <div class="col">
+        <h4>Qué incluye (ya entregado)</h4>
+        <ul>
+          <li>Base local: 452,793 CUIs de Datos Abiertos del MEF, refresco semanal por script; candidatos en ~0.2&nbsp;s sin captcha.</li>
+          <li>Resolver público-primero con vetos de identidad: rubro, provincia/distrito, entidad municipal; ante homónimos indistinguibles, «Por confirmar» con candidatos — nunca adivina.</li>
+          <li>Clasificación expediente vs obra por toda la evidencia + modo forzado por concurso (camino A): al expediente no se le exigen valorizaciones de la construcción posterior.</li>
+          <li>Optimización de la skill: se eliminó el paso que quemaba ~3M de tokens por corrida (la resolución de CUIs pasó al backend).</li>
+        </ul>
+      </div>
+      <div class="col">
+        <h4>Validación (con datos reales)</h4>
+        <ul>
+          <li>Auditoría golden de 277 casos: errores silenciosos <b>16 → 10</b>, cero casos que antes salían bien y ahora mal.</li>
+          <li>2 corridas completas de punta a punta (105 y 68 experiencias) + rescate íntegro del análisis San Isidro.</li>
+          <li>266+ pruebas automáticas en verde; pendiente solo el despliegue al servidor (base de 26&nbsp;MB + 1 línea de cron).</li>
         </ul>
       </div>
     </div>
@@ -392,7 +426,7 @@
   <table>
     <tr><th>Punto</th><th>Detalle</th></tr>
     <tr><td class="num">Momento</td><td>Presentar junto con la entrega final del contrato vigente — no antes, para no mezclar alcances.</td></tr>
-    <tr><td class="num">T-003</td><td>Se cobra como extra ya entregado: abrir la reunión con demo en vivo (es exactamente lo que su hoja «cui» describe hacer a mano, ya automatizado).</td></tr>
+    <tr><td class="num">T-003 + T-008</td><td>Se cobran como extras ya entregados (S/ 5,400): abrir la reunión con demo en vivo — es exactamente lo que sus hojas «cui» y su flujograma V2 describen hacer a mano, ya automatizado y auditado. El argumento V2: «tu propio Excel pide distinguir expediente de obra y ubicar el CUI: eso ya corre, medido sobre 277 casos tuyos».</td></tr>
     <tr><td class="num">Bloques</td><td>T-004 + T-005 se ofrecen como un solo bloque «Expediente SEACE y cruces de fechas» (<b>S/ 3,600</b>). T-006 aparte. T-007 como muestra del canal de bolsa de horas.</td></tr>
     <tr><td class="num">Insumos del cliente</td><td>Ya no se necesitan contratos de muestra (el OCR salió del alcance). Solo 1–2 casos de obras privadas de salud (para probar T-006).</td></tr>
     <tr><td class="num">Riesgo declarado</td><td><b>Resuelto antes de cotizar</b>: las sondas ya corrieron (SEACE con reCAPTCHA → esquivado por datos abiertos oficiales, GO medido con 86% de cobertura; RENIPRESS GO sin captcha). El precio v2 refleja el riesgo eliminado: T-004 S/ 2,600→2,400 y T-005 S/ 1,400→1,200.</td></tr>

@@ -125,10 +125,10 @@
 <body>
 
 <h1>Flujos de las otras skills del Excel</h1>
-<p class="sub">Hojas «cui» y «contrato bases y resolucion» del Excel «para RAFAEL» (Ing. Manuel Echandía) · anotado con el estado real en el sistema — 18&nbsp;jul&nbsp;2026</p>
+<p class="sub">Hojas «cui» y «contrato bases y resolucion» del Excel «para RAFAEL-V2» (Ing. Manuel Echandía) · anotado con el estado real en el sistema — <b>v2 · 22&nbsp;jul&nbsp;2026</b>: actualizado con el refactor de resolución de CUI ya construido (base local MEF, rama <code>sonda/refactor-cui</code>)</p>
 
 <div class="leyenda">
-  <span><i class="chip ok"></i> Ya construido por código en el sistema (T-003)</span>
+  <span><i class="chip ok"></i> Ya construido por código en el sistema (T-003 / T-008)</span>
   <span><i class="chip cot"></i> Cotizable — paquetes T-004 / T-005</span>
 </div>
 
@@ -138,7 +138,7 @@
   <p class="h2sub">Hoja «cui»: la skill de navegador que Manuel redactó, paso a paso. Tres buscadores en cascada, con captcha manual en cada intento.</p>
 
   <div class="flujo">
-    <div class="callout">Todo este flujo ya lo hace el sistema <b>por código y sin captcha</b> (T-003): resuelve el CUI de todas las experiencias de la corrida automáticamente. El diagrama muestra el proceso manual que la skill describe.</div>
+    <div class="callout">Todo este flujo ya lo hace el sistema <b>por código y sin captcha</b> — y desde el 21&nbsp;jul, <b>sin depender de los buscadores del MEF</b>: el backend tiene una copia local del Banco de Inversiones completo (452,793 CUIs de Datos Abiertos, refresco semanal) y resuelve cada experiencia en ~0.2&nbsp;s con vetos de identidad (rubro, ubicación, entidad). Precisión auditada sobre 277 casos reales: errores silenciosos 16&nbsp;→&nbsp;10, cero regresiones. El diagrama muestra el proceso manual que la skill describe.</div>
 
     <div class="nodo"><b>Entrada</b><small>nombre del proyecto · distrito/provincia/departamento · palabras clave distintivas · SNIP o CUI si ya es visible en el documento</small></div>
     <div class="flecha"></div>
@@ -153,7 +153,7 @@
       <div class="titulo"><span class="num">1</span><b>Consulta Pública del MEF</b></div>
       <p>Solo inversiones <b>viables y aprobadas</b>. Navegar, leer el captcha del screenshot, escribir una palabra clave distintiva (no el nombre completo) y buscar.</p>
       <ul>
-        <li class="ok"><span class="txt">Equivalente en el sistema: consulta directa por código</span><span class="tag ok">T-003 ✔ sin captcha</span></li>
+        <li class="ok"><span class="txt">Equivalente en el sistema: base local del Banco de Inversiones (sin red ni captcha)</span><span class="tag ok">T-008 ✔ construido</span></li>
       </ul>
     </div>
     <div class="flecha lbl"><i>¿apareció? Sí → reportar ficha · No ↓</i></div>
@@ -162,7 +162,7 @@
       <div class="titulo"><span class="num">2</span><b>SSI — Sistema de Seguimiento de Inversiones</b></div>
       <p>Incluye <b>todos los estados</b>. Modal «Búsqueda por nombre», escribir con teclado (la app filtra por evento de tecla), probar variantes: palabra clave única → distrito → fragmento del objeto.</p>
       <ul>
-        <li class="ok"><span class="txt">Equivalente en el sistema: endpoint del SSI por código (13/13 CUIs validados)</span><span class="tag ok">T-003 ✔ sin captcha</span></li>
+        <li class="ok"><span class="txt">Equivalente en el sistema: fuzzy sobre la base local (cubre TODOS los estados: activas + cerradas + desactivadas) — el SSI en vivo queda de verificación opcional</span><span class="tag ok">T-008 ✔ construido</span></li>
       </ul>
     </div>
     <div class="flecha lbl"><i>¿apareció? Sí → reportar ficha · No ↓</i></div>
@@ -181,7 +181,7 @@
 
     <div class="fin priv">Conclusión: obra PRIVADA (sin CUI) → verificar por SUNAT / RENIPRESS · sugerir SEACE por N° de contrato u otras variantes del nombre</div>
 
-    <p class="nota">Homónimos: se desempatan con distrito/provincia/departamento. En el sistema esto ya está resuelto con el filtro exacto + selección por solape de valorizaciones y preferencia por CUI de 7 dígitos.</p>
+    <p class="nota">Homónimos: se desempatan con distrito/provincia/departamento — exactamente lo que el sistema hace ahora por identidad: N° de institución, RUC del emisor, ubigeo oficial del MEF y entidad contratante, con vetos cuando contradicen. Si dos proyectos quedan indistinguibles, el sistema NO adivina: los muestra en «Por confirmar» para que el evaluador elija. (El desempate por solape de fechas declaradas se eliminó a propósito: usaba el dato bajo auditoría para decidir.)</p>
   </div>
 </section>
 
