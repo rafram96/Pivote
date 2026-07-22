@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arquitectura del sistema — componentes y caminos</title>
+<style>
+  :root{
+    --bg:#f8f9fb; --panel:#ffffff; --ink:#1a2233; --muted:#5b6474;
+    --line:#d7dce4; --arrow:#9aa3b2;
+    --ok-bg:#e8f6ee; --ok-bd:#2f9e63; --ok-tx:#1d6f44;
+    --exi-bg:#eef1f6; --exi-bd:#8e99ab; --exi-tx:#4a5261;
+    --a-bg:#e9f0fb;  --a-bd:#3b6fd4;  --a-tx:#2a54a8;
+    --b-bg:#f3edfb;  --b-bd:#7d5bb8;  --b-tx:#5d3f96;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12151b; --panel:#1a1f28; --ink:#e8ebf1; --muted:#9aa3b2;
+      --line:#313947; --arrow:#5b6474;
+      --ok-bg:#15291e; --ok-bd:#2f9e63; --ok-tx:#6fd39e;
+      --exi-bg:#222835; --exi-bd:#5b6474; --exi-tx:#b6bdc9;
+      --a-bg:#18233a; --a-bd:#3b6fd4; --a-tx:#8fb0f0;
+      --b-bg:#241a33; --b-bd:#7d5bb8; --b-tx:#c3a9ee;
+    }
+  }
+  *{box-sizing:border-box; margin:0}
+  body{background:var(--bg); color:var(--ink); font:15px/1.5 "Segoe UI", system-ui, sans-serif;
+    padding:32px 24px 64px; max-width:1180px; margin:0 auto}
+  h1{font-size:1.5rem; margin-bottom:4px}
+  .sub{color:var(--muted); margin-bottom:20px; font-size:.92rem}
+  h2{font-size:1.15rem; margin-bottom:2px}
+  .h2sub{color:var(--muted); font-size:.88rem; margin-bottom:16px}
+  section{margin-bottom:52px}
+
+  .leyenda{display:flex; flex-wrap:wrap; gap:10px 22px; margin-bottom:34px;
+    background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 16px}
+  .leyenda span{display:inline-flex; align-items:center; gap:8px; font-size:.86rem; color:var(--muted)}
+  .chip{display:inline-block; min-width:14px; height:14px; border-radius:4px; border:1.5px solid}
+  .chip.exi{background:var(--exi-bg); border-color:var(--exi-bd)}
+  .chip.ok {background:var(--ok-bg);  border-color:var(--ok-bd)}
+
+  .mapa{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:22px 20px}
+  .capa{margin-bottom:18px}
+  .capa:last-child{margin-bottom:0}
+  .capa > h3{font-size:.78rem; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin-bottom:8px}
+  .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:10px}
+  .comp{border:1.5px solid var(--exi-bd); background:var(--exi-bg); border-radius:10px; padding:9px 12px}
+  .comp b{display:block; font-size:.9rem; color:var(--ink)}
+  .comp small{color:var(--muted); font-size:.78rem}
+  .comp.nuevo{border-color:var(--ok-bd); background:var(--ok-bg)}
+  .comp.nuevo b{color:var(--ok-tx)}
+  .comp.nuevo small{color:var(--ok-tx); opacity:.85}
+
+  .flujo{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:26px 22px}
+  .nodo{border:1.5px solid var(--exi-bd); border-radius:10px; background:var(--exi-bg);
+    padding:9px 14px; text-align:center; max-width:420px; margin:0 auto}
+  .nodo b{display:block; font-size:.92rem}
+  .nodo small{color:var(--muted); font-size:.78rem}
+  .nodo.nuevo{border-color:var(--ok-bd); background:var(--ok-bg)}
+  .nodo.nuevo small{color:var(--ok-tx)}
+  .flecha{width:0; height:20px; border-left:2px solid var(--arrow); margin:0 auto; position:relative}
+  .flecha::after{content:""; position:absolute; bottom:-1px; left:-5px;
+    border:5px solid transparent; border-top:7px solid var(--arrow)}
+  .flecha.lbl{height:28px}
+  .flecha.lbl > i{position:absolute; left:10px; top:3px; font-style:normal; font-size:.74rem;
+    color:var(--muted); white-space:nowrap}
+
+  .split{display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-top:16px}
+  .rama{border-radius:12px; border:1.5px solid; padding:20px 14px 16px; position:relative}
+  .rama > .etiqueta{position:absolute; top:-12px; left:14px; padding:1px 12px; border-radius:99px;
+    font-size:.78rem; font-weight:700; color:#fff}
+  .rama.a{border-color:var(--a-bd)} .rama.a > .etiqueta{background:var(--a-bd)}
+  .rama.b{border-color:var(--b-bd)} .rama.b > .etiqueta{background:var(--b-bd)}
+  .rama .nodo{max-width:none; background:var(--panel); border-color:var(--line)}
+  .rama.a .nodo b{color:var(--a-tx)} .rama.b .nodo b{color:var(--b-tx)}
+  .fin{margin:14px auto 0; max-width:420px; text-align:center; font-size:.84rem;
+    border:1.5px solid var(--ok-bd); background:var(--ok-bg); color:var(--ok-tx);
+    border-radius:99px; padding:6px 16px; font-weight:600}
+  .nota{margin-top:14px; font-size:.82rem; color:var(--muted)}
+  @media (max-width:760px){ .split{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+
+<h1>Arquitectura del sistema — componentes y caminos</h1>
+<p class="sub">Mapa visual del sistema tras el refactor (rama <code style="font-size:.85em">sonda/refactor-cui</code>) · 22&nbsp;jul&nbsp;2026</p>
+
+<div class="leyenda">
+  <span><i class="chip exi"></i> Componente existente</span>
+  <span><i class="chip ok"></i> Componente nuevo (refactor T-008 / camino A)</span>
+</div>
+
+<!-- ============ 1 · MAPA DE COMPONENTES ============ -->
+<section>
+  <h2>1 · Componentes del sistema</h2>
+  <p class="h2sub">Por capas: qué hace cada pieza, en una línea.</p>
+
+  <div class="mapa">
+    <div class="capa">
+      <h3>Máquina del cliente (extracción)</h3>
+      <div class="grid">
+        <div class="comp"><b>Skill analizar-licitacion</b><small>lee bases + propuesta → espejo JSON + Excel</small></div>
+        <div class="comp"><b>Subagentes (mapa → N prof → evaluador)</b><small>extracción profunda por profesional</small></div>
+        <div class="comp nuevo"><b>Paso 4.5 acotado</b><small>solo verifica CUIs citados (ya no resuelve)</small></div>
+        <div class="comp"><b>MCP local / Dropzone</b><small>sube el análisis al backend</small></div>
+      </div>
+    </div>
+
+    <div class="capa">
+      <h3>Backend · datos de referencia</h3>
+      <div class="grid">
+        <div class="comp nuevo"><b>ETL base MEF</b><small>descarga y compacta el Banco de Inversiones</small></div>
+        <div class="comp nuevo"><b>Base local de CUIs</b><small>452,793 proyectos consultables sin red</small></div>
+        <div class="comp nuevo"><b>Catálogo de entidades públicas</b><small>11,004 nombres + siglas</small></div>
+      </div>
+    </div>
+
+    <div class="capa">
+      <h3>Backend · pipeline por análisis</h3>
+      <div class="grid">
+        <div class="comp"><b>Ingesta + validación</b><small>recibe espejo, Excel y certificados</small></div>
+        <div class="comp nuevo"><b>Resolver de CUI (nuevo)</b><small>identifica el proyecto de cada experiencia</small></div>
+        <div class="comp nuevo"><b>Clasificador expediente/obra</b><small>elige el camino A o B por experiencia</small></div>
+        <div class="comp"><b>InfoObras</b><small>ficha, valorizaciones, documentos de obra</small></div>
+        <div class="comp"><b>Verificación MEF de expedientes</b><small>contrato + resolución de aprobación (08-A)</small></div>
+        <div class="comp"><b>SUNAT</b><small>antigüedad del emisor (ALT-04)</small></div>
+        <div class="comp"><b>Motor de reglas + Paso 5</b><small>alertas y días efectivos</small></div>
+        <div class="comp"><b>Excel final + ZIP</b><small>formato del cliente con imágenes embebidas</small></div>
+      </div>
+    </div>
+
+    <div class="capa">
+      <h3>Persistencia y presentación</h3>
+      <div class="grid">
+        <div class="comp"><b>Archivos por job</b><small>fuente de verdad (carpeta por análisis)</small></div>
+        <div class="comp"><b>Postgres</b><small>respaldo lógico consultable</small></div>
+        <div class="comp"><b>Panel web</b><small>resultados, «Por confirmar», descargas</small></div>
+        <div class="comp nuevo"><b>Golden de regresión</b><small>277 casos auditados como vara de calidad</small></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 2 · ETL ============ -->
+<section>
+  <h2>2 · ETL de la base de referencia (semanal)</h2>
+  <p class="h2sub">Una sola descarga a la semana deja al sistema sin dependencia de los buscadores web del MEF.</p>
+  <div class="flujo">
+    <div class="nodo"><b>MEF Datos Abiertos</b><small>3 CSV: activas · cerradas · desactivadas (~523 MB)</small></div>
+    <div class="flecha lbl"><i>cron semanal</i></div>
+    <div class="nodo nuevo"><b>Script de ingesta</b><small>valida, compacta y escribe atómico</small></div>
+    <div class="flecha"></div>
+    <div class="nodo nuevo"><b>Archivo local (~26 MB)</b><small>CUI · SNIP · nombre · ubigeo · entidad · estado</small></div>
+    <div class="flecha lbl"><i>carga perezosa, 1 vez por proceso</i></div>
+    <div class="nodo nuevo"><b>Índice en memoria</b><small>consultas fuzzy en ~0.2 s · sin captcha ni red</small></div>
+    <p class="nota">Si la base falta o envejece, el sistema avisa y sigue funcionando con InfoObras (degradación segura).</p>
+  </div>
+</section>
+
+<!-- ============ 3 · CONSULTA DE CUI ============ -->
+<section>
+  <h2>3 · La nueva forma de consultar el CUI</h2>
+  <p class="h2sub">Identidad primero; las fechas declaradas nunca eligen el proyecto.</p>
+  <div class="flujo">
+    <div class="nodo"><b>Experiencia del certificado</b><small>proyecto · entidad · RUC del emisor · periodo</small></div>
+    <div class="flecha lbl"><i>1 · ¿cita un CUI? → se verifica y se prefiere</i></div>
+    <div class="nodo nuevo"><b>Candidatos</b><small>base local MEF + búsqueda InfoObras (fusión)</small></div>
+    <div class="flecha lbl"><i>2 · puntuación por identidad</i></div>
+    <div class="nodo nuevo"><b>Señales y vetos</b><small>N° de institución · RUC · ubigeo · entidad · rubro</small></div>
+    <div class="flecha lbl"><i>3 · ¿homónimos indistinguibles? → «Por confirmar»</i></div>
+    <div class="nodo"><b>CUI resuelto (o candidatos al evaluador)</b><small>nunca se adivina; privadas se clasifican al final</small></div>
+    <div class="fin">Precisión auditada: errores silenciosos 16 → 10 (277 casos, cero regresiones)</div>
+  </div>
+</section>
+
+<!-- ============ 4 · LOS DOS CAMINOS ============ -->
+<section>
+  <h2>4 · Los dos caminos del backend</h2>
+  <p class="h2sub">Con el CUI resuelto, cada experiencia se verifica según lo que el certificado acredita (automático, o forzado para concursos 100% de expedientes).</p>
+  <div class="flujo">
+    <div class="nodo nuevo"><b>Clasificador</b><small>expediente/estudio vs supervisión/ejecución de obra</small></div>
+    <div class="split">
+      <div class="rama a">
+        <span class="etiqueta">CAMINO A — EXPEDIENTES</span>
+        <div class="nodo"><b>Verificación MEF</b><small>contrato del expediente + resolución de aprobación</small></div>
+        <div class="flecha"></div>
+        <div class="nodo"><b>Hito de aprobación</b><small>sustento aunque la obra no tenga valorizaciones</small></div>
+        <div class="flecha"></div>
+        <div class="nodo"><b>Sin descuento por valorizaciones</b><small>el estudio precede a la construcción</small></div>
+      </div>
+      <div class="rama b">
+        <span class="etiqueta">CAMINO B — OBRAS</span>
+        <div class="nodo"><b>InfoObras</b><small>ficha · valorizaciones · paralizaciones</small></div>
+        <div class="flecha"></div>
+        <div class="nodo"><b>Días efectivos (Paso 5)</b><small>recorte a la ventana real de valorizaciones</small></div>
+        <div class="flecha"></div>
+        <div class="nodo"><b>Documentos de obra al ZIP</b><small>valorizaciones · cierre · informes de control</small></div>
+      </div>
+    </div>
+    <div class="fin">Veredicto + alertas → Excel final con imágenes + ZIP de sustento + panel</div>
+    <p class="nota">Común a ambos caminos: SUNAT (emisor), motor de reglas, «Por confirmar» para lo no verificable. Las valorizaciones actúan solo en el VEREDICTO — jamás eligen el proyecto.</p>
+  </div>
+</section>
+
+<p class="nota">Documentos hermanos: <b>plan-desarrollo-extras.html</b> (cotización) · <b>flujos-verificacion-experiencias.html</b> (qué se verifica por tipo) · <b>resolucion-cui-datos-abiertos.html</b> (SEACE por datos abiertos).</p>
+
+</body>
+</html>
