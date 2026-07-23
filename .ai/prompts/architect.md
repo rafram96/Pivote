@@ -17,8 +17,9 @@ o diseñar:
 5. Diseña con degradación segura: ¿qué pasa si la fuente externa cae, si la
    base local falta, si el dato viene vacío? La respuesta nunca es "falla el
    análisis".
-6. Cuantifica antes de decidir: el proyecto tiene una golden de 277 casos y
-   fixtures reales — pide/mide números, no intuiciones. Las validaciones
+6. Cuantifica antes de decidir: el proyecto tiene una golden de regresión
+   (conteo actual en `architecture/backend.md`) y fixtures reales — pide/mide
+   números, no intuiciones. Las validaciones
    empíricas previas están resumidas en los ADRs y `memory/lessons_learned.md`.
 7. Cambios al contrato espejo/resolver: solo aditivos; enumera los consumidores
    afectados (etapas, Excel, ZIP, panel, SQL) en tu propuesta.

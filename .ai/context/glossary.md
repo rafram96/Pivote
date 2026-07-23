@@ -9,7 +9,7 @@
 | **Valorizaciones** | Avances mensuales pagados de una obra en InfoObras — la evidencia de CUÁNDO la obra se ejecutó de verdad. Solo VEREDICTO, jamás selección. |
 | **Clamp / Paso 5** | Recorte de los días declarados a la ventana real de valorizaciones; días fuera no cuentan. |
 | **«Por confirmar»** | Cola de revisión humana en el panel (ItemRevision) — terminología visible al evaluador, sin jerga. |
-| **Golden** | Auditoría de regresión del resolver: 277 casos reales con verdad auditada (`golden_cui_baseline.json` + caché de respuestas para re-corridas offline). |
+| **Golden** | Auditoría de regresión del resolver: casos reales con verdad auditada (`golden_cui_baseline.json` + caché de respuestas para re-corridas offline). Conteo actual: ver `architecture/backend.md` (fuente única). |
 | **T-00x** | Componentes del paquete de extras (T-003 MEF expedientes ✔, T-004 SEACE, T-005 fechas ET, T-006 RENIPRESS, T-007 SUNAT habido, T-008 refactor CUI ✔). |
 | **ALT-xx** | Alertas del motor de reglas (ej. ALT-04 = emisor más joven que la experiencia). ALT-12 (firmante=rep. legal) DESCARTADA. |
 | **Formato 08-A** | Ficha MEF de la fase de ejecución; su sección B trae la resolución de aprobación del expediente técnico. |
