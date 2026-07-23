@@ -16,6 +16,11 @@
 /descargas_infoobras/
 **/_descargas_*/
 
+# Scratch de sondas a portales (tools/_sonda_seace/, etc.): descargas crudas
+# —XLSX de CONOSCE, dumps XML/HTML— sin código. El código de la sonda vive en
+# tools/*.py y ese sí se versiona.
+**/_sonda_*/
+
 # Cache de Python
 __pycache__/
 *.py[cod]

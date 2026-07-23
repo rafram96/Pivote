@@ -29,6 +29,7 @@
 
 ### 📐 Raíz
 - [`arquitectura.md`](arquitectura.md) — las 4 piezas y su flujo end-to-end.
+- [`preparacion-pdfs-corrida.md`](preparacion-pdfs-corrida.md) — runbook: dejar bases (DOCX→PDF sin tachado) + propuesta listas antes de correr la skill.
 
 ### 🔌 `contrato/` — el contrato de datos Claude ↔ backend
 - [`contrato_refactor.md`](contrato/contrato_refactor.md) — **contrato vigente (v1.2.0)**. El schema lo define el código: `backend/schemas/espejo.py` ↔ `skill/schemas/espejo.js`.
