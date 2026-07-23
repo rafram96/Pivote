@@ -13,7 +13,7 @@ NO añadir pandas/duckdb/sqlalchemy/SQLite sin ADR.
 | `orquestador/etapas_reales.py` | etapas reales: `EtapaResolucionCuiReal` (único caller del resolver), `EtapaInfoObrasReal` (fetch, clamp, verificación MEF de expedientes, descargas), SUNAT, reglas, excel |
 | `orquestador/repositorio.py` | `RepositorioArchivos` (fuente de verdad) + `RepositorioConRespaldo` (write-through a PG best-effort) |
 | `resolucion/cui.py` | **resolver de CUI** (ver abajo) |
-| `resolucion/base_mef.py` | base local del Banco de Inversiones: índice en memoria (singleton perezoso, ~60 s carga, ~370 MB RAM, consultas ~0.2 s); `buscar_candidatos / existe_cui / es_entidad_publica` |
+| `resolucion/base_mef.py` | base local del Banco de Inversiones: índice en memoria con `sys.intern` + índice invertido token→filas (singleton perezoso, carga ~15-60 s según caché de disco, **~370 MB RAM** — fuente única de esta cifra; remedido 2026-07-23: 379 MB; consultas ~0.2 s); `buscar_candidatos / existe_cui / es_entidad_publica` |
 | `resolucion/texto.py` | `norm()` / `expandir_abrev()` compartidos |
 | `scraping/infoobras.py` | búsqueda, `fetch_by_cui`, valorizaciones (`lAvances`), paralizaciones, `seleccionar_obra` (entre obras del MISMO CUI), descargas |
 | `scraping/mef.py` | T-003: ficha 08-A, contratos SEACE vía DWH del MEF, descarga de PDFs de expediente (funciones de parseo puras + fixtures offline) |
