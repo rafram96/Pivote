@@ -1,5 +1,11 @@
 # Visión general del sistema
 
+> **Coexistencia deliberada**: si este checkout incluye la raíz del sistema
+> (`../../.ai/`), la fuente oficial de la arquitectura global es
+> `../../.ai/topology.md` — este documento es el resumen AUTOSUFICIENTE para
+> cuando Pivote se clona solo (ADR-S002 del nivel sistema). Si editas la
+> forma del sistema, edita topology.md primero y este resumen después.
+
 **InfoObras Pivote** audita propuestas técnicas de concursos públicos OSCE
 (consultoría/supervisión de obra, Perú) para el cliente Indeconsult (Ing. Manuel
 Echandía). Detecta si la experiencia declarada por cada profesional es real:
