@@ -2,11 +2,8 @@
 
 ## Técnico (listo para ejecutar)
 
-- [ ] **Deploy del refactor** (paquete): merge `sonda/refactor-cui` → `demo`;
-  rebuild backend en server 192.168.100.5; copiar base MEF (~26 MB) a
-  `datos_pivote/referencia/mef/`; crontab `0 3 * * 0` para
-  `actualizar_base_mef.py`; rebuild plugin de la skill (`build.ps1`) y
-  entregarlo al cliente. **Todo junto** (ADR-007).
+- [ ] **Deploy del refactor** — tarea CROSS-REPO; checklist canónico en
+  `InfoObras/.ai/tasks/active.md` (nivel sistema). Regla: todo junto (ADR-007).
 - [ ] Camino A: no descargar ni pintar secciones de obra (valorizaciones,
   cronograma) en expedientes; silenciar advertencias COBERTURA para expedientes.
 - [ ] Re-revisar con el cliente los 2 casos de verdad auditada dudosa:

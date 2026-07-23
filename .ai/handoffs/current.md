@@ -15,11 +15,10 @@ actualización del paquete comercial de extras (T-003…T-008).
 
 ## ¿Qué falta? (en orden recomendado)
 
-1. **Deploy como paquete**: merge a `demo` → rebuild backend en el server
-   (192.168.100.5) → copiar base MEF (26 MB, está en
-   `backend/datos_pivote/referencia/mef/` local) → crontab semanal → rebuild
-   plugin (`plugin/build.ps1`) → entregar al cliente. NO entregar el plugin sin
-   el backend nuevo (ADR-007 explica por qué).
+1. **Deploy como paquete** (cross-repo: backend + panel + plugin + server) —
+   el checklist canónico vive en **`InfoObras/.ai/tasks/active.md`** (nivel
+   sistema); aquí no se copia. Regla clave: NO entregar el plugin sin el
+   backend nuevo (ADR-007).
 2. Pulido camino A (filtro de secciones de obra en descargas/Excel).
 3. Reunión de cotización (materiales: `docs/nuevos_modulos/*.html` v3).
 4. Resto: `tasks/backlog.md`.
