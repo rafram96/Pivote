@@ -23,4 +23,6 @@
 - [ ] Modo "local primero" del resolver (medir recall con golden antes).
 - [ ] Skill: imágenes a media resolución para el agente-mapa cuando Camino B
   sea inevitable (el Camino A/Tesseract ya funciona en la laptop).
-- [ ] Paquetes B/C/D de progreso fino del panel (ETA, timeline, cancelar, SSE).
+
+(El progreso fino B/C/D es CROSS-REPO — vive en
+`InfoObras/.ai/tasks/backlog.md`, aquí no se copia.)
