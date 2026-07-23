@@ -1,6 +1,6 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-07-22** · rama de trabajo: `sonda/refactor-cui`
+> Última actualización: **2026-07-23** · rama de trabajo: `sonda/refactor-cui`
 
 ## Terminado y validado (sin desplegar)
 
@@ -36,16 +36,15 @@
 
 ## Riesgos
 
-- La rama `sonda/refactor-cui` NO está mergeada a `demo` ni desplegada: el
-  server corre el código viejo. La skill optimizada requiere el backend nuevo
-  (si se entrega el plugin sin desplegar backend, los CUIs null no se resuelven
-  bien para expedientes).
+- Hay un **deploy pendiente**: la rama `sonda/refactor-cui` NO está mergeada
+  ni desplegada — el server corre el código viejo. Los pasos y el ORDEN del
+  deploy viven SOLO en `InfoObras/.ai/tasks/active.md` (fuente única).
 - Límite de gasto mensual de Claude alcanzado el 21-jul (los subagentes pueden
   morir a mitad — el trabajo F8 se terminó a mano por eso).
 
 ## Siguiente prioridad recomendada
 
-1. Merge `sonda/refactor-cui` → `demo` + deploy al server (base MEF de 26 MB +
-   crontab) + rebuild del plugin (`build.ps1`) para Manuel — **como paquete**.
+1. Deploy en paquete del refactor — checklist de deploy: ver
+   `InfoObras/.ai/tasks/active.md` (fuente única).
 2. Filtro de secciones de descarga/Excel en modo camino A.
 3. Reunión de cotización con los 5 HTML de docs/nuevos_modulos/.

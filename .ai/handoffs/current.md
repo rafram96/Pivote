@@ -1,8 +1,20 @@
 # Handoff — punto de continuación
 
-> Actualizado: **2026-07-22**. Si eres un agente nuevo: lee esto completo,
+> Actualizado: **2026-07-23**. Si eres un agente nuevo: lee esto completo,
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
+
+## Nota de mantenimiento (2026-07-23) — el checklist de deploy RECAYÓ una vez
+
+La auditoría de migración de la base `.ai` (dos niveles) encontró que
+`context/roadmap.md` y `context/current_state.md` volvían a resumir el
+checklist de deploy — el mismo patrón que ADR-S002 ya había corregido — y
+los resúmenes eran peligrosos: omitían el merge del Panel y la regla de
+orden de ADR-007 (plugin SOLO después del backend nuevo). Fase 1 de la
+corrección ejecutada: ambos quedaron reducidos a puntero a
+`InfoObras/.ai/tasks/active.md` (fuente única; verificado que ahí la regla
+de orden está literal y el paso del Panel existe). Si ves el checklist
+copiado en cualquier otro archivo, es una regresión: bórralo y deja puntero.
 
 ## ¿Qué se estaba haciendo?
 

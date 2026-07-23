@@ -2,8 +2,8 @@
 
 ## Corto plazo (paquete de cierre + extras aprobados)
 
-1. **Deploy del refactor**: merge `sonda/refactor-cui` → `demo` → rebuild
-   backend en el server + base MEF + crontab; rebuild del plugin de la skill.
+1. **Deploy del refactor** — checklist de deploy: ver
+   `InfoObras/.ai/tasks/active.md` (fuente única).
 2. **Pulido camino A**: no descargar/pintar secciones de obra en expedientes;
    silenciar advertencias COBERTURA para expedientes.
 3. **Hito final del contrato vigente**: validación en server, pruebas con
