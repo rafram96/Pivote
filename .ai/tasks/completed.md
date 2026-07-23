@@ -1,6 +1,9 @@
 # Completado (más reciente primero)
 
 ## 2026-07-22
+- Base de conocimiento de NIVEL SISTEMA creada en la raíz `InfoObras/.ai/`
+  (repo git propio; ADR-S001): panel documentado, contratos cross-repo,
+  legacy inventariado; `CLAUDE.md` del Panel reescrito como puntero.
 - Base de conocimiento `.ai/` creada.
 - Documentos del paquete de extras actualizados a v3 (T-008 incorporado) +
   `arquitectura-sistema.html` nuevo (commits `5025ccb`, `f2bde36`).

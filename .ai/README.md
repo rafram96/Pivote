@@ -1,8 +1,13 @@
-# .ai — Base de conocimiento del proyecto
+# .ai — Base de conocimiento del proyecto (nivel REPO)
 
 **Única fuente de verdad de contexto** para cualquier agente (Claude Code, Gemini
 CLI, Codex, etc.) o desarrollador nuevo. No asumas que existe ninguna conversación
 previa: todo lo importante está (o debe estar) aquí.
+
+> **Nivel sistema**: existe un `.ai/` paraguas en la raíz `InfoObras/../.ai`
+> (mapa de repos, visión de negocio, panel, contratos cross-repo, legacy) —
+> ver su `manifest.md`. Relación entre niveles: su `decisions/ADR-S001`.
+> Esta carpeta sigue siendo el detalle del repo Pivote; nada se duplicó.
 
 ## Cómo usar esta carpeta
 
