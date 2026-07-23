@@ -1,5 +1,9 @@
 # Backlog
 
+> Entradas nuevas: formato estructurado obligatorio —
+> `../conventions/formato_tarea_estructurada.md`. Las entradas viejas de
+> abajo se migran solo si se tocan.
+
 ## Técnico (listo para ejecutar)
 
 - [ ] **Deploy del refactor** — tarea CROSS-REPO; checklist canónico en
