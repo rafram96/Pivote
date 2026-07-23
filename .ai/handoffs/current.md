@@ -16,6 +16,14 @@ corrección ejecutada: ambos quedaron reducidos a puntero a
 de orden está literal y el paso del Panel existe). Si ves el checklist
 copiado en cualquier otro archivo, es una regresión: bórralo y deja puntero.
 
+Más tarde el mismo día: **merge fast-forward `sonda/refactor-cui` → `demo`**
+(`c31f71a`, solo local — push pendiente de confirmación del desarrollador;
+la sonda no recibe más commits) y **Fase 2 de la corrección cerrada** sobre
+`demo` (commits `c7045a7…`): coexistencia overview↔topology declarada, lista
+T-00x consolidada en `vision.md` (raíz), tareas reubicadas por nivel,
+ADR-S004 en la raíz, conteo de la golden con fuente única en
+`architecture/backend.md`.
+
 ## ¿Qué se estaba haciendo?
 
 Semana 20-22 jul: **refactor completo del resolver de CUI** (rama

@@ -36,9 +36,10 @@
 
 ## Riesgos
 
-- Hay un **deploy pendiente**: la rama `sonda/refactor-cui` NO está mergeada
-  ni desplegada — el server corre el código viejo. Los pasos y el ORDEN del
-  deploy viven SOLO en `InfoObras/.ai/tasks/active.md` (fuente única).
+- Hay un **deploy pendiente**: el refactor ya está mergeado a `demo`
+  (fast-forward 2026-07-23, SOLO local — falta push), pero el server corre el
+  código viejo. Los pasos y el ORDEN del deploy viven SOLO en
+  `InfoObras/.ai/tasks/active.md` (fuente única).
 - Límite de gasto mensual de Claude alcanzado el 21-jul (los subagentes pueden
   morir a mitad — el trabajo F8 se terminó a mano por eso).
 
