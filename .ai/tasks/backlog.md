@@ -13,10 +13,10 @@
 - [ ] Tool MCP `buscar_cui` servida por el backend (pedido cliente 06-jul) +
   endpoint de descarga por 1 CUI reutilizando el ZIP (hacerlo job).
 
-## Extras cotizados (esperan aprobación del cliente — ver roadmap)
+## Extras cotizados (esperan aprobación del cliente)
 
-- [ ] T-004 SEACE datos abiertos (CONOSCE/OCDS) · T-005 fechas ET + cronología
-  · T-006 RENIPRESS · T-007 SUNAT habido.
+- [ ] Lista canónica T-00x con estado: `InfoObras/.ai/context/vision.md`
+  (fuente única, nivel sistema) — aquí no se copia.
 
 ## Ideas (sin compromiso, evidencia parcial)
 

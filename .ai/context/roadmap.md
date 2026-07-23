@@ -11,12 +11,9 @@
 
 ## Extras cotizados (pendientes de aprobación del cliente)
 
-- **T-004** — SEACE bases + contrato por datos abiertos (CONOSCE/OCDS) +
-  candado de confirmación · S/2,400 · sonda GO hecha.
-- **T-005** — Reglas de fechas del ET (inicio ≥ firma contrato · término ≤
-  resolución) + hoja "Cronología de expedientes" · S/1,200.
-- **T-006** — RENIPRESS establecimientos de salud · S/800 · sonda GO hecha.
-- **T-007** — SUNAT condición HABIDO/ACTIVO · bolsa 8 h.
+- Lista canónica T-00x con estado comercial: `InfoObras/.ai/context/vision.md`
+  (fuente única, nivel sistema). Precios y estrategia: `docs/comercial/`
+  (gitignored a propósito).
 - Decisión pendiente del cliente: 2 skills hermanas (A/B) vs 1 skill que
   declara el tipo de concurso (el backend ya soporta ambos con el modo).
 
