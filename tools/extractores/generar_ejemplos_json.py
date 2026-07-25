@@ -28,7 +28,7 @@ import pandas as pd
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BASE_DIR = Path(__file__).resolve().parents[2]
+BASE_DIR = Path(__file__).resolve().parents[3]
 EXCEL_CLAUDE_PASO1 = BASE_DIR / "docs" / "files" / "Cuadro_Personal_Clave_CP02-2025.xlsx"
 EXCEL_INGENIERO = Path(
     r"C:\Users\Holbi\Documents\Freelance\proyectos\InfoObras"

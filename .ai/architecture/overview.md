@@ -15,13 +15,13 @@ un **falso CUMPLE es el peor fallo posible**; ante la duda el sistema se abstien
 ## Arquitectura híbrida (regla inquebrantable)
 
 ```
-[Máquina/Cowork del cliente — Claude Max 5x]
+[Máquina del cliente — Claude Code (Claude Max 5x)]
   Skill analizar-licitacion-osce (skill/ + plugin/ empaquetado)
   ├─ subagentes: bases ∥ propuesta-mapa → N×propuesta-profesional → evaluador
   └─ produce: espejo JSON + Excel "claude" + certificados.zip
         │  (MCP local mcp-server/ o dropzone del panel)
         ▼
-[Backend on-prem — FastAPI, backend/]      ⛔ JAMÁS llama APIs cloud de IA
+[Backend on-prem (Servidor Windows) — FastAPI, backend/]      ⛔ JAMÁS llama APIs cloud de IA
   pipeline por job: ingesta → validación → resolución de CUI → InfoObras
   ∥ SUNAT → reglas/Paso 5 → Excel final + ZIP → persistencia
         ▼

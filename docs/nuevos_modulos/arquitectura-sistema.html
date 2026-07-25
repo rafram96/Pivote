@@ -143,16 +143,16 @@
 
 <!-- ============ 2 · ETL ============ -->
 <section>
-  <h2>2 · ETL de la base de referencia (semanal)</h2>
-  <p class="h2sub">Una sola descarga a la semana deja al sistema sin dependencia de los buscadores web del MEF.</p>
+  <h2>2 · Módulo ETL & Ingesta Automática del MEF (semanal)</h2>
+  <p class="h2sub">Una sola ingesta streaming a la semana independiza al sistema de los buscadores web del MEF y garantiza búsquedas ultra-rápidas.</p>
   <div class="flujo">
     <div class="nodo"><b>MEF Datos Abiertos</b><small>3 CSV: activas · cerradas · desactivadas (~523 MB)</small></div>
     <div class="flecha lbl"><i>cron semanal</i></div>
-    <div class="nodo nuevo"><b>Script de ingesta</b><small>valida, compacta y escribe atómico</small></div>
+    <div class="nodo nuevo"><b>Pipeline ETL</b><small>ingesta streaming + sanity check (≥400k filas)</small></div>
     <div class="flecha"></div>
-    <div class="nodo nuevo"><b>Archivo local (~26 MB)</b><small>CUI · SNIP · nombre · ubigeo · entidad · estado</small></div>
-    <div class="flecha lbl"><i>carga perezosa, 1 vez por proceso</i></div>
-    <div class="nodo nuevo"><b>Índice en memoria</b><small>consultas fuzzy en ~0.2 s · sin captcha ni red</small></div>
+    <div class="nodo nuevo"><b>Estructuración Dual</b><small>Hot Path (16 campos indexados) + Cold Path (68 campos JSONB)</small></div>
+    <div class="flecha lbl"><i>swap atómico zero-downtime</i></div>
+    <div class="nodo nuevo"><b>PostgreSQL / Base Local</b><small>índice trigrama pg_trgm (&lt; 15 ms) + motor de búsqueda paralela N profesionales</small></div>
     <p class="nota">Si la base falta o envejece, el sistema avisa y sigue funcionando con InfoObras (degradación segura).</p>
   </div>
 </section>

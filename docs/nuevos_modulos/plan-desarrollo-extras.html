@@ -143,7 +143,7 @@
     </tr>
     <tr>
       <td class="num">T-008</td>
-      <td>Refactor de resolución de CUI: <b>base local del Banco de Inversiones</b> (452,793 CUIs offline, refresco semanal, sin captcha) + vetos de identidad (rubro/ubicación/entidad) + clasificación <b>expediente vs obra</b> con modo «concurso de expedientes» + optimización de la skill (corrige la fuga de ~3M tokens por corrida)</td>
+      <td>Refactor de resolución de CUI + <b>Módulo ETL & Ingesta Automática del MEF</b>: base local del Banco de Inversiones (452,793 CUIs offline, refresco semanal por cron, sin captcha) + <b>Arquitectura Dual de Datos</b> (16 campos calientes Hot Path + 68 campos crudos JSONB Cold Path) + carga atómica zero-downtime en PostgreSQL + vetos de identidad (rubro/ubicación/entidad) + clasificación <b>expediente vs obra</b> + engine de búsqueda paralela $N$ profesionales + optimización de la skill</td>
       <td><span class="tag ok">✔ construido</span></td>
       <td>Ya validado: auditoría golden de 277 casos reales (errores silenciosos 16→10, cero regresiones) + 2 corridas completas (105 y 68 experiencias)</td>
       <td class="num">— (invertido)</td>
@@ -272,16 +272,20 @@
 
   <!-- T-008 -->
   <div class="card ok">
-    <div class="head"><h3>T-008 — Refactor de resolución de CUI + base local MEF + camino expedientes</h3><span class="tag ok">✔ construido y validado</span><span class="precio">S/ 2,800</span></div>
-    <p class="meta">Construido el 20-21&nbsp;jul (rama <code>sonda/refactor-cui</code>, 11 commits). El sistema ya no depende de los buscadores web del MEF: lleva una copia local del Banco de Inversiones completo (activas + cerradas + desactivadas) y resuelve por IDENTIDAD — nunca por conveniencia de fechas. Incluye la clasificación automática expediente/obra que pide el flujograma V2, con modo «concurso de expedientes» (usado en San Isidro).</p>
+    <div class="head"><h3>T-008 — Módulo ETL del MEF + Refactor de resolución de CUI + Base Local + Camino Expedientes</h3><span class="tag ok">✔ construido y validado</span><span class="precio">S/ 2,800</span></div>
+    <p class="meta">Construido el 20-21&nbsp;jul (rama <code>sonda/refactor-cui</code>, 11 commits). El sistema ya no depende de los buscadores web del MEF: lleva una ingesta ETL atómica del Banco de Inversiones completo (activas + cerradas + desactivadas) y resuelve por IDENTIDAD — nunca por conveniencia de fechas. Incluye la clasificación automática expediente/obra que pide el flujograma V2, con modo «concurso de expedientes» (usado en San Isidro).</p>
     <div class="cols">
       <div class="col">
         <h4>Qué incluye (ya entregado)</h4>
         <ul>
-          <li>Base local: 452,793 CUIs de Datos Abiertos del MEF, refresco semanal por script; candidatos en ~0.2&nbsp;s sin captcha.</li>
-          <li>Resolver público-primero con vetos de identidad: rubro, provincia/distrito, entidad municipal; ante homónimos indistinguibles, «Por confirmar» con candidatos — nunca adivina.</li>
-          <li>Clasificación expediente vs obra por toda la evidencia + modo forzado por concurso (camino A): al expediente no se le exigen valorizaciones de la construcción posterior.</li>
-          <li>Optimización de la skill: se eliminó el paso que quemaba ~3M de tokens por corrida (la resolución de CUIs pasó al backend).</li>
+          <li><b>Módulo ETL & Ingesta Resiliente</b>: Descarga streaming por bloques con reintentos para los 3 CSVs de Datos Abiertos del MEF (~523&nbsp;MB → ~26&nbsp;MB comprimido) + parámetro <code>--desde-dir</code> para ejecución offline.</li>
+          <li><b>Arquitectura Dual de Datos (Hot / Cold Path)</b>: Extracción de 16 campos calientes indexados para búsquedas en &lt; 15&nbsp;ms + almacenamiento del payload crudo de 68 campos en <code>JSONB</code> para auditorías sin pérdida de información.</li>
+          <li><b>Persistencia PostgreSQL & Zero-Downtime Swap</b>: Gate de calidad ($\ge 400,000$ registros) e intercambio atómico de tablas en una sola transacción (<code>mef_inversiones_staging</code> → <code>mef_inversiones</code>) sin interrumpir el servicio.</li>
+          <li><b>Engine de Búsqueda Paralela</b>: Procesamiento concurrente de $N$ profesionales y sus $M$ experiencias vía <code>asyncio</code> y <code>ThreadPoolExecutor</code> (&lt; 3&nbsp;s por concurso).</li>
+          <li><b>Catálogo de Entidades & Siglas</b>: 11,004 entidades del Estado con extracción automática de siglas (ej. <code>- AGN</code>, <code>- INABIF</code>) para desempates por emisor.</li>
+          <li><b>Resolver público-primero</b>: Vetos de identidad por rubro, provincia/distrito y entidad municipal; ante homónimos indistinguibles, «Por confirmar» con candidatos — nunca adivina.</li>
+          <li><b>Clasificación expediente vs obra (Camino A)</b>: Al expediente técnico no se le exigen valorizaciones de la construcción posterior.</li>
+          <li><b>Optimización de la skill</b>: Eliminó el paso que quemaba ~3M de tokens por corrida (resolución de CUIs trasladada al backend).</li>
         </ul>
       </div>
       <div class="col">

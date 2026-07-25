@@ -53,7 +53,7 @@ from src.scraping.sunat import (  # noqa: E402
 )
 from src.scraping.infoobras import fetch_by_cui  # noqa: E402
 
-DOCS = Path(__file__).resolve().parents[2] / "docs"
+DOCS = Path(__file__).resolve().parents[3] / "docs"
 
 # Targets por defecto
 RUC_DEFAULT = "20304582147"

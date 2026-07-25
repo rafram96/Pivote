@@ -152,7 +152,7 @@ F = {
 }
 
 # Directorios de salida (convención del repo: artefactos de sondas bajo tools/)
-OUTPUT_DIR = Path(__file__).parent / "_sonda_seace"
+OUTPUT_DIR = Path(__file__).resolve().parents[1] / "_sonda_seace"
 DOCS_DIR = OUTPUT_DIR / "documentos"
 for _d in (DOCS_DIR, OUTPUT_DIR / "debug"):
     _d.mkdir(parents=True, exist_ok=True)

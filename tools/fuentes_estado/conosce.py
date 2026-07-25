@@ -62,7 +62,7 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/144 Safari/537.36")
 HEADERS = {"User-Agent": UA, "Referer": "https://bi.seace.gob.pe/"}
 
-OUT = Path(__file__).parent / "_sonda_seace"
+OUT = Path(__file__).resolve().parents[1] / "_sonda_seace"
 OUT.mkdir(parents=True, exist_ok=True)
 
 

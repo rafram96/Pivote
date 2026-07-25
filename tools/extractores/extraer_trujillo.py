@@ -19,7 +19,7 @@ from pathlib import Path
 
 import openpyxl
 
-BASE = Path(__file__).resolve().parents[1]
+BASE = Path(__file__).resolve().parents[2]
 SRC = BASE / "fixtures" / "trujillo" / "02. Formato de evaluacion COMPLETADO - Consorcio Salud Trujillo I.xlsx"
 OUT = BASE / "fixtures" / "trujillo" / "trujillo_espejo_full.json"
 

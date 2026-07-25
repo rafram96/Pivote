@@ -14,7 +14,7 @@ from pathlib import Path
 
 import openpyxl
 
-BASE = Path(__file__).resolve().parents[1]
+BASE = Path(__file__).resolve().parents[2]
 SRC = Path(sys.argv[1]) if len(sys.argv) > 1 else BASE / "fixtures" / "new_format" / "02. Formato de evaluacion COMPLETADO.xlsx"
 OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else BASE / "fixtures" / "new_format" / "libertador_espejo.json"
 

@@ -8,6 +8,20 @@
 
 - [ ] **Deploy del refactor** — tarea CROSS-REPO; checklist canónico en
   `InfoObras/.ai/tasks/active.md` (nivel sistema). Regla: todo junto (ADR-007).
+- [ ] **EPIC #12: Sistema ETL del MEF** (Registrado en GitHub Project #1 `InfoObras Development`):
+  - [ ] **[Feature #13] Ingesta y Extracción de Datos Abiertos del MEF**
+    - [ ] `T-ETL-001` (#14): Ingesta streaming con reintentos y tolerancia a fallos (3 CSVs MEF).
+    - [ ] `T-ETL-002` (#15): Soporte offline y parámetro `--desde-dir`.
+  - [ ] **[Feature #16] Normalización y Estructuración Dual (Hot / Cold Path)**
+    - [ ] `T-ETL-003` (#17): Extracción y normalización de 16 campos calientes (Hot Path).
+    - [ ] `T-ETL-004` (#18): Empaquetado de payload crudo completo de 68 campos (Cold Path JSONB).
+    - [ ] `T-ETL-005` (#19): Extracción de catálogo de entidades públicas y siglas.
+  - [ ] **[Feature #20] Persistencia PostgreSQL y Carga Atómica Zero-Downtime**
+    - [ ] `T-ETL-006` (#21): Control de calidad de volumen y Sanity Check (Gate >= 400k filas).
+    - [ ] `T-ETL-007` (#22): Swap atómico de tablas PostgreSQL (`mef_inversiones_staging` -> `mef_inversiones`).
+  - [ ] **[Feature #23] Búsqueda Paralela y Cron de Refresco**
+    - [ ] `T-ETL-008` (#24): Cron semanal y actualización de `metadata.json`.
+    - [ ] `T-ETL-009` (#25): Engine de búsqueda paralela N profesionales (SQL + Python Scoring).
 - [ ] Camino A: no descargar ni pintar secciones de obra (valorizaciones,
   cronograma) en expedientes; silenciar advertencias COBERTURA para expedientes.
 - [ ] Re-revisar con el cliente los 2 casos de verdad auditada dudosa:

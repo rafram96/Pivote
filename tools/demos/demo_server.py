@@ -49,7 +49,7 @@ HOST = "127.0.0.1"
 PORT = 8765
 # Sirve la presentación unificada (arquitectura + demo con buscador embebido).
 # Fallback al buscador simple si la presentación no existe.
-DOCS = Path(__file__).resolve().parents[1] / "docs"
+DOCS = Path(__file__).resolve().parents[2] / "docs"
 UI_PATH = DOCS / "presentaciones" / "pivote_presentacion.html"
 if not UI_PATH.exists():
     UI_PATH = Path(__file__).parent / "demo_buscador.html"

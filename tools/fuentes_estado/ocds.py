@@ -45,7 +45,7 @@ import requests
 API = "https://contratacionesabiertas.oece.gob.pe/api/v1"
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/144",
       "Accept": "application/json"}
-OUT = Path(__file__).parent / "_sonda_seace"
+OUT = Path(__file__).resolve().parents[1] / "_sonda_seace"
 OUT.mkdir(parents=True, exist_ok=True)
 
 

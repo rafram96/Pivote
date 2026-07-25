@@ -9,7 +9,7 @@ import json
 import sys
 from pathlib import Path
 
-RAIZ = Path(__file__).resolve().parents[1]
+RAIZ = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(RAIZ / "backend"))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 

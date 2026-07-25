@@ -9,8 +9,8 @@ Claude (Max 5x) con mejores extracciones, y exige que su servidor jamás llame
 APIs cloud ni exponga sus PDFs.
 
 ## Decisión
-La extracción corre como skill de Claude en el entorno del cliente (Cowork,
-plugin) y produce un espejo JSON; el backend on-prem solo verifica y enriquece
+La extracción corre como skill de Claude en el entorno del cliente (**Claude Code**,
+plugin) y produce un espejo JSON; el backend on-prem (Servidor Windows) solo verifica y enriquece
 (InfoObras/SUNAT/MEF), genera Excel/ZIP y sirve el panel. El backend NUNCA
 llama APIs de IA.
 

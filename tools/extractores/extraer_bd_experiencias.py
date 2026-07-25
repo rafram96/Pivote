@@ -25,7 +25,7 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 SRC = Path(sys.argv[1]) if len(sys.argv) > 1 else \
     Path(r"C:\Users\Holbi\Downloads\BD_Experiencias_Paso3_CP02-2025 (1).xlsx")
 DST = Path(sys.argv[2]) if len(sys.argv) > 2 else \
-    Path(__file__).resolve().parents[1] / "fixtures" / "cp02_lircay" / "bd_experiencias_espejo.json"
+    Path(__file__).resolve().parents[2] / "fixtures" / "cp02_lircay" / "bd_experiencias_espejo.json"
 
 # índices 0-based de columnas (ver inspección del Excel)
 C_NPROF, C_CARGO, C_NOMBRE, C_DNI = 1, 2, 3, 4

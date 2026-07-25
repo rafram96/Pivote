@@ -18,7 +18,7 @@ import pandas as pd
 # Forzar UTF-8 en stdout (Windows console usa cp1252 por default)
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BASE = Path(__file__).resolve().parents[2] / "docs" / "files"
+BASE = Path(__file__).resolve().parents[3] / "docs" / "files"
 
 FILES = [
     ("Paso 1 - Cuadro_Personal_Clave (bases)", "Cuadro_Personal_Clave_CP02-2025.xlsx"),

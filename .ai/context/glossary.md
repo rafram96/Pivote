@@ -16,5 +16,5 @@
 | **RTM** | Requisitos Técnicos Mínimos de las bases del concurso. |
 | **Factor A** | Puntaje por experiencia adicional de ciertos cargos (bases). |
 | **Bases integradas** | Versión final de las bases del proceso (SEACE); el tachado (w:strike) marca requisitos ELIMINADOS. |
-| **Cowork** | Entorno Linux de Claude donde corre la skill del cliente (como plugin). |
+| **Claude Code** | Entorno CLI de Claude donde corre la skill en la máquina del cliente (como plugin). |
 | **Concurso de referencia** | CP-02-2025 GOB.REG.HVCA "Lircay" — origen del formato Excel congelado. |

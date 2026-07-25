@@ -1,15 +1,15 @@
 # Infraestructura y despliegue
 
-## Server del cliente (producción on-prem)
+## Servidor del cliente (producción on-prem)
 
-- Host `192.168.100.5` (red local del cliente; deploy realizado 2026-07-12).
-- `deploy/docker-compose.yml`: 3 servicios — `backend` (FastAPI, crea tablas al
+- Servidor Windows `192.168.100.5` (red local del cliente; deploy realizado 2026-07-12).
+- `deploy/docker-compose.yml` / servicios de Windows: `backend` (FastAPI, crea tablas al
   arrancar), `panel` (Next.js, del repo hermano), `db` (postgres:16-alpine,
   sin puerto expuesto). Volúmenes: `datos_pivote:/datos`, `pgdata`.
   `TZ: America/Lima`. Backend expuesto en `${BACKEND_PORT:-8001}`.
 - El backend SÍ tiene salida a internet (scraping InfoObras/SUNAT/MEF).
 - **No hay scheduler en el stack**: el refresco semanal de la base MEF va por
-  crontab del host (sugerido `0 3 * * 0` → `actualizar_base_mef.py`) o manual.
+  programador de tareas del host / crontab (sugerido `0 3 * * 0` → `actualizar_base_mef.py`) o manual.
   La base compactada (~26 MB) puede copiarse desde la laptop en vez de
   re-descargar los 523 MB.
 
@@ -26,7 +26,7 @@
 
 ## Entorno de la skill (cliente)
 
-La skill corre en **Cowork (Linux)** empaquetada como plugin (`plugin/`,
+La skill corre en la máquina del cliente ejecutando **Claude Code**, empaquetada como plugin (`plugin/`,
 `build.ps1` la reconstruye). Cambios en `skill/` NO llegan al cliente sin
 rebuild + re-entrega del plugin.
 
