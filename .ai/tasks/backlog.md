@@ -6,6 +6,26 @@
 
 ## Técnico (listo para ejecutar)
 
+---
+id: T-TAREA-ADR010
+tipo: tarea
+zona: otro (contrato espejo + skill + orquestador/)
+agente_origen: desarrollador
+estado: aprobado
+depende_de: []
+---
+**Implementar ADR-010: tipo de concurso (A/B) como parámetro declarado por la skill.**
+Campo aditivo `concurso.tipo_evaluacion` ("expedientes"|"obras") en las 3 copias
+del contrato espejo (espejo.py/espejo.js/espejo.ts) + validador + consolidador;
+la skill lo lee del objeto de la convocatoria (agent-bases ya lo extrae) con
+vocabulario cerrado; form-field opcional en `/api/pivote/analizar`;
+`EtapaInfoObrasReal` enruta por el parámetro con precedencia
+espejo > form > `PIVOTE_FORZAR_EXPEDIENTES` > `es_expediente_exp` (fallback +
+telemetría de discrepancia). El resolver de CUI NO se toca (ya es independiente
+del tipo). Incluir aquí el filtro de secciones de descarga/Excel por camino
+(absorbe la tarea "Camino A: no descargar secciones de obra" de abajo).
+Verificación: pytest + golden sin cambios + replay San Isidro con el campo.
+
 - [ ] **Deploy del refactor** — tarea CROSS-REPO; checklist canónico en
   `InfoObras/.ai/tasks/active.md` (nivel sistema). Regla: todo junto (ADR-007).
 - [ ] **EPIC #12: Sistema ETL del MEF** (Registrado en GitHub Project #1 `InfoObras Development`):

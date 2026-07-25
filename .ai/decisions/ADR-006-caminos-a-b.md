@@ -1,6 +1,8 @@
 # ADR-006 · Dos caminos de verificación (expediente vs obra) + modo forzado
 
-- Fecha: 2026-07-21 · Estado: vigente
+- Fecha: 2026-07-21 · Estado: **parcialmente supersedido por ADR-010**
+  (los DOS CAMINOS siguen vigentes; el mecanismo de selección del camino pasa
+  de detección-por-texto/env-var a parámetro declarado por la skill)
 
 ## Contexto
 Concurso real de expedientes (San Isidro): la skill guardaba `proyecto` sin el
