@@ -80,7 +80,7 @@ const ExperienciaProf = z.object({
   entidad_emisora: txt, ruc_emisor: txt,
   proyecto: txt,                 // nombre de obra VERBATIM y completo (sin abreviar ni meter metadata)
   cui: txt,                      // CUI/SNIP citado en el cert (solo dígitos) → Paso 0 determinístico
-  cui_fuente: txt,               // "certificado" | "skill" (resuelto por Claude en el Paso 4.5)
+  cui_fuente: txt,               // "certificado" (la skill solo transcribe lo citado) | "skill" (legado)
   tipo_documento: txt, nombre_emisor: txt,
   cargo_emisor: txt, cargo_valido_emitir: txt,
   fecha_inicial: fecha, fecha_final: fecha, fecha_emision: fecha,

@@ -148,44 +148,25 @@ propenso a errores en propuestas grandes):
 
 Persiste todo en `~/InfoObras/analisis/<analisis_id>/`.
 
-### Paso 4.5 — VERIFICAR solo los CUI citados (acotado; los null los resuelve el backend)
-**NO resuelvas los `cui: null` — déjalos null.** El backend tiene una base local del
-Banco de Inversiones del MEF (los ~453k CUI con su nombre oficial, ubigeo y entidad)
-y resuelve por identidad en milisegundos, con candados contra homónimos y verificación
-InfoObras. Investigar CUIs desde aquí (búsquedas web + evidencia por experiencia)
-cuesta millones de tokens y lo hace peor que el backend — se eliminó a propósito.
-Lo no resuelto cae a "Por confirmar" en el panel con candidatos sugeridos, como debe.
+### Paso 4.5 — La resolución de CUI la hace el BACKEND (tú NO consultas nada)
+**No consultes InfoObras ni el MEF desde aquí.** Tu trabajo con el CUI termina en la
+extracción: transcribir **literal** el código que el certificado cita (`cui`) y dejar
+`null` cuando no lo cita. Nada más.
 
-Lo ÚNICO que haces tú es **verificar los CUI que el certificado YA cita** (pocos y
-baratos — un CUI citado desactualizado sí necesita tu contexto del certificado):
+Toda la resolución y verificación es del backend, que tiene la base local del Banco de
+Inversiones del MEF (~453k CUI con nombre oficial, ubigeo y entidad) y la consulta a
+InfoObras por código: resuelve por identidad en milisegundos, con candados contra
+homónimos, compuerta de rubro y verificación de valorizaciones. Hacerlo desde la skill
+cuesta millones de tokens, es más lento y **acierta menos**. Lo que el backend no pueda
+confirmar cae a "Por confirmar" en el panel con candidatos sugeridos, como debe.
 
-1. **Sonda primero (una sola vez):** una consulta de prueba a la búsqueda pública de
-   InfoObras. Sin internet o portal caído → **omite el paso completo** y sigue al
-   Paso 5 (cero regresión: el backend verifica igual).
-2. **Consulta cada CUI citado en InfoObras** (POST simple, sin login):
-   ```
-   curl -s "https://infobras.contraloria.gob.pe/InfobrasWeb/Mapa/busqueda/obrasBasic?page=0&rowsPerPage=20&Parameters=%7B%22nombrObra%22%3A%22%22%2C%22codSnip%22%3A%22<CUI>%22%7D" -X POST
-   ```
-   Cada resultado trae `codUniqInv` (el CUI canónico, 7 díg.), `nombrObra`,
-   `nombrDepartamento`, `estObra`. Verifica nombre/departamento contra el certificado.
-   Si el cert citaba un **SNIP viejo (5-6 díg.)**, anota el `codUniqInv` canónico.
-3. **CUI citado desactualizado:** si la obra devuelta no existe o su época no cuadra
-   en absoluto con el certificado (obra 2015-16 vs cert 2022-23), es probable una
-   reformulación (caso real: cert citaba 2140959; el proyecto vigente con el MISMO
-   nombre era 2448758). Solo en ESE caso puntual busca el nombre en el MEF/web para
-   hallar el re-registro; si lo confirmas por nombre+departamento, usa ese CUI
-   (`cui_fuente: "skill"`) y deja constancia del reemplazo en `observaciones_claude`.
-   Sin reemplazo claro, deja el citado — el backend lo marcará a revisión.
-4. **Anti-alucinación:** todo CUI que escribas debe haberse VISTO en una respuesta de
-   InfoObras/MEF coincidiendo en nombre/departamento. El backend lo trata como
-   autoritativo. **Jamás un CUI "de memoria"; mejor null que un CUI dudoso.**
-5. **Escribe en `espejo.json`**: citado verificado → `cui_fuente: "certificado"`;
-   reemplazo del punto 3 → `cui_fuente: "skill"`. Re-valida el espejo
-   (`node scripts/validar_espejo.js`) tras editarlo.
-
-> **Alcance:** aplica a proyectos PÚBLICOS. Experiencias con cliente PRIVADO no tienen
-> CUI — déjalas `cui: null` sin insistir. Y de nuevo: **cero búsquedas por nombre para
-> resolver nulls** — ese trabajo es del backend, no gastes tokens del plan en eso.
+- **Anti-alucinación:** un CUI que no esté impreso en el certificado **no se escribe**.
+  Jamás un CUI "de memoria" ni deducido: mejor `null` que un CUI dudoso — el backend
+  trata lo que llega como pista autoritativa del certificado.
+- **SNIP viejo (5-6 díg.) vs CUI (7 díg.):** transcribe lo que diga el documento; el
+  backend normaliza al código canónico.
+- **Cliente PRIVADO:** no tiene CUI — `null` sin insistir (el backend ni siquiera lo
+  busca: InfoObras solo registra obra pública).
 
 ### Paso 4.6 — Verificación de EXPEDIENTES: la hace el BACKEND (no tú)
 Para las experiencias de **expediente técnico/estudio**, el contraste del contrato
@@ -195,10 +176,10 @@ código**, automáticamente, cuando recibe el espejo. NO lo hagas tú por navega
 sería trabajo duplicado y podría chocar con lo del backend.
 
 **Tu única responsabilidad para que esto funcione:** que los CUI **citados** lleguen
-verificados (Paso 4.5) y el resto llegue `cui: null` limpio. El backend resuelve los
-null con su base local del MEF, detecta el expediente por el nombre, consulta el MEF
-(`traeContratoSeaceDWH` + Formato 08-A), descarga los PDFs al ZIP y muestra el bloque
-"VERIFICACIÓN SEACE/MEF" en el Excel y el panel.
+transcritos literal y el resto llegue `cui: null` limpio (Paso 4.5). El backend
+resuelve los null con su base local del MEF, detecta el expediente por el nombre,
+consulta el MEF (`traeContratoSeaceDWH` + Formato 08-A), descarga los PDFs al ZIP y
+muestra el bloque "VERIFICACIÓN SEACE/MEF" en el Excel y el panel.
 
 Diferenciación (la resuelve el backend, no la skill): si la experiencia tiene
 valorizaciones de obra → muestra valorizaciones; si es un expediente sin

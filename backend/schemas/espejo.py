@@ -172,9 +172,9 @@ class ExperienciaProf(_Model):
     ruc_emisor: Optional[str] = None      # RUC (11 díg.) del emisor del cert → cruce ejecutor/supervisor + ALT12
     proyecto: Optional[str] = None        # nombre de obra VERBATIM y completo (sin abreviar ni meter metadata)
     cui: Optional[str] = None             # CUI/SNIP citado en el cert (solo dígitos) → Paso 0 determinístico
-    # De dónde salió el CUI: "certificado" (citado en la constancia) o "skill"
-    # (Claude lo resolvió buscando en la web en el Paso 4.5 — SOLO tras confirmarlo
-    # contra InfoObras). El backend lo trata igual (por_codigo autoritativo).
+    # De dónde salió el CUI: "certificado" (citado en la constancia — lo único que la
+    # skill escribe hoy) o "skill" (legado: espejos viejos donde Claude lo resolvía).
+    # El backend lo trata igual en ambos casos (por_codigo autoritativo).
     cui_fuente: Optional[str] = None
     tipo_documento: Optional[str] = None
     nombre_emisor: Optional[str] = None
