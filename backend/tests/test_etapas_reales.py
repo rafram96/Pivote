@@ -65,7 +65,13 @@ class ConsultaFake:
             return [{"nombrObra": "MEJORAMIENTO DEL HOSPITAL MATERNO DE AMBO",
                      "nombrDepartamento": "HUANUCO", "codSnip": "395001",
                      "codigoObra": 222, "rucEjecutor": "", "rucSupervisor": "20512345678"}]
-        return []  # Quisqui: sin candidatos → REVISIÓN
+        if "SULLANA" in nombre.upper():
+            # sub-obra 1 del paquete HV: SÍ está en InfoObras, resoluble por nombre
+            return [{"nombrObra": "MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL "
+                                  "HOSPITAL DE APOYO SULLANA II-2",
+                     "nombrDepartamento": "PIURA", "codUniqInv": "2595123",
+                     "codigoObra": 444, "rucEjecutor": "", "rucSupervisor": ""}]
+        return []  # Quisqui y Posope Alto: sin candidatos → REVISIÓN
 
 
 @dataclass
@@ -105,6 +111,10 @@ def fetcher_fake(cui):
     if cui == "395001":
         # cubre el periodo certificado (2019-11 → 2023-03), sin paralización
         return ObraFake(222, "HOSPITAL MATERNO AMBO", avances=_meses((2019, 11), (2023, 3)))
+    if cui == "2595123":
+        # sub-obra 1 del paquete HV: valorizaciones que cubren el vínculo del cert
+        return ObraFake(444, "HOSPITAL DE APOYO SULLANA II-2",
+                        avances=_meses((2022, 3), (2023, 7)))
     if cui == "777999":
         # CUI pegado a mano por el humano → resuelve a una obra que cubre su cert
         # (Quisqui: 2023-11-22 → 2025-07-22)
@@ -975,11 +985,14 @@ def test_espejo_multi_obra_sin_cui_valida_contra_el_contrato():
                for o in exp.obras)
 
 
-def test_multi_obra_sin_cui_no_pierde_la_experiencia(tmp_path):
-    """Paquete sin CUI: la experiencia cuenta por el certificado y las sub-obras
-    quedan VISIBLES, no silenciadas. HOY las dos mueren en `sin_cui` — es el estado
-    honesto del motor actual (resolver_obras solo resuelve por código citado).
-    ⇢ PR-2 debe dar vuelta esos dos estados a `resuelto` sin tocar nada más."""
+def test_multi_obra_sin_cui_resuelve_por_nombre_y_tolera_parcial(tmp_path):
+    """PR-2 · el caso que motivó el ADR-011. Ninguna sub-obra cita CUI: cada una pasa
+    por `resolver()` completo. La 1ª (Sullana) resuelve por NOMBRE; la 2ª (Posope
+    Alto) no tiene candidatos y cae a `revision`.
+
+    Lo que este test protege es el PARCIAL (1 de N): la experiencia sigue contando
+    —su respaldo es el certificado— y la sub-obra no hallada queda VISIBLE en vez de
+    tumbar la experiencia o desaparecer."""
     motor, repo = hacer_motor(tmp_path)
     job = motor.correr(motor.crear_job(ESPEJO_MULTI_OBRA_HV).job_id)
 
@@ -987,16 +1000,38 @@ def test_multi_obra_sin_cui_no_pierde_la_experiencia(tmp_path):
     assert enr["via"] == "MULTI_OBRA" and enr["cui"] is None
     sub = enr["sub_obras"]
     assert [s["proyecto"] for s in sub] == [_HV_SUB_1, _HV_SUB_2]
-    assert [s["estado"] for s in sub] == ["sin_cui", "sin_cui"]   # ⇠ PR-2 lo cambia
+    assert [s["estado"] for s in sub] == ["resuelto", "revision"]
+
+    # la resuelta trae CUI, ficha y la FUERZA de la evidencia (via)
+    assert sub[0]["cui"] == "2595123" and sub[0]["via"] == "NOMBRE"
+    assert sub[0]["ficha"]["obra_nombre"] == "HOSPITAL DE APOYO SULLANA II-2"
+    # la no resuelta no inventa CUI y explica por qué
+    assert sub[1]["cui"] is None and sub[1]["decision"]
 
     # la experiencia NO se pierde ni va a la cola humana (ADR-011: el identificador
     # de un cert multi-obra es su portafolio, no un CUI único)
     assert not [it for it in job.items_revision if not it.resuelto]
     obs = [o for e in job.etapas for o in e.observaciones if o.codigo == "MULTI_OBRA"]
-    assert len(obs) == 1 and "2 sub-proyectos" in obs[0].mensaje
+    assert len(obs) == 1 and "1 de 2 identificada(s)" in obs[0].mensaje
+    # parcial ⇒ ADVERTENCIA, no INFO: la brecha tiene que verse
+    assert obs[0].severidad.value == "advertencia"
 
-    # y el Excel las muestra una por una con el motivo, no las esconde
+    # el Excel: banda resumen + la hallada como SubExperiencia con su evidencia,
+    # y la no hallada listada con su motivo (no se esconde)
     ws = openpyxl.load_workbook(tmp_path / job.job_id / "final.xlsx")["P1 GERENTE DE PROYECTO"]
     texto = "\n".join(str(c.value) for f in ws.iter_rows() for c in f if c.value)
-    assert "CERTIFICADO MULTI-OBRA — 0 de 2 obra(s) hallada(s)" in texto
-    assert texto.count("el certificado no cita CUI para este proyecto") == 2
+    assert "CERTIFICADO MULTI-OBRA — 1 de 2 obra(s) hallada(s)" in texto
+    assert "SubExperiencia 1.1" in texto and "identificada por nombre" in texto
+    assert "POSOPE ALTO" in texto and "no se pudo identificar con seguridad" in texto
+
+
+def test_multi_obra_el_tiempo_no_se_duplica_al_resolver_por_nombre(tmp_path):
+    """Regresión anti-duplicación (ADR-011 §2): pasar de `por_codigo` a `resolver()`
+    NO puede cambiar el tiempo. Los días viven en la experiencia MADRE; las
+    SubExperiencias son verificación por obra y no suman."""
+    motor, repo = hacer_motor(tmp_path)
+    job = motor.correr(motor.crear_job(ESPEJO_MULTI_OBRA_HV).job_id)
+
+    p1 = repo.cargar_enriquecimiento(job.job_id)["prof:1"]
+    # 2022-03-01 → 2023-07-31 contado UNA vez, no una por sub-obra
+    assert p1["dias_brutos"] == 518

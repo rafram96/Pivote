@@ -7,8 +7,9 @@ from __future__ import annotations
 import itertools
 
 from resolucion.cui import (
-    _es_experiencia_expediente, _es_experiencia_privada, _puntuar, _sin_prefijo,
-    norm, resolver, resolver_obras, ubicacion)
+    _es_experiencia_expediente, _es_experiencia_privada, _exp_derivada,
+    _muni_contradice, _puntuar, _sin_prefijo, norm, resolver, resolver_obras,
+    ubicacion, ubigeo_cert)
 
 
 def test_ubicacion_no_confunde_ica_dentro_de_huancavelica():
@@ -383,3 +384,136 @@ def test_resolver_no_pre_bloquea_consultorias_ni_otros_rubros():
     r = resolver(exp, _FakeConsulta([_obra("2000001", 50, _NOMBRE)]))
     assert r["estado"] == "resuelto", r
     assert r["via"] != "NA"
+
+
+# ── ADR-011 · resolución por SUB-OBRA (cert multi-obra) ──────────────────────
+
+_MADRE_HV = {
+    "proyecto": ("MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL HOSPITAL DE APOYO "
+                 "SULLANA II-2 Y EL CENTRO DE SALUD POSOPE ALTO I-3 (PAQUETE 6)"),
+    "cui": None,
+    "entidad_contratante": "MUNICIPALIDAD PROVINCIAL DE SULLANA",
+    "entidad_emisora": "HV CONTRATISTAS S.A.", "ruc_emisor": "20100000001",
+    "ubicacion": "Provincia de Sullana, Piura",
+    "fecha_inicial": "2022-03-01", "fecha_final": "2023-07-31",
+}
+
+
+def test_exp_derivada_hereda_el_contrato_pero_no_la_ubicacion():
+    """La herencia de la madre a la sub-obra, campo por campo. Heredar TODO vetaría
+    sub-obras legítimas de un paquete que cruza provincias; heredar NADA dejaría la
+    búsqueda por nombre sin candados."""
+    sub = {"proyecto": "MEJORAMIENTO ... CENTRO DE SALUD POSOPE ALTO I-3", "cui": None}
+    d = _exp_derivada(_MADRE_HV, sub)
+
+    # el proyecto es el de la SUB-OBRA (el punto del desglose), no el compuesto
+    assert d["proyecto"] == sub["proyecto"] and "PAQUETE" not in d["proyecto"]
+    # el contrato es uno solo → entidad/emisor/RUC viajan (mantienen los candados)
+    assert d["entidad_contratante"] == "MUNICIPALIDAD PROVINCIAL DE SULLANA"
+    assert d["ruc_emisor"] == "20100000001"
+    # la ubicación de la madre NO viaja
+    assert "ubicacion" not in d
+    # las fechas del vínculo sí, como respaldo (desempate en _elegir_obra)
+    assert d["fecha_inicial"] == "2022-03-01" and d["fecha_final"] == "2023-07-31"
+    # dict NUEVO: resolver() escribe en la exp que recibe y no debe tocar a la madre
+    d["_fichas_mef"] = {"x": 1}
+    assert "_fichas_mef" not in _MADRE_HV
+
+
+def test_exp_derivada_prefiere_las_fechas_propias_de_la_sub_obra():
+    """Escenario B (sub-fechas declaradas): mandan las de la sub-obra."""
+    sub = {"proyecto": "OBRA X", "cui": None,
+           "fecha_inicial": "2022-06-01", "fecha_final": "2022-12-31"}
+    d = _exp_derivada(_MADRE_HV, sub)
+    assert d["fecha_inicial"] == "2022-06-01" and d["fecha_final"] == "2022-12-31"
+
+
+def test_la_geografia_de_la_madre_no_veta_a_la_sub_obra():
+    """El veto de ubicación entra por DOS puertas (`ubigeo_cert` lee la entidad
+    contratante; `_muni_contradice` la lee sola). Para una sub-obra ambas se apagan:
+    la única autoridad geográfica sobre la sub-obra es SU nombre. Sin esto, un
+    paquete de la Municipalidad Provincial de Sullana vetaría su propia obra de
+    Posope Alto (Lambayeque) — falso negativo."""
+    sub = {"proyecto": "MEJORAMIENTO ... CENTRO DE SALUD POSOPE ALTO I-3", "cui": None}
+    d = _exp_derivada(_MADRE_HV, sub)
+
+    # la madre SÍ declara Sullana…
+    assert "SULLANA" in ubigeo_cert(_MADRE_HV)["prov"]
+    # …y la sub-obra derivada NO hereda esa provincia
+    assert ubigeo_cert(d)["prov"] == set()
+    # el candado municipalidad-vs-municipalidad también queda inerte
+    ficha_otra_muni = {"entidad": "MUNICIPALIDAD PROVINCIAL DE CHICLAYO"}
+    assert _muni_contradice(_MADRE_HV, ficha_otra_muni) is True
+    assert _muni_contradice(d, ficha_otra_muni) is False
+
+
+def test_la_sub_obra_conserva_la_geografia_de_su_propio_nombre():
+    """Apagar la geografía heredada NO es apagar el veto: si el NOMBRE de la
+    sub-obra declara su provincia, esa sí cuenta (y sí puede vetar)."""
+    sub = {"proyecto": "MEJORAMIENTO DEL C.S. X, PROVINCIA DE CHICLAYO", "cui": None}
+    assert "CHICLAYO" in ubigeo_cert(_exp_derivada(_MADRE_HV, sub))["prov"]
+
+
+def test_sub_obra_sin_cui_resuelve_por_nombre():
+    """El delta del ADR-011: antes una sub-obra sin CUI moría en `sin_cui`."""
+    class ConsultaHV:
+        def por_codigo(self, c):
+            return []
+
+        def buscar(self, nombre):
+            if "SULLANA" in nombre.upper():
+                return [{"nombrObra": "MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL "
+                                      "HOSPITAL DE APOYO SULLANA II-2",
+                         "codUniqInv": "2595123", "codigoObra": 444,
+                         "nombrDepartamento": "PIURA"}]
+            return []
+
+    obras = [{"proyecto": "MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL HOSPITAL "
+                          "DE APOYO SULLANA II-2", "cui": None},
+             {"proyecto": "MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL CENTRO DE "
+                          "SALUD POSOPE ALTO I-3", "cui": None}]
+    res = resolver_obras(obras, ConsultaHV(), exp_madre=_MADRE_HV)
+
+    assert [r["estado"] for r in res] == ["resuelto", "revision"]
+    assert res[0]["cui"] == "2595123" and res[0]["via"] == "NOMBRE"
+    # 1 de N: la que no resuelve queda VISIBLE con su motivo, no desaparece
+    assert res[1]["cui"] is None and res[1]["decision"]
+    assert res[1]["proyecto"].endswith("POSOPE ALTO I-3")
+
+
+def test_sub_obra_sin_exp_madre_sigue_saliendo_sin_cui():
+    """Sin madre no hay de dónde derivar: se conserva el estado histórico en vez de
+    buscar por un nombre pelado y sin candados."""
+    class ConsultaVacia:
+        def por_codigo(self, c):
+            return []
+
+        def buscar(self, nombre):
+            raise AssertionError("no debe buscar por nombre sin exp_madre")
+
+    res = resolver_obras([{"proyecto": "OBRA X", "cui": None}], ConsultaVacia())
+    assert res[0]["estado"] == "sin_cui"
+
+
+def test_cui_citado_que_no_existe_no_cae_a_busqueda_por_nombre():
+    """ESCALERA (la decisión de diseño de PR-2). El cert de Talara cita el código de
+    un Plan Integral que NO es obra. Si esa sub-obra cayera a búsqueda por nombre,
+    el resolver podría casarla con cualquier obra parecida: sería adivinar sobre
+    evidencia que YA contradice — el falso positivo que el ADR-011 quiere evitar.
+    Un código citado que no existe se queda en `no_encontrado`."""
+    buscados = []
+
+    class ConsultaTalara:
+        def por_codigo(self, c):
+            return []                      # el Plan Integral no figura como obra
+
+        def buscar(self, nombre):
+            buscados.append(nombre)
+            return [{"nombrObra": "MEJORAMIENTO DEL AEROPUERTO JORGE CHAVEZ",
+                     "codUniqInv": "2999999", "codigoObra": 9,
+                     "nombrDepartamento": "LIMA"}]
+
+    res = resolver_obras([{"proyecto": "Jorge Chávez", "cui": "2089754"}],
+                         ConsultaTalara(), exp_madre=_MADRE_HV)
+    assert res[0]["estado"] == "no_encontrado" and res[0]["cui"] == "2089754"
+    assert buscados == []                  # ni siquiera se intentó por nombre

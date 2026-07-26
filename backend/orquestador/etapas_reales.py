@@ -231,15 +231,19 @@ class EtapaResolucionCuiReal:
                 # su CUI. El "identificador" de la experiencia es su portafolio, no un
                 # CUI único → NO va a "Por confirmar". Se verifica cada sub-obra por
                 # código (determinístico) y se guarda la lista para el Excel/panel.
-                sub = resolver_obras(e.get("obras"), consulta, base=base)
+                sub = resolver_obras(e.get("obras"), consulta, base=base, exp_madre=e)
                 n_res = sum(1 for s in sub if s.get("estado") == "resuelto")
                 ctx.enriquecimiento[_clave(np_, ne)] = {
                     "cui": None, "via": "MULTI_OBRA", "obra": None, "sub_obras": sub}
                 ok += 1
+                # PARCIAL (1 de N): la experiencia cuenta igual —su respaldo es el
+                # certificado— pero el conteo deja la brecha a la vista (ADR-011).
+                sev = (pipeline.Severidad.INFO if n_res == len(sub)
+                       else pipeline.Severidad.ADVERTENCIA)
                 obs.append(pipeline.Observacion(
-                    codigo="MULTI_OBRA", severidad=pipeline.Severidad.INFO,
+                    codigo="MULTI_OBRA", severidad=sev,
                     mensaje=f"experiencia multi-obra ({len(sub)} sub-proyectos): "
-                            f"{n_res} verificado(s) en InfoObras por su código",
+                            f"{n_res} de {len(sub)} identificada(s) en InfoObras",
                     origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
             else:
                 pendientes.append((e, (np_, ne)))
