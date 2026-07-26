@@ -58,6 +58,27 @@ obra?** con la pregunta en el título del campo, lista los representantes
 (R:U) que corrió el de representante de obra a W:Z. Falta el render en el
 panel (repo `Panel-InfoObras`): el JSON ya viaja con `representantes`,
 `historico` y `habido`.
+## Nota (2026-07-26) — issue #32, el factor de evaluación en cada hoja P
+
+Rama `rafram96/issue-32-embeber-el-factor-2` (`17b1e04`), sobre demo ya con
+33/34/35 dentro. Lo que un agente nuevo necesita para retomarlo:
+
+- **Falta lo único que no se puede hacer offline**: correr un job real y MIRAR
+  el recorte. No basta `regenerar_excel_final`: hay que re-correr
+  `extraer_certificados.js` con `bases.pdf` y volver a subir el ZIP, porque los
+  `certs/` en disco no tienen el `P{n}_FACTOR.pdf`. No re-scrapea nada.
+- **El riesgo vivo es el número de página**, no el código: lo elige un LLM
+  (`agent-bases`), y un recorte de la página equivocada se ve legítimo. El
+  script valida el rango y avisa por stdout; la corrección real es mirarlo.
+- **No agrava el pendiente de rebuild del plugin**: el cambio es compatible en
+  ambos sentidos (un `P{n}_FACTOR.pdf` en un backend viejo se ignora; un
+  backend nuevo sin el archivo genera la hoja como antes). Viaja con el rebuild
+  único que ya deben 33/34/35.
+- **Pendiente de cliente**: confirmar si el TDR y el Anexo 16 se quedan al
+  INICIO de la hoja (hoy) o bajan junto al factor. Son dos líneas en
+  `excel_final.py`.
+
+## ¿Qué se estaba haciendo?
 
 Semana 20-22 jul: **refactor completo del resolver de CUI** (rama
 `sonda/refactor-cui`, 13 commits) — base local MEF, público-primero, camino

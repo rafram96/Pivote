@@ -555,3 +555,86 @@ def test_excel_final_requisitos_lista_no_crashea(tmp_path):
     rows = {str(row[0].value or ""): row[1].value for row in ws.iter_rows(min_col=1, max_col=2)}
     cargos = next((rows[k] for k in rows if "CARGOS VÁLIDOS" in k), None)
     assert cargos == "Residente de obra; Jefe de obra; Supervisor de obra"
+
+
+# ── Factor de evaluación embebido al final de la hoja (issue #32) ────────────
+
+_ESPEJO_FACTOR = {
+    "_meta": {"pagina_factores": 48},
+    "postor": {},
+    "profesionales": [{
+        "n_prof": 1, "cargo": "ESPECIALISTA EN ARQUITECTURA", "nombre": "JUANA",
+        "colegiatura": "CAP 1",
+        "experiencias": [{"n": 1, "proyecto": "Hospital X", "fecha_inicial": "2019-01-01",
+                          "fecha_final": "2020-01-01", "entidad_emisora": "GR",
+                          "cargo_ocupado": "Arquitecta"}],
+    }],
+    "resumen_evaluacion": {"factores": []},
+}
+
+
+def _pdf_una_pagina(destino: Path, texto: str) -> Path:
+    """PDF mínimo de 1 página, con PyMuPDF — el mismo motor con el que el generador
+    rasteriza los recortes."""
+    fitz = pytest.importorskip("fitz")
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 100), texto)
+    doc.save(str(destino))
+    doc.close()
+    return destino
+
+
+def _fila_de(ws, texto: str) -> int:
+    """Nº de fila cuya columna A empieza con `texto` (0 si no está)."""
+    return next((c.row for (c,) in ws.iter_rows(min_col=1, max_col=1)
+                 if str(c.value or "").startswith(texto)), 0)
+
+
+def test_excel_final_embebe_factor_al_final(tmp_path):
+    """El recorte del Cuadro de Factores cierra la hoja del profesional, DESPUÉS de
+    la PARTE 5 — y sin pisarla."""
+    factor = _pdf_una_pagina(tmp_path / "factor.pdf", "4.2 FACTORES DE EVALUACION")
+    salida = generar_excel_final(_ESPEJO_FACTOR, tmp_path / "factor.xlsx",
+                                 certificados={(1, "FACTOR"): factor})
+    ws = next(s for s in openpyxl.load_workbook(salida).worksheets if s.title.startswith("P1"))
+
+    fila_banda = _fila_de(ws, "FACTOR DE EVALUACIÓN")
+    fila_anios = _fila_de(ws, "AÑOS EFECTIVOS")
+    # (1) el recorte está, y (2) va DESPUÉS de la PARTE 5 (al final, no al inicio)
+    assert fila_banda > 0 and fila_anios > 0
+    assert fila_banda > fila_anios
+    # (3) REGRESIÓN del `r += 2`: la PARTE 5 deja `r` EN su última fila, así que sin
+    # el salto la banda se mergea encima y openpyxl la absorbe SIN error — el Excel
+    # sale válido pero con "AÑOS EFECTIVOS" pisado y el número huérfano en la col. S.
+    # Por eso NO basta con contar imágenes: hay que exigir que la fila sobreviva.
+    assert isinstance(ws.cell(fila_anios, 19).value, (int, float))
+    assert len(ws._images) == 1
+
+
+def test_excel_final_sin_factor_no_cambia_la_hoja(tmp_path):
+    """Corrida sin el recorte (agent-bases no capturó la página): la hoja sale igual
+    que siempre, sin imagen ni banda — no se rompe la generación."""
+    salida = generar_excel_final(_ESPEJO_FACTOR, tmp_path / "sin_factor.xlsx")
+    ws = next(s for s in openpyxl.load_workbook(salida).worksheets if s.title.startswith("P1"))
+    assert _fila_de(ws, "FACTOR DE EVALUACIÓN") == 0
+    assert _fila_de(ws, "AÑOS EFECTIVOS") > 0
+    assert not ws._images
+
+
+def test_regenerar_excel_final_conserva_los_embeds(tmp_path):
+    """Regresión: `regenerar_excel_final` no pasaba `certificados`, así que el
+    backfill dejaba el entregable SIN ninguna imagen (constancias, TDR, Anexo). Ahora
+    mapea la carpeta `certs/` hermana del Excel."""
+    from entregables import regenerar_excel_final
+
+    job = tmp_path / "job-1"
+    (job / "certs").mkdir(parents=True)
+    _pdf_una_pagina(job / "certs" / "P1_FACTOR.pdf", "4.2 FACTORES")
+    _pdf_una_pagina(job / "certs" / "P1_E1.pdf", "CONSTANCIA")
+
+    salida = regenerar_excel_final(_ESPEJO_FACTOR, {}, job / "final.xlsx")
+    ws = next(s for s in openpyxl.load_workbook(salida).worksheets if s.title.startswith("P1"))
+    assert len(ws._images) == 2        # constancia de la experiencia + factor
+    fila_anios = _fila_de(ws, "AÑOS EFECTIVOS")
+    assert fila_anios > 0
+    assert _fila_de(ws, "FACTOR DE EVALUACIÓN") > fila_anios
