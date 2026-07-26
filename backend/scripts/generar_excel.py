@@ -276,7 +276,11 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
     b.parte("PARTE 1: FORMULARIOS DEL POSTOR")
     b.headers(["ANEXO", "DESCRIPCIÓN", "OBSERVACIÓN", "FOLIO"])
     for f in p.get("formularios", []):
-        b.row([f.get("anexo", ""), f.get("descripcion", ""), f.get("observacion", ""), f.get("folio", "")])
+        # `documento` es la clave del formato vigente; `descripcion` la del
+        # formato Trujillo (ambas viven en el contrato — schemas/espejo.py).
+        # Leer solo una dejaba la columna VACÍA en todos los espejos nuevos.
+        b.row([f.get("anexo", ""), f.get("documento") or f.get("descripcion") or "",
+               f.get("observacion", ""), f.get("folio", "")])
     b.blank()
     oe = p.get("oferta_economica", {})
     if oe:

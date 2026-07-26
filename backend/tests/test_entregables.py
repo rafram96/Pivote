@@ -555,3 +555,24 @@ def test_excel_final_requisitos_lista_no_crashea(tmp_path):
     rows = {str(row[0].value or ""): row[1].value for row in ws.iter_rows(min_col=1, max_col=2)}
     cargos = next((rows[k] for k in rows if "CARGOS VÁLIDOS" in k), None)
     assert cargos == "Residente de obra; Jefe de obra; Supervisor de obra"
+
+
+def test_excel_final_parte1_usa_documento_o_descripcion(tmp_path):
+    """PARTE 1, columna DESCRIPCIÓN. El contrato admite DOS claves: `documento`
+    (formato vigente, lo que emite la skill hoy) y `descripcion` (formato
+    Trujillo). El render leía solo `descripcion` → la columna salía VACÍA en
+    todos los espejos nuevos (medido: 371/371 formularios reales usan
+    `documento`)."""
+    espejo = {**ESPEJO, "postor": {**ESPEJO.get("postor", {}), "formularios": [
+        {"anexo": "ANEXO N° 01", "documento": "Declaración Jurada del Postor",
+         "observacion": "Presenta", "folio": 5},
+        {"anexo": "ANEXO N° 02", "descripcion": "Pacto de Integridad (Trujillo)",
+         "observacion": "Presenta", "folio": 8},
+    ]}}
+    salida = generar_excel_final(espejo, tmp_path / "p1.xlsx")
+    ws = openpyxl.load_workbook(salida)["CLAUDE"]
+    textos = [[str(c.value or "") for c in fila] for fila in ws.iter_rows(max_row=40)]
+    fila1 = next(f for f in textos if f and f[0] == "ANEXO N° 01")
+    fila2 = next(f for f in textos if f and f[0] == "ANEXO N° 02")
+    assert fila1[1] == "Declaración Jurada del Postor"      # clave nueva
+    assert fila2[1] == "Pacto de Integridad (Trujillo)"     # clave legacy sigue viva
