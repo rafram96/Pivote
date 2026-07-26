@@ -389,6 +389,94 @@ def test_hoja_profesional_emisor_sin_anomalia():
     assert "HABIDO" in texto and "SOCIEDAD ANONIMA CERRADA" in texto
 
 
+def test_hoja_profesional_representantes_e_historico_del_emisor():
+    """Issue #30: el cuadro del emisor lista los representantes legales y responde
+    —en el TÍTULO del campo— si estaba habido al emitir y durante la obra; el
+    histórico va en un cuadro contiguo (R:U) y el representante de obra se corre
+    a W:Z."""
+    import openpyxl
+    from entregables.excel_final import construir_hoja_profesional
+
+    ws = openpyxl.Workbook().active
+    prof = {"n_prof": 1, "cargo": "ESP", "nombre": "N", "experiencias": [
+        {"n": 1, "proyecto": "Obra Z", "fecha_inicial": "2021-05-13",
+         "fecha_final": "2023-05-06", "fecha_emision": "2023-06-01",
+         "ruc_emisor": "20512345678"}]}
+    fichas = {(1, 1): {"cui": "2418877", "valorizaciones": [],
+                       "representante_obra": {"contratistas": [
+                           {"nombre_empresa": "EJECUTORA SAC", "ruc": "20111111111"}]}}}
+    sunat = {(1, 1): {
+        "ruc": "20512345678", "razon_social": "CONSTRUCTORA X SAC",
+        "fecha_inscripcion": "2010-01-05", "estado": "ACTIVO", "condicion": "HABIDO",
+        "representantes": [
+            {"tipo_documento": "CE", "nro_documento": "001748034",
+             "nombre": "ZHANG XIA", "cargo": "APODERADO", "fecha_desde": "2020-08-17"},
+            {"tipo_documento": "CE", "nro_documento": "002143422",
+             "nombre": "LI WENXUE", "cargo": "APODERADO", "fecha_desde": "2020-12-09"}],
+        "historico": {"razones_sociales": [
+            {"nombre": "CONSTRUCTORA X EIRL", "fecha_baja": "2016-05-04"}],
+            "domicilios": [{"direccion": "JR. AREQUIPA 55", "fecha_baja": "2016-05-04"}]},
+        "habido": {
+            "emision": {"fecha": "2023-06-01", "condicion": "HABIDO", "ok": True},
+            "periodo": {"desde": "2021-05-13", "hasta": "2023-05-06",
+                        "tramos": [
+                            {"condicion": "HABIDO", "desde": "2021-05-13", "hasta": "2022-06-30"},
+                            {"condicion": "NO HABIDO", "desde": "2022-07-01", "hasta": "2022-09-30"}],
+                        "tramos_no_habido": [
+                            {"condicion": "NO HABIDO", "desde": "2022-07-01", "hasta": "2022-09-30"}],
+                        "ok": False}}}}
+    construir_hoja_profesional(ws, prof, {}, {}, fichas, {}, sunat)
+
+    celdas = {c.coordinate: str(c.value) for row in ws.iter_rows() for c in row if c.value}
+    texto = "\n".join(celdas.values())
+
+    # representantes: todos, con cargo y fecha desde — y SIN cruce con el firmante
+    assert "Representantes legales (SUNAT)" in texto
+    assert "ZHANG XIA" in texto and "LI WENXUE" in texto
+    assert "APODERADO" in texto and "17/08/20" in texto
+    assert "ALT12" not in texto and "firmante" not in texto
+
+    # la pregunta va en el TÍTULO del campo, no solo en el valor
+    assert any(v.startswith("¿Estaba habido al emitir el certificado?")
+               for v in celdas.values())
+    assert any(v.startswith("¿Estuvo habido durante la obra?") for v in celdas.values())
+    assert "NO — NO HABIDO 01/07/22–30/09/22" in texto
+
+    # cuadro histórico contiguo: arranca en R (col 18), en la misma fila que el emisor
+    emisor = next(k for k, v in celdas.items() if v == "EMISOR DEL CERTIFICADO (SUNAT)")
+    hist = next(k for k, v in celdas.items() if v == "HISTÓRICO SUNAT DEL EMISOR")
+    assert emisor[0] == "M" and hist[0] == "R"
+    assert emisor[1:] == hist[1:], "los dos cuadros del emisor arrancan en la misma fila"
+    assert "CONSTRUCTORA X EIRL" in texto and "JR. AREQUIPA 55" in texto
+
+    # el representante de obra (InfoObras) se corrió a W:Z
+    rep_obra = next(k for k, v in celdas.items() if v == "REPRESENTANTE DE OBRA (InfoObras)")
+    assert rep_obra[0] == "W"
+
+
+def test_hoja_profesional_sin_historico_no_dibuja_el_cuadro():
+    """Emisor sin información histórica: no se dibuja el cuadro contiguo (queda
+    'no verificable' en el campo del emisor) y no se rompe nada."""
+    import openpyxl
+    from entregables.excel_final import construir_hoja_profesional
+
+    ws = openpyxl.Workbook().active
+    prof = {"n_prof": 1, "cargo": "ESP", "nombre": "N", "experiencias": [
+        {"n": 1, "proyecto": "Obra W", "fecha_inicial": "2020-01-01",
+         "fecha_final": "2021-01-01", "ruc_emisor": "20512345678"}]}
+    sunat = {(1, 1): {"ruc": "20512345678", "razon_social": "EMPRESA OK",
+                      "fecha_inscripcion": "2010-05-10", "estado": "ACTIVO",
+                      "condicion": "HABIDO", "representantes": [], "historico": None,
+                      "habido": None}}
+    construir_hoja_profesional(ws, prof, {}, {}, {(1, 1): {"valorizaciones": []}}, {}, sunat)
+
+    texto = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
+    assert "HISTÓRICO SUNAT DEL EMISOR" not in texto
+    assert "Representantes legales" not in texto
+    assert "¿Estaba habido al emitir y durante la obra?" in texto
+    assert "Sin información histórica en SUNAT" in texto
+
+
 # ── Hoja CLAUDE: formato de Manuel (blanco + verde/rojo semántico) ─────────────
 
 def test_clasificar_veredicto_polaridad():

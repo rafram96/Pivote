@@ -56,6 +56,116 @@ def test_parse_representantes_html_sin_tabla():
     assert sunat._parse_representantes("<html><body>nada</body></html>") == []
 
 
+# ── Información histórica (getinfHis) ───────────────────────────────────────
+# Dumps del sondeo del issue #30: _rico = con cambios de razón social y muchos
+# tramos de condición · _vacio = "No hay Información" en las tres tablas ·
+# _error = RUC inexistente (el portal devuelve su página de error genérica).
+
+def test_parse_historico_dump_rico(dump_sunat):
+    h = sunat._parse_historico(dump_sunat("30_getinfHis_rico.html"), "20573023481")
+
+    assert [r["nombre"] for r in h.razones_sociales] == [
+        "JOGAMA CONSULTORIAS Y CONSTRUCCIONES GENERALES E.I.R.L"] * 2
+    assert h.razones_sociales[0]["fecha_baja"] == "2018-03-13"
+
+    assert len(h.condiciones) >= 20, "el histórico de condición trae muchos tramos"
+    primero = h.condiciones[0]
+    assert primero.condicion == "PENDIENTE"
+    assert primero.desde is None, "'-' en Fecha Desde = extremo abierto"
+    assert primero.hasta == date(2013, 1, 23)
+    # el portal usa más estados que HABIDO/NO HABIDO
+    assert {"NO HALLADO", "POR VERIFICAR"} <= {t.condicion for t in h.condiciones}
+
+    assert len(h.domicilios) == 2
+    # el portal antepone guiones a algunas direcciones; el parser los limpia
+    assert all(not d["direccion"].startswith("-") for d in h.domicilios)
+    assert h.domicilios[0]["fecha_baja"] == "2015-09-16"
+
+
+def test_parse_historico_dump_vacio(dump_sunat):
+    # las tres tablas existen pero dicen "No hay Información" → histórico vacío,
+    # NO un fallo de parseo
+    h = sunat._parse_historico(dump_sunat("30_getinfHis_vacio.html"), "20600789911")
+    assert h.vacio()
+    assert h.to_dict()["condiciones"] == []
+
+
+def test_parse_historico_pagina_error(dump_sunat):
+    # RUC inexistente: la página de error no tiene tablas → nada que parsear
+    h = sunat._parse_historico(dump_sunat("30_getinfHis_error.html"), "20607105615")
+    assert h.vacio()
+
+
+# ── ¿Estaba HABIDO al emitir el certificado y durante la obra? ───────────────
+
+def _tramos(*filas):
+    return [sunat.TramoCondicion(c, d, h) for c, d, h in filas]
+
+
+def test_condicion_en_fecha_dentro_y_fuera_del_historico():
+    tramos = _tramos(
+        ("HABIDO", None, date(2013, 1, 23)),
+        ("NO HABIDO", date(2013, 1, 24), date(2014, 5, 24)),
+        ("HABIDO", date(2014, 5, 25), date(2018, 3, 13)),
+    )
+    assert sunat.condicion_en_fecha(tramos, date(2012, 6, 1)) == "HABIDO"
+    assert sunat.condicion_en_fecha(tramos, date(2013, 6, 1)) == "NO HABIDO"
+    # posterior al último tramo → cae en la condición actual de la ficha
+    assert sunat.condicion_en_fecha(tramos, date(2020, 1, 1),
+                                    condicion_actual="HABIDO") == "HABIDO"
+    # ...y sin condición actual no se puede afirmar nada
+    assert sunat.condicion_en_fecha(tramos, date(2020, 1, 1)) is None
+
+
+def test_condicion_en_fecha_tramos_del_mismo_dia_gana_el_ultimo():
+    # caso real (BCP): alta y baja el mismo día, dos filas que se pisan
+    tramos = _tramos(("NO HALLADO", date(2017, 12, 20), date(2017, 12, 20)),
+                     ("HABIDO", date(2017, 12, 20), date(2017, 12, 20)))
+    assert sunat.condicion_en_fecha(tramos, date(2017, 12, 20)) == "HABIDO"
+
+
+def test_evaluar_habido_emision_y_periodo_limpios():
+    tramos = _tramos(("HABIDO", None, date(2020, 12, 31)))
+    r = sunat.evaluar_habido(tramos, fecha_emision=date(2019, 5, 10),
+                             ini=date(2018, 1, 1), fin=date(2019, 4, 30))
+    assert r["emision"]["ok"] is True and r["emision"]["condicion"] == "HABIDO"
+    assert r["periodo"]["ok"] is True
+    assert r["periodo"]["tramos_no_habido"] == []
+
+
+def test_evaluar_habido_detecta_el_tramo_malo_dentro_de_la_obra():
+    tramos = _tramos(
+        ("HABIDO", None, date(2018, 6, 30)),
+        ("NO HABIDO", date(2018, 7, 1), date(2018, 9, 30)),
+        ("HABIDO", date(2018, 10, 1), date(2021, 1, 1)),
+    )
+    r = sunat.evaluar_habido(tramos, fecha_emision=date(2019, 2, 1),
+                             ini=date(2018, 1, 1), fin=date(2018, 12, 31))
+    assert r["emision"]["ok"] is True          # al emitir ya estaba habido
+    assert r["periodo"]["ok"] is False         # pero durante la obra, no
+    malos = r["periodo"]["tramos_no_habido"]
+    assert len(malos) == 1
+    assert malos[0]["condicion"] == "NO HABIDO"
+    # el tramo se reporta recortado al periodo de la experiencia
+    assert malos[0]["desde"] == "2018-07-01" and malos[0]["hasta"] == "2018-09-30"
+
+
+def test_evaluar_habido_sin_datos_no_inventa_veredicto():
+    r = sunat.evaluar_habido([], fecha_emision=date(2019, 1, 1),
+                             ini=date(2018, 1, 1), fin=date(2018, 12, 31))
+    assert r["emision"]["ok"] is None
+    assert r["periodo"]["ok"] is None
+
+
+def test_evaluar_habido_periodo_posterior_al_historico_usa_condicion_actual():
+    # experiencia posterior al último tramo: manda la condición de la ficha
+    tramos = _tramos(("NO HABIDO", None, date(2015, 1, 1)))
+    r = sunat.evaluar_habido(tramos, ini=date(2018, 1, 1), fin=date(2018, 12, 31),
+                             condicion_actual="HABIDO")
+    assert r["periodo"]["ok"] is True
+    assert r["periodo"]["condiciones"] == ["HABIDO"]
+
+
 # ── Diagnóstico de página anómala (captcha real / cambio de estructura) ─────
 
 def test_diagnostico_dump_real_es_estructura_conocida(dump_sunat):
