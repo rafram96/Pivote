@@ -526,6 +526,18 @@ def _puntuar(cand: dict, proyecto_norm: str, deptos_hint: set[str],
     return round(score, 1)
 
 
+def _mef_desactivada(ficha: Optional[dict]) -> bool:
+    """True si la ficha del MEF corresponde a una inversión DESACTIVADA.
+
+    El dato ya viajaba en la base local (`estado_dataset`) desde F3 y NADIE lo leía:
+    229k de las 494k filas son desactivadas y competían de igual a igual con las
+    vivas. Se usa como DESEMPATE y como orden del presupuesto de consultas al
+    portal — nunca como filtro que borra un candidato: un CUI reformulado queda
+    desactivado y el certificado bien puede citar al viejo (15 de 191 verdades
+    auditadas viven en filas DESACTIVADA)."""
+    return bool(ficha) and (ficha.get("estado_dataset") or "") == "DESACTIVADA"
+
+
 def _ficha_mef(cui: Optional[str], base, fichas_mef: dict) -> Optional[dict]:
     """Ficha MEF de un CUI: primero el mapa recolectado en la fusión
     (`exp['_fichas_mef']`), luego `base.existe_cui` (rescata CUIs que InfoObras
@@ -976,9 +988,10 @@ def _fusionar_mef(exp: dict, consulta: Consulta, base, vistos: dict) -> None:
     """F3 · Fusión con la base local del MEF. Solo se invoca con `base` disponible.
     Marca el origen de cada registro y trae por código (`por_codigo`) los CUIs que
     el MEF sugiere y que InfoObras no encontró por nombre — tope de 5 fetches por
-    experiencia, capturando `PortalNoResponde` POR candidato (se descarta ese, la
-    experiencia sigue). Guarda las fichas MEF por CUI en `exp['_fichas_mef']` para
-    el paso de scoring (señal de nombre/dpto/entidad)."""
+    experiencia, PRIORIZANDO las inversiones vivas sobre las desactivadas y
+    capturando `PortalNoResponde` POR candidato (se descarta ese, la experiencia
+    sigue). Guarda las fichas MEF por CUI en `exp['_fichas_mef']` para el paso de
+    scoring (señal de nombre/dpto/entidad)."""
     proyecto = exp.get("proyecto") or ""
     fichas_mef = exp.setdefault("_fichas_mef", {})
     # todo lo ya recolectado vino de InfoObras (por nombre)
@@ -986,7 +999,7 @@ def _fusionar_mef(exp: dict, consulta: Consulta, base, vistos: dict) -> None:
         o.setdefault("_origen", "infoobras")
     ya = set().union(*(_codigos_de(o) for o in vistos.values())) if vistos else set()
 
-    fetches = 0
+    utiles: list[tuple[str, dict]] = []
     for c in base.buscar_candidatos(_sin_prefijo(proyecto), topn=10):
         cui = re.sub(r"\D", "", str(c.get("cui") or "")) \
             or re.sub(r"\D", "", str(c.get("snip") or ""))
@@ -994,11 +1007,26 @@ def _fusionar_mef(exp: dict, consulta: Consulta, base, vistos: dict) -> None:
             continue
         fichas_mef.setdefault(cui, c)  # ficha MEF por CUI → scoring (aunque no se fetchee)
         if cui in ya:
-            # el CUI ya estaba en InfoObras (por nombre): pasa a origen 'ambos'
+            # el CUI ya estaba en InfoObras (por nombre): pasa a origen 'ambos'. Se
+            # marca ACÁ, fuera del presupuesto de fetches: que el MEF corrobore un
+            # CUI es un hecho, no depende de cuántas consultas quepan.
             for o in vistos.values():
                 if cui in _codigos_de(o):
                     o["_origen"] = "ambos"
             continue
+        utiles.append((cui, c))
+    # ORDEN DEL PRESUPUESTO DE FETCHES: los proyectos DESACTIVADOS del MEF van al
+    # FINAL de la cola. El tope de 5 consultas al portal es escaso y hoy se gasta en
+    # inversiones que nunca se ejecutaron (medido sobre los 277 casos auditados:
+    # 420 de 1303 fetches potenciales, 32%, apuntan a desactivadas). `sort` es
+    # ESTABLE → dentro de cada grupo se conserva el orden por score.
+    # NO se descartan: un CUI reformulado queda desactivado y el certificado puede
+    # citar al viejo (15 de 191 verdades auditadas viven en filas DESACTIVADA), así
+    # que si el presupuesto alcanza igual se consultan — solo pierden la prioridad.
+    utiles.sort(key=lambda par: _mef_desactivada(par[1]))
+
+    fetches = 0
+    for cui, c in utiles:
         if fetches >= 5:
             break  # tope de fetches al portal por experiencia
         fetches += 1
@@ -1090,7 +1118,11 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
                 "departamento": o.get("nombrDepartamento"),
                 "obra_id": o.get("codigoObra") or o.get("obraId"),
                 "ruc_match": ruc_match, "num_match": num_match,
-                "ent_match": ent_match, "score": round(sc, 1)}
+                "ent_match": ent_match, "score": round(sc, 1),
+                # estado del MEF: "" = el CUI NO está en la base local (desconocido,
+                # que no es lo mismo que vivo — ver `_estado_separa`).
+                "mef_estado": ((ficha or {}).get("estado_dataset") or ""),
+                "mef_desactivada": _mef_desactivada(ficha)}
         if o.get("_origen"):
             cand["origen"] = o["_origen"]
             origenes.setdefault(cui, set()).add(o["_origen"])
@@ -1128,11 +1160,15 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
         if origs:
             cand["origen"] = "ambos" if len(origs) > 1 else next(iter(origs))
 
-    # orden DETERMINÍSTICO: score desc y, ante empate, menor CUI y menor obra_id.
+    # orden DETERMINÍSTICO: score desc; ante EMPATE de score gana la inversión VIVA
+    # sobre la DESACTIVADA en el MEF y, recién después, menor CUI y menor obra_id.
     # Sin la clave secundaria, dos CUIs con el mismo score quedaban en el orden de
     # inserción de `porcui` (no reproducible) → `best` variaba entre corridas.
+    # El estado entra DESPUÉS del score (nunca lo pisa): un desactivado que puntúa
+    # más alto sigue arriba — solo se rompen los empates.
     ranked = sorted(porcui.values(),
-                    key=lambda x: (-x["score"], _num(x["cui"]), _num(x["obra_id"])))
+                    key=lambda x: (-x["score"], x.get("mef_desactivada", False),
+                                   _num(x["cui"]), _num(x["obra_id"])))
     return ranked, vetados
 
 
@@ -1210,12 +1246,36 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
     # el mismo dpto). DELTA=4 calibrado contra el golden: corta 6 mal-resueltos y
     # solo roza 3 correctos contestados (best==verdad a <4 pts de un gemelo), coste
     # honesto — un falso "a revisión" cuesta minutos; un falso CUMPLE, el producto.
+    #
+    # El ESTADO del MEF sí es señal separadora: si el mejor está VIVO y el rival
+    # está DESACTIVADO, no son "dos gemelos indistinguibles" — uno de los dos nunca
+    # se ejecutó. Ese rival no dispara el guard (medido sobre los 277 casos
+    # auditados: cero verdades desactivadas tienen un rival vivo a ≤4 pts, así que
+    # esta puerta no sacrifica ningún correcto). Al revés NO aplica: si el mejor es
+    # el desactivado, la duda sigue viva y se manda a revisión como siempre.
     _DELTA_EMPATE = 4.0
     if best and not _es_experiencia_privada(exp):
         def _senal_dura(c: dict) -> bool:
             return bool(c.get("ruc_match") or c.get("num_match") or c.get("ent_match"))
+
+        def _estado_separa(a: dict, b: dict) -> bool:
+            """`a` está VIVO en el MEF y `b` DESACTIVADO. Exige el dato en AMBOS: un
+            CUI ausente de la base local es DESCONOCIDO, no vivo — resolver contra
+            un rival muerto apoyándose en la ausencia de información sería adivinar."""
+            return (b.get("mef_estado") == "DESACTIVADA"
+                    and a.get("mef_estado") in ("ACTIVO", "CERRADA"))
+
         elegibles = [c for c in ranked if not _mef_sin_corroborar(c)]
-        otro = next((c for c in elegibles if c["cui"] != best["cui"]), None)
+        rivales = [c for c in elegibles
+                   if c["cui"] != best["cui"] and not _estado_separa(best, c)]
+        descartados_estado = [c for c in elegibles if c["cui"] != best["cui"]
+                              and _estado_separa(best, c)
+                              and (best["score"] - c["score"]) <= _DELTA_EMPATE]
+        if descartados_estado:
+            _traza().ev("empate_roto_por_estado", best=best["cui"],
+                        desactivados=[f"{c['cui']}·{c['score']}"
+                                      for c in descartados_estado][:3])
+        otro = next(iter(rivales), None)
         if (otro is not None
                 and (best["score"] - otro["score"]) <= _DELTA_EMPATE
                 and _senal_dura(best) == _senal_dura(otro)):
@@ -1232,6 +1292,7 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
         # al homónimo equivocado. Peor que abstenerse → revisión con ambos visibles.
         rival_geo = next((c for c in vetados
                           if c.get("veto") == "ubigeo" and c["cui"] != best["cui"]
+                          and not _estado_separa(best, c)
                           and (best["score"] - c["score"]) <= _DELTA_EMPATE), None)
         if rival_geo is not None and not _senal_dura(best):
             _traza().ev("guard_empate_geo", best=best["cui"], vetado=rival_geo["cui"],

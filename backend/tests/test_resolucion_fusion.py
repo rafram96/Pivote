@@ -351,3 +351,70 @@ def test_empate_roto_por_numero_de_institucion_resuelve():
            "fecha_inicial": "2019-01-01"}
     r = resolver(exp, _fake_lista(obras), base=None)
     assert r["estado"] == "resuelto" and r["cui"] == "2000020", r
+
+
+# ── T-MULTI-002 (paso 1) · DESEMPATE POR ESTADO DEL MEF ──────────────────────
+# `estado_dataset` ya viajaba en la base local y nadie lo leía. Se usa para (1)
+# priorizar el presupuesto de fetches y (2) romper empates de score. NUNCA como
+# filtro: un CUI reformulado queda desactivado y el cert puede citar al viejo.
+
+def _mef_muerto(cui, nombre, score, dpto="LIMA"):
+    c = _mef_cand(cui, nombre, score, dpto=dpto)
+    c["estado_dataset"] = "DESACTIVADA"
+    return c
+
+
+def test_fetches_priorizan_inversiones_vivas():
+    """El tope de 5 consultas al portal se gasta primero en los proyectos VIVOS.
+    Los desactivados no se descartan: quedan al final de la cola."""
+    cands = [_mef_muerto("2000101", "OBRA MUERTA A", 90),
+             _mef_cand("2000102", "OBRA VIVA A", 88),
+             _mef_muerto("2000103", "OBRA MUERTA B", 86),
+             _mef_cand("2000104", "OBRA VIVA B", 84),
+             _mef_muerto("2000105", "OBRA MUERTA C", 82),
+             _mef_cand("2000106", "OBRA VIVA C", 80)]
+    consulta = _Consulta()
+    resolver({"proyecto": "consulta cualquiera"}, consulta, base=FakeBase(cands))
+    assert len(consulta.llamadas) == 5                        # el tope no cambia
+    assert consulta.llamadas[:3] == ["2000102", "2000104", "2000106"]  # vivos primero
+    assert consulta.llamadas[3:] == ["2000101", "2000103"]    # muertos, por score
+
+
+def test_estado_no_pisa_el_score():
+    """El estado desempata DESPUÉS del score: un desactivado que puntúa MÁS ALTO
+    sigue consultándose primero (no se reordena por estado a costa del parecido)."""
+    cands = [_mef_muerto("2000201", "OBRA MUERTA MEJOR", 95),
+             _mef_cand("2000202", "OBRA VIVA PEOR", 76)]
+    consulta = _Consulta()
+    resolver({"proyecto": "consulta cualquiera"}, consulta, base=FakeBase(cands))
+    assert consulta.llamadas == ["2000202", "2000201"]
+
+
+def test_empate_vivo_vs_desactivado_resuelve(base_real):
+    """El caso que motivó T-MULTI-002. Dos CUIs con el MISMO nombre y el mismo
+    score: uno vivo (2500001) y uno DESACTIVADO (2500002) en la base local. Antes
+    el guard de empate mandaba a revisión ('homónimos sin señal'); el estado del
+    MEF SÍ los separa → resuelve al vivo."""
+    nombre = "CONSTRUCCION DEL COLISEO DEPORTIVO DE MONTERREY"
+    obras = [_obra("2500001", 1, nombre, "LA LIBERTAD"),
+             _obra("2500002", 2, nombre, "LA LIBERTAD")]
+    exp = {"proyecto": nombre, "fecha_inicial": "2019-01-01"}
+    r = resolver(exp, _fake_lista(obras), base=base_real)
+    assert r["estado"] == "resuelto" and r["cui"] == "2500001", r
+    assert any(c.get("cui") == "2500002" for c in r["candidatos"]), r  # sigue visible
+
+
+def test_empate_con_el_mejor_desactivado_sigue_abstenido(base_real):
+    """Al revés NO aplica: si el candidato desactivado es el que puntúa igual o
+    mejor y el rival vivo no lo separa por otra señal, la duda sigue viva. Acá el
+    desactivado (2299341, Chinchinga deportiva) empata con un homónimo vivo
+    inventado: el resolver NO debe elegir al vivo por el solo hecho de estarlo
+    cuando ambos son igual de plausibles y el desactivado va primero por score."""
+    nombre = "INSTALACION DE LOSA DEPORTIVA MULTIUSO EN EL CENTRO POBLADO DE CHINCHINGA"
+    obras = [_obra("2299341", 1, nombre, "HUANUCO"),
+             _obra("2999999", 2, nombre, "HUANUCO")]      # vivo: no está en la base
+    exp = {"proyecto": nombre, "fecha_inicial": "2019-01-01"}
+    r = resolver(exp, _fake_lista(obras), base=base_real)
+    # 2999999 no existe en el MEF → no es "vivo comprobado", es desconocido: sin
+    # señal que separe, se abstiene.
+    assert r["estado"] == "revision" and r["cui"] is None, r
