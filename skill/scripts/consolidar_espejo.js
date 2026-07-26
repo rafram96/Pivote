@@ -152,7 +152,11 @@ for (const i of nums) {
       anterior_colegiatura: pick(j.anterior_colegiatura),
       cargo_ocupado: pick(e.cargo_ocupado, e.cargo_desempenado, e.cargo),
       cargo_bases_valido: pick(j.cargo_bases_valido),
-      funciones_similares: null,
+      // Segunda puerta del cargo (#31): las funciones son un HECHO del documento
+      // (lo extrae agent-propuesta-profesional), no un juicio; el evaluador solo
+      // es respaldo. null = el documento no las lista → no acredita funciones,
+      // que es lo que el candado del backend necesita distinguir.
+      funciones_similares: pick(e.funciones_similares, j.funciones_similares),
       cert_antes_culminar: siNo(j.cert_antes_culminar, e.cert_antes_culminar),
       incluye_covid: siNo(j.incluye_covid, e.incluye_covid),
       tipo_obra_valido: pick(j.tipo_obra_valido),

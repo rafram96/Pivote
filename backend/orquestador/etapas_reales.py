@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from schemas import pipeline
-from validacion import verificar_espejo
+from validacion import anotar_cargo_nucleo, verificar_espejo
 from resolucion import ConsultaInfoObras, resolver_con_dedup, resolver_obras
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
 from entregables import desempaquetar_enriquecimiento, generar_excel_final, mapear_certificados
@@ -185,6 +185,10 @@ class EtapaValidacionReal:
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
         ctx.reportar(self.nombre, 0, 0, "Revisando la consistencia de la propuesta")
         observaciones = verificar_espejo(ctx.espejo)
+        # DESPUÉS de verificar (que lee el veredicto original de Claude para
+        # detectar la contradicción): marca en rojo, dentro del espejo que va al
+        # Excel, las experiencias que no acreditan ni cargo ni funciones (#31).
+        anotar_cargo_nucleo(ctx.espejo)
         n_exp = sum(len(p.get("experiencias", [])) for p in ctx.espejo.get("profesionales", []))
         return _res(self.nombre, EE.OK, _met(n_exp, n_exp), observaciones)
 
