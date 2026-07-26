@@ -32,7 +32,21 @@ en el return, así que nunca llegaban al job ni al panel (solo quedaban, a
 medias, en el enriquecimiento). Corregido en PR-1 del Issue #26. Si ves una
 etapa que arma una lista `obs` y no la devuelve, es el mismo patrón.
 
-## ¿Qué se estaba haciendo?
+## Nota (2026-07-26) — PRs 33/34/35 revisadas, corregidas y mergeadas a demo
+
+Orquestación completa: #33 (pestañas/nombres) la mergeó el desarrollador;
+#34 (SUNAT histórico) se mergeó tras corregir el hallazgo H2 del review
+(`d59f900`: «habido durante la obra» exigía solo que un tramo TOCARA el
+periodo → verde con días sin dato; ahora pide cobertura completa y degrada a
+«No verificable» con los huecos listados); #35 (ADR-011 multi-obra) mergeó
+limpia; #36 arregló el choque de integración 33×35 (tests con nombre de
+pestaña viejo). Suite en demo: **333 passed**. H1 del review (fixture
+`hacer_motor` sin `extras_sunat` → pytest puede tocar la red) quedó SIN
+corregir por decisión del desarrollador. Pendientes que dejaron los merges:
+**un solo rebuild del plugin** (33/34/35 tocaron skill/schemas — ADR-007:
+viaja con el backend), **regenerar `golden_cui_baseline.json`** desde demo
+(el actual es pre-refactor y da −10 falsos), y los issues del panel
+(sub-obras panel#1 + render SUNAT).
 
 25-jul: **issue #30 — el emisor del certificado en SUNAT** (rama
 `rafram96/issue-30-mostrar-representante-legal`). Sondeada y cableada la
