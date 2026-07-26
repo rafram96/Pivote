@@ -59,12 +59,21 @@ destruye el producto. **Ante ambigüedad, abstenerse y mostrar candidatos.**
   caso citado, la versión tachada admitía «coordinador» y la vigente no).
 - ⚠ **Trampa para cualquier matcher**: por tokens compartidos, «Especialista
   en Costos, Metrados y Valorizaciones» comparte COSTOS con «Especialista de
-  Planeamiento y Costos» → un match laxo da **falso CUMPLE**. Hoy
-  `cargo_bases_valido` lo juzga el LLM sin candado determinístico
-  (`skill/prompts/agent-evaluador.md`, paso 2); `match_cargo.js` resuelve
-  otra cosa (a qué cargo del Cuadro postula el profesional, no si la
-  experiencia vale). Gap conocido — ver `InfoObras/.ai/context/
-  capabilities.md`.
+  Planeamiento y Costos» → un match laxo da **falso CUMPLE**.
+- **RESUELTO (issue #31, ADR-012)**: candado determinístico en
+  `backend/validacion/cargo_nucleo.py`, corre en la etapa VALIDACIÓN
+  server-side. `cargos_validos` se lee como **OR entre alternativas / AND
+  dentro de cada una** (la lista son cargos aceptables, no sinónimos —
+  medido en 35 espejos). Si falta un término del núcleo y el documento no
+  lista funciones: observación + celda **roja** cuando contradice un "SÍ" de
+  Claude, **amarilla** («POR VERIFICAR») cuando Claude no opinó. No toca el
+  cómputo de días y se **abstiene** si no puede derivar el núcleo.
+  `match_cargo.js` sigue resolviendo otra cosa (a qué cargo del Cuadro
+  postula el profesional, no si la experiencia vale).
+- Equivalencias de núcleo admitidas: **solo** `planificación ≈ planeamiento`
+  + familia derivativa por prefijo (supervisión↔supervisor). `costos ≈
+  presupuestos ≈ valorizaciones` **NO** — reabre el falso CUMPLE. Ampliar la
+  tabla exige aval explícito del Comité.
 
 ## Otras reglas fijadas
 

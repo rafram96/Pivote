@@ -37,7 +37,14 @@
 
 ## En progreso
 
-- Nada activo en código. Fase comercial: presentar extras a Manuel
+- **Issue #31 — candado cargo↔bases (ADR-012)**, mergeado a `demo` el
+  2026-07-26: `backend/validacion/cargo_nucleo.py`
+  exige el núcleo de especialidad COMPLETO (OR entre alternativas, AND dentro)
+  y usa las funciones como segunda puerta; marca rojo/amarillo en el Excel sin
+  tocar el formato ni el cómputo de días. Replay: 15 rojas + 116 amarillas
+  sobre 1421 experiencias, con los 4 casos del Comité detectados. Falta prueba
+  viva + deploy (la skill cambió → rebuild del plugin).
+- Fase comercial: presentar extras a Manuel
   (T-003+T-008 entregados S/5,400; T-004/005/006 por desarrollar S/4,400).
 
 ## Problemas abiertos

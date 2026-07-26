@@ -80,10 +80,20 @@ resumen del Anexo 16"; algunos requirieron "2do/3er intento (re-OCR a 400/450dpi
 **literalmente contra el texto de las bases** ("si las Bases piden 'Residente' y el
 certificado dice 'Residente', es válido — no impongas criterio propio").
 
-**Verificación backend (parcial)**: el juicio es de Claude (`cargo_bases_valido`,
-`tipo_obra_valido`), pero el backend verifica **consistencia**: si
-`cargo_bases_valido == "NO"` la experiencia no puede sumar al total usado en el
-veredicto `cumple`. Recalcular el total solo-válidas y comparar.
+**Verificación backend**: implementada como **CARGO_NUCLEO** (issue #31,
+ADR-012) en `validacion/cargo_nucleo.py`. El juicio de Claude
+(`cargo_bases_valido`) deja de ser la última palabra: el candado lee
+`requisitos.cargos_validos` como **OR entre alternativas / AND dentro de cada
+una** y exige el **núcleo de especialidad completo**; si falta un término y
+`funciones_similares` es `null` (segunda puerta), emite observación y reescribe
+la celda —**roja** si contradice un "SÍ" de Claude, **amarilla** («POR
+VERIFICAR») si Claude no opinó—. Se abstiene si no puede derivar el núcleo.
+`tipo_obra_valido` sigue siendo juicio de Claude sin candado.
+
+⚠ **No implementado a propósito**: el descuento del total (*"si
+`cargo_bases_valido == 'NO'` la experiencia no puede sumar"*) — el candado
+**señala, no juzga**, y el veredicto duro es del Comité. Si se decide
+implementarlo, es cambio de cómputo y va con su propia validación.
 
 ### NOTA 3 — Búsqueda exhaustiva de ISOs
 

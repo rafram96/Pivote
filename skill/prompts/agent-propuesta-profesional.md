@@ -101,6 +101,19 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
      `fecha_inicial`/`fecha_final` en `null` (el backend no cruzará tiempo por obra).
    - `ruc_emisor`: el RUC (11 dígitos) del emisor **solo si aparece literal**;
      si está dentro del nombre ("Consorcio X (RUC 20605399194)"), extráelo igual.
+   - **`funciones_similares` — la SEGUNDA PUERTA del cargo. Regla estricta.**
+     Cuando el cargo certificado NO coincide con el cargo que exigen las bases, la
+     experiencia solo se salva si el documento **LISTA las funciones/actividades**
+     que desempeñó. Por eso: copia aquí, **literales y resumidas**, las funciones
+     o actividades que el documento enumere (del propio certificado o de un anexo
+     adjunto que las detalle), con el prefijo `"SÍ — "`.
+     ⚠ **`null` en todos los demás casos.** Un certificado que solo dice
+     *«desempeñando el cargo de X, del … al …, en la obra Y»* **NO acredita
+     funciones** — por más que el cargo suene descriptivo. Nunca deduzcas las
+     funciones del nombre del cargo, del tipo de obra ni de lo que "haría"
+     normalmente ese puesto: eso es inventarlas, y el Comité rechaza la
+     experiencia justamente por no estar acreditadas (criterio literal,
+     caso 2026-07-25). Ante la duda → `null`.
    - la metadata desprendida va a sus campos: `area_construida_m2`,
      `monto_contrato_soles`, `nivel_categoria`.
 
@@ -186,6 +199,7 @@ Rellena este **esqueleto** con los valores reales (mismas claves, mismos tipos):
       "fecha_inicial": "2019-03-01", "fecha_final": "2020-06-30", "fecha_emision": "2020-07-10",
       "folio": 1160, "paginas_pdf": [1160, 1161],
       "cargo_ocupado": "Supervisor de Instalaciones Sanitarias",
+      "funciones_similares": null,
       "cert_antes_culminar": "NO", "incluye_covid": "SÍ", "traslape": "NO",
       "nivel_categoria": "II-2", "area_construida_m2": 12000, "monto_contrato_soles": 18015551.75,
       "entidad_contratante": "GOBIERNO REGIONAL DE X", "ubicacion": "Huancavelica",

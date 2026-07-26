@@ -12,6 +12,10 @@ Implementadas aquí (no requieren bases ni fuentes externas):
   +   — veredictos obligatorios no vacíos (hallazgo del Excel real)
   +   — totales del profesional vs suma de experiencias
   +   — puntaje_total vs suma de factores
+  +   — CARGO_NUCLEO: correspondencia cargo↔bases (candado de `cargo_nucleo.py`,
+        issue #31). Los requisitos SÍ viajan dentro del espejo
+        (`profesionales[].requisitos.cargos_validos`), así que no necesita
+        fuentes externas.
 
 Quedan para la etapa con más insumos: N15 (necesita el nº de cargos de las
 bases), N2/N4 (consistencia con juicios), N14 (consorciados ↔ ISOs).
@@ -22,6 +26,8 @@ from datetime import date
 from typing import Optional
 
 from schemas import pipeline
+
+from .cargo_nucleo import revisar_profesional
 
 COVID_INICIO = date(2020, 3, 16)
 COVID_FIN = date(2020, 6, 30)
@@ -171,6 +177,81 @@ def nota10_covid(prof: dict) -> list[pipeline.Observacion]:
     return out
 
 
+# ── CARGO_NUCLEO · correspondencia cargo declarado ↔ cargo exigido ───────────
+# Candado del issue #31: el LLM matchea por tokens compartidos («COSTOS» presente
+# → falso CUMPLE). Aquí se exige el NÚCLEO COMPLETO y, si el título no acredita,
+# se mira la segunda puerta (funciones). Ver `cargo_nucleo.py` para la regla.
+
+def nota_cargo_nucleo(prof: dict) -> list[pipeline.Observacion]:
+    n_prof = prof.get("n_prof")
+    requisito, hallazgos = revisar_profesional(prof)
+
+    if requisito is None:
+        # Sin lista de cargos válidos (o sin núcleo derivable) el candado se
+        # ABSTIENE: nunca se marca NO por ausencia de datos. Una sola por
+        # profesional, para que el gap de `agent-bases` no pase inadvertido.
+        if prof.get("experiencias"):
+            return [_obs(
+                "CARGO_NUCLEO", _SEV.INFO,
+                "no se pudo derivar el núcleo de especialidad de los cargos válidos "
+                "de las bases → el candado de correspondencia de cargo se abstuvo "
+                "en este profesional (revisar que agent-bases haya copiado la lista)",
+                f"prof={n_prof}")]
+        return []
+
+    todas = requisito.describir()
+    out = []
+    for h in hallazgos:
+        ref = f"prof={n_prof} exp={h.n_exp}"
+        if h.acredita:
+            if h.llm == "no":
+                out.append(_obs(
+                    "CARGO_NUCLEO", _SEV.INFO,
+                    f"marcada como cargo NO válido, pero el cargo declarado "
+                    f"{h.cargo_ocupado!r} sí reúne el núcleo exigido ({todas}) "
+                    f"— posible falso negativo, a ratificación del Comité", ref))
+            continue
+
+        falta = ", ".join(f"«{t}»" for t in h.faltantes)
+        # Se cita la alternativa MÁS CERCANA de las bases (la que el Comité mira),
+        # no la lista entera: es la que explica qué le falta a este cargo.
+        exigido = (f"«{h.referencia.texto}» = {h.referencia.describir()}"
+                   if h.referencia else todas)
+        if not h.duro:
+            # El título no acredita pero el documento SÍ lista funciones: la
+            # segunda puerta puede salvarla — es criterio del Comité, no del sistema.
+            out.append(_obs(
+                "CARGO_NUCLEO", _SEV.ADVERTENCIA,
+                f"el cargo declarado {h.cargo_ocupado!r} no acredita {falta} del "
+                f"núcleo exigido ({exigido}); se acompaña de funciones declaradas "
+                f"— acreditación por funciones, a ratificación del Comité", ref))
+        elif h.llm == "no":
+            out.append(_obs(
+                "CARGO_NUCLEO", _SEV.ADVERTENCIA,
+                f"no acredita cargo ni funciones — a ratificación del Comité: el "
+                f"cargo declarado {h.cargo_ocupado!r} no reúne {falta} del núcleo "
+                f"exigido ({exigido}) y el documento no lista funciones (concuerda "
+                f"con lo marcado por Claude)", ref))
+        elif h.llm == "si":
+            # El caso del issue #31: habría pasado en VERDE. Contradicción dura.
+            out.append(_obs(
+                "CARGO_NUCLEO", _SEV.ALERTA,
+                f"no acredita cargo ni funciones — a ratificación del Comité: el "
+                f"cargo declarado {h.cargo_ocupado!r} no reúne {falta} del núcleo "
+                f"exigido ({exigido}) y el documento no lista funciones; Claude la "
+                f"había dado por válida", ref))
+        else:
+            # Claude no dejó veredicto legible: no hay verde que desmentir y la
+            # precisión del candado es menor → se pide confirmación, no se afirma.
+            out.append(_obs(
+                "CARGO_NUCLEO", _SEV.ADVERTENCIA,
+                f"por verificar — a ratificación del Comité: el cargo declarado "
+                f"{h.cargo_ocupado!r} no reúne {falta} del núcleo exigido "
+                f"({exigido}) y el documento no lista funciones; Claude no emitió "
+                f"veredicto sobre la correspondencia del cargo", ref))
+    return out
+
+
 # ── Veredictos obligatorios (hallazgo del Excel real: 3 venían vacíos) ───────
 
 def veredictos_no_vacios(prof: dict) -> list[pipeline.Observacion]:
@@ -230,6 +311,7 @@ def verificar_espejo(espejo: dict) -> list[pipeline.Observacion]:
         out.extend(nota7_orden(prof))
         out.extend(nota9_traslapes(prof))
         out.extend(nota10_covid(prof))
+        out.extend(nota_cargo_nucleo(prof))
         out.extend(veredictos_no_vacios(prof))
         out.extend(totales_cuadran(prof))
     out.extend(puntaje_total_cuadra(espejo))

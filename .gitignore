@@ -68,6 +68,10 @@ Thumbs.db
 !/backend/tests/fixtures/mef/
 !/backend/tests/fixtures/mef/*.html
 !/backend/tests/fixtures/mef/*.json
+# Fixture del candado cargo↔bases (issue #31): espejo SINTÉTICO — cargos del
+# caso del Comité 25-jul sin datos de postor ni de profesionales reales.
+!/backend/tests/fixtures/cargo/
+!/backend/tests/fixtures/cargo/*.json
 
 # Plugin Cowork: se versiona el manifiesto + build.ps1 + README; las copias de
 # la skill y el MCP son build output (regenéralas con plugin/build.ps1).

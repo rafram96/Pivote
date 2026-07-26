@@ -1,0 +1,73 @@
+{
+  "_meta": {
+    "analisis_id": "fixture-planeamiento-costos",
+    "concurso": "CASO REAL — Comité 2026-07-25 (huachocolpa, P4)",
+    "nota": "Los 4 cargos son los que el Comité declaró NO CUMPLE por no reunir el núcleo «planeamiento y costos». La exp 5 es el control positivo (núcleo completo) y NO debe alertar.",
+    "version_contrato": "1.2.0"
+  },
+  "profesionales": [
+    {
+      "n_prof": 4,
+      "cargo": "Especialista en Planeamiento y Costos",
+      "cargo_bases_num": 4,
+      "cargo_bases_nombre": "ESPECIALISTA EN PLANEAMIENTO Y COSTOS",
+      "nombre": "PROFESIONAL DE PRUEBA",
+      "requisitos": {
+        "cargos_validos": "Especialista en Planeamiento y Costos; Responsable de Planeamiento y Costos; Encargado de Planeamiento y Costos; Ingeniero de Planeamiento y Costos; Inspector de Planeamiento y Costos",
+        "tipo_experiencia_valida": "Experiencia mínima: 24 meses.",
+        "tipo_obra_valida": "Obras de salud"
+      },
+      "experiencias": [
+        {
+          "n": 1,
+          "proyecto": "Hospital Tingo María",
+          "cargo_ocupado": "Ing. de Costos y Presupuestos",
+          "cargo_bases_valido": "SÍ — 'Costos' figura en los cargos válidos de las bases → CUMPLE",
+          "funciones_similares": null,
+          "fecha_inicial": "2019-01-01",
+          "fecha_final": "2019-12-31"
+        },
+        {
+          "n": 2,
+          "proyecto": "Hospital Daniel A. Carrión",
+          "cargo_ocupado": "Ingeniero de Costos y Valorizaciones",
+          "cargo_bases_valido": "SÍ — el cargo corresponde por equivalencia (costos)",
+          "funciones_similares": null,
+          "fecha_inicial": "2020-01-01",
+          "fecha_final": "2020-12-31"
+        },
+        {
+          "n": 3,
+          "proyecto": "E.S. Pedro Sánchez Meza",
+          "cargo_ocupado": "Especialista en Costos, Metrados y Valorizaciones",
+          "cargo_bases_valido": "SÍ — 'Especialista en Costos' está en la lista de cargos similares válidos",
+          "funciones_similares": null,
+          "fecha_inicial": "2021-01-01",
+          "fecha_final": "2021-12-31"
+        },
+        {
+          "n": 4,
+          "proyecto": "Hospital de Apoyo Pichanaki",
+          "cargo_ocupado": "Especialista en Planificación",
+          "cargo_bases_valido": "SÍ — planificación ≈ planeamiento → CUMPLE",
+          "funciones_similares": null,
+          "fecha_inicial": "2022-01-01",
+          "fecha_final": "2022-12-31"
+        },
+        {
+          "n": 5,
+          "proyecto": "CONTROL POSITIVO — núcleo completo",
+          "cargo_ocupado": "Especialista en Planeamiento y Costos de Obra",
+          "cargo_bases_valido": "SÍ — reúne el núcleo exigido por las bases",
+          "funciones_similares": null,
+          "fecha_inicial": "2023-01-01",
+          "fecha_final": "2023-12-31"
+        }
+      ],
+      "total": {},
+      "cumple": "CUMPLE — 5 experiencias válidas (veredicto original del LLM, el que el Comité corrigió)"
+    }
+  ],
+  "resumen_evaluacion": {"factores": [], "puntaje_total": null, "nota": null},
+  "observaciones_claude": []
+}
