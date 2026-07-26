@@ -35,6 +35,17 @@
 - Cotización interna lista: `docs/comercial/planeacion-v2-para-rafael.md`
   (gitignored — no va al repo).
 
+- **Issue #28 (T-MULTI-002) paso 1 — desempate por estado del MEF**, mergeado
+  a `demo` el 2026-07-26 (PR #39, `14f9fe8`): `estado_dataset` ya viajaba en la
+  base local desde F3 y **ningún consumidor lo leía** (229k de 494k filas son
+  DESACTIVADAS y competían de igual a igual con las vivas). Ahora ordena el
+  presupuesto de fetches, desempata el ranking a igual score y separa homónimos
+  en el guard de empate — siempre como DESEMPATE, nunca como filtro (15 de 191
+  verdades auditadas viven en filas DESACTIVADA: CUIs reformulados que el cert
+  cita). Consultas al portal gastadas en desactivadas: 32.2% → 9.3%. Empate de
+  Sullana 4 → 2 candidatos. 375 tests verdes. **Golden en vivo NO corrido** (el
+  reordenamiento cambia qué CUIs se consultan → la caché no los tiene).
+
 ## En progreso
 
 - **Issue #31 — candado cargo↔bases (ADR-012)**, mergeado a `demo` el

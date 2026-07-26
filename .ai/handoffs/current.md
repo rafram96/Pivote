@@ -108,6 +108,33 @@ actualización del paquete comercial de extras (T-003…T-008).
 - Jobs de referencia local: `b4f385c31811` (San Isidro camino A, entregado),
   `c9c769976750` (replay BNP con `revision_manual.md`).
 
+## Nota (2026-07-26) — #28 paso 1: el dato que estaba y nadie leía
+
+Antes de agregar columnas a la base MEF, revisar si el campo ya está cargado.
+`estado_dataset` viajaba en `base_mef.py` desde F3, se exponía en la ficha del
+candidato y **ningún consumidor lo leía**: 229k de 494k filas son DESACTIVADAS
+y competían de igual a igual con las vivas. Usarlo rompió el empate de Sullana
+de 4 a 2 y liberó el 23% del presupuesto de consultas al portal, sin regenerar
+el artefacto (PR #39). El alcance original de la #28 arrancaba por regenerar la
+base; el orden correcto era al revés.
+
+**Regla que salió de acá:** las señales de la base MEF son DESEMPATE, jamás
+filtro. 15 de 191 verdades auditadas viven en filas DESACTIVADA (un CUI
+reformulado queda desactivado y el certificado cita al viejo). Y el guard exige
+el dato en AMBOS lados: un CUI ausente de la base es DESCONOCIDO, no vivo —
+resolver apoyándose en la ausencia de información es adivinar.
+
+**Trampas del dataset de 68 campos, medidas (para el paso 2):**
+- `DES_TIPOLOGIA` está VACÍA en los dos CUIs de referencia (2483109, 2502652);
+  0% en desactivadas, 32.6% global. No sirve como veto.
+- `TIPO_INVERSION` no es binario "PROYECTO vs IOARR": son 8 valores y las obras
+  ARCC del caso HV son `INTERVENCIONES IRI`. Un veto por tipo mata al correcto.
+- Las DESACTIVADAS no traen `PRIMER/ULTIMO_DEVENGADO` (solo el acumulado).
+- `golden_cui.py:190` arma la experiencia con `fecha_inicial: None` → cualquier
+  regla de ventana temporal es INERTE en el golden. Para medirla hay que
+  enriquecer el corpus con las fechas del cert (join `job` + `prof:exp` contra
+  los `espejo.json`).
+
 ## Riesgos vivos
 
 - Server en producción corre el código VIEJO hasta el deploy.
