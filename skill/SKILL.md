@@ -131,6 +131,19 @@ propenso a errores en propuestas grandes):
   uniendo todo, normalizando los alias/typos de los subagentes (cada uno diverge)
   y dejando `_backend` en `null`. Auto-detecta N de `_prof/`; si falta el bloque
   postor del mapa, lo deja vacío + un aviso en `observaciones_claude`.
+
+  > ⛔ **GATE — si el consolidador termina en `⛔ INCOMPLETO` (exit code 1), PARA.**
+  > No sigas al Paso 5, no subas por MCP y no le digas al usuario que el análisis
+  > está listo. Ese exit ≠ 0 significa que `agent-evaluador` no cubrió 1:1 a los
+  > profesionales/experiencias: el espejo se escribe igual (los hechos crudos no
+  > se pierden) y **`validar_espejo.js` va a decir «OK»**, porque el schema no
+  > sabe distinguir un veredicto ausente de un `null` legítimo. Pasó dos veces el
+  > 26-jul: veredictos corridos +1 y una corrida sin evaluación, ambas subidas
+  > como buenas.
+  > **Qué hacer:** lee los críticos que lista (dicen qué profesional/qué `n`),
+  > vuelve a correr `agent-evaluador` exigiéndole esas entradas (máx. 2 intentos)
+  > y consolida otra vez. Si al segundo intento sigue en `⛔`, no lo subas:
+  > repórtale al usuario qué quedó sin evaluar y para ahí.
 - el **JSON espejo** resultante (estructura en `references/salida.md`);
 - el **Excel** de 5 partes (`node scripts/generar_excel.js` — construcción
   dinámica: un bloque por cargo, filas variables por experiencia, estilos del
@@ -204,7 +217,8 @@ resuelves el CUI; el backend elige qué mostrar.
 manual: `docs/prompt-verificacion-expediente.md`.)
 
 ### Paso 5 — Transporte al backend (POR DEFECTO: MCP, automático)
-**El default es subir por el MCP, sin preguntar.** Tras consolidar y validar:
+**El default es subir por el MCP, sin preguntar.** Tras consolidar **sin críticos**
+(gate del Paso 4: exit 0) y validar:
 1. `probar_conexion` del MCP `infoobras-onprem-bridge` (ver `mcp-server/`). Si
    responde, continúa; si no, ve al fallback.
 2. `subir_analisis(json_espejo, excel_base64, certificados_base64)` — crea/usa el
@@ -227,6 +241,10 @@ node scripts/validar_espejo.js <ruta_json>
 
 (usa `schemas/espejo.js`, zod). Imprime `OK · …` si es válido, o `INVÁLIDO · …`
 con la lista de errores (campo + mensaje).
+
+> ⚠ Su `OK` dice **«la forma es correcta»**, no «la evaluación está completa»: un
+> espejo con TODAS las columnas de juicio en `null` valida perfecto. Lo segundo lo
+> dice el consolidador (gate del Paso 4). Los dos tienen que salir bien.
 
 Si sale `INVÁLIDO`, toma cada error y **reintenta el subagente responsable** de
 ese campo (máx. 2 reintentos por subagente), pasándole el texto literal del

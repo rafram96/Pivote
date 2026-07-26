@@ -79,7 +79,11 @@ raíz), y los datos del emisor/firmante son campos planos (no objetos anidados).
         "n",
         "entidad_emisora",     // empresa/entidad que emite el certificado
         "ruc_emisor",          // ⭐ RUC (11 díg.) si está literal → cruce + ALT12; null si no
-        "proyecto",            // ⭐ VERBATIM y completo (sin abreviar ni meter metadata)
+        "proyecto",            // ⭐ ACCIÓN + OBJETO + UBICACIÓN, con las palabras del cert
+                               //    ("Construcción del HOSPITAL DE ESSALUD, en la ciudad de
+                               //     Tarapoto, Departamento de San Martín" — así nombra el MEF
+                               //     sus inversiones y así lo resuelve el backend).
+                               //    Sin abreviar, sin metadata (m²/monto/SNIP van a su campo).
         "cui",                 // ⭐ CUI/SNIP citado en el cert (solo dígitos) → cruce determinístico
         "tipo_documento",
         "nombre_emisor",       // persona que firma
