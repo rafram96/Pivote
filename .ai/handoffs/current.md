@@ -44,7 +44,8 @@ pestaña viejo). Suite en demo: **333 passed**. H1 del review (fixture
 `hacer_motor` sin `extras_sunat` → pytest puede tocar la red) quedó SIN
 corregir por decisión del desarrollador. Pendientes que dejaron los merges:
 **un solo rebuild del plugin** (33/34/35 tocaron skill/schemas — ADR-007:
-viaja con el backend), **regenerar `golden_cui_baseline.json`** desde demo
+viaja con el backend), ~~regenerar `golden_cui_baseline.json`~~ (HECHO 26-jul,
+ver nota abajo)
 (el actual es pre-refactor y da −10 falsos), y los issues del panel
 (sub-obras panel#1 + render SUNAT).
 
@@ -77,6 +78,29 @@ Rama `rafram96/issue-32-embeber-el-factor-2` (`17b1e04`), sobre demo ya con
 - **Pendiente de cliente**: confirmar si el TDR y el Anexo 16 se quedan al
   INICIO de la hoja (hoy) o bajan junto al factor. Son dos líneas en
   `excel_final.py`.
+
+## Nota (2026-07-26) — baseline de la golden REGENERADO, y la caché ya sirve
+
+El baseline vivía desde el 20-jul (PRE-refactor T-008) y comparar contra él daba
+−10 correctos que parecían regresión y eran la deuda de no regenerarlo. Además
+`--solo-cache` había dejado de funcionar: la caché es de ANTES de que el resolver
+fusionara candidatos MEF, así que le faltaban **642 de 1957 claves** (461 `cod:`,
+181 `nom:`) y abortaba en el primer hueco.
+
+Corrida en vivo autorizada por el desarrollador (26-jul, sobre `demo` = `b7d4c4a`,
+post-merge de #48): **339 s, 1.2 s/caso, cero `portal_caido`**. La caché quedó
+completa (7.9 MB) y **`--solo-cache` vuelve a correr offline** — verificado.
+
+Baseline nuevo (es el vigente): correcto **230** · incorrecto **10** · revisión 34
+· privada 3. Contra el viejo: incorrecto 16→10, y la matriz de transiciones da
+**cero `correcto → incorrecto`** (el criterio duro de la Regla de oro). Los 8
+`correcto → revisión` son el costo de abstención que ADR-005 ya había aceptado.
+El viejo se conservó como `golden_cui_baseline.prerefactor.json`.
+
+⚠ Un solo caso empeoró de verdad (`revisión → incorrecto`): CUI **2195439**
+(I.E. N° 0022 Jorge Ríos) — y es **uno de los dos casos de "verdad auditada
+dudosa"** que ya estaban en el backlog (Tocache vs Loreto). Antes de tratarlo como
+regresión hay que resolver cuál es la verdad.
 
 ## ¿Qué se estaba haciendo?
 
