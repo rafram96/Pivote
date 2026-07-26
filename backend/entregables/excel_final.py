@@ -494,7 +494,7 @@ def construir_hoja_profesional(
         "PROBABLE": "por nombre — candidato PROBABLE, conviene un vistazo",
     }
 
-    def render_multi_obra(top: int, sub: list) -> int:
+    def render_multi_obra(top: int, sub: list, multi_rubro=None) -> int:
         """RESUMEN (banda F:K de la experiencia madre) de un cert multi-obra: cuántas
         obras se hallaron + las NO halladas en compacto. El DETALLE de cada obra
         hallada va como una SubExperiencia FULL-WIDTH debajo (render_subexperiencias)."""
@@ -505,6 +505,18 @@ def construir_hoja_profesional(
                            f"hallada(s); cada una se detalla abajo como SubExperiencia")
         c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
         rr += 1
+        if multi_rubro:
+            # candado multi-rubro (ADR-011 · P1): decisión de criterio del Comité,
+            # no un NO CUMPLE — el tiempo del vínculo no se toca.
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+            c = ws.cell(rr, 6, "Por confirmar — agrupa obras de especialidades "
+                               f"distintas ({', '.join(multi_rubro)}) sin declarar el "
+                               "tiempo de cada una: para repartir la experiencia por "
+                               "especialidad se requiere el anexo de desglose. El "
+                               "tiempo total del vínculo no cambia.")
+            c.font, c.fill, c.border, c.alignment = F_CELL, FILL_ALERTA, BORDER, AL_WRAP
+            ws.row_dimensions[rr].height = max(15, (-(-len(str(c.value)) // 70)) * 13 + 2)
+            rr += 1
         for s in (sub or []):
             if s.get("estado") == "resuelto":
                 continue  # su detalle full-width va abajo (render_subexperiencias)
@@ -936,7 +948,7 @@ def construir_hoja_profesional(
         if fx and fx.get("sub_obras"):
             # cert multi-obra: la banda F:K muestra un RESUMEN (cuántas + no halladas);
             # el detalle full-width de cada obra hallada va como SubExperiencia debajo.
-            r_right = render_multi_obra(r_top, fx["sub_obras"])
+            r_right = render_multi_obra(r_top, fx["sub_obras"], fx.get("multi_rubro"))
             r = max(r, r_right + 1)
         elif fx:
             r_right = render_obra(r_top, fx, ini, fin)
@@ -1146,7 +1158,8 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
         # que el render la muestre (sin cambiar la firma de generar_excel_final).
         if enr.get("sub_obras"):
             fichas[(np_, ne)] = {**(fichas.get((np_, ne)) or {}),
-                                 "sub_obras": enr["sub_obras"]}
+                                 "sub_obras": enr["sub_obras"],
+                                 "multi_rubro": enr.get("multi_rubro")}
     return paral, cuis, fichas, sunat
 
 

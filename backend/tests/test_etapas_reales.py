@@ -1035,3 +1035,73 @@ def test_multi_obra_el_tiempo_no_se_duplica_al_resolver_por_nombre(tmp_path):
     p1 = repo.cargar_enriquecimiento(job.job_id)["prof:1"]
     # 2022-03-01 → 2023-07-31 contado UNA vez, no una por sub-obra
     assert p1["dias_brutos"] == 518
+
+
+# ── ADR-011 · P1 · candado MULTI-RUBRO ───────────────────────────────────────
+# Mismo vínculo, pero el paquete mezcla salud y vial. Cuánto del tiempo va a cada
+# especialidad es indecidible sin un anexo que lo declare: el backend lo SEÑALA,
+# no lo decide ni lo castiga.
+_HV_SUB_VIAL = "MEJORAMIENTO DE LA CARRETERA VECINAL TAMBOGRANDE - LAS LOMAS"
+
+
+def _espejo_multi_rubro(sub_fechas=False):
+    extra = ({"fecha_inicial": "2022-03-01", "fecha_final": "2022-11-30"}
+             if sub_fechas else {})
+    extra2 = ({"fecha_inicial": "2022-12-01", "fecha_final": "2023-07-31"}
+              if sub_fechas else {})
+    esp = {k: v for k, v in ESPEJO_MULTI_OBRA_HV.items() if k != "profesionales"}
+    esp["profesionales"] = [{
+        "n_prof": 1, "cargo": "GERENTE DE PROYECTO", "nombre": "Prof HV",
+        "requisitos": {"tipo_experiencia": "mínimo 1 año"},
+        "total": {"dias": 518, "anios": 1.42},
+        "experiencias": [{
+            "n": 1, "proyecto": _HV_PAQUETE_6, "cui": None,
+            "entidad_emisora": "HV CONTRATISTAS S.A.",
+            "entidad_contratante": "GOBIERNO REGIONAL DE PIURA",
+            "fecha_inicial": "2022-03-01", "fecha_final": "2023-07-31",
+            "dias": 518, "folio": "300",
+            "obras": [{"proyecto": _HV_SUB_1, "cui": None, **extra},
+                      {"proyecto": _HV_SUB_VIAL, "cui": None, **extra2}]}]}]
+    return esp
+
+
+def test_multi_rubro_sin_sub_fechas_se_señala_pero_no_bloquea(tmp_path):
+    """Salud + vial sin desglose temporal → alerta para el evaluador. Lo que este
+    test fija es que la alerta NO castiga: los días del vínculo son los mismos y la
+    experiencia sigue contando (el ADR mantiene el tiempo en la madre)."""
+    motor, repo = hacer_motor(tmp_path)
+    job = motor.correr(motor.crear_job(_espejo_multi_rubro()).job_id)
+
+    obs = [o for e in job.etapas for o in e.observaciones if o.codigo == "MULTI_RUBRO"]
+    assert len(obs) == 1
+    assert obs[0].severidad.value == "advertencia"
+    assert "salud, vial" in obs[0].mensaje
+
+    enr = repo.cargar_enriquecimiento(job.job_id)
+    assert enr["1:1"]["multi_rubro"] == ["salud", "vial"]
+    # NO bloquea: el tiempo del vínculo queda intacto y la experiencia cuenta
+    assert enr["prof:1"]["dias_brutos"] == 518
+    assert not [it for it in job.items_revision if not it.resuelto]
+
+    ws = openpyxl.load_workbook(tmp_path / job.job_id / "final.xlsx")["P1 GERENTE DE PROYECTO"]
+    texto = "\n".join(str(c.value) for f in ws.iter_rows() for c in f if c.value)
+    assert "Por confirmar" in texto and "especialidades distintas" in texto
+
+
+def test_multi_rubro_no_dispara_si_el_cert_declara_las_sub_fechas(tmp_path):
+    """Escenario B: si el cert declara el tiempo de CADA obra, el desglose existe y
+    no hay nada que confirmar — el candado se calla."""
+    motor, repo = hacer_motor(tmp_path)
+    job = motor.correr(motor.crear_job(_espejo_multi_rubro(sub_fechas=True)).job_id)
+
+    assert not [o for e in job.etapas for o in e.observaciones
+                if o.codigo == "MULTI_RUBRO"]
+    assert "multi_rubro" not in repo.cargar_enriquecimiento(job.job_id)["1:1"]
+
+
+def test_multi_rubro_no_dispara_en_paquete_de_un_solo_rubro(tmp_path):
+    """El paquete HV real es todo salud: no debe salir la alerta."""
+    motor, _ = hacer_motor(tmp_path)
+    job = motor.correr(motor.crear_job(ESPEJO_MULTI_OBRA_HV).job_id)
+    assert not [o for e in job.etapas for o in e.observaciones
+                if o.codigo == "MULTI_RUBRO"]

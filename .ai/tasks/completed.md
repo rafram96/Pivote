@@ -1,5 +1,24 @@
 # Completado (más reciente primero)
 
+## 2026-07-25
+- **T-TAREA-ADR011 · certificados multi-obra** (Issue #26), en 3 PRs sobre
+  `demo` — rama `rafram96/issue-26-t-multi-001`, SIN pushear todavía:
+  - **PR-1** (`74cc80e`): la skill desglosa paquetes SIN CUI (antes el
+    disparador exigía código por sub-obra, así que el caso HV ni llegaba al
+    backend); fixture HV congelado, válido en Pydantic y en zod.
+  - **PR-2** (`ed26628`): escalera CUI→nombre + `_exp_derivada` + mapeo aditivo
+    de estados. Detalle que no estaba en el ADR: no heredar `ubicacion` NO basta
+    — la geografía de la madre entra igual por `entidad_contratante`
+    (`ubigeo_cert`, `_muni_contradice`), y hay que apagarla con
+    `_solo_geo_propia`.
+  - **PR-3**: candado multi-rubro, contradicción exigida ENTRE dos sub-obras.
+  - Golden 277 casos con **cero drift** en las dos corridas (PR-2 y PR-3).
+  - Bug colateral corregido: `EtapaResolucionCui.correr` descartaba TODAS sus
+    observaciones (`MULTI_OBRA`/`PROBABLE`/`PRIVADA`) por no pasar `obs` a
+    `_res`.
+  - Pendiente del ADR: P2 (Escenario B con sub-fechas por anexo) sigue
+    pospuesto — el contrato ya lo modela, falta un cert real que lo exija.
+
 ## 2026-07-22
 - Base de conocimiento de NIVEL SISTEMA creada en la raíz `InfoObras/.ai/`
   (repo git propio; ADR-S001): panel documentado, contratos cross-repo,

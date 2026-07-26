@@ -24,7 +24,8 @@ from typing import Callable, Optional
 
 from schemas import pipeline
 from validacion import verificar_espejo
-from resolucion import ConsultaInfoObras, resolver_con_dedup, resolver_obras
+from resolucion import (ConsultaInfoObras, resolver_con_dedup, resolver_obras,
+                        rubros_mixtos)
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
 from entregables import desempaquetar_enriquecimiento, generar_excel_final, mapear_certificados
 from .etapas import Contexto, EtapaIngesta, EtapaStub
@@ -233,8 +234,30 @@ class EtapaResolucionCuiReal:
                 # código (determinístico) y se guarda la lista para el Excel/panel.
                 sub = resolver_obras(e.get("obras"), consulta, base=base, exp_madre=e)
                 n_res = sum(1 for s in sub if s.get("estado") == "resuelto")
-                ctx.enriquecimiento[_clave(np_, ne)] = {
-                    "cui": None, "via": "MULTI_OBRA", "obra": None, "sub_obras": sub}
+                enr_mo = {"cui": None, "via": "MULTI_OBRA", "obra": None,
+                          "sub_obras": sub}
+                # CANDADO MULTI-RUBRO (ADR-011 · P1): sub-obras de especialidades
+                # distintas y NINGÚN desglose de tiempo por obra → cuánto tiempo
+                # corresponde a cada especialidad es genuinamente indecidible sin
+                # anexo. Se SEÑALA para que lo confirme un humano; NO se bloquea el
+                # cómputo: los días son del vínculo y viven en la experiencia madre
+                # (el ADR es explícito). Si el cert declaró las sub-fechas de TODAS
+                # las obras (Escenario B), el desglose existe y no hay nada que
+                # confirmar; con solo algunas, sigue siendo ambiguo.
+                mix = rubros_mixtos(e.get("obras") or [])
+                con_sub_fechas = all(o.get("fecha_inicial") and o.get("fecha_final")
+                                     for o in (e.get("obras") or []))
+                if mix and not con_sub_fechas:
+                    enr_mo["multi_rubro"] = sorted(mix)
+                    obs.append(pipeline.Observacion(
+                        codigo="MULTI_RUBRO", severidad=pipeline.Severidad.ADVERTENCIA,
+                        mensaje="Por confirmar — el certificado agrupa obras de "
+                                f"especialidades distintas ({', '.join(sorted(mix))}) "
+                                "y no declara el tiempo de cada una: para repartir la "
+                                "experiencia por especialidad se necesita el anexo de "
+                                "desglose. El tiempo total del vínculo no cambia.",
+                        origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+                ctx.enriquecimiento[_clave(np_, ne)] = enr_mo
                 ok += 1
                 # PARCIAL (1 de N): la experiencia cuenta igual —su respaldo es el
                 # certificado— pero el conteo deja la brecha a la vista (ADR-011).

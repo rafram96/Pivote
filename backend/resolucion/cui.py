@@ -300,6 +300,27 @@ def rubros_de(texto: str) -> set[str]:
     return {r for r, pat in _RUBROS.items() if pat.search(n)}
 
 
+def rubros_mixtos(obras: list[dict]) -> set[str]:
+    """Rubros en MIXTURA entre las sub-obras de un cert multi-obra (ADR-011 · P1).
+
+    Devuelve el conjunto de rubros involucrados si DOS sub-obras se contradicen
+    —ambas con rubro declarado y sin ninguno en común, p. ej. salud vs vial—, o
+    vacío si no hay mixtura. El rubro sale del NOMBRE de cada sub-proyecto, no de
+    la ficha resuelta: es lo único que existe para una sub-obra que no resolvió, y
+    justo esa es la que el ADR quiere atrapar.
+
+    Exige la contradicción ENTRE DOS sub-obras, no en el conjunto: un solo nombre
+    que mencione dos rubros ("centro de salud y su acceso vial") es UNA obra con
+    dos componentes, no un paquete multi-rubro. Un rubro indeterminado (set vacío)
+    nunca participa — misma regla que `_rubro_contradice`."""
+    porobra = [r for r in (rubros_de(o.get("proyecto") or "") for o in obras or []) if r]
+    for i, a in enumerate(porobra):
+        for b in porobra[i + 1:]:
+            if not (a & b):
+                return set().union(*porobra)
+    return set()
+
+
 def _rubro_contradice(rub_cert: set[str], texto_obra: str) -> bool:
     """True si ambos lados declaran rubro y NO comparten ninguno. Un lado
     indeterminado (set vacío) jamás veta — el veto exige contradicción positiva."""

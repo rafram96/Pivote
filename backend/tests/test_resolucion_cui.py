@@ -9,7 +9,7 @@ import itertools
 from resolucion.cui import (
     _es_experiencia_expediente, _es_experiencia_privada, _exp_derivada,
     _muni_contradice, _puntuar, _sin_prefijo, norm, resolver, resolver_obras,
-    ubicacion, ubigeo_cert)
+    rubros_mixtos, ubicacion, ubigeo_cert)
 
 
 def test_ubicacion_no_confunde_ica_dentro_de_huancavelica():
@@ -517,3 +517,41 @@ def test_cui_citado_que_no_existe_no_cae_a_busqueda_por_nombre():
                          ConsultaTalara(), exp_madre=_MADRE_HV)
     assert res[0]["estado"] == "no_encontrado" and res[0]["cui"] == "2089754"
     assert buscados == []                  # ni siquiera se intentó por nombre
+
+
+# ── ADR-011 · P1 · candado MULTI-RUBRO ───────────────────────────────────────
+
+def _obras(*nombres):
+    return [{"proyecto": n, "cui": None} for n in nombres]
+
+
+def test_rubros_mixtos_detecta_salud_mas_vial():
+    """El caso del ADR: un paquete que mezcla especialidades y no dice cuánto
+    tiempo va a cada una es indecidible sin anexo."""
+    mix = rubros_mixtos(_obras("MEJORAMIENTO DEL CENTRO DE SALUD POSOPE ALTO I-3",
+                               "MEJORAMIENTO DE LA CARRETERA VECINAL SULLANA-TAMBOGRANDE"))
+    assert mix == {"salud", "vial"}
+
+
+def test_rubros_mixtos_no_dispara_con_un_solo_rubro():
+    assert rubros_mixtos(_obras("HOSPITAL DE APOYO SULLANA II-2",
+                                "CENTRO DE SALUD POSOPE ALTO I-3")) == set()
+
+
+def test_rubros_mixtos_no_dispara_por_una_obra_con_dos_componentes():
+    """UNA obra que menciona dos rubros ("el centro de salud y su acceso vial") es
+    una obra con dos componentes, no un paquete multi-rubro. La contradicción se
+    exige ENTRE dos sub-obras — si no, el candado se dispararía por redacción."""
+    assert rubros_mixtos(_obras(
+        "MEJORAMIENTO DEL CENTRO DE SALUD X Y SU ACCESO VIAL",
+        "MEJORAMIENTO DEL CENTRO DE SALUD Y")) == set()
+
+
+def test_rubros_mixtos_ignora_las_sub_obras_de_rubro_indeterminado():
+    """Rubro vacío = indeterminado: nunca participa (misma regla que el veto)."""
+    assert rubros_mixtos(_obras("HOSPITAL DE APOYO SULLANA II-2",
+                                "OBRA SIN PALABRAS DE RUBRO ALGUNO")) == set()
+    # …y con una tercera que sí contradice, la mixtura es solo entre las declaradas
+    assert rubros_mixtos(_obras("HOSPITAL DE APOYO SULLANA II-2",
+                                "OBRA SIN PALABRAS DE RUBRO ALGUNO",
+                                "CARRETERA VECINAL X")) == {"salud", "vial"}
