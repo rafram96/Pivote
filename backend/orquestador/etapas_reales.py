@@ -23,7 +23,8 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from schemas import pipeline
-from validacion import anotar_cargo_nucleo, verificar_espejo
+from validacion import (anotar_cargo_nucleo, observaciones_recalculo,
+                        recalcular_espejo, verificar_espejo)
 from resolucion import (ConsultaInfoObras, resolver_con_dedup, resolver_obras,
                         rubros_mixtos)
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
@@ -185,7 +186,16 @@ class EtapaValidacionReal:
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
         ctx.reportar(self.nombre, 0, 0, "Revisando la consistencia de la propuesta")
-        observaciones = verificar_espejo(ctx.espejo)
+        # ANTES de verificar: días/meses/años, ¿anterior a colegiatura? y ¿COVID?
+        # son ARITMÉTICA, no juicio — el backend los calcula y deja de depender de
+        # que el LLM los mande (#45 · L2). Con el defecto `sobrescribir=False` solo
+        # rellena huecos, así que `notas` ve el espejo ya completo y sus totales
+        # cuadran. Si algún día se activa `sobrescribir=True`, este bloque debe ir
+        # DESPUÉS de `verificar_espejo`: las NOTAS 9 y 10 comparan contra lo que
+        # escribió Claude y ya no lo encontrarían.
+        recalculo = recalcular_espejo(ctx.espejo)
+        observaciones = observaciones_recalculo(recalculo, origen=E.VALIDACION)
+        observaciones += verificar_espejo(ctx.espejo)
         # DESPUÉS de verificar (que lee el veredicto original de Claude para
         # detectar la contradicción): marca en rojo, dentro del espejo que va al
         # Excel, las experiencias que no acreditan ni cargo ni funciones (#31).
