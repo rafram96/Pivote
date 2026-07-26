@@ -38,12 +38,40 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
    `"YYYY-MM (anotación literal)"`. Si es ilegible/no consta tras reintentar
    (NOTA 12) → `"POR VERIFICAR (motivo)"`. Nada fuera de esas tres formas.
 5. **Identificadores para el cruce oficial (backend)** — campos dedicados:
+   - **`proyecto`: ACCIÓN + OBJETO + UBICACIÓN, con las palabras del certificado.**
+     El backend busca esa obra en el registro público **con ese texto**, así que el
+     nombre tiene que identificarla **por sí solo**. Un nombre genérico trae la obra
+     equivocada: de *"El Proyecto consistió en la **Construcción del HOSPITAL DE
+     ESSALUD**, en la **ciudad de Tarapoto, Departamento de San Martín**… dentro de un
+     área de 11,525.02 m² en 02 pisos"* se guardó solo `"HOSPITAL DE ESSALUD"` — tres
+     palabras genéricas — y el resolver lo emparejó con *"INSTALACIÓN DE LOS SERVICIOS
+     DE TOMOGRAFÍA … PUERTO MALDONADO, MADRE DE DIOS"*: otro departamento, otra escala,
+     otro tipo de obra (caso real). Lo correcto era
+     `"Construcción del HOSPITAL DE ESSALUD, en la ciudad de Tarapoto, Departamento de
+     San Martín"`. Por eso:
+     - **Acción**: el sustantivo de intervención tal cual lo dice el documento
+       (Construcción, Mejoramiento, Ampliación, Creación, Rehabilitación,
+       Instalación…). **Nunca lo tires.** El MEF nombra oficialmente cada inversión
+       así (`CONSTRUCCIÓN DEL … EN LA CIUDAD DE …`), así que es la mejor señal que le
+       puedes dar al resolver — es la misma razón por la que en un cert multi-obra
+       repites el tronco de la acción en cada sub-obra.
+     - **Objeto**: el establecimiento/infraestructura, con su categoría o nivel
+       ("II-2", "I-3") si el cert lo cita.
+     - **Ubicación**: ciudad / distrito / provincia / departamento **si el certificado
+       la consigna al describir el proyecto**. Que también viaje en `ubicacion` no es
+       duplicado: en el nombre oficial la ubicación forma parte del nombre.
+     - **Con las palabras del documento**: sin sinónimos, sin siglas propias, sin
+       agregar nada que el certificado no diga. Si viene en prosa ("El Proyecto
+       consistió en…"), descarta **solo** el conector de redacción y conserva acción +
+       objeto + ubicación.
+     - **NO** le pegues la metadata desprendible (m², nº de pisos, monto, SNIP/CUI):
+       esa va a `area_construida_m2`, `monto_contrato_soles`, `cui`.
    - `cui`: si el texto cita "CUI NNNN" o "SNIP NNNN", pon **solo los dígitos**
      aquí. Si el cert muestra **ambos** (un SNIP de 6 díg y un CUI de 7 díg del
      mismo proyecto), captura **siempre el CUI de 7 díg** (código único estable) —
      así la extracción es la misma entre corridas (evita que una vez tomes el SNIP
-     y otra el CUI). El `proyecto` queda con el nombre de la obra **verbatim y
-     completo**, SIN pegarle la cola de metadata ("– SNIP 71857; 27,420 m²; S/.118M").
+     y otra el CUI). El `proyecto` queda con el nombre **completo** según la regla de
+     arriba, SIN pegarle la cola de metadata ("– SNIP 71857; 27,420 m²; S/.118M").
      **PERO conserva el ENVOLTORIO del desempeño cuando exista**: si el cert dice
      "…en la **Elaboración del Expediente Técnico**: «MEJORAMIENTO…»" (o "estudio
      de…", "supervisión del estudio…"), el `proyecto` empieza con ese envoltorio
@@ -194,7 +222,8 @@ Rellena este **esqueleto** con los valores reales (mismas claves, mismos tipos):
     {
       "n": 1,
       "entidad_emisora": "GOBIERNO REGIONAL DE X", "ruc_emisor": "20123456789",
-      "proyecto": "Supervisión del Hospital ...", "cui": "2354781",
+      "proyecto": "Mejoramiento de los Servicios de Salud del Hospital II-2 de Tarapoto, Departamento de San Martín",
+      "cui": "2354781",
       "tipo_documento": "Constancia", "nombre_emisor": "ING. ...", "cargo_emisor": "Gerente de Obras",
       "fecha_inicial": "2019-03-01", "fecha_final": "2020-06-30", "fecha_emision": "2020-07-10",
       "folio": 1160, "paginas_pdf": [1160, 1161],
@@ -219,6 +248,8 @@ Rellena este **esqueleto** con los valores reales (mismas claves, mismos tipos):
 - `paginas_pdf`: **array de enteros** `[1160, 1161]` (NUNCA un string como `"1160 (dup 1229)"`).
 - Fechas: string `YYYY-MM-DD`, parcial `"YYYY-MM (anotación)"`, o `"POR VERIFICAR…"`. Nada más.
 - `experiencia_total_declarada`: **string** (NUNCA un objeto).
+- `proyecto`: **acción + objeto + ubicación** (punto 5). Nunca solo el nombre del
+  establecimiento: con eso el backend resuelve la obra de otro departamento.
 - `incluye_covid` / `traslape` / `cert_antes_culminar`: `"SÍ"` / `"NO"` / `null` (NUNCA booleano).
 - `monto_contrato_soles` / `area_construida_m2`: número (sin `S/`, sin comas).
 - `n_prof` va en `_meta` **y** en `profesional`; `n` de cada experiencia contiguo 1..N.

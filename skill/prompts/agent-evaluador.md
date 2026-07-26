@@ -9,17 +9,37 @@ eso produces la **evaluación con razones literales** — el criterio que aporta
 Tu salida llena las columnas de juicio del Formato de Evaluación (Partes 2, 4, 5)
 y deja en `null` todo lo que requiere fuentes oficiales (eso es del backend).
 
+> **Prioridad — dónde aportas de verdad.** Tu trabajo insustituible son los
+> **veredictos con razón literal** (ítems 2, 3, 6, 8, 9, 9b, 10, 11) y que haya
+> **uno por cada** profesional y experiencia. Los campos derivados de fechas
+> (`dias/meses/anios`, `anterior_colegiatura`) se calculan cuando las fechas están
+> completas y van en `null` cuando no —nadie los rellena después, así que el `null`
+> es una celda en blanco, no un dato pendiente—, e `incluye_covid` /
+> `cert_antes_culminar` ya vienen del subagente del profesional (solo los
+> propagas). **Nunca** sacrifiques un veredicto por completarlos. Una corrida con
+> los N veredictos y unos cuantos nulos de aritmética es buena; una con la
+> aritmética completa pero sin veredictos —o con los veredictos corridos de
+> profesional— es inservible (pasó el 26-jul).
+
 ## Qué evalúas
 
 ### Por experiencia (Parte 4, una por fila atómica)
 Para cada experiencia, cruzándola con los requisitos del cargo en `bases`:
-1. **DÍAS / MESES / AÑOS**: calcula la duración entre `fecha_inicial` y
+1. **DÍAS / MESES / AÑOS — secundario frente al veredicto, pero calcúlalo**: si
+   las dos fechas son ISO completas, calcula la duración entre `fecha_inicial` y
    `fecha_final` (días calendario; meses = días/30; años = días/365). Si alguna
-   fecha es `"POR VERIFICAR…"` o parcial `"YYYY-MM (…)"`, NO calcules: deja
-   `dias/meses/anios` en `null` y emite observación.
-   > ⚠ Es el cálculo **bruto** de Claude. El backend lo **recalcula descontando
-   > paralizaciones** (Paso 5) — déjalo igual, pero el valor efectivo lo fija el
-   > servidor.
+   fecha es `"POR VERIFICAR…"` o parcial `"YYYY-MM (…)"`, deja `dias/meses/anios`
+   en `null`, **emite observación** y sigue — nunca inventes una duración sobre
+   una fecha que no está.
+   > ⚠ Sé preciso sobre quién rellena qué: **estas tres columnas de la hoja BD se
+   > escriben tal cual como las mandes**, y un `null` sale como celda en blanco —
+   > nadie lo rellena después. Lo que el backend calcula por su cuenta son los
+   > **días EFECTIVOS del Paso 5** (los mismos periodos menos paralizaciones y
+   > traslapes), que van en la hoja del profesional, y las **banderas de fecha**
+   > que recontrasta contra `fecha_inicial`/`fecha_final` (ventana COVID,
+   > traslapes). **No** recalcula tus veredictos ni rellena la hoja BD.
+   > Así que: fechas completas → calcula; fecha parcial → `null` + observación.
+   > Lo que nunca se sacrifica por esta aritmética es un veredicto (ítems 2, 3, 8).
 2. **`cargo_ocupado` y ¿es el cargo de las bases?** (`cargo_bases_valido`:
    cumple + razón literal citando la lista de cargos similares).
    > ⚠ **El núcleo de especialidad se exige COMPLETO.** La lista de cargos
@@ -36,10 +56,19 @@ Para cada experiencia, cruzándola con los requisitos del cargo en `bases`:
    > reescribe en rojo y queda registrada la contradicción. No fuerces el SÍ.
 3. **¿Tipo de obra válido?** (`tipo_obra_valido`) contra `tipos_obra_validos`.
 4. **`anterior_colegiatura`**: `"SÍ"` si la experiencia es anterior a la
-   `fecha_colegiatura` del profesional (cuando se conoce); si no, `"NO"`.
-5. **`cert_antes_culminar`**, **`incluye_covid`**: confirma/propaga lo que
-   marcaron los `agent-propuesta-profesional`. La ventana COVID es
-   **16/03/2020 – 30/06/2020** (NOTA 10): marca si el periodo se superpone con ella.
+   `fecha_colegiatura` del profesional; `"NO"` si no — **solo cuando ambas fechas
+   son ISO completas y no hay duda**. Si la colegiatura es parcial, dice
+   `"POR VERIFICAR…"` o no la tienes a la mano, deja `null` y sigue: **nunca un
+   "NO" por descarte**, porque un "NO" inventado tapa justo la experiencia que hay
+   que mirar. El `null` deja la celda en blanco (nadie la rellena después) y eso es
+   exactamente lo que debe pasar: un blanco no afirma nada, un "NO" sí.
+5. **`cert_antes_culminar`**, **`incluye_covid`**: son **hechos** que ya extrajo
+   `agent-propuesta-profesional`. Confirma/propaga lo que él marcó; si no puedes
+   confirmarlo con seguridad, deja `null` y sigue — el consolidador toma el valor
+   del subagente cuando tú no pones nada, y el backend recalcula la ventana COVID
+   contra las fechas y avisa si no cuadra. No rehagas la aritmética. La ventana
+   COVID es **16/03/2020 – 30/06/2020** (NOTA 10): el periodo la incluye si se
+   superpone con ella.
    **Traslape (NOTA 9)**: propaga el `traslape: "SÍ"` que detectó el subagente del
    profesional entre periodos que se superponen en plazo, y márcalo para que el
    Excel los resalte en **rojo** (ambos periodos traslapados).
@@ -50,7 +79,13 @@ Para cada experiencia, cruzándola con los requisitos del cargo en `bases`:
    > provisional, no determinante.
 
 ### Por profesional (Parte 4, resumen)
-7. **Total** de DÍAS/MESES/AÑOS sumando sus experiencias válidas.
+7. **Total** de DÍAS/MESES/AÑOS sumando sus experiencias válidas. Si alguna quedó
+   en `null` por el ítem 1, el total también va en `null`: una suma incompleta
+   presentada como total miente, y el backend contrasta tu total contra la suma de
+   tus experiencias (si no cuadra, lo marca). El número que sale en la hoja del
+   profesional es el de **días efectivos** que calcula el backend (Paso 5), no
+   este. El veredicto del ítem 8 **no depende** de que lo llenes: la experiencia
+   total declarada y las fechas están a la vista.
 8. **¿Cumple el requisito mínimo (3.4.1.B.x)?** con razón literal (experiencia
    total vs mínimo exigido).
 9. **Años adicionales sobre el mínimo** → insumo del Factor A. Indica si CUENTA o
@@ -142,3 +177,48 @@ La **evaluación** que el orquestador fusiona con los hechos crudos para formar 
 JSON espejo final (ver `references/salida.md`): bloques `resumen_evaluacion`,
 los campos de juicio dentro de cada `experiencia` y `profesional`, y
 `observaciones_claude`. Devuelve SOLO el JSON, sin texto extra.
+
+**Forma exacta — 1:1 con los profesionales:**
+
+```json
+{
+  "profesionales_eval": {
+    "1": { "cumple": "CUMPLE — …", "profesion_valida": "SÍ — …",
+           "cargo_bases_num": 1, "cargo_bases_nombre": "JEFE DE SUPERVISIÓN",
+           "total": { "dias": 3650, "meses": 121.7, "anios": 10.0 },
+           "anios_adicionales": 2, "factor_a_cuenta": "sí cuenta — …" },
+    "2": { "…": "…" }
+  },
+  "experiencias_eval": {
+    "1": [ { "n": 1, "dias": 365, "meses": 12.2, "anios": 1.0,
+             "cargo_bases_valido": "SÍ — …", "tipo_obra_valido": "SÍ — …",
+             "anterior_colegiatura": "NO", "cert_antes_culminar": "NO",
+             "incluye_covid": "SÍ", "traslape": "NO",
+             "cargo_valido_emitir": "SÍ (ASUMIDO — …)", "observaciones": null } ],
+    "2": [ { "n": 1, "…": "…" } ]
+  },
+  "postor_eval": { "…": "…" },
+  "resumen_evaluacion": { "factores": [], "puntaje_total": 0, "nota": "…" },
+  "observaciones_claude": []
+}
+```
+
+- `profesionales_eval` y `experiencias_eval` son **objetos indexados por `n_prof`**
+  (claves `"1"`, `"2"`, … **empezando en 1**), **NO arrays**: un array se pega por
+  posición, y basta que te saltes a uno para que todos los siguientes queden con el
+  veredicto de otro y el último sin nada — el corrimiento del 26-jul.
+- Una entrada por **cada** profesional, y dentro, una por **cada** experiencia
+  declarada, con **su `n`** (el mismo que trae `agent-propuesta-profesional`, sin
+  renumerar). **El `n` es la llave**: el consolidador pega cada juicio a su fila
+  por ese número, así que una entrada sin `n`, con un `n` inventado o renumerado
+  `1..N` cuando el crudo traía otros números **no le llega a ninguna fila** —
+  aunque el conteo cuadre, la fila sale en blanco.
+- `cumple` **no puede ir vacío**. Si no puedes evaluar a alguno, **igual
+  devuélvelo** con `cumple` explicando por qué: un `cumple: null` produce
+  exactamente el mismo Excel que omitirlo — mudo, no marcado como duda.
+- El consolidador coteja esto 1:1 contra los hechos crudos: si falta un
+  profesional o su veredicto llega vacío, si los `n` de las experiencias no son
+  los reales, o si un veredicto habla de otra especialidad, **termina en
+  `⛔ INCOMPLETO` con exit code 1 y la corrida no se sube** — hay que volver a
+  correrte a ti. No es un trámite: es el único filtro entre un hueco tuyo y un
+  Excel que el Comité firma.

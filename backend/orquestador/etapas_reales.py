@@ -23,7 +23,8 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from schemas import pipeline
-from validacion import anotar_cargo_nucleo, verificar_espejo
+from validacion import (anotar_cargo_nucleo, observaciones_recalculo,
+                        recalcular_espejo, verificar_espejo)
 from resolucion import (ConsultaInfoObras, resolver_con_dedup, resolver_obras,
                         rubros_mixtos)
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
@@ -185,7 +186,16 @@ class EtapaValidacionReal:
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
         ctx.reportar(self.nombre, 0, 0, "Revisando la consistencia de la propuesta")
-        observaciones = verificar_espejo(ctx.espejo)
+        # ANTES de verificar: días/meses/años, ¿anterior a colegiatura? y ¿COVID?
+        # son ARITMÉTICA, no juicio — el backend los calcula y deja de depender de
+        # que el LLM los mande (#45 · L2). Con el defecto `sobrescribir=False` solo
+        # rellena huecos, así que `notas` ve el espejo ya completo y sus totales
+        # cuadran. Si algún día se activa `sobrescribir=True`, este bloque debe ir
+        # DESPUÉS de `verificar_espejo`: las NOTAS 9 y 10 comparan contra lo que
+        # escribió Claude y ya no lo encontrarían.
+        recalculo = recalcular_espejo(ctx.espejo)
+        observaciones = observaciones_recalculo(recalculo, origen=E.VALIDACION)
+        observaciones += verificar_espejo(ctx.espejo)
         # DESPUÉS de verificar (que lee el veredicto original de Claude para
         # detectar la contradicción): marca en rojo, dentro del espejo que va al
         # Excel, las experiencias que no acreditan ni cargo ni funciones (#31).
@@ -1171,12 +1181,17 @@ class EtapaExcelReal:
         # pasa los periodos CON su tipo (paralizado / sin valorización) para que
         # el Excel los muestre diferenciados; el generador normaliza las fechas.
         paral, cuis, fichas, sunat = desempaquetar_enriquecimiento(ctx.enriquecimiento)
-        # experiencias en revisión → su motivo, para que la hoja del profesional
-        # muestre "EN REVISIÓN" + la razón en vez de una columna vacía.
-        revisiones: dict[tuple[int, int], str] = {}
+        # experiencias en revisión → su motivo Y su acción sugerida, para que la hoja
+        # del profesional muestre "EN REVISIÓN" + la razón en vez de una columna
+        # vacía. La acción viaja junto al motivo porque los ItemRevision los crean 4
+        # etapas distintas y cada una pide algo diferente (pegar un CUI, verificar
+        # una fecha, reintentar el portal): si el Excel inventa una acción fija de
+        # "pegar el CUI", la pide también sobre obras bien identificadas.
+        revisiones: dict[tuple[int, int], tuple[str, Optional[str]]] = {}
         for it in ctx.job.items_revision:
             if not it.resuelto and it.n_exp is not None:
-                revisiones.setdefault((it.n_prof, it.n_exp), it.motivo)
+                revisiones.setdefault((it.n_prof, it.n_exp),
+                                      (it.motivo, it.accion_sugerida))
         # experiencias PRIVADAS → bloque propio en el Excel (no es "revisión": el
         # respaldo es el certificado; InfoObras no registra obra privada).
         for k, e in ctx.enriquecimiento.items():
