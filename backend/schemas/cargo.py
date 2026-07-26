@@ -70,3 +70,67 @@ def normalizar_cargos_espejo(espejo: dict) -> int:
             if normalizar_cargo_profesional(prof):
                 n += 1
     return n
+
+
+# ── Etiqueta corta para la pestaña del Excel ─────────────────────────────────
+# El cargo completo no cabe en una pestaña: el límite de 31 chars de Excel lo
+# cortaba a media frase ("P4 ESPECIALISTA PLANEAMIENTO Y"). Regla determinística,
+# sin tabla de abreviaturas que mantener sincronizada:
+#   1. fuera el prefijo genérico — TODOS son "especialistas", no distingue. "Jefe"
+#      SÍ se conserva: marca jerarquía y es lo que separa al jefe de los demás.
+#   2. fuera los conectores (y, de, en…).
+#   3. cada palabra a la mitad, con piso de 5 letras (las de ≤5 quedan enteras).
+#   4. Title Case fijo → la pestaña deja de depender de cómo escribió el cargo el
+#      postor en su PDF ("INSTALACIONES SANITARIAS" vs "Instalaciones Sanitarias"
+#      daban pestañas distintas para el mismo cargo).
+# El cargo COMPLETO no se pierde: sigue en la banda "PROFESIONAL N: <cargo>" de la
+# propia hoja y en la columna "CARGO AL QUE POSTULA" de la hoja Base de Datos.
+_RE_PREFIJO_GENERICO = re.compile(
+    r"^\s*(?:esp\.?|especialista|ingeniero|ing\.?|responsable|gerente)"
+    r"(?:\s+(?:en|de|del|para)\b)?\s+",
+    re.I,
+)
+# Excel rechaza estos caracteres en el nombre de una hoja.
+_RE_INVALIDO_HOJA = re.compile(r"[\\/*?:\[\]]")
+_CONECTORES = {"y", "e", "o", "u", "de", "del", "la", "el", "los", "las",
+               "en", "para", "con", "a", "al"}
+_MIN_PALABRA = 5        # piso: "Costos" → "Costo", no "Cos"
+_LIMITE_HOJA = 31       # límite duro de Excel
+
+
+def _mitad(palabra: str) -> str:
+    """Palabra recortada a la mitad (redondeando hacia arriba), nunca por debajo
+    de `_MIN_PALABRA`: 'Supervisión' → 'Superv', 'Jefe' → 'Jefe'."""
+    corte = max(_MIN_PALABRA, -(-len(palabra) // 2))    # ceil(len/2)
+    return palabra[:corte].rstrip(" -.,;")
+
+
+def abreviar_cargo(cargo: str) -> str:
+    """'Jefe de Supervisión' → 'Jefe Superv' · 'ESPECIALISTA EN ESTRUCTURAS' →
+    'Estruc' · 'ESP. PLANEAMIENTO Y COSTOS' → 'Planea Costo'. Devuelve "" si no
+    queda nada legible."""
+    txt = _RE_INVALIDO_HOJA.sub(" ", str(cargo or "")).strip()
+    if not txt:
+        return ""
+    # Si el cargo es SOLO el prefijo genérico ("Especialista"), quitarlo lo dejaría
+    # vacío → en ese caso se conserva el original.
+    sin_prefijo = _RE_PREFIJO_GENERICO.sub("", txt, count=1).strip()
+    palabras = [p for p in (sin_prefijo or txt).split()
+                if p.lower().strip(".") not in _CONECTORES]
+    return " ".join(_mitad(p.capitalize()) for p in palabras if p).strip()
+
+
+def etiqueta_hoja(n_prof: int, cargo: str) -> str:
+    """Nombre de la pestaña del profesional: `P{n}. {cargo abreviado}`.
+
+    El prefijo `P{n}` garantiza unicidad aunque dos profesionales compartan cargo.
+    El clamp a 31 es una guardia (la regla ya deja ~15 chars) y corta en límite de
+    palabra, nunca a media palabra."""
+    abrev = abreviar_cargo(cargo)
+    base = f"P{n_prof}. {abrev}".strip() if abrev else f"P{n_prof}"
+    if len(base) <= _LIMITE_HOJA:
+        return base
+    cut = base[:_LIMITE_HOJA]
+    if base[_LIMITE_HOJA] != " ":            # solo retrocede si cortó a media palabra
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip(" ,;-.")

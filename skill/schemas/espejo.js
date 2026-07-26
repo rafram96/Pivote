@@ -170,7 +170,9 @@ const Observacion = z.object({
 }).passthrough();
 
 const JsonEspejo = z.object({
-  _meta: z.object({ analisis_id: z.string().min(1) }).passthrough(),
+  // `slug`: nombre CORTO del concurso ("huachocolpa") para los archivos que
+  // descarga el evaluador. Lo elige el orquestador (ver SKILL.md, Paso 4).
+  _meta: z.object({ analisis_id: z.string().min(1), slug: txt }).passthrough(),
   postor: z.object({
     detalle: txt,
     formularios: z.array(Formulario).default([]),

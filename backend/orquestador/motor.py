@@ -74,6 +74,7 @@ class Motor:
         job = pipeline.Job(
             job_id=uuid.uuid4().hex[:12],
             analisis_id=str(meta.get("analisis_id") or "(sin analisis_id)"),
+            slug=meta.get("slug"),
             concurso_id=concurso_id,
             concurso=meta.get("concurso"),
             postor=meta.get("postor"),
