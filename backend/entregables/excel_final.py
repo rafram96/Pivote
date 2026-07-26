@@ -33,6 +33,7 @@ from reglas import (
     anios, dias_efectivos_profesional, dias_inclusivos, periodo_fechas,
     restar_paralizaciones,
 )
+from schemas.cargo import etiqueta_hoja
 from scripts.generar_excel import (
     AL_HEAD, AL_WRAP, BORDER, F_BOLD, F_CELL, F_HEAD, F_PARTE, F_PROF,
     FILL_BACKEND, FILL_CLAUDE, FILL_HEAD, FILL_PARTE, FILL_PROF,
@@ -99,20 +100,10 @@ def _fecha_iso(v) -> Optional[date]:
     return None
 
 
-def _nombre_hoja(n_prof: int, cargo: str) -> str:
-    """Nombre de hoja Excel útil y corto (≤31 chars). Quita el prefijo redundante
-    "Especialista en/de" (el cargo distintivo se ve de una) y, si aún excede,
-    corta en LÍMITE DE PALABRA — no a media palabra. El prefijo P{n} garantiza
-    unicidad aunque dos cargos empiecen igual."""
-    txt = re.sub(r'[\\/*?:\[\]]', "", cargo or "").strip()
-    txt = re.sub(r"^especialista\s+(?:en|de|del)\s+", "", txt, flags=re.I)
-    base = f"P{n_prof} {txt}".strip()
-    if len(base) <= 31:
-        return base
-    cut = base[:31]
-    if base[31] != " ":               # solo retrocede si cortó a media palabra
-        cut = cut.rsplit(" ", 1)[0]
-    return cut.rstrip(" ,;-")
+def _ddmmaa(v) -> str:
+    """Fecha (ISO o date) como dd/mm/aa para los cuadros del emisor; '—' si no hay."""
+    f = _fecha_iso(v)
+    return f.strftime("%d/%m/%y") if f else "—"
 
 
 # ── Certificados embebidos (Fase 2) ──────────────────────────────────────────
@@ -135,29 +126,42 @@ def _render_cert_pages(cert_pdf, dpi=130, q=70, max_pag=12):
     return out
 
 
-def mapear_certificados(dir_base, job_id) -> dict:
-    """Lee la carpeta `{job_id}/certs/` (un PDF `P{n}_E{m}.pdf` por experiencia, con
-    la página principal primero — lo recorta la skill) y devuelve
-    `{(n_prof, n_exp): Path}` para pasarle a `generar_excel_final`."""
+def _mapear_dir_certs(cdir) -> dict:
+    """Mapea una carpeta `certs/` de PDFs recortados por la skill →
+    `{(n_prof, n_exp | "TDR" | "ANEXO" | "FACTOR"): Path}`:
+
+      · `P{n}_E{m}.pdf`   constancia de la experiencia (página principal primero)
+      · `P{n}_TDR.pdf`    requisito del cargo en las bases        (mejora A)
+      · `P{n}_ANEXO.pdf`  Anexo 16 declarado y firmado            (mejora A)
+      · `P{n}_FACTOR.pdf` página del Cuadro de Factores (4.2 A)   (issue #32)
+
+    El recorte del FACTOR es la MISMA página para todos; la skill la replica por
+    profesional para que no haga falta una clave global (el ingest solo acepta
+    `P*`, y `generar_excel_final` reparte los certs filtrando por `n_prof`). Las
+    claves de tag no colisionan con las experiencias (ahí `n_exp` es int)."""
     certs: dict = {}
-    cdir = Path(dir_base) / str(job_id) / "certs"
-    if cdir.is_dir():
-        for f in cdir.glob("P*_E*.pdf"):
+    cdir = Path(cdir)
+    if not cdir.is_dir():
+        return certs
+    for f in cdir.glob("P*_E*.pdf"):
+        try:
+            np_, ne = f.stem[1:].split("_E")
+            certs[(int(np_), int(ne))] = f
+        except ValueError:
+            continue
+    for tag in ("TDR", "ANEXO", "FACTOR"):
+        for f in cdir.glob(f"P*_{tag}.pdf"):
             try:
-                np_, ne = f.stem[1:].split("_E")
-                certs[(int(np_), int(ne))] = f
+                certs[(int(f.stem[1:].split("_")[0]), tag)] = f
             except ValueError:
                 continue
-        # Mejora A: recorte del TDR (de las bases) y del Anexo 16 por profesional,
-        # `P{n}_TDR.pdf` / `P{n}_ANEXO.pdf` → clave (n_prof, "TDR"/"ANEXO"). No
-        # colisiona con las experiencias (n_exp es int).
-        for tag in ("TDR", "ANEXO"):
-            for f in cdir.glob(f"P*_{tag}.pdf"):
-                try:
-                    certs[(int(f.stem[1:].split("_")[0]), tag)] = f
-                except ValueError:
-                    continue
     return certs
+
+
+def mapear_certificados(dir_base, job_id) -> dict:
+    """Los certificados del job, en el layout del repositorio (`{job_id}/certs/`),
+    listos para pasarle a `generar_excel_final`."""
+    return _mapear_dir_certs(Path(dir_base) / str(job_id) / "certs")
 
 
 # ── Hoja 2 · Base de Datos ───────────────────────────────────────────────────
@@ -253,11 +257,13 @@ def construir_hoja_profesional(
     revisiones = revisiones or {}
     sunat = sunat or {}
     certificados = certificados or {}
-    # A:D hitos · F:K obra+valorizaciones · M:P emisor SUNAT · R:U representante de obra
+    # A:D hitos · F:K obra+valorizaciones · M:P emisor SUNAT · R:U histórico SUNAT
+    # (los dos cuadros del emisor van pegados) · W:Z representante de obra
     anchos = {"A": 52, "B": 14, "C": 14, "D": 10, "E": 2,
               "F": 5, "G": 18, "H": 14, "I": 18, "J": 14, "K": 13, "L": 2,
               "M": 16, "N": 12, "O": 18, "P": 12, "Q": 2,
-              "R": 17, "S": 12, "T": 22, "U": 14}
+              "R": 17, "S": 12, "T": 12, "U": 14, "V": 2,
+              "W": 17, "X": 12, "Y": 22, "Z": 14}
     for col, w in anchos.items():
         ws.column_dimensions[col].width = w
     n_prof = prof.get("n_prof")
@@ -479,11 +485,22 @@ def construir_hoja_profesional(
     _EST_SUBOBRA = {
         "resuelto": "obra hallada en InfoObras",
         "no_encontrado": "el código no figura como obra (posible estudio/plan)",
+        "revision": "no se pudo identificar con seguridad — confirmar",
+        "privada": "obra/cliente privado — InfoObras no registra obra privada",
         "sin_cui": "el certificado no cita CUI para este proyecto",
         "portal": "InfoObras no respondió — reintentar",
     }
+    # de qué fuerza es la evidencia con que se identificó CADA sub-obra: no es la
+    # misma cosa un código citado que un nombre parecido, y el evaluador decide.
+    _VIA_SUBOBRA = {
+        "CODIGO": "por el código citado en el certificado",
+        "CUI_TEXTO": "por el código citado en el certificado",
+        "RUC": "por el RUC del emisor (ejecutor/supervisor de la obra)",
+        "NOMBRE": "por nombre del establecimiento",
+        "PROBABLE": "por nombre — candidato PROBABLE, conviene un vistazo",
+    }
 
-    def render_multi_obra(top: int, sub: list) -> int:
+    def render_multi_obra(top: int, sub: list, multi_rubro=None) -> int:
         """RESUMEN (banda F:K de la experiencia madre) de un cert multi-obra: cuántas
         obras se hallaron + las NO halladas en compacto. El DETALLE de cada obra
         hallada va como una SubExperiencia FULL-WIDTH debajo (render_subexperiencias)."""
@@ -494,13 +511,31 @@ def construir_hoja_profesional(
                            f"hallada(s); cada una se detalla abajo como SubExperiencia")
         c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
         rr += 1
+        if multi_rubro:
+            # candado multi-rubro (ADR-011 · P1): decisión de criterio del Comité,
+            # no un NO CUMPLE — el tiempo del vínculo no se toca.
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+            c = ws.cell(rr, 6, "Por confirmar — agrupa obras de especialidades "
+                               f"distintas ({', '.join(multi_rubro)}) sin declarar el "
+                               "tiempo de cada una: para repartir la experiencia por "
+                               "especialidad se requiere el anexo de desglose. El "
+                               "tiempo total del vínculo no cambia.")
+            c.font, c.fill, c.border, c.alignment = F_CELL, FILL_ALERTA, BORDER, AL_WRAP
+            ws.row_dimensions[rr].height = max(15, (-(-len(str(c.value)) // 70)) * 13 + 2)
+            rr += 1
         for s in (sub or []):
             if s.get("estado") == "resuelto":
                 continue  # su detalle full-width va abajo (render_subexperiencias)
             est = _EST_SUBOBRA.get(s.get("estado"), s.get("estado") or "—")
             cui_txt = f"  (CUI {s['cui']})" if s.get("cui") else ""
+            # los candidatos de una sub-obra en revisión se MUESTRAN (no hay cola
+            # humana por sub-obra): el evaluador necesita ver qué se encontró.
+            cands = s.get("candidatos") or []
+            cand_txt = ("   ·   candidatos: " + "; ".join(
+                f"CUI {c.get('cui')} {c.get('nombre_obra') or ''}".strip()
+                for c in cands[:2])) if cands else ""
             ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
-            c = ws.cell(rr, 6, f"• {s.get('proyecto') or '—'}{cui_txt} → {est}")
+            c = ws.cell(rr, 6, f"• {s.get('proyecto') or '—'}{cui_txt} → {est}{cand_txt}")
             c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
             ws.row_dimensions[rr].height = max(15, (-(-len(str(c.value)) // 70)) * 13 + 2)
             rr += 1
@@ -515,7 +550,9 @@ def construir_hoja_profesional(
         nonlocal r
         halladas = [s for s in (sub or []) if s.get("estado") == "resuelto"]
         for j, s in enumerate(halladas, 1):
-            cab = f"SubExperiencia {n_exp}.{j}: {s.get('proyecto') or '—'}  (CUI {s.get('cui')})"
+            via = _VIA_SUBOBRA.get(s.get("via") or "")
+            cab = (f"SubExperiencia {n_exp}.{j}: {s.get('proyecto') or '—'}  "
+                   f"(CUI {s.get('cui')})" + (f" — identificada {via}" if via else ""))
             if s.get("sin_verificar"):
                 banda(cab + " — obra hallada; su ficha no cargó (portal), reintentar",
                       F_HEAD, FILL_HEAD, 16)
@@ -557,12 +594,22 @@ def construir_hoja_profesional(
     def render_emisor(top: int, s: Optional[dict], fecha_emision, ini, ruc_espejo) -> int:
         """Cuadro del EMISOR del certificado (datos SUNAT) en columnas M:P desde
         `top`, al lado de las valorizaciones. Señala ALT04 (anomalía de antigüedad
-        del emisor) en rojo/verde. Devuelve la última fila usada."""
+        del emisor) en rojo/verde, responde si el emisor estaba HABIDO al emitir y
+        durante la obra, y lista sus representantes legales (informativo: ADR-008
+        descartó cruzarlos con el firmante). Devuelve la última fila usada."""
         rr = top
         ws.merge_cells(start_row=rr, start_column=13, end_row=rr, end_column=16)
         c = ws.cell(rr, 13, "EMISOR DEL CERTIFICADO (SUNAT)")
         c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
         rr += 1
+
+        def sub(texto):
+            nonlocal rr
+            ws.merge_cells(start_row=rr, start_column=13, end_row=rr, end_column=16)
+            cc = ws.cell(rr, 13, texto)
+            cc.font, cc.fill = F_PARTE, FILL_PARTE
+            cc.alignment = Alignment(vertical="center", wrap_text=True)
+            rr += 1
 
         def kv(label, value, fill=None, height=None):
             nonlocal rr
@@ -576,6 +623,75 @@ def construir_hoja_profesional(
             if height:
                 ws.row_dimensions[rr].height = height
             rr += 1
+
+        def render_habido(h: Optional[dict]) -> None:
+            """Lo que el evaluador necesita saber del histórico SUNAT, con la
+            PREGUNTA en el título del campo: ¿el emisor estaba habido cuando
+            emitió el certificado, y lo estuvo durante la obra que certifica?"""
+            emi = (h or {}).get("emision")
+            per = (h or {}).get("periodo")
+            if not (emi or per):
+                kv("¿Estaba habido al emitir y durante la obra?",
+                   "Sin información histórica en SUNAT — no verificable")
+                return
+            if emi:
+                ok, cond = emi.get("ok"), emi.get("condicion") or "sin dato"
+                prefijo = "Sí — " if ok else ("NO — " if ok is False else "")
+                kv("¿Estaba habido al emitir el certificado?",
+                   f"{prefijo}{cond} al {_ddmmaa(emi.get('fecha'))}",
+                   fill=FILL_OK if ok else (FILL_ALERTA if ok is False else None))
+            if per:
+                ok = per.get("ok")
+                malos = per.get("tramos_no_habido") or []
+                if ok:
+                    txt = (f"Sí — HABIDO todo el periodo "
+                           f"({_ddmmaa(per.get('desde'))} – {_ddmmaa(per.get('hasta'))})")
+                elif ok is False:
+                    det = "; ".join(
+                        f"{t.get('condicion')} {_ddmmaa(t.get('desde'))}–{_ddmmaa(t.get('hasta'))}"
+                        for t in malos[:3])
+                    txt = f"NO — {det}" + (" y otros" if len(malos) > 3 else "")
+                else:
+                    sin = per.get("sin_dato") or []
+                    if per.get("tramos") and sin:
+                        # cobertura PARCIAL: lo conocido fue HABIDO (si hubiera
+                        # NO HABIDO, ok sería False), pero hay días sin condición
+                        # registrada — nunca un "Sí" con huecos.
+                        det = "; ".join(
+                            f"{_ddmmaa(h.get('desde'))}–{_ddmmaa(h.get('hasta'))}"
+                            for h in sin[:3])
+                        txt = ("No verificable — HABIDO en los tramos con dato, "
+                               f"pero sin condición registrada en: {det}"
+                               + (" y otros" if len(sin) > 3 else ""))
+                    else:
+                        txt = "Sin dato de condición para ese periodo"
+                kv("¿Estuvo habido durante la obra?", txt,
+                   fill=FILL_OK if ok else (FILL_ALERTA if ok is False else None),
+                   height=None if ok else 34)
+
+        def render_representantes_emisor(reps: Optional[list]) -> None:
+            """Representantes legales del emisor según SUNAT. INFORMATIVO: sin
+            cruce con el firmante del certificado (ADR-008 descartó ALT-12)."""
+            reps = reps or []
+            if not reps:
+                return
+            nonlocal rr
+            sub("Representantes legales (SUNAT) — informativo")
+
+            def fila_rep(nombre, cargo, desde, *, font=F_CELL):
+                nonlocal rr
+                ws.merge_cells(start_row=rr, start_column=13, end_row=rr, end_column=14)
+                for col, val in ((13, nombre), (15, cargo), (16, desde)):
+                    cc = ws.cell(rr, col, val)
+                    cc.font, cc.border, cc.alignment = font, BORDER, AL_WRAP
+                if len(str(nombre)) > 24:
+                    ws.row_dimensions[rr].height = 28
+                rr += 1
+
+            fila_rep("Nombre", "Cargo", "Desde", font=F_BOLD)
+            for rp in reps:
+                fila_rep(rp.get("nombre") or "—", rp.get("cargo") or "—",
+                         _ddmmaa(rp.get("fecha_desde")))
 
         creacion = _fecha_iso(s.get("fecha_inscripcion")) if s else None
         if s and s.get("ruc"):                       # datos completos del emisor
@@ -601,6 +717,8 @@ def construir_hoja_profesional(
                            if s.get("via") == "nombre_exacto"
                            else "por nombre (el cert no traía RUC)")
                 kv("Cruce", detalle)
+            render_habido(s.get("habido"))
+            render_representantes_emisor(s.get("representantes"))
             emision = _fecha_iso(fecha_emision)
             if creacion and emision and creacion > emision:
                 txt = (f"🔴 ALT04 — certificado emitido ({emision.strftime('%d/%m/%y')}) ANTES de "
@@ -638,19 +756,27 @@ def construir_hoja_profesional(
         rr += 2
         return rr - 1
 
-    def render_representante(top: int, rep: Optional[dict]) -> int:
-        """Representante de obra (InfoObras): TODOS los contratistas, supervisores/
-        inspectores y residentes con todos sus campos (tipo, documento, razón social,
-        monto, fechas), en columnas R:U — al lado del emisor SUNAT. Numera cada
-        categoría cuando hay más de uno. Devuelve la última fila (o top-1 si vacío)."""
+    def render_historico(top: int, s: Optional[dict]) -> int:
+        """Cuadro HISTÓRICO SUNAT del emisor en columnas R:U, pegado al cuadro del
+        emisor (M:P): forman un par. Compacto — solo lo que tiene datos:
+
+          · nombres/razones sociales anteriores, con su fecha de baja
+          · condición del contribuyente RECORTADA al periodo de la experiencia
+            (el histórico completo puede traer 30 tramos; el resto vive en el
+            panel), en rojo lo que no fue HABIDO
+          · domicilios fiscales anteriores, con su fecha de baja
+
+        Devuelve la última fila usada (o top-1 si no hay nada que mostrar)."""
         rr = top
-        contr = (rep or {}).get("contratistas") or []
-        supes = (rep or {}).get("supervisores") or []
-        resis = (rep or {}).get("residentes") or []
-        if not (contr or supes or resis):
+        hist = (s or {}).get("historico") or {}
+        razones = hist.get("razones_sociales") or []
+        domicilios = hist.get("domicilios") or []
+        tramos = (((s or {}).get("habido") or {}).get("periodo") or {}).get("tramos") or []
+        if not (razones or domicilios or tramos):
             return rr - 1
+
         ws.merge_cells(start_row=rr, start_column=18, end_row=rr, end_column=21)
-        c = ws.cell(rr, 18, "REPRESENTANTE DE OBRA (InfoObras)")
+        c = ws.cell(rr, 18, "HISTÓRICO SUNAT DEL EMISOR")
         c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
         rr += 1
 
@@ -662,18 +788,87 @@ def construir_hoja_profesional(
             cc.alignment = Alignment(vertical="center", wrap_text=True)
             rr += 1
 
+        def _escribir(cols, font, fill, largo):
+            nonlocal rr
+            for col, val in cols:
+                cc = ws.cell(rr, col, val)
+                cc.font, cc.border, cc.alignment = font, BORDER, AL_WRAP
+                if fill:
+                    cc.fill = fill
+            if largo > 40:            # texto ancho (dirección, razón social)
+                ws.row_dimensions[rr].height = 28
+            rr += 1
+
+        def fila_texto_fecha(texto, fecha, *, font=F_CELL):
+            """Texto largo en R:T + su fecha en U (razón social / domicilio)."""
+            ws.merge_cells(start_row=rr, start_column=18, end_row=rr, end_column=20)
+            _escribir(((18, texto), (21, fecha)), font, None, len(str(texto)))
+
+        def fila_tramo(condicion, desde, hasta, *, font=F_CELL, fill=None):
+            """Tramo de condición: R | S | T:U."""
+            ws.merge_cells(start_row=rr, start_column=20, end_row=rr, end_column=21)
+            _escribir(((18, condicion), (19, desde), (20, hasta)), font, fill, 0)
+
+        if razones:
+            sub("Nombre o razón social anterior")
+            fila_texto_fecha("Nombre", "Fecha de baja", font=F_BOLD)
+            for rz in razones:
+                fila_texto_fecha(rz.get("nombre") or "—", _ddmmaa(rz.get("fecha_baja")))
+
+        if tramos:
+            sub("Condición del contribuyente durante la experiencia")
+            fila_tramo("Condición", "Desde", "Hasta", font=F_BOLD)
+            for t in tramos:
+                mal = (t.get("condicion") or "").upper() != "HABIDO"
+                fila_tramo(t.get("condicion") or "—", _ddmmaa(t.get("desde")),
+                           _ddmmaa(t.get("hasta")),
+                           fill=FILL_ALERTA if mal else None)
+
+        if domicilios:
+            sub("Domicilio fiscal anterior")
+            fila_texto_fecha("Dirección", "Fecha de baja", font=F_BOLD)
+            for d in domicilios:
+                fila_texto_fecha(d.get("direccion") or "—", _ddmmaa(d.get("fecha_baja")))
+
+        return rr - 1
+
+    def render_representante(top: int, rep: Optional[dict]) -> int:
+        """Representante de obra (InfoObras): TODOS los contratistas, supervisores/
+        inspectores y residentes con todos sus campos (tipo, documento, razón social,
+        monto, fechas), en columnas W:Z — a la derecha de los dos cuadros del
+        emisor. Numera cada categoría cuando hay más de uno. Devuelve la última
+        fila (o top-1 si vacío)."""
+        rr = top
+        contr = (rep or {}).get("contratistas") or []
+        supes = (rep or {}).get("supervisores") or []
+        resis = (rep or {}).get("residentes") or []
+        if not (contr or supes or resis):
+            return rr - 1
+        ws.merge_cells(start_row=rr, start_column=23, end_row=rr, end_column=26)
+        c = ws.cell(rr, 23, "REPRESENTANTE DE OBRA (InfoObras)")
+        c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
+        rr += 1
+
+        def sub(texto):
+            nonlocal rr
+            ws.merge_cells(start_row=rr, start_column=23, end_row=rr, end_column=26)
+            cc = ws.cell(rr, 23, texto)
+            cc.font, cc.fill = F_PARTE, FILL_PARTE
+            cc.alignment = Alignment(vertical="center", wrap_text=True)
+            rr += 1
+
         def kv(label, value, fmt=None):
             nonlocal rr
             if value in (None, ""):
                 value = "—"
-            ws.merge_cells(start_row=rr, start_column=18, end_row=rr, end_column=19)
-            cl = ws.cell(rr, 18, label); cl.font, cl.border = F_BOLD, BORDER
+            ws.merge_cells(start_row=rr, start_column=23, end_row=rr, end_column=24)
+            cl = ws.cell(rr, 23, label); cl.font, cl.border = F_BOLD, BORDER
             cl.alignment = Alignment(vertical="top", wrap_text=True)
-            ws.merge_cells(start_row=rr, start_column=20, end_row=rr, end_column=21)
-            cv = ws.cell(rr, 20, value); cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
+            ws.merge_cells(start_row=rr, start_column=25, end_row=rr, end_column=26)
+            cv = ws.cell(rr, 25, value); cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
             if fmt and isinstance(value, (int, float, date)):
                 cv.number_format = fmt
-            # valor T:U (~36 car) en celda combinada NO auto-ajusta en Excel: si el
+            # valor Y:Z (~36 car) en celda combinada NO auto-ajusta en Excel: si el
             # texto es largo (razón social, URL), subir la altura para que se vea
             # completo. Solo AUMENTA (no pisa la altura de otras bandas en la fila).
             if isinstance(value, str) and len(value) > 34:
@@ -917,7 +1112,7 @@ def construir_hoja_profesional(
         if fx and fx.get("sub_obras"):
             # cert multi-obra: la banda F:K muestra un RESUMEN (cuántas + no halladas);
             # el detalle full-width de cada obra hallada va como SubExperiencia debajo.
-            r_right = render_multi_obra(r_top, fx["sub_obras"])
+            r_right = render_multi_obra(r_top, fx["sub_obras"], fx.get("multi_rubro"))
             r = max(r, r_right + 1)
         elif fx:
             r_right = render_obra(r_top, fx, ini, fin)
@@ -927,11 +1122,16 @@ def construir_hoja_profesional(
             r = max(r, r_right + 1)
 
         # 3ª banda (M:P): emisor del certificado (SUNAT) + ALT04, al lado de valorizaciones
-        r_emi = render_emisor(r_top, sunat.get((n_prof, n_exp)),
+        s_emisor = sunat.get((n_prof, n_exp))
+        r_emi = render_emisor(r_top, s_emisor,
                               e.get("fecha_emision"), ini, e.get("ruc_emisor"))
         r = max(r, r_emi + 1)
 
-        # 4ª banda (R:U): representante de obra (InfoObras), al lado del emisor SUNAT
+        # 4ª banda (R:U): histórico SUNAT del mismo emisor, pegado al cuadro anterior
+        r_his = render_historico(r_top, s_emisor)
+        r = max(r, r_his + 1)
+
+        # 5ª banda (W:Z): representante de obra (InfoObras), a la derecha del par
         r_rep = render_representante(r_top, (fx or {}).get("representante_obra"))
         r = max(r, r_rep + 1)
 
@@ -1045,6 +1245,22 @@ def construir_hoja_profesional(
     cy = ws.cell(r, 19, round(anios(_dias_ef), 2))
     cy.font, cy.fill, cy.border, cy.number_format = F_BOLD, FILL_EFECTIVO, BORDER, FMT_DEC
 
+    # ── Factor de evaluación, AL FINAL de la hoja (issue #32) ────────────────
+    # La página del Cuadro de Factores (4.2 A — la tabla de puntaje) cierra la
+    # hoja: es el baremo con el que se puntúa todo lo de arriba, y el evaluador
+    # lo quiere a la mano "para no estar buscando" en las bases. Es la MISMA
+    # página para todos, replicada por profesional (ver `_mapear_dir_certs`).
+    # OJO con `r`: la PARTE 5 termina escribiendo EN la fila `r` sin avanzarla
+    # (nunca hubo nada debajo). Sin este salto, la banda de `embeber_cert` se
+    # mergea sobre esa misma fila y openpyxl la absorbe SIN error: el archivo
+    # sale válido pero con el título del factor pisando "AÑOS EFECTIVOS" y el
+    # número de años huérfano en la columna S.
+    _factor_pdf = certificados.get((n_prof, "FACTOR"))
+    if _factor_pdf:
+        r += 2
+        embeber_cert(_factor_pdf, "FACTOR DE EVALUACIÓN — recorte de las bases "
+                                  "(el baremo con el que se puntúa lo anterior)")
+
 
 # ── Entregable completo ──────────────────────────────────────────────────────
 
@@ -1084,7 +1300,7 @@ def generar_excel_final(
     construir_hoja_base_datos(wb.create_sheet("Base de Datos"), espejo)
 
     for prof in espejo.get("profesionales", []):
-        nombre = _nombre_hoja(prof.get("n_prof", 0), prof.get("cargo", ""))
+        nombre = etiqueta_hoja(prof.get("n_prof", 0), prof.get("cargo", ""))
         certs_prof = {k: v for k, v in certificados.items() if k[0] == prof.get("n_prof")}
         construir_hoja_profesional(wb.create_sheet(nombre), prof, paralizaciones,
                                    cuis, fichas, revisiones, sunat, certs_prof)
@@ -1127,16 +1343,26 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
         # que el render la muestre (sin cambiar la firma de generar_excel_final).
         if enr.get("sub_obras"):
             fichas[(np_, ne)] = {**(fichas.get((np_, ne)) or {}),
-                                 "sub_obras": enr["sub_obras"]}
+                                 "sub_obras": enr["sub_obras"],
+                                 "multi_rubro": enr.get("multi_rubro")}
     return paral, cuis, fichas, sunat
 
 
 def regenerar_excel_final(espejo: dict, enriquecimiento: Optional[dict],
-                          salida: Path, revisiones: Optional[dict] = None) -> Path:
+                          salida: Path, revisiones: Optional[dict] = None,
+                          certificados: Optional[dict] = None) -> Path:
     """Regenera el Excel final desde el espejo + enriquecimiento YA en disco (sin
-    tocar red). Lo usa el backfill de cargos para dejar el entregable limpio."""
+    tocar red). Lo usa el backfill de cargos para dejar el entregable limpio.
+
+    `certificados`: si no se pasa, se mapea la carpeta `certs/` HERMANA del Excel
+    (el layout del repositorio: `<job>/final.xlsx` + `<job>/certs/`). Antes no se
+    pasaban en absoluto, así que regenerar arrancaba TODAS las imágenes embebidas
+    (constancias, TDR, Anexo 16) del entregable — silenciosamente."""
     paral, cuis, fichas, sunat = desempaquetar_enriquecimiento(enriquecimiento)
     salida = Path(salida)
+    if certificados is None:
+        certificados = _mapear_dir_certs(salida.parent / "certs")
     if salida.exists():
         salida.unlink()
-    return generar_excel_final(espejo, salida, paral, cuis, fichas, revisiones or {}, sunat)
+    return generar_excel_final(espejo, salida, paral, cuis, fichas, revisiones or {},
+                               sunat, certificados)

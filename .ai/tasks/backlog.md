@@ -34,7 +34,7 @@ id: T-TAREA-ADR011
 tipo: tarea
 zona: skill + orquestador/ + entregables/
 agente_origen: desarrollador
-estado: aprobado
+estado: completado (2026-07-25, ver completed.md — P2 sigue pospuesto)
 depende_de: []
 ---
 **Implementar ADR-011: Tratamiento de certificados multi-obra por sub-obras, resolución por resolver() completo y principio anti-alucinación.**

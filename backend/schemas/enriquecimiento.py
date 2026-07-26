@@ -105,14 +105,39 @@ class Representante(_Model):
     fecha_desde: Optional[date] = None
 
 
+class TramoCondicion(_Model):
+    """Un tramo del histórico de condición del contribuyente (getinfHis)."""
+    condicion: Optional[str] = None             # HABIDO / NO HABIDO / NO HALLADO / …
+    desde: Optional[date] = None                # None = extremo abierto ("-")
+    hasta: Optional[date] = None
+
+
+class HistoricoSunat(_Model):
+    """Información histórica del emisor (getinfHis): lo que cambió y desde cuándo."""
+    razones_sociales: list[dict] = Field(default_factory=list)   # {nombre, fecha_baja}
+    condiciones: list[TramoCondicion] = Field(default_factory=list)
+    domicilios: list[dict] = Field(default_factory=list)         # {direccion, fecha_baja}
+
+
+class HabidoEmisor(_Model):
+    """¿El emisor estaba HABIDO cuando emitió el certificado y durante la obra?
+    `ok=None` = no se puede afirmar (sin histórico o sin fechas)."""
+    emision: Optional[dict] = None      # {fecha, condicion, ok}
+    periodo: Optional[dict] = None      # {desde, hasta, condiciones, tramos, tramos_no_habido, ok}
+
+
 class SunatResultado(_Model):
     ruc: Optional[str] = None
     razon_social: Optional[str] = None
     fecha_creacion_emisor: Optional[date] = None       # ALT04
     antiguedad_anios: Optional[float] = Field(default=None, ge=0)
     alerta_antiguedad_emisor: Optional[bool] = None    # ALT04
+    # informativo (issue #30): quiénes representan al emisor. NO alimenta reglas —
+    # ADR-008 descartó ALT-12 (firmante ≠ representante).
     representantes: list[Representante] = Field(default_factory=list)  # getRepLeg
-    firmante_facultado_sunat: Optional[bool] = None    # ALT12
+    historico: Optional[HistoricoSunat] = None         # getinfHis
+    habido: Optional[HabidoEmisor] = None              # la pregunta del evaluador
+    firmante_facultado_sunat: Optional[bool] = None    # ALT12 (descartada, ADR-008)
     firmante_match_detalle: Optional[str] = None       # equivalencia de cargo + vigencia temporal
     vinculacion_postor_emisor: Optional[bool] = None   # autocertificación intragrupo (bandera)
     requiere_humano: bool = False                      # ej. emisor persona natural sin RUC consultable

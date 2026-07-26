@@ -22,6 +22,18 @@ Para cada experiencia, cruzándola con los requisitos del cargo en `bases`:
    > servidor.
 2. **`cargo_ocupado` y ¿es el cargo de las bases?** (`cargo_bases_valido`:
    cumple + razón literal citando la lista de cargos similares).
+   > ⚠ **El núcleo de especialidad se exige COMPLETO.** La lista de cargos
+   > válidos varía en el sustantivo inicial (especialista / responsable /
+   > encargado / ingeniero / inspector…), pero la especialidad es obligatoria y,
+   > si es compuesta, valen **TODOS** sus términos: si las bases piden
+   > «planeamiento **y** costos», un cargo con costos pero sin planeamiento
+   > **NO** acredita — y al revés tampoco. **Compartir una palabra no basta**:
+   > "Especialista en Costos, Metrados y Valorizaciones" comparte COSTOS y aun
+   > así NO acredita (caso real del Comité, 2026-07-25). Es una comparación de
+   > **todos** los términos, no un parecido general.
+   > El backend corre un candado determinístico sobre esto y **su veredicto
+   > manda**: si tú dices "SÍ" donde falta un término del núcleo, la celda se
+   > reescribe en rojo y queda registrada la contradicción. No fuerces el SÍ.
 3. **¿Tipo de obra válido?** (`tipo_obra_valido`) contra `tipos_obra_validos`.
 4. **`anterior_colegiatura`**: `"SÍ"` si la experiencia es anterior a la
    `fecha_colegiatura` del profesional (cuando se conoce); si no, `"NO"`.
@@ -106,6 +118,19 @@ Para cada experiencia, cruzándola con los requisitos del cargo en `bases`:
   NO puede empezar con "NO CUMPLE" (eso es una contradicción interna y descalifica a
   quien sí califica). Reserva "NO CUMPLE" para cuando el cargo **no** acredita ni
   literal ni por equivalencia, o falla el tiempo/profesión.
+  > **Alcance de esa regla anti-falso-negativo**: cubre la discrepancia entre el
+  > cargo *ofertado* y el *certificado* — **NO** cubre un núcleo de especialidad
+  > incompleto. Equivalencia significa **otra forma de nombrar la misma
+  > especialidad completa** ("planificación" por "planeamiento"), nunca una
+  > especialidad **parcial** ni una emparentada. Si al cargo certificado le falta
+  > un término del núcleo exigido y el documento no acredita funciones, eso **sí**
+  > es motivo de NO CUMPLE (criterio del Comité, 2026-07-25): no lo conviertas en
+  > CUMPLE apelando a la equivalencia.
+- **Funciones (`funciones_similares`) — no las inventes.** Es la segunda puerta
+  cuando el cargo no acredita, y la llena `agent-propuesta-profesional` con lo
+  que el documento **liste textualmente**. Si viene `null`, el documento no
+  acredita funciones: NO la rellenes deduciéndola del nombre del cargo ni de lo
+  que ese puesto "haría" normalmente.
 - **No inventes verificaciones**: lo que dependa de SUNAT/InfoObras (RUC real,
   facultad del firmante, paralizaciones, vinculación postor↔emisor) va en `null`
   dentro de `_backend`. Tú señalas "ASUMIDO", el servidor confirma.

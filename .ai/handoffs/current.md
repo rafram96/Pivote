@@ -24,6 +24,60 @@ T-00x consolidada en `vision.md` (raíz), tareas reubicadas por nivel,
 ADR-S004 en la raíz, conteo de la golden con fuente única en
 `architecture/backend.md`.
 
+## Nota (2026-07-25) — ADR-011 arrancó, y un bug que apareció de paso
+
+`EtapaResolucionCui.correr` (`etapas_reales.py`) acumulaba observaciones
+`MULTI_OBRA` / `PROBABLE` / `PRIVADA` y **no las pasaba a `_res`**: se perdían
+en el return, así que nunca llegaban al job ni al panel (solo quedaban, a
+medias, en el enriquecimiento). Corregido en PR-1 del Issue #26. Si ves una
+etapa que arma una lista `obs` y no la devuelve, es el mismo patrón.
+
+## Nota (2026-07-26) — PRs 33/34/35 revisadas, corregidas y mergeadas a demo
+
+Orquestación completa: #33 (pestañas/nombres) la mergeó el desarrollador;
+#34 (SUNAT histórico) se mergeó tras corregir el hallazgo H2 del review
+(`d59f900`: «habido durante la obra» exigía solo que un tramo TOCARA el
+periodo → verde con días sin dato; ahora pide cobertura completa y degrada a
+«No verificable» con los huecos listados); #35 (ADR-011 multi-obra) mergeó
+limpia; #36 arregló el choque de integración 33×35 (tests con nombre de
+pestaña viejo). Suite en demo: **333 passed**. H1 del review (fixture
+`hacer_motor` sin `extras_sunat` → pytest puede tocar la red) quedó SIN
+corregir por decisión del desarrollador. Pendientes que dejaron los merges:
+**un solo rebuild del plugin** (33/34/35 tocaron skill/schemas — ADR-007:
+viaja con el backend), **regenerar `golden_cui_baseline.json`** desde demo
+(el actual es pre-refactor y da −10 falsos), y los issues del panel
+(sub-obras panel#1 + render SUNAT).
+
+25-jul: **issue #30 — el emisor del certificado en SUNAT** (rama
+`rafram96/issue-30-mostrar-representante-legal`). Sondeada y cableada la
+consulta "Información Histórica" (`getinfHis`, sin captcha) además de los
+representantes legales (`getRepLeg`, ya existía sin usar). El bloque emisor del
+Excel ahora responde **¿estaba HABIDO al emitir el certificado y durante la
+obra?** con la pregunta en el título del campo, lista los representantes
+(informativo — ADR-008 descartó ALT-12), y suma un cuadro histórico contiguo
+(R:U) que corrió el de representante de obra a W:Z. Falta el render en el
+panel (repo `Panel-InfoObras`): el JSON ya viaja con `representantes`,
+`historico` y `habido`.
+## Nota (2026-07-26) — issue #32, el factor de evaluación en cada hoja P
+
+Rama `rafram96/issue-32-embeber-el-factor-2` (`17b1e04`), sobre demo ya con
+33/34/35 dentro. Lo que un agente nuevo necesita para retomarlo:
+
+- **Falta lo único que no se puede hacer offline**: correr un job real y MIRAR
+  el recorte. No basta `regenerar_excel_final`: hay que re-correr
+  `extraer_certificados.js` con `bases.pdf` y volver a subir el ZIP, porque los
+  `certs/` en disco no tienen el `P{n}_FACTOR.pdf`. No re-scrapea nada.
+- **El riesgo vivo es el número de página**, no el código: lo elige un LLM
+  (`agent-bases`), y un recorte de la página equivocada se ve legítimo. El
+  script valida el rango y avisa por stdout; la corrección real es mirarlo.
+- **No agrava el pendiente de rebuild del plugin**: el cambio es compatible en
+  ambos sentidos (un `P{n}_FACTOR.pdf` en un backend viejo se ignora; un
+  backend nuevo sin el archivo genera la hoja como antes). Viaja con el rebuild
+  único que ya deben 33/34/35.
+- **Pendiente de cliente**: confirmar si el TDR y el Anexo 16 se quedan al
+  INICIO de la hoja (hoy) o bajan junto al factor. Son dos líneas en
+  `excel_final.py`.
+
 ## ¿Qué se estaba haciendo?
 
 Semana 20-22 jul: **refactor completo del resolver de CUI** (rama

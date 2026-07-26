@@ -55,15 +55,44 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
      `cargo_ocupado` tal cual ("JEFE DE PROYECTO en la Elaboración del ET" →
      cargo "Jefe de Proyecto"; el desempeño va en el `proyecto`).
    - **Cert MULTI-OBRA (varias obras, un solo vínculo)**: si la constancia
-     documenta **un periodo continuo** pero enumera **varios proyectos/obras
-     distintos, cada uno con su propio CUI/código** (típico de roles de *gestión
-     de proyectos / portafolio / coordinación*), es **UNA sola experiencia** (un
-     periodo) — **NO** la partas en una fila por proyecto (el tiempo se cuenta
-     **una vez**, no se multiplica). Lista cada sub-proyecto en
-     `obras: [{ "proyecto": "...", "cui": "NNNNNNN" }]` (nombre verbatim + CUI solo
-     dígitos; `"cui": null` si ese proyecto no cita código). El `cui` de la
-     experiencia queda `null` (los códigos viven en `obras[]`); el backend verifica
-     **cada** CUI por separado. Captura **TODOS** los que liste el cert, sin omitir.
+     documenta **un periodo continuo** pero el trabajo abarca **varias obras o
+     infraestructuras distintas**, es **UNA sola experiencia** (un periodo) —
+     **NO** la partas en una fila por obra (el tiempo se cuenta **una vez**, no se
+     multiplica). Llega en dos formas y **ambas** cuentan:
+     - **(a) lista enumerada** — el cert enumera varios proyectos, casi siempre
+       cada uno con su CUI/código (típico de roles de *gestión de proyectos /
+       portafolio / coordinación*);
+     - **(b) nombre compuesto** — un solo nombre encadena varias infraestructuras
+       con conectores (*"Y EL"*, *"Y LA"*, *"E"*) y/o lleva una etiqueta de paquete
+       (*"(PAQUETE 6)"*, *"PAQUETE N° 6"*), típico de paquetes de inversión
+       ejecutados en simultáneo. Aquí **puede no haber ningún CUI**.
+
+     El `proyecto` de la experiencia queda **verbatim y completo** (etiqueta de
+     paquete incluida — fidelidad legal del certificado) y cada infraestructura va
+     **desglosada y limpia** en `obras: [{ "proyecto": "...", "cui": "NNNNNNN" }]`:
+     - quita los conectores de unión y la etiqueta de paquete;
+     - **repite en cada sub-obra el tronco de la acción** que comparten
+       ("MEJORAMIENTO DE LOS SERVICIOS DE SALUD DE…") y conserva el nombre del
+       establecimiento con su **categoría/nivel** ("II-2", "I-3") y su ubicación si
+       el nombre la trae: cada entrada tiene que identificar su obra **por sí sola**
+       (el backend la busca en el registro público con ese texto);
+     - `"cui"`: solo dígitos si el cert lo cita para ESA obra; **`null` si no lo
+       cita** (lo normal en un paquete — el backend la resuelve igual por nombre).
+
+     El `cui` de la experiencia madre queda `null` (los códigos, si los hay, viven
+     en `obras[]`). Captura **TODAS** las que liste el cert, sin omitir.
+     ⚠ **No sobre-partas**: solo son sub-obras las infraestructuras **distintas y
+     completas** (cada una con su nombre propio y/o su categoría). Las **partes de
+     una misma obra** ("el pabellón A y el cerco perimétrico", "la planta de
+     tratamiento y sus redes") **NO** se desglosan. Si el nombre es ambiguo y no
+     puedes separarlo sin inventar, deja `obras` en `null` + observación
+     `extraccion_parcial` — nunca partas un nombre a la fuerza.
+     *Ejemplo (b)*: `proyecto` = "MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL
+     HOSPITAL DE APOYO SULLANA II-2 Y EL CENTRO DE SALUD POSOPE ALTO I-3
+     (PAQUETE 6)" → `obras` = `[{"proyecto": "MEJORAMIENTO DE LOS SERVICIOS DE
+     SALUD DEL HOSPITAL DE APOYO SULLANA II-2", "cui": null}, {"proyecto":
+     "MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL CENTRO DE SALUD POSOPE ALTO I-3",
+     "cui": null}]`.
      **Fechas por obra**: si —y SOLO si— el cert consigna el **rango de tiempo de
      cada obra** (fechas propias de cada sub-proyecto, además del periodo total del
      vínculo), inclúyelas: `{ "proyecto": "...", "cui": "...", "fecha_inicial":
@@ -72,6 +101,19 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
      `fecha_inicial`/`fecha_final` en `null` (el backend no cruzará tiempo por obra).
    - `ruc_emisor`: el RUC (11 dígitos) del emisor **solo si aparece literal**;
      si está dentro del nombre ("Consorcio X (RUC 20605399194)"), extráelo igual.
+   - **`funciones_similares` — la SEGUNDA PUERTA del cargo. Regla estricta.**
+     Cuando el cargo certificado NO coincide con el cargo que exigen las bases, la
+     experiencia solo se salva si el documento **LISTA las funciones/actividades**
+     que desempeñó. Por eso: copia aquí, **literales y resumidas**, las funciones
+     o actividades que el documento enumere (del propio certificado o de un anexo
+     adjunto que las detalle), con el prefijo `"SÍ — "`.
+     ⚠ **`null` en todos los demás casos.** Un certificado que solo dice
+     *«desempeñando el cargo de X, del … al …, en la obra Y»* **NO acredita
+     funciones** — por más que el cargo suene descriptivo. Nunca deduzcas las
+     funciones del nombre del cargo, del tipo de obra ni de lo que "haría"
+     normalmente ese puesto: eso es inventarlas, y el Comité rechaza la
+     experiencia justamente por no estar acreditadas (criterio literal,
+     caso 2026-07-25). Ante la duda → `null`.
    - la metadata desprendida va a sus campos: `area_construida_m2`,
      `monto_contrato_soles`, `nivel_categoria`.
 
@@ -157,6 +199,7 @@ Rellena este **esqueleto** con los valores reales (mismas claves, mismos tipos):
       "fecha_inicial": "2019-03-01", "fecha_final": "2020-06-30", "fecha_emision": "2020-07-10",
       "folio": 1160, "paginas_pdf": [1160, 1161],
       "cargo_ocupado": "Supervisor de Instalaciones Sanitarias",
+      "funciones_similares": null,
       "cert_antes_culminar": "NO", "incluye_covid": "SÍ", "traslape": "NO",
       "nivel_categoria": "II-2", "area_construida_m2": 12000, "monto_contrato_soles": 18015551.75,
       "entidad_contratante": "GOBIERNO REGIONAL DE X", "ubicacion": "Huancavelica",

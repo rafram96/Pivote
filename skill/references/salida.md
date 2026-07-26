@@ -48,7 +48,9 @@ raíz), y los datos del emisor/firmante son campos planos (no objetos anidados).
 
 ```jsonc
 {
-  "_meta": { "analisis_id": "...", "concurso": "...", "postor": "...",
+  "_meta": { "analisis_id": "...",
+             "slug": "huachocolpa",   // nombre CORTO del concurso → nombre de los archivos
+             "concurso": "...", "postor": "...",
              "version_contrato": "1.2.0", "generado_por": "claude-code" },
   "postor": {
     "detalle": "...",
