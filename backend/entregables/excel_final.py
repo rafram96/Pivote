@@ -608,7 +608,19 @@ def construir_hoja_profesional(
                         for t in malos[:3])
                     txt = f"NO — {det}" + (" y otros" if len(malos) > 3 else "")
                 else:
-                    txt = "Sin dato de condición para ese periodo"
+                    sin = per.get("sin_dato") or []
+                    if per.get("tramos") and sin:
+                        # cobertura PARCIAL: lo conocido fue HABIDO (si hubiera
+                        # NO HABIDO, ok sería False), pero hay días sin condición
+                        # registrada — nunca un "Sí" con huecos.
+                        det = "; ".join(
+                            f"{_ddmmaa(h.get('desde'))}–{_ddmmaa(h.get('hasta'))}"
+                            for h in sin[:3])
+                        txt = ("No verificable — HABIDO en los tramos con dato, "
+                               f"pero sin condición registrada en: {det}"
+                               + (" y otros" if len(sin) > 3 else ""))
+                    else:
+                        txt = "Sin dato de condición para ese periodo"
                 kv("¿Estuvo habido durante la obra?", txt,
                    fill=FILL_OK if ok else (FILL_ALERTA if ok is False else None),
                    height=None if ok else 34)

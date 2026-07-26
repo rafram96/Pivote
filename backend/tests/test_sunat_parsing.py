@@ -157,6 +157,41 @@ def test_evaluar_habido_sin_datos_no_inventa_veredicto():
     assert r["periodo"]["ok"] is None
 
 
+def test_evaluar_habido_cobertura_parcial_no_da_verde():
+    """El hueco del review (H2): un tramo HABIDO que TOCA el periodo no dice nada
+    del resto. Histórico que muere en dic-2018, periodo hasta dic-2019 y ficha sin
+    condición actual → todo 2019 sin dato: ok=None, jamás True."""
+    tramos = _tramos(("HABIDO", None, date(2018, 12, 31)))
+    r = sunat.evaluar_habido(tramos, ini=date(2018, 1, 1), fin=date(2019, 12, 31))
+    per = r["periodo"]
+    assert per["ok"] is None
+    assert per["sin_dato"] == [{"desde": "2019-01-01", "hasta": "2019-12-31"}]
+
+
+def test_evaluar_habido_hueco_intermedio_no_da_verde():
+    tramos = _tramos(("HABIDO", None, date(2018, 6, 30)),
+                     ("HABIDO", date(2018, 9, 1), date(2019, 12, 31)))
+    r = sunat.evaluar_habido(tramos, ini=date(2018, 1, 1), fin=date(2018, 12, 31))
+    per = r["periodo"]
+    assert per["ok"] is None
+    assert per["sin_dato"] == [{"desde": "2018-07-01", "hasta": "2018-08-31"}]
+
+
+def test_evaluar_habido_no_habido_gana_aunque_haya_huecos():
+    """Un NO HABIDO dentro del periodo es veredicto duro (eso SÍ se sabe), con o
+    sin días sin dato alrededor."""
+    tramos = _tramos(("NO HABIDO", date(2018, 3, 1), date(2018, 5, 31)))
+    r = sunat.evaluar_habido(tramos, ini=date(2018, 1, 1), fin=date(2018, 12, 31))
+    assert r["periodo"]["ok"] is False
+    assert r["periodo"]["sin_dato"]          # los huecos quedan reportados igual
+
+
+def test_evaluar_habido_cobertura_completa_sigue_dando_verde():
+    tramos = _tramos(("HABIDO", None, None))
+    r = sunat.evaluar_habido(tramos, ini=date(2018, 1, 1), fin=date(2019, 12, 31))
+    assert r["periodo"]["ok"] is True and r["periodo"]["sin_dato"] == []
+
+
 def test_evaluar_habido_periodo_posterior_al_historico_usa_condicion_actual():
     # experiencia posterior al último tramo: manda la condición de la ficha
     tramos = _tramos(("NO HABIDO", None, date(2015, 1, 1)))

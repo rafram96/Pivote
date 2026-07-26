@@ -1018,6 +1018,29 @@ def condiciones_en_rango(
     return fuera
 
 
+def _dias_sin_condicion(cubiertos: list[TramoCondicion],
+                        ini: date, fin: date) -> list[tuple[date, date]]:
+    """Sub-rangos de [ini, fin] donde NINGÚN tramo aporta condición.
+
+    La cobertura parcial es la trampa del veredicto por rango: un solo tramo
+    HABIDO que TOCA el periodo no dice nada del resto (cabeza antes del primer
+    tramo, huecos intermedios, cola cuando la ficha no trae condición actual).
+    Los `cubiertos` vienen de `condiciones_en_rango`, ya recortados al rango
+    (desde/hasta siempre presentes)."""
+    huecos: list[tuple[date, date]] = []
+    cursor = ini
+    for t in sorted(cubiertos, key=lambda t: t.desde or ini):
+        if t.desde and t.desde > cursor:
+            huecos.append((cursor, t.desde - timedelta(days=1)))
+        siguiente = (t.hasta or fin) + timedelta(days=1)
+        if siguiente > cursor:
+            cursor = siguiente
+        if cursor > fin:
+            return huecos
+    huecos.append((cursor, fin))
+    return huecos
+
+
 def evaluar_habido(
     tramos: list[TramoCondicion],
     *,
@@ -1049,6 +1072,10 @@ def evaluar_habido(
         cubiertos = condiciones_en_rango(tramos, ini, fin,
                                          condicion_actual=condicion_actual)
         malos = [t for t in cubiertos if t.condicion != CONDICION_HABIDO]
+        huecos = _dias_sin_condicion(cubiertos, ini, fin)
+        # "Sí" exige cobertura COMPLETA del periodo: HABIDO en los tramos con
+        # dato + días sin condición = "no verificable", nunca un verde. Un tramo
+        # NO HABIDO sí es veredicto duro aunque haya huecos (eso ya se sabe).
         out["periodo"] = {
             "desde": ini.isoformat(), "hasta": fin.isoformat(),
             "condiciones": sorted({t.condicion for t in cubiertos}),
@@ -1056,7 +1083,10 @@ def evaluar_habido(
             # histórico del Excel (el histórico completo puede traer 30 filas)
             "tramos": [t.to_dict() for t in cubiertos],
             "tramos_no_habido": [t.to_dict() for t in malos],
-            "ok": None if not cubiertos else not malos,
+            "sin_dato": [{"desde": a.isoformat(), "hasta": b.isoformat()}
+                         for a, b in huecos],
+            "ok": (False if malos
+                   else True if cubiertos and not huecos else None),
         }
 
     return out
