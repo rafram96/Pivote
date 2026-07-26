@@ -4,6 +4,14 @@
 
 ## Terminado y validado (sin desplegar)
 
+- **Issue #30 — emisor del certificado en SUNAT** (rama
+  `rafram96/issue-30-mostrar-representante-legal`): representantes legales +
+  información histórica (`getinfHis`, sondeada 25-jul) en el bloque emisor del
+  Excel, con la respuesta calculada a "¿estaba HABIDO al emitir y durante la
+  obra?" en el título del campo. Cuadro histórico nuevo en R:U (representante
+  de obra corrido a W:Z). Una consulta por RUC por job. 276 tests verdes +
+  prueba en vivo contra 6 RUCs. **Pendiente: render en el panel.**
+
 - **Refactor del resolver de CUI (T-008)** — rama `sonda/refactor-cui`, 13
   commits (`a732936…f2bde36`): base local MEF + público-primero + vetos de
   identidad + candados de abstención + camino A/B. Golden 277 casos: errores

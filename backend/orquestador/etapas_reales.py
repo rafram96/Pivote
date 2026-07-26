@@ -808,13 +808,34 @@ def _elegir_match_exacto(nombre: str, matches: list) -> Optional[dict]:
     return None
 
 
+def _evaluar_habido_emisor(hist, emp, e: dict, ini) -> Optional[dict]:
+    """¿El emisor estaba HABIDO el día que emitió el certificado y durante la
+    obra que certifica? (issue #30, punto 4).
+
+    Cruza el histórico de condición con la fecha de emisión y con el periodo de
+    la experiencia. Devuelve None si no hay histórico que cruzar; dentro, cada
+    respuesta puede quedar en `ok=None` cuando el dato no alcanza.
+    """
+    if hist is None:
+        return None
+    from scraping.sunat import evaluar_habido
+    return evaluar_habido(
+        hist.condiciones,
+        fecha_emision=_fecha_iso(e.get("fecha_emision")),
+        ini=ini, fin=_fecha_iso(e.get("fecha_final")),
+        condicion_actual=getattr(emp, "condicion", None),
+    )
+
+
 class EtapaSunatReal:
     nombre = E.SUNAT
 
     def __init__(self, consultor: Optional[Callable] = None,
-                 buscador: Optional[Callable] = None):
+                 buscador: Optional[Callable] = None,
+                 extras: Optional[Callable] = None):
         self._consultor = consultor
         self._buscador = buscador
+        self._extras = extras
 
     def _consultar(self, ruc: str):
         if self._consultor:
@@ -828,10 +849,19 @@ class EtapaSunatReal:
         from scraping.sunat import buscar_por_razon_social
         return buscar_por_razon_social(nombre)
 
+    def _consultar_extras(self, ruc: str) -> tuple[list, object]:
+        """Las dos consultas informativas del emisor (issue #30): representantes
+        legales e información histórica. Devuelve (representantes, historico)."""
+        if self._extras:
+            return self._extras(ruc)
+        from scraping.sunat import consultar_historico, consultar_representantes
+        return consultar_representantes(ruc), consultar_historico(ruc)
+
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
         ok = err = rev = 0
         obs: list[pipeline.Observacion] = []
         cache: dict[str, object] = {}
+        cache_extra: dict[str, tuple] = {}   # ruc → (representantes, historico)
         total = 0
         postor_rucs = _rucs_postor(ctx.espejo)
 
@@ -902,6 +932,15 @@ class EtapaSunatReal:
                 err += 1
                 continue
             ok += 1
+            # Consultas informativas del emisor (una vez por RUC, no por
+            # experiencia): representantes legales + información histórica.
+            try:
+                reps, hist = (cache_extra[ruc] if ruc in cache_extra
+                              else cache_extra.setdefault(ruc, self._consultar_extras(ruc)))
+            except Exception as ex:  # noqa: BLE001 — informativo, no debe tumbar la etapa
+                logger.warning("SUNAT extras %s: %r", ruc, ex)
+                reps, hist = [], None
+
             enr = ctx.enriquecimiento.get(k) or {}
             fins = getattr(emp, "fecha_inscripcion", None)
             ini_act = getattr(emp, "fecha_inicio_actividades", None)
@@ -916,6 +955,13 @@ class EtapaSunatReal:
                 "domicilio_fiscal": getattr(emp, "domicilio_fiscal", None),
                 "fecha_inicio_actividades": ini_act.isoformat() if ini_act else None,
                 "actividades_economicas": getattr(emp, "actividades_economicas", None) or [],
+                # informativo (issue #30): representantes legales del emisor.
+                # SIN veredicto de firmante — ADR-008 descartó ALT-12.
+                "representantes": [r.to_dict() for r in (reps or [])],
+                # información histórica + la pregunta que le importa al evaluador:
+                # ¿estaba HABIDO al emitir el certificado y durante la obra?
+                "historico": hist.to_dict() if hist else None,
+                "habido": _evaluar_habido_emisor(hist, emp, e, ini),
             }
             ctx.enriquecimiento[k] = enr
             if fins and ini and fins > ini:
@@ -1123,8 +1169,8 @@ class EtapaExcelReal:
 # ── juego completo ───────────────────────────────────────────────────────────
 
 def etapas_reales(dir_datos: Path, *, consulta_cui=None, fetcher_infoobras=None,
-                  consultor_sunat=None, buscador_sunat=None, descargar=None,
-                  verificador_mef=None):
+                  consultor_sunat=None, buscador_sunat=None, extras_sunat=None,
+                  descargar=None, verificador_mef=None):
     """Las 8 etapas de la demo. Los parámetros inyectables son para tests;
     en producción quedan los clientes en vivo."""
     return [
@@ -1133,7 +1179,8 @@ def etapas_reales(dir_datos: Path, *, consulta_cui=None, fetcher_infoobras=None,
         EtapaResolucionCuiReal(consulta=consulta_cui),
         EtapaInfoObrasReal(fetcher=fetcher_infoobras, dir_descargas=Path(dir_datos),
                            descargar=descargar, verificador_mef=verificador_mef),
-        EtapaSunatReal(consultor=consultor_sunat, buscador=buscador_sunat),
+        EtapaSunatReal(consultor=consultor_sunat, buscador=buscador_sunat,
+                       extras=extras_sunat),
         EtapaReglasReal(),
         EtapaExcelReal(Path(dir_datos)),
         EtapaStub(E.PERSISTENCIA),

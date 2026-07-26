@@ -26,6 +26,17 @@ ADR-S004 en la raíz, conteo de la golden con fuente única en
 
 ## ¿Qué se estaba haciendo?
 
+25-jul: **issue #30 — el emisor del certificado en SUNAT** (rama
+`rafram96/issue-30-mostrar-representante-legal`). Sondeada y cableada la
+consulta "Información Histórica" (`getinfHis`, sin captcha) además de los
+representantes legales (`getRepLeg`, ya existía sin usar). El bloque emisor del
+Excel ahora responde **¿estaba HABIDO al emitir el certificado y durante la
+obra?** con la pregunta en el título del campo, lista los representantes
+(informativo — ADR-008 descartó ALT-12), y suma un cuadro histórico contiguo
+(R:U) que corrió el de representante de obra a W:Z. Falta el render en el
+panel (repo `Panel-InfoObras`): el JSON ya viaja con `representantes`,
+`historico` y `habido`.
+
 Semana 20-22 jul: **refactor completo del resolver de CUI** (rama
 `sonda/refactor-cui`, 13 commits) — base local MEF, público-primero, camino
 expedientes/obra, candados de abstención — validado con una auditoría golden de

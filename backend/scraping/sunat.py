@@ -16,6 +16,10 @@ Basado en el PoC en JS:
 Endpoints:
   [1] GET  /cl-ti-itmrconsruc/FrameCriterioBusquedaWeb.jsp → cookies de sesión
   [2] POST /cl-ti-itmrconsruc/jcrS00Alias  → consulta (RUC | DNI | razón social)
+
+Las consultas secundarias del emisor son acciones del MISMO POST, encadenadas
+tras la ficha de detalle: `getRepLeg` (representantes legales) y `getinfHis`
+(información histórica).
 """
 from __future__ import annotations
 
@@ -30,7 +34,7 @@ import ssl
 import time
 import unicodedata
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
 import requests
@@ -694,7 +698,9 @@ def consultar_representantes(
     """
     Consulta los representantes legales de un RUC (acción getRepLeg).
 
-    Insumo de ALT12: ¿el firmante del certificado está facultado según SUNAT?
+    Dato INFORMATIVO del bloque emisor (nombre, cargo y fecha desde de cada
+    representante). No alimenta ninguna regla automática: ADR-008 descartó
+    ALT-12 (firmante ≠ representante) por falsos positivos sistemáticos.
     Requiere encadenar dos consultas: consPorRuc (para obtener `numRnd` y la
     razón social) y luego getRepLeg.
 
@@ -766,6 +772,324 @@ def consultar_representantes(
     finally:
         if own_session:
             session.close()
+
+
+# ============================================================================
+# Información histórica (acción getinfHis) — ¿el emisor estaba HABIDO cuando
+# emitió el certificado y mientras duró la obra que certifica?
+# ============================================================================
+#
+# El portal devuelve SIEMPRE tres tablas, en este orden:
+#   1. Nombre o Razón Social  | Fecha de Baja
+#   2. Condición del Contribuyente | Fecha Desde | Fecha Hasta
+#   3. Dirección del Domicilio Fiscal | Fecha de Baja
+# Cuando una no tiene datos, su única fila dice "No hay Información".
+#
+# OJO (sondeo 25-jul-2026): la respuesta declara `charset=ISO-8859-1` en el
+# header pero manda UTF-8 → se decodifica a mano, NO con _detectar_encoding.
+
+CONDICION_HABIDO = "HABIDO"
+
+_SIN_DATOS = "no hay informaci"
+
+
+@dataclass
+class TramoCondicion:
+    """Un tramo de la condición del contribuyente (HABIDO, NO HABIDO, NO HALLADO,
+    PENDIENTE, POR VERIFICAR). `desde`/`hasta` en None = extremo abierto ("-")."""
+
+    condicion: str
+    desde: Optional[date] = None
+    hasta: Optional[date] = None
+
+    def cubre(self, f: date) -> bool:
+        return (self.desde is None or f >= self.desde) and \
+               (self.hasta is None or f <= self.hasta)
+
+    def solapa(self, ini: date, fin: date) -> bool:
+        return (self.desde is None or self.desde <= fin) and \
+               (self.hasta is None or self.hasta >= ini)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"condicion": self.condicion,
+                "desde": self.desde.isoformat() if self.desde else None,
+                "hasta": self.hasta.isoformat() if self.hasta else None}
+
+
+@dataclass
+class HistoricoSUNAT:
+    """Información histórica de un contribuyente (razón social, condición y
+    domicilio fiscal anteriores, con sus vigencias)."""
+
+    ruc: str
+    razones_sociales: list[dict[str, Any]] = field(default_factory=list)
+    condiciones: list[TramoCondicion] = field(default_factory=list)
+    domicilios: list[dict[str, Any]] = field(default_factory=list)
+
+    def vacio(self) -> bool:
+        return not (self.razones_sociales or self.condiciones or self.domicilios)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"ruc": self.ruc,
+                "razones_sociales": self.razones_sociales,
+                "condiciones": [t.to_dict() for t in self.condiciones],
+                "domicilios": self.domicilios}
+
+
+def _filas_tabla(tabla_html: str) -> list[list[str]]:
+    filas = []
+    for tr in re.finditer(r"<tr[^>]*>([\s\S]*?)</tr>", tabla_html, re.I):
+        filas.append([
+            _strip_tags(c)
+            for c in re.findall(r"<t[dh][^>]*>([\s\S]*?)</t[dh]>", tr.group(1), re.I)
+        ])
+    return filas
+
+
+def _parse_historico(html: str, ruc: str = "") -> HistoricoSUNAT:
+    """Extrae las tres tablas del HTML de getinfHis.
+
+    Devuelve un HistoricoSUNAT posiblemente vacío (el portal responde con las
+    tablas armadas y "No hay Información" cuando el contribuyente no tiene
+    historia) — eso NO es un fallo de parseo.
+    """
+    decoded = html_module.unescape(html)
+    hist = HistoricoSUNAT(ruc=ruc)
+
+    for t in re.finditer(r"<table[\s\S]*?</table>", decoded, re.I):
+        filas = _filas_tabla(t.group(0))
+        if not filas:
+            continue
+        cabecera = " ".join(filas[0]).lower()
+        datos = [f for f in filas[1:]
+                 if f and f[0] and not f[0].lower().startswith(_SIN_DATOS)]
+
+        if "raz" in cabecera and "social" in cabecera:
+            for f in datos:
+                baja = _parse_fecha_sunat(f[1]) if len(f) > 1 else None
+                hist.razones_sociales.append(
+                    {"nombre": f[0], "fecha_baja": baja.isoformat() if baja else None})
+        elif "condici" in cabecera:
+            for f in datos:
+                hist.condiciones.append(TramoCondicion(
+                    condicion=f[0].upper(),
+                    desde=_parse_fecha_sunat(f[1]) if len(f) > 1 else None,
+                    hasta=_parse_fecha_sunat(f[2]) if len(f) > 2 else None))
+        elif "domicilio" in cabecera:
+            for f in datos:
+                baja = _parse_fecha_sunat(f[1]) if len(f) > 1 else None
+                # el portal a veces antepone guiones a la dirección ("----AV. …")
+                hist.domicilios.append(
+                    {"direccion": f[0].lstrip("- ").strip(),
+                     "fecha_baja": baja.isoformat() if baja else None})
+
+    return hist
+
+
+def consultar_historico(
+    ruc: str,
+    *,
+    timeout: float = 20.0,
+    session: Optional[requests.Session] = None,
+) -> Optional[HistoricoSUNAT]:
+    """
+    Consulta la "Información Histórica" de un RUC (acción getinfHis).
+
+    Devuelve `None` si SUNAT no respondió o el RUC no existe (el portal devuelve
+    una página de error genérica); un HistoricoSUNAT —posiblemente vacío— si la
+    consulta salió bien.
+    """
+    if not re.match(r"^\d{11}$", ruc):
+        raise ValueError(f"RUC debe ser 11 digitos: {ruc!r}")
+
+    own_session = session is None
+    if session is None:
+        session = _crear_session_sunat()
+
+    try:
+        r_form = _request_with_retry(
+            session, "GET", HOST + FORM_PATH,
+            timeout=timeout, description=f"bootstrap hist {ruc}",
+        )
+        if r_form is None or r_form.status_code >= 400:
+            return None
+
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": HOST + FORM_PATH,
+            "Origin": HOST,
+        }
+        # getinfHis necesita la razón social (desRuc) de la ficha de detalle.
+        # `numRnd` va vacío: la ficha lo trae vacío y el portal lo acepta así.
+        body_ruc = {
+            "accion": "consPorRuc", "razSoc": "", "nroRuc": ruc, "nrodoc": "",
+            "search1": ruc, "search2": "", "search3": "", "tipdoc": "1",
+            "rbtnTipo": "1", "codigo": "", "contexto": "ti-it", "modo": "1",
+            "token": _fake_captcha_token(),
+        }
+        r_det = _request_with_retry(
+            session, "POST", HOST + SEARCH_PATH, data=body_ruc, headers=headers,
+            timeout=timeout, description=f"detalle hist {ruc}",
+        )
+        if r_det is None or r_det.status_code >= 400:
+            return None
+        r_det.encoding = _detectar_encoding(r_det.headers.get("Content-Type", ""))
+        m_rnd = re.search(r'name="numRnd"\s+value="([^"]*)"', r_det.text)
+        m_raz = re.search(r"\d{11}\s*-\s*([^<]+)<", r_det.text)
+
+        r_his = _request_with_retry(
+            session, "POST", HOST + SEARCH_PATH, headers=headers,
+            data={"accion": "getinfHis", "nroRuc": ruc,
+                  "desRuc": _strip_tags(m_raz.group(1)) if m_raz else "",
+                  "contexto": "ti-it", "modo": "1",
+                  "numRnd": m_rnd.group(1) if m_rnd else "",
+                  "token": _fake_captcha_token()},
+            timeout=timeout, description=f"getinfHis {ruc}",
+        )
+        if r_his is None or r_his.status_code >= 400:
+            return None
+
+        if SUNAT_THROTTLE_DELAY > 0:
+            time.sleep(SUNAT_THROTTLE_DELAY)
+
+        # el header miente el charset (dice ISO-8859-1, manda UTF-8)
+        html = r_his.content.decode("utf-8", errors="replace")
+    finally:
+        if own_session:
+            session.close()
+
+    if "Pagina de Error" in html or "<table" not in html.lower():
+        # RUC inexistente o el portal cortó: no hay histórico que parsear.
+        logger.info("SUNAT getinfHis %s sin tablas (RUC inexistente o error del portal)", ruc)
+        return None
+
+    return _parse_historico(html, ruc)
+
+
+def condicion_en_fecha(
+    tramos: list[TramoCondicion],
+    f: date,
+    *,
+    condicion_actual: Optional[str] = None,
+) -> Optional[str]:
+    """Condición del contribuyente vigente en la fecha `f`.
+
+    Fechas posteriores al último tramo histórico caen en `condicion_actual` (la
+    de la ficha): SUNAT cierra el histórico y no repite la condición vigente.
+    Si dos tramos se pisan el mismo día (pasa: altas y bajas del mismo día),
+    gana el más reciente de la lista.
+    """
+    cubren = [t for t in tramos if t.cubre(f)]
+    if cubren:
+        return cubren[-1].condicion
+    ultimo = max((t.hasta for t in tramos if t.hasta), default=None)
+    if ultimo and f > ultimo:
+        return (condicion_actual or "").upper() or None
+    if not tramos:
+        return (condicion_actual or "").upper() or None
+    return None
+
+
+def condiciones_en_rango(
+    tramos: list[TramoCondicion],
+    ini: date,
+    fin: date,
+    *,
+    condicion_actual: Optional[str] = None,
+) -> list[TramoCondicion]:
+    """Tramos de condición que tocan el rango [ini, fin], recortados al rango.
+
+    Si el rango se extiende más allá del histórico, agrega un tramo final con la
+    condición actual (ver `condicion_en_fecha`).
+    """
+    fuera: list[TramoCondicion] = []
+    for t in tramos:
+        if t.solapa(ini, fin):
+            fuera.append(TramoCondicion(
+                condicion=t.condicion,
+                desde=max(t.desde, ini) if t.desde else ini,
+                hasta=min(t.hasta, fin) if t.hasta else fin))
+    ultimo = max((t.hasta for t in tramos if t.hasta), default=None)
+    actual = (condicion_actual or "").upper()
+    if actual and (not tramos or (ultimo and fin > ultimo)):
+        desde = max(ultimo + timedelta(days=1), ini) if ultimo else ini
+        if desde <= fin:
+            fuera.append(TramoCondicion(condicion=actual, desde=desde, hasta=fin))
+    return fuera
+
+
+def _dias_sin_condicion(cubiertos: list[TramoCondicion],
+                        ini: date, fin: date) -> list[tuple[date, date]]:
+    """Sub-rangos de [ini, fin] donde NINGÚN tramo aporta condición.
+
+    La cobertura parcial es la trampa del veredicto por rango: un solo tramo
+    HABIDO que TOCA el periodo no dice nada del resto (cabeza antes del primer
+    tramo, huecos intermedios, cola cuando la ficha no trae condición actual).
+    Los `cubiertos` vienen de `condiciones_en_rango`, ya recortados al rango
+    (desde/hasta siempre presentes)."""
+    huecos: list[tuple[date, date]] = []
+    cursor = ini
+    for t in sorted(cubiertos, key=lambda t: t.desde or ini):
+        if t.desde and t.desde > cursor:
+            huecos.append((cursor, t.desde - timedelta(days=1)))
+        siguiente = (t.hasta or fin) + timedelta(days=1)
+        if siguiente > cursor:
+            cursor = siguiente
+        if cursor > fin:
+            return huecos
+    huecos.append((cursor, fin))
+    return huecos
+
+
+def evaluar_habido(
+    tramos: list[TramoCondicion],
+    *,
+    fecha_emision: Optional[date] = None,
+    ini: Optional[date] = None,
+    fin: Optional[date] = None,
+    condicion_actual: Optional[str] = None,
+) -> dict[str, Any]:
+    """Responde las dos preguntas del evaluador con el histórico SUNAT:
+
+      · ¿estaba HABIDO el día que emitió el certificado?
+      · ¿estuvo HABIDO durante todo el periodo de la experiencia?
+
+    Cada respuesta trae `ok` (True/False/None si no se puede saber), la condición
+    encontrada y —para el periodo— los tramos que no fueron HABIDO.
+    """
+    out: dict[str, Any] = {"emision": None, "periodo": None}
+
+    if fecha_emision:
+        cond = condicion_en_fecha(tramos, fecha_emision,
+                                  condicion_actual=condicion_actual)
+        out["emision"] = {
+            "fecha": fecha_emision.isoformat(),
+            "condicion": cond,
+            "ok": None if not cond else cond == CONDICION_HABIDO,
+        }
+
+    if ini and fin and fin >= ini:
+        cubiertos = condiciones_en_rango(tramos, ini, fin,
+                                         condicion_actual=condicion_actual)
+        malos = [t for t in cubiertos if t.condicion != CONDICION_HABIDO]
+        huecos = _dias_sin_condicion(cubiertos, ini, fin)
+        # "Sí" exige cobertura COMPLETA del periodo: HABIDO en los tramos con
+        # dato + días sin condición = "no verificable", nunca un verde. Un tramo
+        # NO HABIDO sí es veredicto duro aunque haya huecos (eso ya se sabe).
+        out["periodo"] = {
+            "desde": ini.isoformat(), "hasta": fin.isoformat(),
+            "condiciones": sorted({t.condicion for t in cubiertos}),
+            # tramos recortados al periodo: es lo que se muestra en el cuadro
+            # histórico del Excel (el histórico completo puede traer 30 filas)
+            "tramos": [t.to_dict() for t in cubiertos],
+            "tramos_no_habido": [t.to_dict() for t in malos],
+            "sin_dato": [{"desde": a.isoformat(), "hasta": b.isoformat()}
+                         for a, b in huecos],
+            "ok": (False if malos
+                   else True if cubiertos and not huecos else None),
+        }
+
+    return out
 
 
 def sondear(timeout: float = 6.0) -> tuple[bool, Optional[str]]:

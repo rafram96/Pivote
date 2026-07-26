@@ -119,11 +119,17 @@ class EmpresaFake:
     razon_social: str
     fecha_inscripcion: date
     estado: str = "ACTIVO"
+    condicion: str = "HABIDO"   # la de la ficha: cubre lo posterior al histórico
 
 
 def consultor_fake(ruc):
     # constituida DESPUÉS del inicio de la experiencia (2019-11-04) → ALT04
     return EmpresaFake(ruc, "CONSORCIO X SAC", date(2020, 6, 1))
+
+
+# Las consultas informativas del emisor (representantes + histórico) salen a la
+# red: los tests offline las anulan con este stub.
+SIN_EXTRAS_SUNAT = lambda ruc: ([], None)  # noqa: E731
 
 
 def hacer_motor(tmp_path):
@@ -878,7 +884,8 @@ def test_sunat_por_nombre_cuando_no_hay_ruc():
 
     consultor = lambda r: EmpresaFake(r, "CONSORCIO HOSPITAL TACNA", date(2015, 11, 6))
     ctx = Contexto(job=None, espejo=espejo, enriquecimiento={})
-    EtapaSunatReal(consultor=consultor, buscador=buscador).correr(ctx)
+    EtapaSunatReal(consultor=consultor, buscador=buscador,
+                   extras=SIN_EXTRAS_SUNAT).correr(ctx)
 
     # exp 1: nombre distintivo → 1 match → cruzado por nombre
     assert ctx.enriquecimiento["1:1"]["sunat"]["ruc"] == "20600789911"
@@ -888,6 +895,73 @@ def test_sunat_por_nombre_cuando_no_hay_ruc():
     assert "ruc" not in ctx.enriquecimiento["1:2"]["sunat"]
     # exp 3: entidad pública → se salta (sin bloque sunat)
     assert "sunat" not in ctx.enriquecimiento.get("1:3", {})
+
+
+def test_sunat_trae_representantes_e_historico_una_vez_por_ruc():
+    """Issue #30: el bloque emisor guarda los representantes legales, el histórico
+    y la respuesta a '¿estaba HABIDO al emitir y durante la obra?'. Las consultas
+    se hacen UNA vez por RUC aunque el mismo emisor firme varias experiencias."""
+    from datetime import date as _date
+
+    from orquestador.etapas import Contexto
+    from orquestador.etapas_reales import EtapaSunatReal
+    from scraping.sunat import HistoricoSUNAT, RepresentanteLegal, TramoCondicion
+
+    espejo = {
+        "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
+        "postor": {},
+        "profesionales": [{"n_prof": 1, "cargo": "ESP", "experiencias": [
+            # mismo emisor en las dos experiencias → una sola consulta
+            {"n": 1, "entidad_emisora": "CONSTRUCTORA X SAC RUC 20512345678",
+             "fecha_inicial": "2018-01-01", "fecha_final": "2018-12-31",
+             "fecha_emision": "2019-02-01"},
+            {"n": 2, "entidad_emisora": "CONSTRUCTORA X SAC RUC 20512345678",
+             "fecha_inicial": "2020-01-01", "fecha_final": "2020-06-30",
+             "fecha_emision": "2020-08-01"},
+        ]}],
+        "resumen_evaluacion": {"factores": []},
+    }
+
+    hist = HistoricoSUNAT(
+        ruc="20512345678",
+        razones_sociales=[{"nombre": "CONSTRUCTORA X EIRL", "fecha_baja": "2016-05-04"}],
+        condiciones=[
+            TramoCondicion("HABIDO", None, _date(2018, 6, 30)),
+            TramoCondicion("NO HABIDO", _date(2018, 7, 1), _date(2018, 9, 30)),
+            TramoCondicion("HABIDO", _date(2018, 10, 1), _date(2019, 12, 31)),
+        ],
+        domicilios=[{"direccion": "AV. LIMA 100", "fecha_baja": "2016-05-04"}],
+    )
+    reps = [RepresentanteLegal("DNI", "09683058", "PEREZ LOPEZ JUAN",
+                               "GERENTE GENERAL", _date(2017, 5, 24))]
+
+    llamadas = []
+
+    def extras(ruc):
+        llamadas.append(ruc)
+        return reps, hist
+
+    consultor = lambda r: EmpresaFake(r, "CONSTRUCTORA X SAC", date(2010, 1, 1))  # noqa: E731
+    ctx = Contexto(job=None, espejo=espejo, enriquecimiento={})
+    EtapaSunatReal(consultor=consultor, buscador=lambda n: [],
+                   extras=extras).correr(ctx)
+
+    assert llamadas == ["20512345678"], "una consulta por RUC, no por experiencia"
+
+    s1 = ctx.enriquecimiento["1:1"]["sunat"]
+    assert s1["representantes"][0]["nombre"] == "PEREZ LOPEZ JUAN"
+    assert s1["representantes"][0]["cargo"] == "GERENTE GENERAL"
+    assert s1["representantes"][0]["fecha_desde"] == "2017-05-24"
+    assert s1["historico"]["razones_sociales"][0]["nombre"] == "CONSTRUCTORA X EIRL"
+
+    # exp 1: emitida en feb-2019 (habido) pero la obra abarca el tramo NO HABIDO
+    assert s1["habido"]["emision"]["ok"] is True
+    assert s1["habido"]["periodo"]["ok"] is False
+    assert s1["habido"]["periodo"]["tramos_no_habido"][0]["desde"] == "2018-07-01"
+
+    # exp 2: obra posterior al último tramo → manda la condición actual (HABIDO)
+    s2 = ctx.enriquecimiento["1:2"]["sunat"]
+    assert s2["habido"]["periodo"]["ok"] is True
 
 
 def test_sunat_desempate_por_nombre_exacto():
@@ -919,7 +993,8 @@ def test_sunat_desempate_por_nombre_exacto():
 
     consultor = lambda r: EmpresaFake(r, "ACRUTA & TAPIA INGENIEROS S.A.C.", date(2010, 1, 1))
     ctx = Contexto(job=None, espejo=espejo, enriquecimiento={})
-    EtapaSunatReal(consultor=consultor, buscador=buscador).correr(ctx)
+    EtapaSunatReal(consultor=consultor, buscador=buscador,
+                   extras=SIN_EXTRAS_SUNAT).correr(ctx)
 
     assert ctx.enriquecimiento["1:1"]["sunat"]["ruc"] == "20262241441"
     assert ctx.enriquecimiento["1:1"]["sunat"]["via"] == "nombre_exacto"
