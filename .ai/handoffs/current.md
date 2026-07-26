@@ -24,6 +24,14 @@ T-00x consolidada en `vision.md` (raíz), tareas reubicadas por nivel,
 ADR-S004 en la raíz, conteo de la golden con fuente única en
 `architecture/backend.md`.
 
+## Nota (2026-07-25) — ADR-011 arrancó, y un bug que apareció de paso
+
+`EtapaResolucionCui.correr` (`etapas_reales.py`) acumulaba observaciones
+`MULTI_OBRA` / `PROBABLE` / `PRIVADA` y **no las pasaba a `_res`**: se perdían
+en el return, así que nunca llegaban al job ni al panel (solo quedaban, a
+medias, en el enriquecimiento). Corregido en PR-1 del Issue #26. Si ves una
+etapa que arma una lista `obs` y no la devuelve, es el mismo patrón.
+
 ## ¿Qué se estaba haciendo?
 
 Semana 20-22 jul: **refactor completo del resolver de CUI** (rama

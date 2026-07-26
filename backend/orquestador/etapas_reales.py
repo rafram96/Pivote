@@ -297,7 +297,9 @@ class EtapaResolucionCuiReal:
 
         total = len(pares)
         estado = EE.OK_CON_REVISION if rev else EE.OK
-        return _res(self.nombre, estado, _met(total, ok, rev))
+        # `obs` SÍ viaja: MULTI_OBRA / PROBABLE / PRIVADA se acumulaban y se perdían
+        # en el return (quedaban solo en el enriquecimiento, invisibles en el job).
+        return _res(self.nombre, estado, _met(total, ok, rev), obs)
 
 
 # ── 3a · Consulta a InfoObras (paralizaciones + descargas) ───────────────────

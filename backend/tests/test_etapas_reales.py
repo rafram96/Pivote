@@ -923,3 +923,80 @@ def test_sunat_desempate_por_nombre_exacto():
     assert ctx.enriquecimiento["1:1"]["sunat"]["ruc"] == "20262241441"
     assert ctx.enriquecimiento["1:1"]["sunat"]["via"] == "nombre_exacto"
     assert "ambiguo" not in ctx.enriquecimiento["1:1"]["sunat"]
+
+
+# ── Cert MULTI-OBRA SIN CUI: paquete de inversión (caso real HV Contratistas) ──
+# El certificado documenta UN vínculo continuo (01/03/2022 – 31/07/2023) sobre un
+# nombre COMPUESTO que encadena dos establecimientos bajo la etiqueta "(PAQUETE 6)"
+# y NO cita ningún CUI. La skill deja el nombre verbatim en `proyecto` y lo desglosa
+# limpio en `obras[]` (ADR-011 · PR-1). Fixture CONGELADO: es exactamente el caso que
+# PR-2 (resolver() completo por sub-obra) tiene que hacer resolver por nombre.
+_HV_PAQUETE_6 = ("MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL HOSPITAL DE APOYO "
+                 "SULLANA II-2 Y EL CENTRO DE SALUD POSOPE ALTO I-3 (PAQUETE 6)")
+_HV_SUB_1 = "MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL HOSPITAL DE APOYO SULLANA II-2"
+_HV_SUB_2 = "MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL CENTRO DE SALUD POSOPE ALTO I-3"
+
+ESPEJO_MULTI_OBRA_HV = {
+    "_meta": {"analisis_id": "hv-paquete6", "concurso": "CP-HV/2026",
+              "postor": "HV CONTRATISTAS S.A."},
+    "postor": {},
+    "profesionales": [
+        {"n_prof": 1, "cargo": "GERENTE DE PROYECTO", "nombre": "Prof HV",
+         "requisitos": {"tipo_experiencia": "mínimo 1 año"},
+         "total": {"dias": 518, "anios": 1.42},
+         "experiencias": [
+             {"n": 1, "proyecto": _HV_PAQUETE_6, "cui": None,
+              "entidad_emisora": "HV CONTRATISTAS S.A.",
+              "entidad_contratante": "GOBIERNO REGIONAL DE PIURA",
+              "fecha_inicial": "2022-03-01", "fecha_final": "2023-07-31",
+              "dias": 518, "folio": "300",
+              "obras": [{"proyecto": _HV_SUB_1, "cui": None},
+                        {"proyecto": _HV_SUB_2, "cui": None}]},
+         ]},
+    ],
+    "resumen_evaluacion": {"factores": [], "puntaje_total": None},
+}
+
+
+def test_espejo_multi_obra_sin_cui_valida_contra_el_contrato():
+    """Una sub-obra SIN CUI es válida en el contrato: el desglose de un paquete no
+    cita códigos y aun así tiene que entrar (antes el contrato lo permitía pero la
+    skill solo desglosaba cuando había CUI)."""
+    from schemas.espejo import JsonEspejo
+
+    m = JsonEspejo.model_validate(ESPEJO_MULTI_OBRA_HV)
+    exp = m.profesionales[0].experiencias[0]
+    # el nombre compuesto se conserva VERBATIM en la madre (fidelidad legal)…
+    assert exp.proyecto == _HV_PAQUETE_6 and exp.cui is None
+    # …y el desglose limpio vive en obras[], sin conectores ni etiqueta de paquete
+    assert [o.proyecto for o in exp.obras] == [_HV_SUB_1, _HV_SUB_2]
+    assert [o.cui for o in exp.obras] == [None, None]
+    assert all("PAQUETE" not in o.proyecto and " Y EL " not in o.proyecto
+               for o in exp.obras)
+
+
+def test_multi_obra_sin_cui_no_pierde_la_experiencia(tmp_path):
+    """Paquete sin CUI: la experiencia cuenta por el certificado y las sub-obras
+    quedan VISIBLES, no silenciadas. HOY las dos mueren en `sin_cui` — es el estado
+    honesto del motor actual (resolver_obras solo resuelve por código citado).
+    ⇢ PR-2 debe dar vuelta esos dos estados a `resuelto` sin tocar nada más."""
+    motor, repo = hacer_motor(tmp_path)
+    job = motor.correr(motor.crear_job(ESPEJO_MULTI_OBRA_HV).job_id)
+
+    enr = repo.cargar_enriquecimiento(job.job_id)["1:1"]
+    assert enr["via"] == "MULTI_OBRA" and enr["cui"] is None
+    sub = enr["sub_obras"]
+    assert [s["proyecto"] for s in sub] == [_HV_SUB_1, _HV_SUB_2]
+    assert [s["estado"] for s in sub] == ["sin_cui", "sin_cui"]   # ⇠ PR-2 lo cambia
+
+    # la experiencia NO se pierde ni va a la cola humana (ADR-011: el identificador
+    # de un cert multi-obra es su portafolio, no un CUI único)
+    assert not [it for it in job.items_revision if not it.resuelto]
+    obs = [o for e in job.etapas for o in e.observaciones if o.codigo == "MULTI_OBRA"]
+    assert len(obs) == 1 and "2 sub-proyectos" in obs[0].mensaje
+
+    # y el Excel las muestra una por una con el motivo, no las esconde
+    ws = openpyxl.load_workbook(tmp_path / job.job_id / "final.xlsx")["P1 GERENTE DE PROYECTO"]
+    texto = "\n".join(str(c.value) for f in ws.iter_rows() for c in f if c.value)
+    assert "CERTIFICADO MULTI-OBRA — 0 de 2 obra(s) hallada(s)" in texto
+    assert texto.count("el certificado no cita CUI para este proyecto") == 2
