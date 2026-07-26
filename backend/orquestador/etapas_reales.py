@@ -1171,12 +1171,17 @@ class EtapaExcelReal:
         # pasa los periodos CON su tipo (paralizado / sin valorización) para que
         # el Excel los muestre diferenciados; el generador normaliza las fechas.
         paral, cuis, fichas, sunat = desempaquetar_enriquecimiento(ctx.enriquecimiento)
-        # experiencias en revisión → su motivo, para que la hoja del profesional
-        # muestre "EN REVISIÓN" + la razón en vez de una columna vacía.
-        revisiones: dict[tuple[int, int], str] = {}
+        # experiencias en revisión → su motivo Y su acción sugerida, para que la hoja
+        # del profesional muestre "EN REVISIÓN" + la razón en vez de una columna
+        # vacía. La acción viaja junto al motivo porque los ItemRevision los crean 4
+        # etapas distintas y cada una pide algo diferente (pegar un CUI, verificar
+        # una fecha, reintentar el portal): si el Excel inventa una acción fija de
+        # "pegar el CUI", la pide también sobre obras bien identificadas.
+        revisiones: dict[tuple[int, int], tuple[str, Optional[str]]] = {}
         for it in ctx.job.items_revision:
             if not it.resuelto and it.n_exp is not None:
-                revisiones.setdefault((it.n_prof, it.n_exp), it.motivo)
+                revisiones.setdefault((it.n_prof, it.n_exp),
+                                      (it.motivo, it.accion_sugerida))
         # experiencias PRIVADAS → bloque propio en el Excel (no es "revisión": el
         # respaldo es el certificado; InfoObras no registra obra privada).
         for k, e in ctx.enriquecimiento.items():
