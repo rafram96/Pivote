@@ -477,6 +477,218 @@ def test_hoja_profesional_sin_historico_no_dibuja_el_cuadro():
     assert "Sin información histórica en SUNAT" in texto
 
 
+# ── Visibilidad del bloque de obra (issue #46: nombre de la obra + aviso) ─────
+
+
+def _texto(ws) -> str:
+    return "\n".join(str(c.value) for f in ws.iter_rows() for c in f if c.value)
+
+
+def _celdas(ws) -> list[str]:
+    return [str(c.value) for f in ws.iter_rows() for c in f if c.value is not None]
+
+
+def _hoja_de(salida, n_prof, cargo):
+    return openpyxl.load_workbook(salida)[etiqueta_hoja(n_prof, cargo)]
+
+
+_ESPEJO_1EXP = {
+    "_meta": {}, "postor": {},
+    "profesionales": [{
+        "n_prof": 1, "cargo": "JEFE", "nombre": "N",
+        "experiencias": [{"n": 1, "proyecto": "Construcción del Hospital de EsSalud, Tarapoto",
+                          "fecha_inicial": "2019-05-01", "fecha_final": "2019-10-31"}],
+    }],
+    "resumen_evaluacion": {"factores": []},
+}
+
+
+def test_bloque_de_obra_muestra_el_nombre_primero(tmp_path):
+    """Punto 1 del issue #46: sin el nombre, un CUI mal resuelto (obra de OTRA
+    región) pasa inadvertido detrás de un código y un monto correctos. El nombre
+    es el PRIMER campo del bloque, antes del código."""
+    fichas = {(1, 1): {"codigo_infoobras": "104710", "cui": "2405647",
+                       "obra_nombre": "INSTALACION DE LOS SERVICIOS DE TOMOGRAFIA, "
+                                      "PUERTO MALDONADO, MADRE DE DIOS",
+                       "estado": "Finalizado", "valorizaciones": []}}
+    salida = generar_excel_final(_ESPEJO_1EXP, tmp_path / "n.xlsx", fichas=fichas)
+    ws = _hoja_de(salida, 1, "JEFE")
+
+    fila_nom = next(c.row for f in ws.iter_rows() for c in f if c.value == "Nombre de la obra")
+    fila_cod = next(c.row for f in ws.iter_rows() for c in f if c.value == "Código InfoObras")
+    assert fila_nom < fila_cod                      # primero el nombre
+    assert "PUERTO MALDONADO" in _texto(ws)
+    # el nombre no cabe en una línea y una celda combinada no auto-ajusta el alto
+    assert (ws.row_dimensions[fila_nom].height or 15) > 15
+
+
+def test_bloque_de_obra_sin_nombre_lo_dice(tmp_path):
+    """Ficha sin nombre (InfoObras no lo devolvió): se dice, no se omite la fila —
+    la ausencia del dato también es información para el evaluador."""
+    fichas = {(1, 1): {"codigo_infoobras": "104710", "cui": "2405647", "valorizaciones": []}}
+    salida = generar_excel_final(_ESPEJO_1EXP, tmp_path / "sn.xlsx", fichas=fichas)
+    assert "no devolvió el nombre" in _texto(_hoja_de(salida, 1, "JEFE"))
+
+
+def test_desempaquetar_enriquecimiento_lleva_el_nombre_a_la_ficha():
+    """El nombre NO viene dentro de `obra_ficha`: viaja suelto (`obra_nombre`) o en
+    `obra.nombre_obra`. Sin esta traducción nunca llegaba al Excel."""
+    from entregables import desempaquetar_enriquecimiento
+
+    _, _, fichas, _ = desempaquetar_enriquecimiento({
+        "1:1": {"obra_nombre": "HOSPITAL X", "obra_ficha": {"cui": "1", "codigo_infoobras": "9"}},
+        "1:2": {"obra": {"nombre_obra": "HOSPITAL Y"},          # solo el nombre anidado
+                "obra_ficha": {"cui": "2", "codigo_infoobras": "8"}},
+    })
+    assert fichas[(1, 1)]["obra_nombre"] == "HOSPITAL X"
+    assert fichas[(1, 2)]["obra_nombre"] == "HOSPITAL Y"
+
+
+def test_aviso_de_revision_se_pinta_aunque_haya_obra(tmp_path):
+    """Punto 2 del issue #46: antes el aviso era `elif` de la obra, así que si el
+    resolver proponía una obra el aviso NUNCA se pintaba (40% de los avisos
+    invisibles). Ahora va como banda ENCIMA del bloque de la obra."""
+    fichas = {(1, 1): {"codigo_infoobras": "1", "cui": "2405647",
+                       "obra_nombre": "OBRA PROPUESTA", "valorizaciones": []}}
+    revisiones = {(1, 1): ("los candidatos contradicen el rubro del certificado — confirmar",
+                           "elegir candidato o pegar CUI")}
+    salida = generar_excel_final(_ESPEJO_1EXP, tmp_path / "rev.xlsx",
+                                 fichas=fichas, revisiones=revisiones)
+    ws = _hoja_de(salida, 1, "JEFE")
+    texto = _texto(ws)
+
+    assert "EXPERIENCIA EN REVISIÓN" in texto
+    assert "contradicen el rubro" in texto
+    assert "Acción: elegir candidato o pegar CUI" in texto
+    aviso = next(c for f in ws.iter_rows() for c in f
+                 if str(c.value or "").startswith("⚠ EXPERIENCIA EN REVISIÓN"))
+    cabecera = next(c for f in ws.iter_rows() for c in f
+                    if str(c.value or "").startswith("OBRA EN INFOOBRAS"))
+    # misma franja de columnas y ARRIBA del bloque de obra (no como nota al pie)
+    assert aviso.column == cabecera.column
+    assert aviso.row < cabecera.row
+    assert aviso.fill.fgColor.rgb.endswith("FF9999")     # alerta, se ve de lejos
+
+
+def test_el_aviso_dice_el_motivo_real_y_no_una_narrativa_de_obra(tmp_path):
+    """Los ItemRevision los crean 4 etapas y la mayoría no habla de la obra. Un
+    aviso que igual grita "la obra no está confirmada, pegue el CUI" sobre un CUI
+    correcto es un falso positivo — y un aviso que miente enseña al evaluador a
+    ignorar la banda. El motivo y la acción son los del item."""
+    fichas = {(1, 1): {"codigo_infoobras": "1", "cui": "2405647",
+                       "obra_nombre": "OBRA BIEN IDENTIFICADA", "valorizaciones": []}}
+    revisiones = {(1, 1): ("NO CUMPLE pero la(s) experiencia(s) 3 no se contó por una "
+                           "fecha sin verificar — confirmarla puede cambiar el veredicto",
+                           "verificar la fecha de fin del certificado")}
+    salida = generar_excel_final(_ESPEJO_1EXP, tmp_path / "rev3.xlsx",
+                                 fichas=fichas, revisiones=revisiones)
+    texto = _texto(_hoja_de(salida, 1, "JEFE"))
+
+    assert "fecha sin verificar" in texto
+    assert "Acción: verificar la fecha de fin del certificado" in texto
+    # el motivo se muestra VERBATIM: `.capitalize()` bajaría el veredicto del motor
+    assert "NO CUMPLE pero" in texto
+    # nada de la narrativa de identidad de obra que antes iba cableada
+    assert "PROPUESTA del sistema" not in texto
+    assert "pegar el CUI" not in texto
+
+
+def test_el_aviso_sin_accion_sugerida_no_inventa_una(tmp_path):
+    """Un item sin `accion_sugerida` cae a una acción GENÉRICA: mandar a pegar un
+    CUI sin saber que el problema es el CUI es fabricar un diagnóstico."""
+    fichas = {(1, 1): {"codigo_infoobras": "1", "cui": "2405647",
+                       "obra_nombre": "OBRA", "valorizaciones": []}}
+    salida = generar_excel_final(_ESPEJO_1EXP, tmp_path / "rev4.xlsx", fichas=fichas,
+                                 revisiones={(1, 1): "el portal no respondió"})
+    texto = _texto(_hoja_de(salida, 1, "JEFE"))
+    assert "Acción: revisar esta experiencia en el panel" in texto
+    assert "pegar el CUI" not in texto
+
+
+def test_el_aviso_no_encoge_la_fila_del_titulo_de_la_experiencia(tmp_path):
+    """El aviso comparte fila con el título de la experiencia (nombre del proyecto
+    VERBATIM, que `banda()` ya dimensionó). Fijar la altura cortaba el nombre justo
+    en la experiencia marcada como dudosa: la altura solo puede AUMENTAR."""
+    espejo = {
+        "_meta": {}, "postor": {},
+        "profesionales": [{
+            "n_prof": 1, "cargo": "JEFE", "nombre": "N", "experiencias": [{
+                "n": 1, "fecha_inicial": "2019-05-01", "fecha_final": "2019-10-31",
+                "proyecto": ("MEJORAMIENTO Y AMPLIACIÓN DE LOS SERVICIOS DE SALUD DEL "
+                             "ESTABLECIMIENTO DE SALUD I-4 SAN MARTÍN DE PORRES, DISTRITO "
+                             "DE MORALES, PROVINCIA DE SAN MARTÍN, DEPARTAMENTO DE SAN "
+                             "MARTÍN")}]}],
+        "resumen_evaluacion": {"factores": []},
+    }
+    fichas = {(1, 1): {"codigo_infoobras": "1", "cui": "2405647",
+                       "obra_nombre": "OBRA", "valorizaciones": []}}
+    sin = generar_excel_final(espejo, tmp_path / "alto_sin.xlsx", fichas=fichas)
+    con = generar_excel_final(espejo, tmp_path / "alto_con.xlsx", fichas=fichas,
+                              revisiones={(1, 1): ("motivo cualquiera", "hacer algo")})
+
+    def _alto_del_titulo(salida):
+        ws = _hoja_de(salida, 1, "JEFE")
+        fila = next(c.row for f in ws.iter_rows() for c in f
+                    if str(c.value or "").startswith("EXPERIENCIA 1:"))
+        return ws.row_dimensions[fila].height or 15
+
+    assert _alto_del_titulo(con) >= _alto_del_titulo(sin) > 15
+
+
+def test_sin_obra_el_aviso_de_revision_sigue_siendo_el_bloque_completo(tmp_path):
+    """Regresión: cuando NO hay obra, el bloque de revisión de siempre (con la
+    acción a tomar) sigue ocupando la franja — no se degrada a la banda."""
+    revisiones = {(1, 1): "el certificado no cita CUI"}
+    salida = generar_excel_final(_ESPEJO_1EXP, tmp_path / "rev2.xlsx", revisiones=revisiones)
+    texto = _texto(_hoja_de(salida, 1, "JEFE"))
+    assert "EXPERIENCIA EN REVISIÓN" in texto
+    # aquí sí no hubo cruce, así que la acción por defecto es de identidad de obra
+    assert "pegar el CUI correcto en el panel" in texto
+    assert "OBRA EN INFOOBRAS" not in texto
+
+
+def test_sin_obra_el_bloque_usa_la_accion_del_item_si_la_trae(tmp_path):
+    """…pero si el item trae su propia acción, manda la del item."""
+    revisiones = {(1, 1): ("no se pudo verificar en InfoObras — veredicto provisional",
+                           "reintentar la consulta o verificar la obra a mano")}
+    salida = generar_excel_final(_ESPEJO_1EXP, tmp_path / "rev5.xlsx", revisiones=revisiones)
+    texto = _texto(_hoja_de(salida, 1, "JEFE"))
+    assert "Acción: reintentar la consulta o verificar la obra a mano" in texto
+    assert "pegar el CUI" not in texto
+
+
+def test_una_obra_repetida_se_detalla_completa_en_cada_experiencia(tmp_path):
+    """Candado del colapso RETIRADO (issue #46 punto 6): hubo una versión que
+    sustituía el 2º bloque de la misma obra por "la ficha está en Experiencia N".
+    Borraba evidencia — dos experiencias con el mismo CUI pueden resolver a obras
+    DISTINTAS, porque la ventana del certificado desambigua. Hasta que se rediseñe,
+    cada experiencia muestra SU ficha completa."""
+    espejo = {
+        "_meta": {}, "postor": {},
+        "profesionales": [{
+            "n_prof": 1, "cargo": "JEFE", "nombre": "N", "experiencias": [
+                {"n": 1, "proyecto": "Tramo 1", "fecha_inicial": "2019-01-01",
+                 "fecha_final": "2019-06-30"},
+                {"n": 2, "proyecto": "Tramo 2", "fecha_inicial": "2021-01-01",
+                 "fecha_final": "2021-12-31"}]}],
+        "resumen_evaluacion": {"factores": []},
+    }
+    fichas = {
+        (1, 1): {"cui": "2418877", "codigo_infoobras": "111", "obra_nombre": "OBRA A",
+                 "valorizaciones": [{"anio": 2019, "mes": 3, "estado": "En ejecución"}]},
+        # mismo CUI, OTRA obra y otro periodo: sin valorizaciones registradas
+        (1, 2): {"cui": "2418877", "codigo_infoobras": "999", "obra_nombre": "OBRA B",
+                 "valorizaciones": []},
+    }
+    salida = generar_excel_final(espejo, tmp_path / "dup.xlsx", fichas=fichas)
+    celdas = _celdas(_hoja_de(salida, 1, "JEFE"))
+    texto = "\n".join(celdas)
+
+    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 2
+    assert "999" in texto and "OBRA B" in texto          # la 2ª ficha no se borró
+    assert "ya detallada" not in texto
+
+
 # ── Hoja CLAUDE: formato de Manuel (blanco + verde/rojo semántico) ─────────────
 
 def test_clasificar_veredicto_polaridad():

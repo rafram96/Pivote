@@ -60,6 +60,11 @@ FILL_SEP = PatternFill("solid", fgColor="FFFF00")
 # Semántico para el cuadro del emisor (SUNAT): rojo = anomalía (ALT04), verde = ok.
 FILL_ALERTA = PatternFill("solid", fgColor="F4CCCC")
 FILL_OK = PatternFill("solid", fgColor="D9EAD3")
+# Advertencia de revisión: rojo FUERTE, no el rosa del cuadro del emisor. Comparte
+# franja (F:K) con el bloque de la obra que va justo debajo y tiene que ganarle a
+# simple vista — si se lee como una nota más, el aviso no sirve para nada.
+FILL_AVISO = PatternFill("solid", fgColor="FF9999")
+F_AVISO = Font(bold=True, size=10, color="7F0000")
 # Sistema de color del ingeniero en las hojas por profesional:
 #   amarillo = declarado / dentro del periodo · cyan = efectivo verificado (Paso 5)
 #   naranja = excluido (paralización / sin valorización) · azules = jerarquía de marco.
@@ -78,6 +83,35 @@ FMT_PCT = '0.00"%"'
 _MES_ES = {1: "ENERO", 2: "FEBRERO", 3: "MARZO", 4: "ABRIL", 5: "MAYO",
            6: "JUNIO", 7: "JULIO", 8: "AGOSTO", 9: "SEPTIEMBRE",
            10: "OCTUBRE", 11: "NOVIEMBRE", 12: "DICIEMBRE"}
+
+# Acciones por defecto cuando el item de revisión no trae la suya. Genéricas a
+# propósito: pedir "pegar el CUI" sin saber que el problema ES el CUI manda al
+# evaluador a arreglar algo que puede estar bien.
+_ACCION_GENERICA = "revisar esta experiencia en el panel"
+# En el bloque sin obra el diagnóstico sí es de identidad (no hubo cruce), así que
+# ahí la acción por defecto puede ser concreta.
+_ACCION_SIN_OBRA = "confirmar la obra o pegar el CUI correcto en el panel"
+
+
+def _mayus_inicial(texto) -> str:
+    """Primera letra en mayúscula SIN tocar el resto: `str.capitalize()` bajaría
+    los veredictos que el motor escribe en mayúsculas ("NO CUMPLE pero…")."""
+    t = str(texto or "").strip()
+    return (t[0].upper() + t[1:]) if t else t
+
+
+def _motivo_accion(v) -> tuple[str, Optional[str]]:
+    """Motivo y acción sugerida de una entrada de `revisiones`.
+
+    Los ItemRevision los crean 4 etapas distintas y cada uno trae SU acción
+    (`accion_sugerida`): pegar un CUI, verificar una fecha del certificado,
+    reintentar el portal… Se acepta también un str suelto — el marcador
+    "[PRIVADA]" y las llamadas que solo pasan el motivo."""
+    if isinstance(v, dict):
+        return str(v.get("motivo") or ""), v.get("accion_sugerida")
+    if isinstance(v, (tuple, list)):
+        return str(v[0] if v else ""), (v[1] if len(v) > 1 else None)
+    return str(v or ""), None
 
 
 def _mes_en_rango(anio: int, mes: int, ini: Optional[date], fin: Optional[date]) -> bool:
@@ -313,12 +347,23 @@ def construir_hoja_profesional(
             nonlocal rr
             ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=7)
             cl = ws.cell(rr, 6, label); cl.font, cl.border = F_BOLD, BORDER
+            cl.alignment = Alignment(vertical="top", wrap_text=True)
             ws.merge_cells(start_row=rr, start_column=8, end_row=rr, end_column=10)
             cv = ws.cell(rr, 8, value); cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
             if fmt and isinstance(value, (int, float, date)):
                 cv.number_format = fmt
+            # H:J ≈ 46 caracteres y una celda COMBINADA no auto-ajusta su alto en
+            # Excel: el nombre de obra (150+ car.) se vería como una sola línea
+            # cortada. Solo AUMENTA la altura (no pisa la de otras bandas de la fila).
+            if isinstance(value, str) and len(value) > 46:
+                alto = (-(-len(value) // 46)) * 13 + 4
+                ws.row_dimensions[rr].height = max(ws.row_dimensions[rr].height or 15, alto)
             rr += 1
 
+        # PRIMERO el nombre: es lo único que deja auditar de un vistazo si la obra
+        # emparejada es la del certificado. Sin él, un CUI mal resuelto (un hospital
+        # de otra región) pasa inadvertido detrás de un código y un monto correctos.
+        kv("Nombre de la obra", fx.get("obra_nombre") or "— (InfoObras no devolvió el nombre)")
         kv("Código InfoObras", fx.get("codigo_infoobras") or "—")
         kv("CUI", fx.get("cui") or "—")
         kv("Estado de obra", fx.get("estado") or "—")
@@ -452,7 +497,7 @@ def construir_hoja_profesional(
                 rr += 1
         return rr - 1
 
-    def render_revision(top: int, motivo: str) -> int:
+    def render_revision(top: int, motivo: str, accion: Optional[str] = None) -> int:
         """Bloque para una experiencia que NO se cruzó: explica por qué quedó en
         revisión humana, en vez de dejar la columna de la obra vacía. El marcador
         especial "[PRIVADA]" pinta el bloque de cliente/obra privada (no es
@@ -476,11 +521,65 @@ def construir_hoja_profesional(
         c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
         rr += 1
         ws.merge_cells(start_row=rr, start_column=6, end_row=rr + 3, end_column=10)
-        c = ws.cell(rr, 6, f"{str(motivo).capitalize()}.\n\nAcción: confirmar la obra "
-                           f"o pegar el CUI correcto en el panel para completar el cruce.")
+        c = ws.cell(rr, 6, f"{_mayus_inicial(motivo)}.\n\nAcción: "
+                           f"{accion or _ACCION_SIN_OBRA}.")
         c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
         rr += 4
         return rr - 1
+
+    def render_aviso_revision(top: int, motivo: str, accion: Optional[str] = None) -> int:
+        """Banda de ALERTA (F:K) ENCIMA del bloque de la obra, cuando la experiencia
+        sigue en revisión Y el resolver además propuso una obra.
+
+        Va ARRIBA y no debajo a propósito: la banda de revisión y el bloque de la
+        obra ocupan la misma franja de columnas, y esto es la advertencia con la que
+        hay que leer la ficha que viene a continuación. Debajo quedaría al final de
+        las valorizaciones (decenas de filas más abajo), o sea invisible — que es
+        justo el bug.
+
+        Dice el MOTIVO y la ACCIÓN reales del item, no una narrativa fija sobre la
+        identidad de la obra: los ItemRevision los crean 4 etapas distintas y la
+        mayoría no habla de la obra (p. ej. "no se contó una experiencia por una
+        fecha sin verificar"). Gritar "la obra no está confirmada, pegue el CUI"
+        sobre una obra bien identificada es un falso positivo, y un aviso que miente
+        enseña al evaluador a ignorar la banda. Devuelve la última fila usada."""
+        rr = top
+        if str(motivo).startswith("[PRIVADA]"):
+            motivo = ("declarada como obra/cliente privado y aun así se halló una "
+                      "obra pública con ese nombre")
+            accion = accion or ("confirmar si la obra es pública — InfoObras no "
+                                "registra obra privada")
+        titulo = f"⚠ EXPERIENCIA EN REVISIÓN — {_mayus_inicial(motivo)}"
+        ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+        c = ws.cell(rr, 6, titulo)
+        c.font, c.fill = F_AVISO, FILL_AVISO
+        c.alignment = Alignment(vertical="center", wrap_text=True)
+        # esta fila es la MISMA del título de la experiencia, que banda() ya
+        # dimensionó según su texto envuelto: solo AUMENTA (fijarla cortaría el
+        # nombre del proyecto justo en la experiencia dudosa).
+        ws.row_dimensions[rr].height = max(ws.row_dimensions[rr].height or 15,
+                                           (-(-len(titulo) // 78)) * 14 + 6)
+        rr += 1
+        ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+        c = ws.cell(rr, 6, f"Acción: {accion or _ACCION_GENERICA}.")
+        c.font, c.fill, c.border, c.alignment = F_CELL, FILL_AVISO, BORDER, AL_WRAP
+        ws.row_dimensions[rr].height = max(ws.row_dimensions[rr].height or 15,
+                                           (-(-len(str(c.value)) // 78)) * 13 + 2)
+        rr += 1
+        return rr - 1
+
+    # ── Anti-duplicado del detalle de obra: RETIRADO a propósito ─────────────
+    # Hubo una versión que colapsaba el 2º bloque de una obra ya detallada en la
+    # hoja y lo sustituía por "la ficha y las valorizaciones están en Experiencia
+    # N". Se retiró porque BORRA EVIDENCIA: dos experiencias con el mismo CUI
+    # pueden resolver a obras DISTINTAS (`_fetch_obra` desambigua por la ventana
+    # del certificado), así que la referencia apuntaba a otra obra y a otro
+    # periodo — y una ficha sin valorizaciones quedaba renderizada como si las
+    # tuviera en otro sitio. Es exactamente "ausencia de dato tratada como
+    # evidencia", lo que el producto prohíbe.
+    # NO reintroducirlo a medias: hace falta clave (cui, codigo_infoobras),
+    # registrar QUÉ se pintó (con o sin tabla de valorizaciones) y exigir siempre
+    # igualdad de periodo. Va aparte, con su propio diseño.
 
     _EST_SUBOBRA = {
         "resuelto": "obra hallada en InfoObras",
@@ -541,6 +640,15 @@ def construir_hoja_profesional(
             rr += 1
         return rr - 1
 
+    def _ficha_sub(s: dict) -> dict:
+        """La ficha de una sub-obra CON el nombre garantizado: las fichas viejas no
+        lo guardan dentro de `ficha`, pero el nombre sí viaja en `obra.nombre_obra`."""
+        ficha = dict(s.get("ficha") or {})
+        if not ficha.get("obra_nombre"):
+            obra = s.get("obra") if isinstance(s.get("obra"), dict) else {}
+            ficha["obra_nombre"] = obra.get("nombre_obra")
+        return ficha
+
     def render_subexperiencias(n_exp, sub, ini, fin) -> None:
         """Cada obra HALLADA de un cert multi-obra como SubExperiencia FULL-WIDTH:
         encabezado + ficha InfoObras + TODAS sus valorizaciones (render_obra, igual
@@ -550,6 +658,7 @@ def construir_hoja_profesional(
         nonlocal r
         halladas = [s for s in (sub or []) if s.get("estado") == "resuelto"]
         for j, s in enumerate(halladas, 1):
+            ficha = _ficha_sub(s)
             via = _VIA_SUBOBRA.get(s.get("via") or "")
             cab = (f"SubExperiencia {n_exp}.{j}: {s.get('proyecto') or '—'}  "
                    f"(CUI {s.get('cui')})" + (f" — identificada {via}" if via else ""))
@@ -564,10 +673,10 @@ def construir_hoja_profesional(
             # el rango POR obra si el cert lo dio; si no, el periodo total del cert.
             oi = _fecha_iso(s.get("fecha_inicial")) or ini
             of = _fecha_iso(s.get("fecha_final")) or fin
-            r_right = render_obra(r_top2, s.get("ficha") or {}, oi, of)
+            r_right = render_obra(r_top2, ficha, oi, of)
             r = max(r, r_right + 1)
             # representante de obra (R:U) si la ficha lo trae
-            rep = (s.get("ficha") or {}).get("representante_obra")
+            rep = ficha.get("representante_obra")
             if rep:
                 r = max(r, render_representante(r_top2, rep) + 1)
             # cobertura del tiempo del cert para esta obra (si el cert dio rango por obra)
@@ -576,8 +685,10 @@ def construir_hoja_profesional(
                 ok = cob.get("cubierto")
                 pct = cob.get("pct")
                 ci, cf = cob.get("cert_ini"), cob.get("cert_fin")
+
                 def _dd(iso):
                     return f"{iso[8:10]}/{iso[5:7]}/{iso[0:4]}" if iso and len(iso) == 10 else "—"
+
                 base = f"Tiempo del cert para esta obra: {_dd(ci)} – {_dd(cf)}  →  "
                 txt = (base + f"{cob.get('nota') or 'no verificable'} — no se puede cruzar el tiempo"
                        if ok is None else
@@ -1109,16 +1220,26 @@ def construir_hoja_profesional(
 
         # lado derecho: ficha de la obra; si la experiencia está en revisión, un
         # bloque que lo explica (en vez de dejar la columna vacía).
+        # El aviso de revisión NO es excluyente con la obra: que el resolver haya
+        # propuesto una es justamente cuando más falta hace avisar que está sin
+        # confirmar (antes solo se pintaba si NO había obra → 40% de los avisos
+        # quedaban invisibles).
+        rev = revisiones.get((n_prof, n_exp))
+        motivo_rev, accion_rev = _motivo_accion(rev) if rev else (None, None)
         if fx and fx.get("sub_obras"):
             # cert multi-obra: la banda F:K muestra un RESUMEN (cuántas + no halladas);
             # el detalle full-width de cada obra hallada va como SubExperiencia debajo.
-            r_right = render_multi_obra(r_top, fx["sub_obras"], fx.get("multi_rubro"))
+            top = (r_top if not motivo_rev
+                   else render_aviso_revision(r_top, motivo_rev, accion_rev) + 1)
+            r_right = render_multi_obra(top, fx["sub_obras"], fx.get("multi_rubro"))
             r = max(r, r_right + 1)
         elif fx:
-            r_right = render_obra(r_top, fx, ini, fin)
+            top = (r_top if not motivo_rev
+                   else render_aviso_revision(r_top, motivo_rev, accion_rev) + 1)
+            r_right = render_obra(top, fx, ini, fin)
             r = max(r, r_right + 1)
-        elif (n_prof, n_exp) in revisiones:
-            r_right = render_revision(r_top, revisiones[(n_prof, n_exp)])
+        elif motivo_rev:
+            r_right = render_revision(r_top, motivo_rev, accion_rev)
             r = max(r, r_right + 1)
 
         # 3ª banda (M:P): emisor del certificado (SUNAT) + ALT04, al lado de valorizaciones
@@ -1333,7 +1454,14 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
         if (enr.get("obra_ficha") or enr.get("valorizaciones")
                 or enr.get("representante_obra") or enr.get("aprobacion_expediente")
                 or enr.get("verificacion_expediente")):
+            # `obra_ficha` NO trae el nombre (solo código/CUI/estado/monto/fechas);
+            # el nombre viaja suelto en `obra_nombre` (o en `obra.nombre_obra`) y sin
+            # esta línea nunca llegaba al Excel — el evaluador no podía ver con qué
+            # obra se emparejó el certificado.
+            _obra = enr.get("obra") if isinstance(enr.get("obra"), dict) else {}
             fichas[(np_, ne)] = {**(enr.get("obra_ficha") or {}),
+                                 "obra_nombre": (enr.get("obra_nombre")
+                                                 or _obra.get("nombre_obra")),
                                  "valorizaciones": enr.get("valorizaciones") or [],
                                  "modificaciones_plazo": enr.get("modificaciones_plazo") or [],
                                  "representante_obra": enr.get("representante_obra"),
