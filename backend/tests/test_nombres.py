@@ -14,8 +14,8 @@ from schemas.nombres import nombre_descarga, slug_concurso, slug_postor
 
 
 class _Job:
-    def __init__(self, analisis_id="", postor=""):
-        self.analisis_id, self.postor = analisis_id, postor
+    def __init__(self, analisis_id="", postor="", slug=None):
+        self.analisis_id, self.postor, self.slug = analisis_id, postor, slug
 
 
 # ── Pestañas ─────────────────────────────────────────────────────────────────
@@ -123,3 +123,21 @@ def test_nombre_descarga_distingue_postores_del_mismo_concurso():
 
 def test_nombre_descarga_sin_postor_no_deja_guion_colgando():
     assert nombre_descarga(_Job("cp01-2025-pucara", "")) == "Analisis_pucara.xlsx"
+
+
+def test_nombre_descarga_no_necesita_el_espejo():
+    """La descarga del ZIP nombra el archivo SIN abrir el espejo: leer MB de disco
+    para armar un string sería absurdo, y un espejo corrupto tumbaría una descarga
+    que por lo demás está completa. El slug viaja en el Job desde la ingesta."""
+    job = _Job("001-2025-MDH-CS1__IDC", "CONSORCIO VIAL", slug="huachocolpa")
+    assert nombre_descarga(job, None, "zip") == "Analisis_huachocolpa_cons-vial.zip"
+
+
+def test_slug_del_job_gana_sobre_la_heuristica_del_id():
+    assert slug_concurso(analisis_id="cp001-2025-mdh-x", slug="Huachocolpa") == "huachocolpa"
+
+
+def test_job_viejo_sin_slug_cae_a_la_heuristica():
+    """Los jobs anteriores a este cambio no tienen slug ni en el Job ni en el
+    espejo → siguen nombrándose por el analisis_id, como hasta ahora."""
+    assert nombre_descarga(_Job("cp001-2025-mdh-huachocolpa", "")) == "Analisis_huachocolpa.xlsx"

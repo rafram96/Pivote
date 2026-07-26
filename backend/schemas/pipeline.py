@@ -154,6 +154,10 @@ class Job(_ModelLax):
     aparte (no se embeben aquí para mantener el registro liviano)."""
     job_id: str
     analisis_id: str
+    # Nombre corto del concurso (`_meta.slug`), copiado del espejo al ingerir.
+    # Vive aquí para que nombrar una descarga NO obligue a leer el espejo entero
+    # de disco (son MB en propuestas grandes). Ver schemas/nombres.py.
+    slug: Optional[str] = None
     concurso_id: Optional[str] = None      # FK a Concurso (panel agrupa por esto)
     concurso: Optional[str] = None         # texto libre del espejo (_meta.concurso)
     postor: Optional[str] = None

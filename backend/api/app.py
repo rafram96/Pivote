@@ -832,7 +832,7 @@ def descargar_zip(job_id: str, tareas: BackgroundTasks):
             return JSONResponse(status_code=202, content=en_prep)
     # zip presente y NO se está descargando → completo (listas, o job previo) → servir
     return FileResponse(ruta, media_type="application/zip",
-                        filename=nombre_descarga(job, repo.cargar_espejo(job_id), "zip"))
+                        filename=nombre_descarga(job, ext="zip"))
 
 
 # ── Descarga por un solo CUI (sin correr un análisis) ────────────────────────

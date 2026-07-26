@@ -17,10 +17,12 @@ postores del MISMO concurso, y sin él los dos Excel colisionan en la carpeta de
 Descargas (el segundo cae como "… (1).xlsx").
 
 De dónde sale el slug del concurso, en orden:
-  1. `_meta.slug` — lo emite la skill, que es quien leyó las bases y sabe cuál es
-     el nombre corto con criterio. Es la vía buena.
-  2. heurística sobre el `analisis_id` — fallback para los espejos que no lo
-     traen (todos los anteriores a esta versión). Ver `_slug_desde_id`.
+  1. `job.slug` — el `_meta.slug` que la skill emitió, copiado al Job en la
+     ingesta. Se lee de ahí para NO tener que abrir el espejo (son MB en
+     propuestas grandes) solo para armar un nombre de archivo.
+  2. `_meta.slug` del espejo — para quien ya lo tenga cargado por otro motivo.
+  3. heurística sobre el `analisis_id` — fallback para los jobs anteriores a
+     esta versión, que no traen slug por ningún lado. Ver `_slug_desde_id`.
 
 Nada de esto toca los archivos en disco (siguen siendo `{job_id}.final.xlsx`):
 es solo el nombre que viaja en el `Content-Disposition`.
@@ -80,10 +82,12 @@ def _slug_desde_id(analisis_id: str, max_len: int = _MAX_SLUG) -> str:
     return _unir([t for t in tokens if t], max_len)
 
 
-def slug_concurso(espejo=None, analisis_id: str = "", max_len: int = _MAX_SLUG) -> str:
-    """Nombre corto del concurso: `_meta.slug` de la skill, o la heurística."""
+def slug_concurso(espejo=None, analisis_id: str = "", max_len: int = _MAX_SLUG,
+                  slug: str = "") -> str:
+    """Nombre corto del concurso: el slug de la skill (del Job o del espejo), o
+    la heurística sobre el `analisis_id`."""
     meta = espejo.get("_meta") or {} if isinstance(espejo, dict) else {}
-    explicito = str(meta.get("slug") or "").strip()
+    explicito = str(slug or meta.get("slug") or "").strip()
     if explicito:
         limpio = re.sub(r"[^a-z0-9-]+", "-", _sin_tildes(explicito).lower()).strip("-")
         if limpio:
@@ -107,9 +111,13 @@ def nombre_descarga(job, espejo=None, ext: str = "xlsx") -> str:
     """`Analisis_{concurso}_{postor}.{ext}` — el nombre que ve el evaluador.
 
     Excel y ZIP comparten nombre base (solo cambia la extensión) para que queden
-    juntos al ordenar la carpeta de Descargas."""
+    juntos al ordenar la carpeta de Descargas.
+
+    `espejo` es OPCIONAL: el Job ya trae `slug` y `postor`, así que quien no lo
+    tenga cargado (la descarga del ZIP) no debe leerlo de disco solo para esto."""
     meta = espejo.get("_meta") or {} if isinstance(espejo, dict) else {}
-    slug = slug_concurso(espejo, getattr(job, "analisis_id", "") or "")
+    slug = slug_concurso(espejo, getattr(job, "analisis_id", "") or "",
+                         slug=getattr(job, "slug", "") or "")
     postor = slug_postor(getattr(job, "postor", "") or str(meta.get("postor") or ""))
     partes = [p for p in ("Analisis", slug, postor) if p]
     return f"{'_'.join(partes)}.{ext}"
