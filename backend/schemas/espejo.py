@@ -90,6 +90,10 @@ FechaFlexible = Annotated[Optional[Union[date, str]], BeforeValidator(_coerce_fe
 # ── Meta ─────────────────────────────────────────────────────────────────────
 class Meta(_ModelLax):
     analisis_id: str = Field(min_length=1)
+    # Nombre CORTO del concurso para los archivos descargables ("huachocolpa").
+    # Lo elige la skill con criterio; si falta, el backend lo deduce del
+    # analisis_id (ver schemas/nombres.py).
+    slug: Optional[str] = None
     concurso: Optional[str] = None
     postor: Optional[str] = None
     version_contrato: Optional[str] = None
@@ -152,12 +156,14 @@ class Backend(_ModelLax):
     alerta_experiencia_antigua: Optional[str] = None
 
 
-# Sub-proyecto de un cert MULTI-OBRA: un cert de rol de gestión/portafolio lista N
-# obras bajo un mismo vínculo continuo, cada una con su CUI. El tiempo se cuenta una
-# sola vez (el periodo de la experiencia); estas obras las verifica el backend por
-# código, cada una por separado. Genérico (no atado a un formato de cert).
+# Sub-obra de un cert MULTI-OBRA: N obras bajo un mismo vínculo continuo. Dos formas:
+# (a) el cert las ENUMERA, casi siempre con su CUI (rol de gestión/portafolio);
+# (b) un NOMBRE COMPUESTO las encadena bajo una etiqueta de paquete, normalmente SIN
+# ningún CUI (paquete de inversión). El tiempo se cuenta una sola vez (el periodo de
+# la experiencia); estas obras las verifica el backend una por una — por su código si
+# lo hay, si no por nombre. Genérico (no atado a un formato de cert).
 class SubObra(_Model):
-    proyecto: Optional[str] = None    # nombre del sub-proyecto/obra
+    proyecto: Optional[str] = None    # nombre del sub-proyecto/obra, ya desglosado y limpio
     cui: Optional[str] = None         # CUI/SNIP del sub-proyecto (solo dígitos) o None
     # SOLO si el cert consigna el rango de tiempo POR obra (además del total del
     # vínculo). Habilita el cruce de cobertura por sub-obra; si no, None.

@@ -1,9 +1,25 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-07-23** · rama de trabajo: `sonda/refactor-cui`
+> Última actualización: **2026-07-26** · rama de trabajo:
+> `rafram96/issue-32-embeber-el-factor-2`
 
 ## Terminado y validado (sin desplegar)
 
+- **Issue #32 — factor de evaluación al final de cada hoja P** (`17b1e04`):
+  cierra el punto 2 del feedback del 28-jul. Verificado e2e con PDFs
+  sintéticos; **falta la corrida sobre un job real**. Toca skill (prompt
+  `agent-bases`, consolidador, `extraer_certificados.js`) y backend
+  (`excel_final.py`), pero es compatible en ambos sentidos de despliegue: un
+  `P{n}_FACTOR.pdf` que llegue a un backend viejo se ignora, y un backend nuevo
+  sin el archivo genera la hoja como antes. Arrastra un fix:
+  `regenerar_excel_final` conservaba cero imágenes.
+- **Issue #30 — emisor del certificado en SUNAT** (rama
+  `rafram96/issue-30-mostrar-representante-legal`): representantes legales +
+  información histórica (`getinfHis`, sondeada 25-jul) en el bloque emisor del
+  Excel, con la respuesta calculada a "¿estaba HABIDO al emitir y durante la
+  obra?" en el título del campo. Cuadro histórico nuevo en R:U (representante
+  de obra corrido a W:Z). Una consulta por RUC por job. 276 tests verdes +
+  prueba en vivo contra 6 RUCs. **Pendiente: render en el panel.**
 - **Refactor del resolver de CUI (T-008)** — rama `sonda/refactor-cui`, 13
   commits (`a732936…f2bde36`): base local MEF + público-primero + vetos de
   identidad + candados de abstención + camino A/B. Golden 277 casos: errores
@@ -21,8 +37,8 @@
 
 ## En progreso
 
-- **Issue #31 — candado cargo↔bases (ADR-012)**, rama
-  `rafram96/issue-31-no-detecta-cargo`: `backend/validacion/cargo_nucleo.py`
+- **Issue #31 — candado cargo↔bases (ADR-012)**, mergeado a `demo` el
+  2026-07-26: `backend/validacion/cargo_nucleo.py`
   exige el núcleo de especialidad COMPLETO (OR entre alternativas, AND dentro)
   y usa las funciones como segunda puerta; marca rojo/amarillo en el Excel sin
   tocar el formato ni el cómputo de días. Replay: 15 rojas + 116 amarillas

@@ -60,14 +60,15 @@ const ExperienciaPostor = z.object({
 
 const Backend = z.object({}).passthrough();
 
-// Cert con VARIOS sub-proyectos bajo un mismo vínculo continuo (rol de gestión/
-// portafolio, p. ej. "gestión de proyectos de inversión"): 1 experiencia (1
-// periodo) que abarca N obras, cada una con su CUI. El TIEMPO se cuenta una sola
-// vez (el periodo de la experiencia); estas obras son para que el backend verifique
-// cada CUI por separado. Genérico: sirve a cualquier constancia que liste obras con
-// su código, no a un formato específico.
+// Cert con VARIAS obras bajo un mismo vínculo continuo: 1 experiencia (1 periodo)
+// que abarca N obras. Dos formas: (a) el cert las ENUMERA, casi siempre con su CUI
+// (rol de gestión/portafolio); (b) un NOMBRE COMPUESTO las encadena bajo una
+// etiqueta de paquete, normalmente SIN ningún CUI (paquete de inversión). El TIEMPO
+// se cuenta una sola vez (el periodo de la experiencia); estas obras son para que el
+// backend verifique cada una por separado — por su código si lo hay, si no por
+// nombre. Genérico: no atado a un formato de certificado.
 const SubObra = z.object({
-  proyecto: txt,                 // nombre del sub-proyecto/obra
+  proyecto: txt,                 // nombre del sub-proyecto/obra, ya desglosado y limpio
   cui: txt,                      // CUI/SNIP del sub-proyecto (solo dígitos), o null si no lo cita
   // SOLO si el cert consigna el rango de tiempo POR obra (además del total del
   // vínculo). Habilita el cruce de cobertura por sub-obra; si no, null.
@@ -170,7 +171,9 @@ const Observacion = z.object({
 }).passthrough();
 
 const JsonEspejo = z.object({
-  _meta: z.object({ analisis_id: z.string().min(1) }).passthrough(),
+  // `slug`: nombre CORTO del concurso ("huachocolpa") para los archivos que
+  // descarga el evaluador. Lo elige el orquestador (ver SKILL.md, Paso 4).
+  _meta: z.object({ analisis_id: z.string().min(1), slug: txt }).passthrough(),
   postor: z.object({
     detalle: txt,
     formularios: z.array(Formulario).default([]),

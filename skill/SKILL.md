@@ -145,6 +145,20 @@ propenso a errores en propuestas grandes):
   del TDR (`requisitos.folio`, de las bases) y el Anexo 16 (`folio_anexo`, de la
   propuesta) → `P{n}_TDR.pdf` / `P{n}_ANEXO.pdf`; el backend los embebe **antes de
   las experiencias** en la hoja del profesional.
+  **Factor de evaluación:** además recorta la página del Cuadro de Factores
+  (`_meta.pagina_factores`, que puso `agent-bases`) → `P{n}_FACTOR.pdf`; el backend
+  la embebe **al final** de cada hoja, como baremo a la mano. Si el script avisa
+  `⚠ sin _meta.pagina_factores` o `fuera del rango`, agrega una observación
+  `severidad: warning` al espejo: el Excel saldrá sin ese recorte.
+
+Al armar `_meta`, pon también **`slug`**: el nombre CORTO del concurso, el que un
+evaluador usaría para referirse a él de palabra — normalmente el distrito o la
+obra, **sin** el código del procedimiento, sin el año y sin la sigla de la entidad
+(`CP N° 001-2025-MDH — Huachocolpa` → `"huachocolpa"`; `CP-02-2025 Essalud
+Vitarte` → `"essalud-vitarte"`). Minúsculas, palabras unidas con `-`, ≤24 chars.
+Con eso el backend nombra los archivos que descarga el Comité
+(`Analisis_huachocolpa_cons-vial.xlsx`); si lo omites, lo deduce del `analisis_id`
+y suele salir peor.
 
 Persiste todo en `~/InfoObras/analisis/<analisis_id>/`.
 

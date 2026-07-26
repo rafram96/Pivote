@@ -24,7 +24,8 @@ from typing import Callable, Optional
 
 from schemas import pipeline
 from validacion import anotar_cargo_nucleo, verificar_espejo
-from resolucion import ConsultaInfoObras, resolver_con_dedup, resolver_obras
+from resolucion import (ConsultaInfoObras, resolver_con_dedup, resolver_obras,
+                        rubros_mixtos)
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
 from entregables import desempaquetar_enriquecimiento, generar_excel_final, mapear_certificados
 from .etapas import Contexto, EtapaIngesta, EtapaStub
@@ -235,15 +236,41 @@ class EtapaResolucionCuiReal:
                 # su CUI. El "identificador" de la experiencia es su portafolio, no un
                 # CUI único → NO va a "Por confirmar". Se verifica cada sub-obra por
                 # código (determinístico) y se guarda la lista para el Excel/panel.
-                sub = resolver_obras(e.get("obras"), consulta, base=base)
+                sub = resolver_obras(e.get("obras"), consulta, base=base, exp_madre=e)
                 n_res = sum(1 for s in sub if s.get("estado") == "resuelto")
-                ctx.enriquecimiento[_clave(np_, ne)] = {
-                    "cui": None, "via": "MULTI_OBRA", "obra": None, "sub_obras": sub}
+                enr_mo = {"cui": None, "via": "MULTI_OBRA", "obra": None,
+                          "sub_obras": sub}
+                # CANDADO MULTI-RUBRO (ADR-011 · P1): sub-obras de especialidades
+                # distintas y NINGÚN desglose de tiempo por obra → cuánto tiempo
+                # corresponde a cada especialidad es genuinamente indecidible sin
+                # anexo. Se SEÑALA para que lo confirme un humano; NO se bloquea el
+                # cómputo: los días son del vínculo y viven en la experiencia madre
+                # (el ADR es explícito). Si el cert declaró las sub-fechas de TODAS
+                # las obras (Escenario B), el desglose existe y no hay nada que
+                # confirmar; con solo algunas, sigue siendo ambiguo.
+                mix = rubros_mixtos(e.get("obras") or [])
+                con_sub_fechas = all(o.get("fecha_inicial") and o.get("fecha_final")
+                                     for o in (e.get("obras") or []))
+                if mix and not con_sub_fechas:
+                    enr_mo["multi_rubro"] = sorted(mix)
+                    obs.append(pipeline.Observacion(
+                        codigo="MULTI_RUBRO", severidad=pipeline.Severidad.ADVERTENCIA,
+                        mensaje="Por confirmar — el certificado agrupa obras de "
+                                f"especialidades distintas ({', '.join(sorted(mix))}) "
+                                "y no declara el tiempo de cada una: para repartir la "
+                                "experiencia por especialidad se necesita el anexo de "
+                                "desglose. El tiempo total del vínculo no cambia.",
+                        origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+                ctx.enriquecimiento[_clave(np_, ne)] = enr_mo
                 ok += 1
+                # PARCIAL (1 de N): la experiencia cuenta igual —su respaldo es el
+                # certificado— pero el conteo deja la brecha a la vista (ADR-011).
+                sev = (pipeline.Severidad.INFO if n_res == len(sub)
+                       else pipeline.Severidad.ADVERTENCIA)
                 obs.append(pipeline.Observacion(
-                    codigo="MULTI_OBRA", severidad=pipeline.Severidad.INFO,
+                    codigo="MULTI_OBRA", severidad=sev,
                     mensaje=f"experiencia multi-obra ({len(sub)} sub-proyectos): "
-                            f"{n_res} verificado(s) en InfoObras por su código",
+                            f"{n_res} de {len(sub)} identificada(s) en InfoObras",
                     origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
             else:
                 pendientes.append((e, (np_, ne)))
@@ -301,7 +328,9 @@ class EtapaResolucionCuiReal:
 
         total = len(pares)
         estado = EE.OK_CON_REVISION if rev else EE.OK
-        return _res(self.nombre, estado, _met(total, ok, rev))
+        # `obs` SÍ viaja: MULTI_OBRA / PROBABLE / PRIVADA se acumulaban y se perdían
+        # en el return (quedaban solo en el enriquecimiento, invisibles en el job).
+        return _res(self.nombre, estado, _met(total, ok, rev), obs)
 
 
 # ── 3a · Consulta a InfoObras (paralizaciones + descargas) ───────────────────
@@ -812,13 +841,34 @@ def _elegir_match_exacto(nombre: str, matches: list) -> Optional[dict]:
     return None
 
 
+def _evaluar_habido_emisor(hist, emp, e: dict, ini) -> Optional[dict]:
+    """¿El emisor estaba HABIDO el día que emitió el certificado y durante la
+    obra que certifica? (issue #30, punto 4).
+
+    Cruza el histórico de condición con la fecha de emisión y con el periodo de
+    la experiencia. Devuelve None si no hay histórico que cruzar; dentro, cada
+    respuesta puede quedar en `ok=None` cuando el dato no alcanza.
+    """
+    if hist is None:
+        return None
+    from scraping.sunat import evaluar_habido
+    return evaluar_habido(
+        hist.condiciones,
+        fecha_emision=_fecha_iso(e.get("fecha_emision")),
+        ini=ini, fin=_fecha_iso(e.get("fecha_final")),
+        condicion_actual=getattr(emp, "condicion", None),
+    )
+
+
 class EtapaSunatReal:
     nombre = E.SUNAT
 
     def __init__(self, consultor: Optional[Callable] = None,
-                 buscador: Optional[Callable] = None):
+                 buscador: Optional[Callable] = None,
+                 extras: Optional[Callable] = None):
         self._consultor = consultor
         self._buscador = buscador
+        self._extras = extras
 
     def _consultar(self, ruc: str):
         if self._consultor:
@@ -832,10 +882,19 @@ class EtapaSunatReal:
         from scraping.sunat import buscar_por_razon_social
         return buscar_por_razon_social(nombre)
 
+    def _consultar_extras(self, ruc: str) -> tuple[list, object]:
+        """Las dos consultas informativas del emisor (issue #30): representantes
+        legales e información histórica. Devuelve (representantes, historico)."""
+        if self._extras:
+            return self._extras(ruc)
+        from scraping.sunat import consultar_historico, consultar_representantes
+        return consultar_representantes(ruc), consultar_historico(ruc)
+
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
         ok = err = rev = 0
         obs: list[pipeline.Observacion] = []
         cache: dict[str, object] = {}
+        cache_extra: dict[str, tuple] = {}   # ruc → (representantes, historico)
         total = 0
         postor_rucs = _rucs_postor(ctx.espejo)
 
@@ -906,6 +965,15 @@ class EtapaSunatReal:
                 err += 1
                 continue
             ok += 1
+            # Consultas informativas del emisor (una vez por RUC, no por
+            # experiencia): representantes legales + información histórica.
+            try:
+                reps, hist = (cache_extra[ruc] if ruc in cache_extra
+                              else cache_extra.setdefault(ruc, self._consultar_extras(ruc)))
+            except Exception as ex:  # noqa: BLE001 — informativo, no debe tumbar la etapa
+                logger.warning("SUNAT extras %s: %r", ruc, ex)
+                reps, hist = [], None
+
             enr = ctx.enriquecimiento.get(k) or {}
             fins = getattr(emp, "fecha_inscripcion", None)
             ini_act = getattr(emp, "fecha_inicio_actividades", None)
@@ -920,6 +988,13 @@ class EtapaSunatReal:
                 "domicilio_fiscal": getattr(emp, "domicilio_fiscal", None),
                 "fecha_inicio_actividades": ini_act.isoformat() if ini_act else None,
                 "actividades_economicas": getattr(emp, "actividades_economicas", None) or [],
+                # informativo (issue #30): representantes legales del emisor.
+                # SIN veredicto de firmante — ADR-008 descartó ALT-12.
+                "representantes": [r.to_dict() for r in (reps or [])],
+                # información histórica + la pregunta que le importa al evaluador:
+                # ¿estaba HABIDO al emitir el certificado y durante la obra?
+                "historico": hist.to_dict() if hist else None,
+                "habido": _evaluar_habido_emisor(hist, emp, e, ini),
             }
             ctx.enriquecimiento[k] = enr
             if fins and ini and fins > ini:
@@ -1127,8 +1202,8 @@ class EtapaExcelReal:
 # ── juego completo ───────────────────────────────────────────────────────────
 
 def etapas_reales(dir_datos: Path, *, consulta_cui=None, fetcher_infoobras=None,
-                  consultor_sunat=None, buscador_sunat=None, descargar=None,
-                  verificador_mef=None):
+                  consultor_sunat=None, buscador_sunat=None, extras_sunat=None,
+                  descargar=None, verificador_mef=None):
     """Las 8 etapas de la demo. Los parámetros inyectables son para tests;
     en producción quedan los clientes en vivo."""
     return [
@@ -1137,7 +1212,8 @@ def etapas_reales(dir_datos: Path, *, consulta_cui=None, fetcher_infoobras=None,
         EtapaResolucionCuiReal(consulta=consulta_cui),
         EtapaInfoObrasReal(fetcher=fetcher_infoobras, dir_descargas=Path(dir_datos),
                            descargar=descargar, verificador_mef=verificador_mef),
-        EtapaSunatReal(consultor=consultor_sunat, buscador=buscador_sunat),
+        EtapaSunatReal(consultor=consultor_sunat, buscador=buscador_sunat,
+                       extras=extras_sunat),
         EtapaReglasReal(),
         EtapaExcelReal(Path(dir_datos)),
         EtapaStub(E.PERSISTENCIA),

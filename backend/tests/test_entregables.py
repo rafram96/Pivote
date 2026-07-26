@@ -12,6 +12,7 @@ import openpyxl
 import pytest
 
 from entregables import construir_zip_infoobras, generar_excel_final, inventariar
+from schemas.cargo import etiqueta_hoja
 from reglas import dias_efectivos_profesional
 
 RAIZ = Path(__file__).resolve().parents[2]
@@ -57,8 +58,10 @@ def test_excel_final_estructura_de_hojas(tmp_path):
     wb = openpyxl.load_workbook(salida)
     assert wb.sheetnames[0] == "CLAUDE"
     assert wb.sheetnames[1] == "Base de Datos"
-    assert wb.sheetnames[2].startswith("P1 ")
-    assert wb.sheetnames[3].startswith("P2 ")
+    # Pestañas cortas: prefijo genérico fuera, cada palabra a la mitad, Title Case.
+    # "Jefe" se conserva (jerarquía); "ESP." no (todos son especialistas).
+    assert wb.sheetnames[2] == "P1. Jefe Superv"
+    assert wb.sheetnames[3] == "P2. Estruc"
 
 
 def test_excel_final_base_datos_con_filtro_y_colores(tmp_path):
@@ -76,7 +79,7 @@ def test_excel_final_base_datos_con_filtro_y_colores(tmp_path):
 
 def test_excel_final_hoja_profesional_cuadro_de_hitos(tmp_path):
     salida = generar_excel_final(ESPEJO, tmp_path / "final.xlsx", PARALIZACIONES)
-    ws = openpyxl.load_workbook(salida)["P1 JEFE DE SUPERVISIÓN"]
+    ws = openpyxl.load_workbook(salida)[etiqueta_hoja(1, "JEFE DE SUPERVISIÓN")]
     celdas = [str(c.value) for fila in ws.iter_rows() for c in fila if c.value is not None]
     texto = "\n".join(celdas)
 
@@ -107,7 +110,7 @@ def test_excel_final_muestra_periodos_sin_valorizacion(tmp_path):
         {"inicio": date(2022, 1, 1), "fin": date(2022, 3, 31), "tipo": "sin_valorizacion"},
     ]}
     salida = generar_excel_final(ESPEJO, tmp_path / "final.xlsx", paral)
-    ws = openpyxl.load_workbook(salida)["P1 JEFE DE SUPERVISIÓN"]
+    ws = openpyxl.load_workbook(salida)[etiqueta_hoja(1, "JEFE DE SUPERVISIÓN")]
     texto = "\n".join(str(c.value) for f in ws.iter_rows() for c in f if c.value)
     assert "Paralización 1 de la obra (InfoObras)" in texto
     assert "Sin valorización 1 — obra parada (InfoObras)" in texto
@@ -138,7 +141,7 @@ def test_excel_final_valorizaciones_resalta_solo_meses_del_certificado(tmp_path)
         ],
     }}
     salida = generar_excel_final(espejo, tmp_path / "v.xlsx", fichas=fichas)
-    ws = openpyxl.load_workbook(salida)["P1 JEFE"]
+    ws = openpyxl.load_workbook(salida)[etiqueta_hoja(1, "JEFE")]
 
     color = {}
     for fila in ws.iter_rows():
@@ -161,7 +164,7 @@ def test_excel_final_valorizaciones_resalta_solo_meses_del_certificado(tmp_path)
 
 def test_excel_final_fechas_no_computables_quedan_anotadas(tmp_path):
     salida = generar_excel_final(ESPEJO, tmp_path / "final.xlsx", PARALIZACIONES)
-    ws = openpyxl.load_workbook(salida)["P2 ESP. ESTRUCTURAS"]
+    ws = openpyxl.load_workbook(salida)[etiqueta_hoja(2, "ESP. ESTRUCTURAS")]
     texto = "\n".join(str(c.value) for fila in ws.iter_rows() for c in fila if c.value)
     assert "no computables" in texto
 
@@ -386,6 +389,94 @@ def test_hoja_profesional_emisor_sin_anomalia():
     assert "HABIDO" in texto and "SOCIEDAD ANONIMA CERRADA" in texto
 
 
+def test_hoja_profesional_representantes_e_historico_del_emisor():
+    """Issue #30: el cuadro del emisor lista los representantes legales y responde
+    —en el TÍTULO del campo— si estaba habido al emitir y durante la obra; el
+    histórico va en un cuadro contiguo (R:U) y el representante de obra se corre
+    a W:Z."""
+    import openpyxl
+    from entregables.excel_final import construir_hoja_profesional
+
+    ws = openpyxl.Workbook().active
+    prof = {"n_prof": 1, "cargo": "ESP", "nombre": "N", "experiencias": [
+        {"n": 1, "proyecto": "Obra Z", "fecha_inicial": "2021-05-13",
+         "fecha_final": "2023-05-06", "fecha_emision": "2023-06-01",
+         "ruc_emisor": "20512345678"}]}
+    fichas = {(1, 1): {"cui": "2418877", "valorizaciones": [],
+                       "representante_obra": {"contratistas": [
+                           {"nombre_empresa": "EJECUTORA SAC", "ruc": "20111111111"}]}}}
+    sunat = {(1, 1): {
+        "ruc": "20512345678", "razon_social": "CONSTRUCTORA X SAC",
+        "fecha_inscripcion": "2010-01-05", "estado": "ACTIVO", "condicion": "HABIDO",
+        "representantes": [
+            {"tipo_documento": "CE", "nro_documento": "001748034",
+             "nombre": "ZHANG XIA", "cargo": "APODERADO", "fecha_desde": "2020-08-17"},
+            {"tipo_documento": "CE", "nro_documento": "002143422",
+             "nombre": "LI WENXUE", "cargo": "APODERADO", "fecha_desde": "2020-12-09"}],
+        "historico": {"razones_sociales": [
+            {"nombre": "CONSTRUCTORA X EIRL", "fecha_baja": "2016-05-04"}],
+            "domicilios": [{"direccion": "JR. AREQUIPA 55", "fecha_baja": "2016-05-04"}]},
+        "habido": {
+            "emision": {"fecha": "2023-06-01", "condicion": "HABIDO", "ok": True},
+            "periodo": {"desde": "2021-05-13", "hasta": "2023-05-06",
+                        "tramos": [
+                            {"condicion": "HABIDO", "desde": "2021-05-13", "hasta": "2022-06-30"},
+                            {"condicion": "NO HABIDO", "desde": "2022-07-01", "hasta": "2022-09-30"}],
+                        "tramos_no_habido": [
+                            {"condicion": "NO HABIDO", "desde": "2022-07-01", "hasta": "2022-09-30"}],
+                        "ok": False}}}}
+    construir_hoja_profesional(ws, prof, {}, {}, fichas, {}, sunat)
+
+    celdas = {c.coordinate: str(c.value) for row in ws.iter_rows() for c in row if c.value}
+    texto = "\n".join(celdas.values())
+
+    # representantes: todos, con cargo y fecha desde — y SIN cruce con el firmante
+    assert "Representantes legales (SUNAT)" in texto
+    assert "ZHANG XIA" in texto and "LI WENXUE" in texto
+    assert "APODERADO" in texto and "17/08/20" in texto
+    assert "ALT12" not in texto and "firmante" not in texto
+
+    # la pregunta va en el TÍTULO del campo, no solo en el valor
+    assert any(v.startswith("¿Estaba habido al emitir el certificado?")
+               for v in celdas.values())
+    assert any(v.startswith("¿Estuvo habido durante la obra?") for v in celdas.values())
+    assert "NO — NO HABIDO 01/07/22–30/09/22" in texto
+
+    # cuadro histórico contiguo: arranca en R (col 18), en la misma fila que el emisor
+    emisor = next(k for k, v in celdas.items() if v == "EMISOR DEL CERTIFICADO (SUNAT)")
+    hist = next(k for k, v in celdas.items() if v == "HISTÓRICO SUNAT DEL EMISOR")
+    assert emisor[0] == "M" and hist[0] == "R"
+    assert emisor[1:] == hist[1:], "los dos cuadros del emisor arrancan en la misma fila"
+    assert "CONSTRUCTORA X EIRL" in texto and "JR. AREQUIPA 55" in texto
+
+    # el representante de obra (InfoObras) se corrió a W:Z
+    rep_obra = next(k for k, v in celdas.items() if v == "REPRESENTANTE DE OBRA (InfoObras)")
+    assert rep_obra[0] == "W"
+
+
+def test_hoja_profesional_sin_historico_no_dibuja_el_cuadro():
+    """Emisor sin información histórica: no se dibuja el cuadro contiguo (queda
+    'no verificable' en el campo del emisor) y no se rompe nada."""
+    import openpyxl
+    from entregables.excel_final import construir_hoja_profesional
+
+    ws = openpyxl.Workbook().active
+    prof = {"n_prof": 1, "cargo": "ESP", "nombre": "N", "experiencias": [
+        {"n": 1, "proyecto": "Obra W", "fecha_inicial": "2020-01-01",
+         "fecha_final": "2021-01-01", "ruc_emisor": "20512345678"}]}
+    sunat = {(1, 1): {"ruc": "20512345678", "razon_social": "EMPRESA OK",
+                      "fecha_inscripcion": "2010-05-10", "estado": "ACTIVO",
+                      "condicion": "HABIDO", "representantes": [], "historico": None,
+                      "habido": None}}
+    construir_hoja_profesional(ws, prof, {}, {}, {(1, 1): {"valorizaciones": []}}, {}, sunat)
+
+    texto = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
+    assert "HISTÓRICO SUNAT DEL EMISOR" not in texto
+    assert "Representantes legales" not in texto
+    assert "¿Estaba habido al emitir y durante la obra?" in texto
+    assert "Sin información histórica en SUNAT" in texto
+
+
 # ── Hoja CLAUDE: formato de Manuel (blanco + verde/rojo semántico) ─────────────
 
 def test_clasificar_veredicto_polaridad():
@@ -464,3 +555,86 @@ def test_excel_final_requisitos_lista_no_crashea(tmp_path):
     rows = {str(row[0].value or ""): row[1].value for row in ws.iter_rows(min_col=1, max_col=2)}
     cargos = next((rows[k] for k in rows if "CARGOS VÁLIDOS" in k), None)
     assert cargos == "Residente de obra; Jefe de obra; Supervisor de obra"
+
+
+# ── Factor de evaluación embebido al final de la hoja (issue #32) ────────────
+
+_ESPEJO_FACTOR = {
+    "_meta": {"pagina_factores": 48},
+    "postor": {},
+    "profesionales": [{
+        "n_prof": 1, "cargo": "ESPECIALISTA EN ARQUITECTURA", "nombre": "JUANA",
+        "colegiatura": "CAP 1",
+        "experiencias": [{"n": 1, "proyecto": "Hospital X", "fecha_inicial": "2019-01-01",
+                          "fecha_final": "2020-01-01", "entidad_emisora": "GR",
+                          "cargo_ocupado": "Arquitecta"}],
+    }],
+    "resumen_evaluacion": {"factores": []},
+}
+
+
+def _pdf_una_pagina(destino: Path, texto: str) -> Path:
+    """PDF mínimo de 1 página, con PyMuPDF — el mismo motor con el que el generador
+    rasteriza los recortes."""
+    fitz = pytest.importorskip("fitz")
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 100), texto)
+    doc.save(str(destino))
+    doc.close()
+    return destino
+
+
+def _fila_de(ws, texto: str) -> int:
+    """Nº de fila cuya columna A empieza con `texto` (0 si no está)."""
+    return next((c.row for (c,) in ws.iter_rows(min_col=1, max_col=1)
+                 if str(c.value or "").startswith(texto)), 0)
+
+
+def test_excel_final_embebe_factor_al_final(tmp_path):
+    """El recorte del Cuadro de Factores cierra la hoja del profesional, DESPUÉS de
+    la PARTE 5 — y sin pisarla."""
+    factor = _pdf_una_pagina(tmp_path / "factor.pdf", "4.2 FACTORES DE EVALUACION")
+    salida = generar_excel_final(_ESPEJO_FACTOR, tmp_path / "factor.xlsx",
+                                 certificados={(1, "FACTOR"): factor})
+    ws = next(s for s in openpyxl.load_workbook(salida).worksheets if s.title.startswith("P1"))
+
+    fila_banda = _fila_de(ws, "FACTOR DE EVALUACIÓN")
+    fila_anios = _fila_de(ws, "AÑOS EFECTIVOS")
+    # (1) el recorte está, y (2) va DESPUÉS de la PARTE 5 (al final, no al inicio)
+    assert fila_banda > 0 and fila_anios > 0
+    assert fila_banda > fila_anios
+    # (3) REGRESIÓN del `r += 2`: la PARTE 5 deja `r` EN su última fila, así que sin
+    # el salto la banda se mergea encima y openpyxl la absorbe SIN error — el Excel
+    # sale válido pero con "AÑOS EFECTIVOS" pisado y el número huérfano en la col. S.
+    # Por eso NO basta con contar imágenes: hay que exigir que la fila sobreviva.
+    assert isinstance(ws.cell(fila_anios, 19).value, (int, float))
+    assert len(ws._images) == 1
+
+
+def test_excel_final_sin_factor_no_cambia_la_hoja(tmp_path):
+    """Corrida sin el recorte (agent-bases no capturó la página): la hoja sale igual
+    que siempre, sin imagen ni banda — no se rompe la generación."""
+    salida = generar_excel_final(_ESPEJO_FACTOR, tmp_path / "sin_factor.xlsx")
+    ws = next(s for s in openpyxl.load_workbook(salida).worksheets if s.title.startswith("P1"))
+    assert _fila_de(ws, "FACTOR DE EVALUACIÓN") == 0
+    assert _fila_de(ws, "AÑOS EFECTIVOS") > 0
+    assert not ws._images
+
+
+def test_regenerar_excel_final_conserva_los_embeds(tmp_path):
+    """Regresión: `regenerar_excel_final` no pasaba `certificados`, así que el
+    backfill dejaba el entregable SIN ninguna imagen (constancias, TDR, Anexo). Ahora
+    mapea la carpeta `certs/` hermana del Excel."""
+    from entregables import regenerar_excel_final
+
+    job = tmp_path / "job-1"
+    (job / "certs").mkdir(parents=True)
+    _pdf_una_pagina(job / "certs" / "P1_FACTOR.pdf", "4.2 FACTORES")
+    _pdf_una_pagina(job / "certs" / "P1_E1.pdf", "CONSTANCIA")
+
+    salida = regenerar_excel_final(_ESPEJO_FACTOR, {}, job / "final.xlsx")
+    ws = next(s for s in openpyxl.load_workbook(salida).worksheets if s.title.startswith("P1"))
+    assert len(ws._images) == 2        # constancia de la experiencia + factor
+    fila_anios = _fila_de(ws, "AÑOS EFECTIVOS")
+    assert fila_anios > 0
+    assert _fila_de(ws, "FACTOR DE EVALUACIÓN") > fila_anios

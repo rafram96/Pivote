@@ -273,6 +273,9 @@ const espejo = {
     entidad: pick(bases.metadata_concurso && bases.metadata_concurso.entidad),
     entidad_ruc: pick(bases.metadata_concurso && bases.metadata_concurso.entidad_ruc),
     cui: pick(bases.metadata_concurso && bases.metadata_concurso.cui),
+    // página del PDF de bases con el Cuadro de Factores (4.2 A) → recorte que el
+    // backend embebe al final de cada hoja de profesional (issue #32).
+    pagina_factores: pick(bases.metadata_concurso && bases.metadata_concurso.pagina_factores),
     postor: pick(P.postor, P.nombre, (roster.postor_nivel || {}).postor),
     postor_ruc: pick(P.postor_ruc, P.ruc, (roster.postor_nivel || {}).postor_ruc),
     fecha_presentacion_oferta: pick(P.fecha_presentacion_oferta),

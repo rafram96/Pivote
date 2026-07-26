@@ -14,6 +14,7 @@ import pytest
 
 from orquestador import Motor, RepositorioMemoria
 from orquestador.etapas_reales import etapas_reales
+from schemas.cargo import etiqueta_hoja
 from schemas.pipeline import Etapa, EstadoEtapa, JobEstado
 
 # ── espejo sintético: 2 profesionales, 3 experiencias ────────────────────────
@@ -65,7 +66,13 @@ class ConsultaFake:
             return [{"nombrObra": "MEJORAMIENTO DEL HOSPITAL MATERNO DE AMBO",
                      "nombrDepartamento": "HUANUCO", "codSnip": "395001",
                      "codigoObra": 222, "rucEjecutor": "", "rucSupervisor": "20512345678"}]
-        return []  # Quisqui: sin candidatos → REVISIÓN
+        if "SULLANA" in nombre.upper():
+            # sub-obra 1 del paquete HV: SÍ está en InfoObras, resoluble por nombre
+            return [{"nombrObra": "MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL "
+                                  "HOSPITAL DE APOYO SULLANA II-2",
+                     "nombrDepartamento": "PIURA", "codUniqInv": "2595123",
+                     "codigoObra": 444, "rucEjecutor": "", "rucSupervisor": ""}]
+        return []  # Quisqui y Posope Alto: sin candidatos → REVISIÓN
 
 
 @dataclass
@@ -105,6 +112,10 @@ def fetcher_fake(cui):
     if cui == "395001":
         # cubre el periodo certificado (2019-11 → 2023-03), sin paralización
         return ObraFake(222, "HOSPITAL MATERNO AMBO", avances=_meses((2019, 11), (2023, 3)))
+    if cui == "2595123":
+        # sub-obra 1 del paquete HV: valorizaciones que cubren el vínculo del cert
+        return ObraFake(444, "HOSPITAL DE APOYO SULLANA II-2",
+                        avances=_meses((2022, 3), (2023, 7)))
     if cui == "777999":
         # CUI pegado a mano por el humano → resuelve a una obra que cubre su cert
         # (Quisqui: 2023-11-22 → 2025-07-22)
@@ -118,11 +129,17 @@ class EmpresaFake:
     razon_social: str
     fecha_inscripcion: date
     estado: str = "ACTIVO"
+    condicion: str = "HABIDO"   # la de la ficha: cubre lo posterior al histórico
 
 
 def consultor_fake(ruc):
     # constituida DESPUÉS del inicio de la experiencia (2019-11-04) → ALT04
     return EmpresaFake(ruc, "CONSORCIO X SAC", date(2020, 6, 1))
+
+
+# Las consultas informativas del emisor (representantes + histórico) salen a la
+# red: los tests offline las anulan con este stub.
+SIN_EXTRAS_SUNAT = lambda ruc: ([], None)  # noqa: E731
 
 
 def hacer_motor(tmp_path):
@@ -180,7 +197,7 @@ def test_flujo_real_completo_con_revision_humana(tmp_path):
     # Excel final regenerado CON las paralizaciones en la hoja de hitos
     ruta = tmp_path / job.job_id / "final.xlsx"
     assert ruta.exists()
-    ws = openpyxl.load_workbook(ruta)["P1 JEFE DE SUPERVISIÓN"]
+    ws = openpyxl.load_workbook(ruta)[etiqueta_hoja(1, "JEFE DE SUPERVISIÓN")]
     texto = "\n".join(str(c.value) for f in ws.iter_rows() for c in f if c.value)
     assert "Paralización 1 de la obra (InfoObras)" in texto
     assert job.excel_final and job.zip_infoobras
@@ -753,7 +770,7 @@ def test_excel_muestra_bloque_en_revision(tmp_path):
     generar_excel_final(espejo, ruta, {}, {}, {},
                         revisiones={(1, 1): "sin candidato fiable en InfoObras"})
     wb = openpyxl.load_workbook(ruta)
-    hoja = next(s for s in wb.sheetnames if s.startswith("P1"))
+    hoja = next(s for s in wb.sheetnames if s.startswith("P1."))
     texto = "\n".join(str(c.value) for row in wb[hoja].iter_rows()
                       for c in row if c.value)
     assert "EN REVISIÓN" in texto and "sin candidato" in texto.lower()
@@ -779,7 +796,7 @@ def test_excel_muestra_modificaciones_de_plazo(tmp_path):
     ruta = tmp_path / "mods.xlsx"
     generar_excel_final(espejo, ruta, {}, {(1, 1): "123"}, fichas)
     wb = openpyxl.load_workbook(ruta)
-    hoja = next(s for s in wb.sheetnames if s.startswith("P1"))
+    hoja = next(s for s in wb.sheetnames if s.startswith("P1."))
     texto = "\n".join(str(c.value) for row in wb[hoja].iter_rows()
                       for c in row if c.value)
     assert "MODIFICACIONES DE PLAZO" in texto and "Ampliación del plazo" in texto
@@ -839,7 +856,7 @@ def test_excel_marca_valorizaciones_con_archivos(tmp_path):
     ruta = tmp_path / "valdocs.xlsx"
     generar_excel_final(espejo, ruta, {}, {(1, 1): "123"}, fichas)
     wb = openpyxl.load_workbook(ruta)
-    hoja = next(s for s in wb.sheetnames if s.startswith("P1"))
+    hoja = next(s for s in wb.sheetnames if s.startswith("P1."))
     texto = "\n".join(str(c.value) for row in wb[hoja].iter_rows()
                       for c in row if c.value)
     assert "ARCHIVOS (ZIP)" in texto   # nueva columna
@@ -877,7 +894,8 @@ def test_sunat_por_nombre_cuando_no_hay_ruc():
 
     consultor = lambda r: EmpresaFake(r, "CONSORCIO HOSPITAL TACNA", date(2015, 11, 6))
     ctx = Contexto(job=None, espejo=espejo, enriquecimiento={})
-    EtapaSunatReal(consultor=consultor, buscador=buscador).correr(ctx)
+    EtapaSunatReal(consultor=consultor, buscador=buscador,
+                   extras=SIN_EXTRAS_SUNAT).correr(ctx)
 
     # exp 1: nombre distintivo → 1 match → cruzado por nombre
     assert ctx.enriquecimiento["1:1"]["sunat"]["ruc"] == "20600789911"
@@ -887,6 +905,73 @@ def test_sunat_por_nombre_cuando_no_hay_ruc():
     assert "ruc" not in ctx.enriquecimiento["1:2"]["sunat"]
     # exp 3: entidad pública → se salta (sin bloque sunat)
     assert "sunat" not in ctx.enriquecimiento.get("1:3", {})
+
+
+def test_sunat_trae_representantes_e_historico_una_vez_por_ruc():
+    """Issue #30: el bloque emisor guarda los representantes legales, el histórico
+    y la respuesta a '¿estaba HABIDO al emitir y durante la obra?'. Las consultas
+    se hacen UNA vez por RUC aunque el mismo emisor firme varias experiencias."""
+    from datetime import date as _date
+
+    from orquestador.etapas import Contexto
+    from orquestador.etapas_reales import EtapaSunatReal
+    from scraping.sunat import HistoricoSUNAT, RepresentanteLegal, TramoCondicion
+
+    espejo = {
+        "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
+        "postor": {},
+        "profesionales": [{"n_prof": 1, "cargo": "ESP", "experiencias": [
+            # mismo emisor en las dos experiencias → una sola consulta
+            {"n": 1, "entidad_emisora": "CONSTRUCTORA X SAC RUC 20512345678",
+             "fecha_inicial": "2018-01-01", "fecha_final": "2018-12-31",
+             "fecha_emision": "2019-02-01"},
+            {"n": 2, "entidad_emisora": "CONSTRUCTORA X SAC RUC 20512345678",
+             "fecha_inicial": "2020-01-01", "fecha_final": "2020-06-30",
+             "fecha_emision": "2020-08-01"},
+        ]}],
+        "resumen_evaluacion": {"factores": []},
+    }
+
+    hist = HistoricoSUNAT(
+        ruc="20512345678",
+        razones_sociales=[{"nombre": "CONSTRUCTORA X EIRL", "fecha_baja": "2016-05-04"}],
+        condiciones=[
+            TramoCondicion("HABIDO", None, _date(2018, 6, 30)),
+            TramoCondicion("NO HABIDO", _date(2018, 7, 1), _date(2018, 9, 30)),
+            TramoCondicion("HABIDO", _date(2018, 10, 1), _date(2019, 12, 31)),
+        ],
+        domicilios=[{"direccion": "AV. LIMA 100", "fecha_baja": "2016-05-04"}],
+    )
+    reps = [RepresentanteLegal("DNI", "09683058", "PEREZ LOPEZ JUAN",
+                               "GERENTE GENERAL", _date(2017, 5, 24))]
+
+    llamadas = []
+
+    def extras(ruc):
+        llamadas.append(ruc)
+        return reps, hist
+
+    consultor = lambda r: EmpresaFake(r, "CONSTRUCTORA X SAC", date(2010, 1, 1))  # noqa: E731
+    ctx = Contexto(job=None, espejo=espejo, enriquecimiento={})
+    EtapaSunatReal(consultor=consultor, buscador=lambda n: [],
+                   extras=extras).correr(ctx)
+
+    assert llamadas == ["20512345678"], "una consulta por RUC, no por experiencia"
+
+    s1 = ctx.enriquecimiento["1:1"]["sunat"]
+    assert s1["representantes"][0]["nombre"] == "PEREZ LOPEZ JUAN"
+    assert s1["representantes"][0]["cargo"] == "GERENTE GENERAL"
+    assert s1["representantes"][0]["fecha_desde"] == "2017-05-24"
+    assert s1["historico"]["razones_sociales"][0]["nombre"] == "CONSTRUCTORA X EIRL"
+
+    # exp 1: emitida en feb-2019 (habido) pero la obra abarca el tramo NO HABIDO
+    assert s1["habido"]["emision"]["ok"] is True
+    assert s1["habido"]["periodo"]["ok"] is False
+    assert s1["habido"]["periodo"]["tramos_no_habido"][0]["desde"] == "2018-07-01"
+
+    # exp 2: obra posterior al último tramo → manda la condición actual (HABIDO)
+    s2 = ctx.enriquecimiento["1:2"]["sunat"]
+    assert s2["habido"]["periodo"]["ok"] is True
 
 
 def test_sunat_desempate_por_nombre_exacto():
@@ -918,8 +1003,181 @@ def test_sunat_desempate_por_nombre_exacto():
 
     consultor = lambda r: EmpresaFake(r, "ACRUTA & TAPIA INGENIEROS S.A.C.", date(2010, 1, 1))
     ctx = Contexto(job=None, espejo=espejo, enriquecimiento={})
-    EtapaSunatReal(consultor=consultor, buscador=buscador).correr(ctx)
+    EtapaSunatReal(consultor=consultor, buscador=buscador,
+                   extras=SIN_EXTRAS_SUNAT).correr(ctx)
 
     assert ctx.enriquecimiento["1:1"]["sunat"]["ruc"] == "20262241441"
     assert ctx.enriquecimiento["1:1"]["sunat"]["via"] == "nombre_exacto"
     assert "ambiguo" not in ctx.enriquecimiento["1:1"]["sunat"]
+
+
+# ── Cert MULTI-OBRA SIN CUI: paquete de inversión (caso real HV Contratistas) ──
+# El certificado documenta UN vínculo continuo (01/03/2022 – 31/07/2023) sobre un
+# nombre COMPUESTO que encadena dos establecimientos bajo la etiqueta "(PAQUETE 6)"
+# y NO cita ningún CUI. La skill deja el nombre verbatim en `proyecto` y lo desglosa
+# limpio en `obras[]` (ADR-011 · PR-1). Fixture CONGELADO: es exactamente el caso que
+# PR-2 (resolver() completo por sub-obra) tiene que hacer resolver por nombre.
+_HV_PAQUETE_6 = ("MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL HOSPITAL DE APOYO "
+                 "SULLANA II-2 Y EL CENTRO DE SALUD POSOPE ALTO I-3 (PAQUETE 6)")
+_HV_SUB_1 = "MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL HOSPITAL DE APOYO SULLANA II-2"
+_HV_SUB_2 = "MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL CENTRO DE SALUD POSOPE ALTO I-3"
+
+ESPEJO_MULTI_OBRA_HV = {
+    "_meta": {"analisis_id": "hv-paquete6", "concurso": "CP-HV/2026",
+              "postor": "HV CONTRATISTAS S.A."},
+    "postor": {},
+    "profesionales": [
+        {"n_prof": 1, "cargo": "GERENTE DE PROYECTO", "nombre": "Prof HV",
+         "requisitos": {"tipo_experiencia": "mínimo 1 año"},
+         "total": {"dias": 518, "anios": 1.42},
+         "experiencias": [
+             {"n": 1, "proyecto": _HV_PAQUETE_6, "cui": None,
+              "entidad_emisora": "HV CONTRATISTAS S.A.",
+              "entidad_contratante": "GOBIERNO REGIONAL DE PIURA",
+              "fecha_inicial": "2022-03-01", "fecha_final": "2023-07-31",
+              "dias": 518, "folio": "300",
+              "obras": [{"proyecto": _HV_SUB_1, "cui": None},
+                        {"proyecto": _HV_SUB_2, "cui": None}]},
+         ]},
+    ],
+    "resumen_evaluacion": {"factores": [], "puntaje_total": None},
+}
+
+
+def test_espejo_multi_obra_sin_cui_valida_contra_el_contrato():
+    """Una sub-obra SIN CUI es válida en el contrato: el desglose de un paquete no
+    cita códigos y aun así tiene que entrar (antes el contrato lo permitía pero la
+    skill solo desglosaba cuando había CUI)."""
+    from schemas.espejo import JsonEspejo
+
+    m = JsonEspejo.model_validate(ESPEJO_MULTI_OBRA_HV)
+    exp = m.profesionales[0].experiencias[0]
+    # el nombre compuesto se conserva VERBATIM en la madre (fidelidad legal)…
+    assert exp.proyecto == _HV_PAQUETE_6 and exp.cui is None
+    # …y el desglose limpio vive en obras[], sin conectores ni etiqueta de paquete
+    assert [o.proyecto for o in exp.obras] == [_HV_SUB_1, _HV_SUB_2]
+    assert [o.cui for o in exp.obras] == [None, None]
+    assert all("PAQUETE" not in o.proyecto and " Y EL " not in o.proyecto
+               for o in exp.obras)
+
+
+def test_multi_obra_sin_cui_resuelve_por_nombre_y_tolera_parcial(tmp_path):
+    """PR-2 · el caso que motivó el ADR-011. Ninguna sub-obra cita CUI: cada una pasa
+    por `resolver()` completo. La 1ª (Sullana) resuelve por NOMBRE; la 2ª (Posope
+    Alto) no tiene candidatos y cae a `revision`.
+
+    Lo que este test protege es el PARCIAL (1 de N): la experiencia sigue contando
+    —su respaldo es el certificado— y la sub-obra no hallada queda VISIBLE en vez de
+    tumbar la experiencia o desaparecer."""
+    motor, repo = hacer_motor(tmp_path)
+    job = motor.correr(motor.crear_job(ESPEJO_MULTI_OBRA_HV).job_id)
+
+    enr = repo.cargar_enriquecimiento(job.job_id)["1:1"]
+    assert enr["via"] == "MULTI_OBRA" and enr["cui"] is None
+    sub = enr["sub_obras"]
+    assert [s["proyecto"] for s in sub] == [_HV_SUB_1, _HV_SUB_2]
+    assert [s["estado"] for s in sub] == ["resuelto", "revision"]
+
+    # la resuelta trae CUI, ficha y la FUERZA de la evidencia (via)
+    assert sub[0]["cui"] == "2595123" and sub[0]["via"] == "NOMBRE"
+    assert sub[0]["ficha"]["obra_nombre"] == "HOSPITAL DE APOYO SULLANA II-2"
+    # la no resuelta no inventa CUI y explica por qué
+    assert sub[1]["cui"] is None and sub[1]["decision"]
+
+    # la experiencia NO se pierde ni va a la cola humana (ADR-011: el identificador
+    # de un cert multi-obra es su portafolio, no un CUI único)
+    assert not [it for it in job.items_revision if not it.resuelto]
+    obs = [o for e in job.etapas for o in e.observaciones if o.codigo == "MULTI_OBRA"]
+    assert len(obs) == 1 and "1 de 2 identificada(s)" in obs[0].mensaje
+    # parcial ⇒ ADVERTENCIA, no INFO: la brecha tiene que verse
+    assert obs[0].severidad.value == "advertencia"
+
+    # el Excel: banda resumen + la hallada como SubExperiencia con su evidencia,
+    # y la no hallada listada con su motivo (no se esconde)
+    ws = openpyxl.load_workbook(tmp_path / job.job_id / "final.xlsx")[etiqueta_hoja(1, "GERENTE DE PROYECTO")]
+    texto = "\n".join(str(c.value) for f in ws.iter_rows() for c in f if c.value)
+    assert "CERTIFICADO MULTI-OBRA — 1 de 2 obra(s) hallada(s)" in texto
+    assert "SubExperiencia 1.1" in texto and "identificada por nombre" in texto
+    assert "POSOPE ALTO" in texto and "no se pudo identificar con seguridad" in texto
+
+
+def test_multi_obra_el_tiempo_no_se_duplica_al_resolver_por_nombre(tmp_path):
+    """Regresión anti-duplicación (ADR-011 §2): pasar de `por_codigo` a `resolver()`
+    NO puede cambiar el tiempo. Los días viven en la experiencia MADRE; las
+    SubExperiencias son verificación por obra y no suman."""
+    motor, repo = hacer_motor(tmp_path)
+    job = motor.correr(motor.crear_job(ESPEJO_MULTI_OBRA_HV).job_id)
+
+    p1 = repo.cargar_enriquecimiento(job.job_id)["prof:1"]
+    # 2022-03-01 → 2023-07-31 contado UNA vez, no una por sub-obra
+    assert p1["dias_brutos"] == 518
+
+
+# ── ADR-011 · P1 · candado MULTI-RUBRO ───────────────────────────────────────
+# Mismo vínculo, pero el paquete mezcla salud y vial. Cuánto del tiempo va a cada
+# especialidad es indecidible sin un anexo que lo declare: el backend lo SEÑALA,
+# no lo decide ni lo castiga.
+_HV_SUB_VIAL = "MEJORAMIENTO DE LA CARRETERA VECINAL TAMBOGRANDE - LAS LOMAS"
+
+
+def _espejo_multi_rubro(sub_fechas=False):
+    extra = ({"fecha_inicial": "2022-03-01", "fecha_final": "2022-11-30"}
+             if sub_fechas else {})
+    extra2 = ({"fecha_inicial": "2022-12-01", "fecha_final": "2023-07-31"}
+              if sub_fechas else {})
+    esp = {k: v for k, v in ESPEJO_MULTI_OBRA_HV.items() if k != "profesionales"}
+    esp["profesionales"] = [{
+        "n_prof": 1, "cargo": "GERENTE DE PROYECTO", "nombre": "Prof HV",
+        "requisitos": {"tipo_experiencia": "mínimo 1 año"},
+        "total": {"dias": 518, "anios": 1.42},
+        "experiencias": [{
+            "n": 1, "proyecto": _HV_PAQUETE_6, "cui": None,
+            "entidad_emisora": "HV CONTRATISTAS S.A.",
+            "entidad_contratante": "GOBIERNO REGIONAL DE PIURA",
+            "fecha_inicial": "2022-03-01", "fecha_final": "2023-07-31",
+            "dias": 518, "folio": "300",
+            "obras": [{"proyecto": _HV_SUB_1, "cui": None, **extra},
+                      {"proyecto": _HV_SUB_VIAL, "cui": None, **extra2}]}]}]
+    return esp
+
+
+def test_multi_rubro_sin_sub_fechas_se_señala_pero_no_bloquea(tmp_path):
+    """Salud + vial sin desglose temporal → alerta para el evaluador. Lo que este
+    test fija es que la alerta NO castiga: los días del vínculo son los mismos y la
+    experiencia sigue contando (el ADR mantiene el tiempo en la madre)."""
+    motor, repo = hacer_motor(tmp_path)
+    job = motor.correr(motor.crear_job(_espejo_multi_rubro()).job_id)
+
+    obs = [o for e in job.etapas for o in e.observaciones if o.codigo == "MULTI_RUBRO"]
+    assert len(obs) == 1
+    assert obs[0].severidad.value == "advertencia"
+    assert "salud, vial" in obs[0].mensaje
+
+    enr = repo.cargar_enriquecimiento(job.job_id)
+    assert enr["1:1"]["multi_rubro"] == ["salud", "vial"]
+    # NO bloquea: el tiempo del vínculo queda intacto y la experiencia cuenta
+    assert enr["prof:1"]["dias_brutos"] == 518
+    assert not [it for it in job.items_revision if not it.resuelto]
+
+    ws = openpyxl.load_workbook(tmp_path / job.job_id / "final.xlsx")[etiqueta_hoja(1, "GERENTE DE PROYECTO")]
+    texto = "\n".join(str(c.value) for f in ws.iter_rows() for c in f if c.value)
+    assert "Por confirmar" in texto and "especialidades distintas" in texto
+
+
+def test_multi_rubro_no_dispara_si_el_cert_declara_las_sub_fechas(tmp_path):
+    """Escenario B: si el cert declara el tiempo de CADA obra, el desglose existe y
+    no hay nada que confirmar — el candado se calla."""
+    motor, repo = hacer_motor(tmp_path)
+    job = motor.correr(motor.crear_job(_espejo_multi_rubro(sub_fechas=True)).job_id)
+
+    assert not [o for e in job.etapas for o in e.observaciones
+                if o.codigo == "MULTI_RUBRO"]
+    assert "multi_rubro" not in repo.cargar_enriquecimiento(job.job_id)["1:1"]
+
+
+def test_multi_rubro_no_dispara_en_paquete_de_un_solo_rubro(tmp_path):
+    """El paquete HV real es todo salud: no debe salir la alerta."""
+    motor, _ = hacer_motor(tmp_path)
+    job = motor.correr(motor.crear_job(ESPEJO_MULTI_OBRA_HV).job_id)
+    assert not [o for e in job.etapas for o in e.observaciones
+                if o.codigo == "MULTI_RUBRO"]
