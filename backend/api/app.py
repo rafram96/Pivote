@@ -41,6 +41,7 @@ from orquestador import Motor, RepositorioArchivos, etapas_esqueleto, etapas_rea
 from orquestador.progreso import REGISTRO
 from schemas import pipeline
 from schemas.espejo import JsonEspejo
+from schemas.nombres import nombre_descarga
 
 # Carpeta de datos: definible en el .env de la raíz (PIVOTE_DATA_DIR). Rutas
 # relativas quedan ancladas a backend/ — no al CWD (ver backend/config.py).
@@ -799,7 +800,7 @@ def descargar_excel(job_id: str):
     return FileResponse(
         ruta,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename=f"Formato_Evaluacion_{job.analisis_id}.xlsx",
+        filename=nombre_descarga(job, espejo, "xlsx"),
     )
 
 
@@ -831,7 +832,7 @@ def descargar_zip(job_id: str, tareas: BackgroundTasks):
             return JSONResponse(status_code=202, content=en_prep)
     # zip presente y NO se está descargando → completo (listas, o job previo) → servir
     return FileResponse(ruta, media_type="application/zip",
-                        filename=f"InfoObras_{job.analisis_id}.zip")
+                        filename=nombre_descarga(job, repo.cargar_espejo(job_id), "zip"))
 
 
 # ── Descarga por un solo CUI (sin correr un análisis) ────────────────────────

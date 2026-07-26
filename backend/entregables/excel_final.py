@@ -33,6 +33,7 @@ from reglas import (
     anios, dias_efectivos_profesional, dias_inclusivos, periodo_fechas,
     restar_paralizaciones,
 )
+from schemas.cargo import etiqueta_hoja
 from scripts.generar_excel import (
     AL_HEAD, AL_WRAP, BORDER, F_BOLD, F_CELL, F_HEAD, F_PARTE, F_PROF,
     FILL_BACKEND, FILL_CLAUDE, FILL_HEAD, FILL_PARTE, FILL_PROF,
@@ -97,22 +98,6 @@ def _fecha_iso(v) -> Optional[date]:
         except ValueError:
             return None
     return None
-
-
-def _nombre_hoja(n_prof: int, cargo: str) -> str:
-    """Nombre de hoja Excel útil y corto (≤31 chars). Quita el prefijo redundante
-    "Especialista en/de" (el cargo distintivo se ve de una) y, si aún excede,
-    corta en LÍMITE DE PALABRA — no a media palabra. El prefijo P{n} garantiza
-    unicidad aunque dos cargos empiecen igual."""
-    txt = re.sub(r'[\\/*?:\[\]]', "", cargo or "").strip()
-    txt = re.sub(r"^especialista\s+(?:en|de|del)\s+", "", txt, flags=re.I)
-    base = f"P{n_prof} {txt}".strip()
-    if len(base) <= 31:
-        return base
-    cut = base[:31]
-    if base[31] != " ":               # solo retrocede si cortó a media palabra
-        cut = cut.rsplit(" ", 1)[0]
-    return cut.rstrip(" ,;-")
 
 
 # ── Certificados embebidos (Fase 2) ──────────────────────────────────────────
@@ -1084,7 +1069,7 @@ def generar_excel_final(
     construir_hoja_base_datos(wb.create_sheet("Base de Datos"), espejo)
 
     for prof in espejo.get("profesionales", []):
-        nombre = _nombre_hoja(prof.get("n_prof", 0), prof.get("cargo", ""))
+        nombre = etiqueta_hoja(prof.get("n_prof", 0), prof.get("cargo", ""))
         certs_prof = {k: v for k, v in certificados.items() if k[0] == prof.get("n_prof")}
         construir_hoja_profesional(wb.create_sheet(nombre), prof, paralizaciones,
                                    cuis, fichas, revisiones, sunat, certs_prof)

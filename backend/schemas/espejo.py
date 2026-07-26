@@ -90,6 +90,10 @@ FechaFlexible = Annotated[Optional[Union[date, str]], BeforeValidator(_coerce_fe
 # ── Meta ─────────────────────────────────────────────────────────────────────
 class Meta(_ModelLax):
     analisis_id: str = Field(min_length=1)
+    # Nombre CORTO del concurso para los archivos descargables ("huachocolpa").
+    # Lo elige la skill con criterio; si falta, el backend lo deduce del
+    # analisis_id (ver schemas/nombres.py).
+    slug: Optional[str] = None
     concurso: Optional[str] = None
     postor: Optional[str] = None
     version_contrato: Optional[str] = None

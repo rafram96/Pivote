@@ -98,7 +98,7 @@ def test_flujo_completo_de_la_demo(cliente):
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(r.content))
     assert wb.sheetnames[:2] == ["CLAUDE", "Base de Datos"]
-    assert any(n.startswith("P1 ") for n in wb.sheetnames)
+    assert any(n.startswith("P1.") for n in wb.sheetnames)
 
     # 8 · ZIP InfoObras descargable (árbol de 4 niveles, sin docs aún)
     r = cliente.get(f"/api/pivote/jobs/{job_id}/zip")

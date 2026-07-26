@@ -14,6 +14,7 @@ import pytest
 
 from orquestador import Motor, RepositorioMemoria
 from orquestador.etapas_reales import etapas_reales
+from schemas.cargo import etiqueta_hoja
 from schemas.pipeline import Etapa, EstadoEtapa, JobEstado
 
 # ── espejo sintético: 2 profesionales, 3 experiencias ────────────────────────
@@ -180,7 +181,7 @@ def test_flujo_real_completo_con_revision_humana(tmp_path):
     # Excel final regenerado CON las paralizaciones en la hoja de hitos
     ruta = tmp_path / job.job_id / "final.xlsx"
     assert ruta.exists()
-    ws = openpyxl.load_workbook(ruta)["P1 JEFE DE SUPERVISIÓN"]
+    ws = openpyxl.load_workbook(ruta)[etiqueta_hoja(1, "JEFE DE SUPERVISIÓN")]
     texto = "\n".join(str(c.value) for f in ws.iter_rows() for c in f if c.value)
     assert "Paralización 1 de la obra (InfoObras)" in texto
     assert job.excel_final and job.zip_infoobras
@@ -753,7 +754,7 @@ def test_excel_muestra_bloque_en_revision(tmp_path):
     generar_excel_final(espejo, ruta, {}, {}, {},
                         revisiones={(1, 1): "sin candidato fiable en InfoObras"})
     wb = openpyxl.load_workbook(ruta)
-    hoja = next(s for s in wb.sheetnames if s.startswith("P1"))
+    hoja = next(s for s in wb.sheetnames if s.startswith("P1."))
     texto = "\n".join(str(c.value) for row in wb[hoja].iter_rows()
                       for c in row if c.value)
     assert "EN REVISIÓN" in texto and "sin candidato" in texto.lower()
@@ -779,7 +780,7 @@ def test_excel_muestra_modificaciones_de_plazo(tmp_path):
     ruta = tmp_path / "mods.xlsx"
     generar_excel_final(espejo, ruta, {}, {(1, 1): "123"}, fichas)
     wb = openpyxl.load_workbook(ruta)
-    hoja = next(s for s in wb.sheetnames if s.startswith("P1"))
+    hoja = next(s for s in wb.sheetnames if s.startswith("P1."))
     texto = "\n".join(str(c.value) for row in wb[hoja].iter_rows()
                       for c in row if c.value)
     assert "MODIFICACIONES DE PLAZO" in texto and "Ampliación del plazo" in texto
@@ -839,7 +840,7 @@ def test_excel_marca_valorizaciones_con_archivos(tmp_path):
     ruta = tmp_path / "valdocs.xlsx"
     generar_excel_final(espejo, ruta, {}, {(1, 1): "123"}, fichas)
     wb = openpyxl.load_workbook(ruta)
-    hoja = next(s for s in wb.sheetnames if s.startswith("P1"))
+    hoja = next(s for s in wb.sheetnames if s.startswith("P1."))
     texto = "\n".join(str(c.value) for row in wb[hoja].iter_rows()
                       for c in row if c.value)
     assert "ARCHIVOS (ZIP)" in texto   # nueva columna

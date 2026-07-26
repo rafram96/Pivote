@@ -12,6 +12,7 @@ import openpyxl
 import pytest
 
 from entregables import construir_zip_infoobras, generar_excel_final, inventariar
+from schemas.cargo import etiqueta_hoja
 from reglas import dias_efectivos_profesional
 
 RAIZ = Path(__file__).resolve().parents[2]
@@ -57,8 +58,10 @@ def test_excel_final_estructura_de_hojas(tmp_path):
     wb = openpyxl.load_workbook(salida)
     assert wb.sheetnames[0] == "CLAUDE"
     assert wb.sheetnames[1] == "Base de Datos"
-    assert wb.sheetnames[2].startswith("P1 ")
-    assert wb.sheetnames[3].startswith("P2 ")
+    # Pestañas cortas: prefijo genérico fuera, cada palabra a la mitad, Title Case.
+    # "Jefe" se conserva (jerarquía); "ESP." no (todos son especialistas).
+    assert wb.sheetnames[2] == "P1. Jefe Superv"
+    assert wb.sheetnames[3] == "P2. Estruc"
 
 
 def test_excel_final_base_datos_con_filtro_y_colores(tmp_path):
@@ -76,7 +79,7 @@ def test_excel_final_base_datos_con_filtro_y_colores(tmp_path):
 
 def test_excel_final_hoja_profesional_cuadro_de_hitos(tmp_path):
     salida = generar_excel_final(ESPEJO, tmp_path / "final.xlsx", PARALIZACIONES)
-    ws = openpyxl.load_workbook(salida)["P1 JEFE DE SUPERVISIÓN"]
+    ws = openpyxl.load_workbook(salida)[etiqueta_hoja(1, "JEFE DE SUPERVISIÓN")]
     celdas = [str(c.value) for fila in ws.iter_rows() for c in fila if c.value is not None]
     texto = "\n".join(celdas)
 
@@ -107,7 +110,7 @@ def test_excel_final_muestra_periodos_sin_valorizacion(tmp_path):
         {"inicio": date(2022, 1, 1), "fin": date(2022, 3, 31), "tipo": "sin_valorizacion"},
     ]}
     salida = generar_excel_final(ESPEJO, tmp_path / "final.xlsx", paral)
-    ws = openpyxl.load_workbook(salida)["P1 JEFE DE SUPERVISIÓN"]
+    ws = openpyxl.load_workbook(salida)[etiqueta_hoja(1, "JEFE DE SUPERVISIÓN")]
     texto = "\n".join(str(c.value) for f in ws.iter_rows() for c in f if c.value)
     assert "Paralización 1 de la obra (InfoObras)" in texto
     assert "Sin valorización 1 — obra parada (InfoObras)" in texto
@@ -138,7 +141,7 @@ def test_excel_final_valorizaciones_resalta_solo_meses_del_certificado(tmp_path)
         ],
     }}
     salida = generar_excel_final(espejo, tmp_path / "v.xlsx", fichas=fichas)
-    ws = openpyxl.load_workbook(salida)["P1 JEFE"]
+    ws = openpyxl.load_workbook(salida)[etiqueta_hoja(1, "JEFE")]
 
     color = {}
     for fila in ws.iter_rows():
@@ -161,7 +164,7 @@ def test_excel_final_valorizaciones_resalta_solo_meses_del_certificado(tmp_path)
 
 def test_excel_final_fechas_no_computables_quedan_anotadas(tmp_path):
     salida = generar_excel_final(ESPEJO, tmp_path / "final.xlsx", PARALIZACIONES)
-    ws = openpyxl.load_workbook(salida)["P2 ESP. ESTRUCTURAS"]
+    ws = openpyxl.load_workbook(salida)[etiqueta_hoja(2, "ESP. ESTRUCTURAS")]
     texto = "\n".join(str(c.value) for fila in ws.iter_rows() for c in fila if c.value)
     assert "no computables" in texto
 
