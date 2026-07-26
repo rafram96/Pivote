@@ -64,6 +64,19 @@ los requisitos críticos si hay tacha.**
    no figura en el Cuadro Resumen de Factores"`). Solo `aplica: true` los factores
    que el cuadro lista explícitamente, con su `puntaje_maximo` literal.
 
+10. **`pagina_factores`** (en `metadata_concurso`): la **página del PDF que estás
+    leyendo** donde está el **Cuadro Resumen de Factores / "4.2 Factores de
+    Evaluación"** — la tabla con los puntajes. Se recorta esa página y se pega al
+    final de la hoja de cada profesional, para que el evaluador tenga el baremo a
+    la mano sin volver a las bases.
+    - Es el **número de página del PDF** (la 1ª página del archivo es la `1`),
+      **NO el folio impreso** en el borde: no siempre coinciden, y si las bases
+      venían en `.docx` el PDF limpio del script re-pagina.
+    - Si la tabla ocupa dos páginas, dalas como rango: `"48-49"`.
+    - Si no la ubicas con certeza, `null` + observación `severidad: warning` — se
+      omite el recorte, no se adivina (un recorte de la página equivocada es peor
+      que ninguno, porque parece correcto).
+
 ## Observaciones
 Emite una `Observacion` ante: ambigüedad (`ambiguedad`), cargo con profesión o
 cargos similares poco claros (`extraccion_parcial`), texto ilegible
@@ -73,8 +86,9 @@ Cada una con `severidad`, `mensaje` humano y `referencia` (número de cargo si
 aplica).
 
 ## Salida
-JSON: `_meta` (con `subagente: "agent-bases"`), `metadata_concurso`,
-`factores_evaluacion`, `personal_clave[]`, `observaciones_claude[]`.
+JSON: `_meta` (con `subagente: "agent-bases"`), `metadata_concurso` (incluye
+**`pagina_factores`**), `factores_evaluacion`, `personal_clave[]`,
+`observaciones_claude[]`.
 Cada entrada de `personal_clave` incluye: `numero`, `cargos_similares_validos`,
 `profesiones_aceptadas`, `tiempo_minimo_experiencia`, `tipos_obra_validos`,
 `aplica` (Factor A) y **`folio`** = el folio de las bases donde aparece el
@@ -85,6 +99,7 @@ requisito de ese cargo (lo usa el recorte del TDR — mejora A).
 - [ ] `fecha_presentacion_oferta` en ISO o `null` + observación critical.
 - [ ] `cargos_similares_validos` no vacío para los cargos que sí los tienen.
 - [ ] cada `personal_clave` con `folio` (dónde está su requisito en las bases → recorte TDR).
+- [ ] `pagina_factores` = página del PDF con el Cuadro de Factores (o `null` + observación).
 - [ ] `cuantia` + `limite_inferior` (90% si la oferta es limitada) calculados.
 - [ ] cada factor con `aplica` true/false según el Cuadro Resumen (PMP puede ser NO APLICA).
 - [ ] bases `.docx` → se leyó el PDF LIMPIO del script; bases `.pdf` → se excluyó lo tachado (+ obs. `tachado_pdf` si tocaba plazo/experiencia/especialidad).

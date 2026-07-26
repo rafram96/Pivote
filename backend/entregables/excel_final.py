@@ -126,29 +126,42 @@ def _render_cert_pages(cert_pdf, dpi=130, q=70, max_pag=12):
     return out
 
 
-def mapear_certificados(dir_base, job_id) -> dict:
-    """Lee la carpeta `{job_id}/certs/` (un PDF `P{n}_E{m}.pdf` por experiencia, con
-    la página principal primero — lo recorta la skill) y devuelve
-    `{(n_prof, n_exp): Path}` para pasarle a `generar_excel_final`."""
+def _mapear_dir_certs(cdir) -> dict:
+    """Mapea una carpeta `certs/` de PDFs recortados por la skill →
+    `{(n_prof, n_exp | "TDR" | "ANEXO" | "FACTOR"): Path}`:
+
+      · `P{n}_E{m}.pdf`   constancia de la experiencia (página principal primero)
+      · `P{n}_TDR.pdf`    requisito del cargo en las bases        (mejora A)
+      · `P{n}_ANEXO.pdf`  Anexo 16 declarado y firmado            (mejora A)
+      · `P{n}_FACTOR.pdf` página del Cuadro de Factores (4.2 A)   (issue #32)
+
+    El recorte del FACTOR es la MISMA página para todos; la skill la replica por
+    profesional para que no haga falta una clave global (el ingest solo acepta
+    `P*`, y `generar_excel_final` reparte los certs filtrando por `n_prof`). Las
+    claves de tag no colisionan con las experiencias (ahí `n_exp` es int)."""
     certs: dict = {}
-    cdir = Path(dir_base) / str(job_id) / "certs"
-    if cdir.is_dir():
-        for f in cdir.glob("P*_E*.pdf"):
+    cdir = Path(cdir)
+    if not cdir.is_dir():
+        return certs
+    for f in cdir.glob("P*_E*.pdf"):
+        try:
+            np_, ne = f.stem[1:].split("_E")
+            certs[(int(np_), int(ne))] = f
+        except ValueError:
+            continue
+    for tag in ("TDR", "ANEXO", "FACTOR"):
+        for f in cdir.glob(f"P*_{tag}.pdf"):
             try:
-                np_, ne = f.stem[1:].split("_E")
-                certs[(int(np_), int(ne))] = f
+                certs[(int(f.stem[1:].split("_")[0]), tag)] = f
             except ValueError:
                 continue
-        # Mejora A: recorte del TDR (de las bases) y del Anexo 16 por profesional,
-        # `P{n}_TDR.pdf` / `P{n}_ANEXO.pdf` → clave (n_prof, "TDR"/"ANEXO"). No
-        # colisiona con las experiencias (n_exp es int).
-        for tag in ("TDR", "ANEXO"):
-            for f in cdir.glob(f"P*_{tag}.pdf"):
-                try:
-                    certs[(int(f.stem[1:].split("_")[0]), tag)] = f
-                except ValueError:
-                    continue
     return certs
+
+
+def mapear_certificados(dir_base, job_id) -> dict:
+    """Los certificados del job, en el layout del repositorio (`{job_id}/certs/`),
+    listos para pasarle a `generar_excel_final`."""
+    return _mapear_dir_certs(Path(dir_base) / str(job_id) / "certs")
 
 
 # ── Hoja 2 · Base de Datos ───────────────────────────────────────────────────
@@ -1232,6 +1245,22 @@ def construir_hoja_profesional(
     cy = ws.cell(r, 19, round(anios(_dias_ef), 2))
     cy.font, cy.fill, cy.border, cy.number_format = F_BOLD, FILL_EFECTIVO, BORDER, FMT_DEC
 
+    # ── Factor de evaluación, AL FINAL de la hoja (issue #32) ────────────────
+    # La página del Cuadro de Factores (4.2 A — la tabla de puntaje) cierra la
+    # hoja: es el baremo con el que se puntúa todo lo de arriba, y el evaluador
+    # lo quiere a la mano "para no estar buscando" en las bases. Es la MISMA
+    # página para todos, replicada por profesional (ver `_mapear_dir_certs`).
+    # OJO con `r`: la PARTE 5 termina escribiendo EN la fila `r` sin avanzarla
+    # (nunca hubo nada debajo). Sin este salto, la banda de `embeber_cert` se
+    # mergea sobre esa misma fila y openpyxl la absorbe SIN error: el archivo
+    # sale válido pero con el título del factor pisando "AÑOS EFECTIVOS" y el
+    # número de años huérfano en la columna S.
+    _factor_pdf = certificados.get((n_prof, "FACTOR"))
+    if _factor_pdf:
+        r += 2
+        embeber_cert(_factor_pdf, "FACTOR DE EVALUACIÓN — recorte de las bases "
+                                  "(el baremo con el que se puntúa lo anterior)")
+
 
 # ── Entregable completo ──────────────────────────────────────────────────────
 
@@ -1320,11 +1349,20 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
 
 
 def regenerar_excel_final(espejo: dict, enriquecimiento: Optional[dict],
-                          salida: Path, revisiones: Optional[dict] = None) -> Path:
+                          salida: Path, revisiones: Optional[dict] = None,
+                          certificados: Optional[dict] = None) -> Path:
     """Regenera el Excel final desde el espejo + enriquecimiento YA en disco (sin
-    tocar red). Lo usa el backfill de cargos para dejar el entregable limpio."""
+    tocar red). Lo usa el backfill de cargos para dejar el entregable limpio.
+
+    `certificados`: si no se pasa, se mapea la carpeta `certs/` HERMANA del Excel
+    (el layout del repositorio: `<job>/final.xlsx` + `<job>/certs/`). Antes no se
+    pasaban en absoluto, así que regenerar arrancaba TODAS las imágenes embebidas
+    (constancias, TDR, Anexo 16) del entregable — silenciosamente."""
     paral, cuis, fichas, sunat = desempaquetar_enriquecimiento(enriquecimiento)
     salida = Path(salida)
+    if certificados is None:
+        certificados = _mapear_dir_certs(salida.parent / "certs")
     if salida.exists():
         salida.unlink()
-    return generar_excel_final(espejo, salida, paral, cuis, fichas, revisiones or {}, sunat)
+    return generar_excel_final(espejo, salida, paral, cuis, fichas, revisiones or {},
+                               sunat, certificados)

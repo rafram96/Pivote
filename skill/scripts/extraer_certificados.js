@@ -15,6 +15,11 @@
  * (`prof.folio_anexo`, de la propuesta) → `P{n}_ANEXO.pdf`. El backend los embebe
  * ANTES de las experiencias en la hoja del profesional.
  *
+ * Issue #32: también recorta de `bases.pdf` la página del Cuadro de Factores
+ * (`espejo._meta.pagina_factores`, la tabla de puntaje del "4.2 A") → un
+ * `P{n}_FACTOR.pdf` por profesional (misma página replicada). El backend lo
+ * embebe AL FINAL de la hoja: es el baremo con el que se puntúa lo de arriba.
+ *
  * Uso:  node scripts/extraer_certificados.js <espejo.json> <propuesta.pdf> <salida.zip> [bases.pdf]
  */
 const fs = require("fs");
@@ -64,8 +69,18 @@ async function main() {
     bases = await PDFDocument.load(fs.readFileSync(basesPath));
     basesTotal = bases.getPageCount();
   }
+  // Factor de evaluación (issue #32): UNA sola página de las bases — la del Cuadro
+  // de Factores / "4.2 A" con la tabla de puntaje — que el backend embebe AL FINAL
+  // de cada hoja de profesional. Es la misma para todos, así que se recorta una vez
+  // y se replica como `P{n}_FACTOR.pdf`: pesa KBs y evita casos especiales aguas
+  // abajo (el ingest solo acepta nombres `P*` y el Excel reparte por n_prof).
+  const factorPags = parseFolios(espejo._meta && espejo._meta.pagina_factores);
+  let factorBuf = null;
+  if (bases && factorPags.length) {
+    factorBuf = await recortar(bases, basesTotal, factorPags);
+  }
   const zip = new JSZip();
-  let nCerts = 0, nAnexo = 0, nTdr = 0, sinFolio = 0;
+  let nCerts = 0, nAnexo = 0, nTdr = 0, nFactor = 0, sinFolio = 0;
   for (const prof of espejo.profesionales || []) {
     for (const exp of prof.experiencias || []) {
       // Páginas FÍSICAS reales del PDF si la skill las marcó (vienen con la
@@ -97,16 +112,28 @@ async function main() {
       const b = await recortar(bases, basesTotal, tdrFolios);
       if (b) { zip.file(`P${prof.n_prof}_TDR.pdf`, b); nTdr++; }
     }
+    if (factorBuf) { zip.file(`P${prof.n_prof}_FACTOR.pdf`, factorBuf); nFactor++; }
   }
   const buf = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
   fs.writeFileSync(zipPath, buf);
+  // el recorte del factor es silencioso si falla → avisar explícitamente por qué,
+  // que es la única señal que tiene la skill para dejar la observación al usuario.
+  let avisoFactor = "";
+  if (bases && !factorPags.length) {
+    avisoFactor = " · ⚠ sin `_meta.pagina_factores` (el Excel saldrá SIN el recorte del factor)";
+  } else if (bases && !factorBuf) {
+    avisoFactor = ` · ⚠ pagina_factores=${espejo._meta.pagina_factores} fuera del rango ` +
+      `1..${basesTotal} de bases.pdf (sin recorte del factor)`;
+  }
   console.log(
     `OK · ${nCerts} constancias` +
       (nAnexo ? ` · ${nAnexo} anexos` : "") +
       (nTdr ? ` · ${nTdr} TDR` : "") +
+      (nFactor ? ` · ${nFactor} factor` : "") +
       ` recortados → ${zipPath}` +
       (sinFolio ? ` · ${sinFolio} experiencias sin folio (omitidas)` : "") +
-      (basesPath && !bases ? ` · ⚠ bases.pdf no hallado (sin recortes TDR)` : "")
+      (basesPath && !bases ? ` · ⚠ bases.pdf no hallado (sin recortes TDR)` : "") +
+      avisoFactor
   );
 }
 
