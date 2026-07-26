@@ -1094,7 +1094,7 @@ def test_multi_obra_sin_cui_resuelve_por_nombre_y_tolera_parcial(tmp_path):
 
     # el Excel: banda resumen + la hallada como SubExperiencia con su evidencia,
     # y la no hallada listada con su motivo (no se esconde)
-    ws = openpyxl.load_workbook(tmp_path / job.job_id / "final.xlsx")["P1 GERENTE DE PROYECTO"]
+    ws = openpyxl.load_workbook(tmp_path / job.job_id / "final.xlsx")[etiqueta_hoja(1, "GERENTE DE PROYECTO")]
     texto = "\n".join(str(c.value) for f in ws.iter_rows() for c in f if c.value)
     assert "CERTIFICADO MULTI-OBRA — 1 de 2 obra(s) hallada(s)" in texto
     assert "SubExperiencia 1.1" in texto and "identificada por nombre" in texto
@@ -1159,7 +1159,7 @@ def test_multi_rubro_sin_sub_fechas_se_señala_pero_no_bloquea(tmp_path):
     assert enr["prof:1"]["dias_brutos"] == 518
     assert not [it for it in job.items_revision if not it.resuelto]
 
-    ws = openpyxl.load_workbook(tmp_path / job.job_id / "final.xlsx")["P1 GERENTE DE PROYECTO"]
+    ws = openpyxl.load_workbook(tmp_path / job.job_id / "final.xlsx")[etiqueta_hoja(1, "GERENTE DE PROYECTO")]
     texto = "\n".join(str(c.value) for f in ws.iter_rows() for c in f if c.value)
     assert "Por confirmar" in texto and "especialidades distintas" in texto
 
