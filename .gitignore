@@ -80,3 +80,8 @@ Thumbs.db
 /datos_pivote/
 
 /.pytest_cache
+
+# Graphify outputs
+graphify-out/
+graphify*
+

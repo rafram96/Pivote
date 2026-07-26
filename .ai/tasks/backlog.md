@@ -28,6 +28,33 @@ Verificación: pytest + golden sin cambios + replay San Isidro con el campo.
 
 - [ ] **Deploy del refactor** — tarea CROSS-REPO; checklist canónico en
   `InfoObras/.ai/tasks/active.md` (nivel sistema). Regla: todo junto (ADR-007).
+
+---
+id: T-TAREA-ADR011
+tipo: tarea
+zona: skill + orquestador/ + entregables/
+agente_origen: desarrollador
+estado: aprobado
+depende_de: []
+---
+**Implementar ADR-011: Tratamiento de certificados multi-obra por sub-obras, resolución por resolver() completo y principio anti-alucinación.**
+- P0: Skill extrae sub-obras limpias sin CUI (`obras: [{proyecto, cui: null}]`); Backend enruta cada sub-obra por `resolver()` completo de `cui.py`; Excel renderiza cada sub-obra como bloque independiente (Exp X.1, Exp X.2) con su recuadro MEF/InfoObras a la derecha. Cómputo de tiempo se mantiene en la Experiencia Madre (solape 100% legítimo).
+- P1: Candado multi-rubro (alerta `POR CONFIRMAR (Requiere Anexo)` si hay mixtura de rubros sin sub-fechas).
+- P2: Escenario B pospuesto hasta que aparezca certificado real que lo exija.
+Verificación: pytest + test de Zod schema + comprobación con certificado HV Contratistas. (Registrado en GitHub Issue #26).
+
+---
+id: T-TAREA-MEF001
+tipo: tarea
+zona: api/ + resolucion/ + scripts/
+agente_origen: desarrollador
+estado: aprobado
+depende_de: []
+---
+**Implementar Endpoint API (GET /api/pivote/mef/buscar) y CLI de búsqueda directa en la base local del MEF.**
+- Exponer endpoint `GET /api/pivote/mef/buscar` con parámetros `q`, `dpto`, `prov`, `dist`, `entidad`, `limite` para consulta instantánea (<200 ms) sin red sobre los 452k CUIs de `base_mef.py`.
+- Crear script CLI `python -m scripts.buscar_mef` para consultas de desarrollo/soporte.
+- Degradación limpia si la base MEF local no está cargada en la máquina. (Registrado en GitHub Issue #27).
 - [ ] **EPIC #12: Sistema ETL del MEF** (Registrado en GitHub Project #1 `InfoObras Development`):
   - [ ] **[Feature #13] Ingesta y Extracción de Datos Abiertos del MEF**
     - [ ] `T-ETL-001` (#14): Ingesta streaming con reintentos y tolerancia a fallos (3 CSVs MEF).
