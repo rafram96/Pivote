@@ -1,5 +1,16 @@
 # Completado (más reciente primero)
 
+## 2026-07-26
+- **Issue #32 — factor de evaluación embebido** (`17b1e04`, rama
+  `rafram96/issue-32-embeber-el-factor-2`): la página del Cuadro de Factores
+  (4.2 A) cierra cada hoja de profesional, junto al TDR y el Anexo 16 que ya
+  se embebían. Cadena: `agent-bases.pagina_factores` → `_meta` → recorte
+  `P{n}_FACTOR.pdf` (misma página replicada por profesional, para no tocar el
+  filtro `P*` del ingest ni el reparto por `n_prof`) → `excel_final`.
+  De paso: **`regenerar_excel_final` ya no arranca los embeds** — nunca pasaba
+  `certificados`, así que el backfill de cargos devolvía el entregable sin
+  ninguna imagen. Falta la verificación sobre un job real (huachocolpa).
+
 ## 2026-07-25
 - **T-TAREA-ADR011 · certificados multi-obra** (Issue #26), en 3 PRs sobre
   `demo` — rama `rafram96/issue-26-t-multi-001`, SIN pushear todavía:
