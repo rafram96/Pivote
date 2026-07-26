@@ -1,6 +1,21 @@
 # ADR-011 · Tratamiento de certificados multi-obra: extracción por sub-obras, resolución por resolver() completo y principio de no adivinar fechas
 
-- Fecha: 2026-07-25 · Estado: **aprobado, pendiente de implementar**
+- Fecha: 2026-07-25 · Estado: **implementado** (P0 + P1; P2 sigue pospuesto)
+
+> Implementado el 2026-07-25 en 3 commits (Issue #26). Dos precisiones que salieron
+> al codear y que este ADR no anticipaba:
+> - **La resolución por sub-obra es una ESCALERA, no `resolver()` para todas.** Una
+>   sub-obra que CITA un código y ese código no existe en InfoObras se queda en
+>   `no_encontrado` y no cae a búsqueda por nombre: buscar por nombre sobre
+>   evidencia que ya contradice es el falso positivo que este mismo ADR quiere
+>   evitar. `resolver()` completo es para las sub-obras SIN código — el caso HV.
+> - **No heredar `ubicacion` no basta.** La geografía de la experiencia madre entra
+>   igual por `entidad_contratante`, que leen `ubigeo_cert` y `_muni_contradice`.
+>   Hay que apagarla explícitamente (`_solo_geo_propia` en `_exp_derivada`), o un
+>   paquete municipal veta sus propias obras de otra provincia.
+>
+> El candado multi-rubro exige la contradicción **entre dos sub-obras**: un solo
+> nombre que menciona dos rubros es una obra con dos componentes, no un paquete.
 
 ## Contexto
 

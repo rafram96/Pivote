@@ -300,6 +300,27 @@ def rubros_de(texto: str) -> set[str]:
     return {r for r, pat in _RUBROS.items() if pat.search(n)}
 
 
+def rubros_mixtos(obras: list[dict]) -> set[str]:
+    """Rubros en MIXTURA entre las sub-obras de un cert multi-obra (ADR-011 · P1).
+
+    Devuelve el conjunto de rubros involucrados si DOS sub-obras se contradicen
+    —ambas con rubro declarado y sin ninguno en común, p. ej. salud vs vial—, o
+    vacío si no hay mixtura. El rubro sale del NOMBRE de cada sub-proyecto, no de
+    la ficha resuelta: es lo único que existe para una sub-obra que no resolvió, y
+    justo esa es la que el ADR quiere atrapar.
+
+    Exige la contradicción ENTRE DOS sub-obras, no en el conjunto: un solo nombre
+    que mencione dos rubros ("centro de salud y su acceso vial") es UNA obra con
+    dos componentes, no un paquete multi-rubro. Un rubro indeterminado (set vacío)
+    nunca participa — misma regla que `_rubro_contradice`."""
+    porobra = [r for r in (rubros_de(o.get("proyecto") or "") for o in obras or []) if r]
+    for i, a in enumerate(porobra):
+        for b in porobra[i + 1:]:
+            if not (a & b):
+                return set().union(*porobra)
+    return set()
+
+
 def _rubro_contradice(rub_cert: set[str], texto_obra: str) -> bool:
     """True si ambos lados declaran rubro y NO comparten ninguno. Un lado
     indeterminado (set vacío) jamás veta — el veto exige contradicción positiva."""
@@ -383,10 +404,17 @@ def _provincia_desde_cola(terminos: list[str]) -> set[str]:
 def ubigeo_cert(exp: dict) -> dict:
     """Señales de ubicación DECLARADAS por el certificado: provincia(s),
     distrito(s), departamento(s) y el pool completo de términos de ubicación.
-    Mira `proyecto` + `ubicacion` + `entidad_contratante` del espejo."""
+    Mira `proyecto` + `ubicacion` + `entidad_contratante` del espejo.
+
+    SUB-OBRA de un paquete (`_solo_geo_propia`, ver `_exp_derivada`): solo cuenta la
+    geografía de SU PROPIO nombre. Un paquete cruza provincias, así que la ubicación
+    de la experiencia madre —declarada o inferida de su entidad contratante— vetaría
+    sub-obras legítimas (falso negativo). El nombre de la sub-obra es la única
+    autoridad geográfica sobre la sub-obra."""
     proyecto = str(exp.get("proyecto") or "")
-    ubic = str(exp.get("ubicacion") or "")
-    ent = str(exp.get("entidad_contratante") or "")
+    solo_propia = bool(exp.get("_solo_geo_propia"))
+    ubic = "" if solo_propia else str(exp.get("ubicacion") or "")
+    ent = "" if solo_propia else str(exp.get("entidad_contratante") or "")
     texto = " || ".join((proyecto, ubic, ent))
     prov = {norm(m) for m in _RE_PROV_KW.findall(texto) if len(norm(m)) >= 3}
     dist = {norm(m) for m in _RE_DIST_KW.findall(texto) if len(norm(m)) >= 3}
@@ -415,8 +443,13 @@ def _muni_contradice(exp: dict, ficha: Optional[dict]) -> bool:
     MEF del candidato es OTRA municipalidad del mismo tipo (distrital vs distrital):
     dos municipalidades distintas no contratan la misma obra (caso auditado
     San Agustín→El Tambo). Exige municipalidad EN AMBOS lados; cualquier otra
-    combinación (gobierno regional, ministerio, ausencia) es inerte."""
-    if not ficha:
+    combinación (gobierno regional, ministerio, ausencia) es inerte.
+
+    Inerte también para una SUB-OBRA de paquete (`_solo_geo_propia`, ver
+    `_exp_derivada`): la municipalidad la declaró la experiencia MADRE, no la
+    sub-obra, y las obras de un paquete pueden estar registradas en el MEF bajo la
+    municipalidad de cada localidad."""
+    if not ficha or exp.get("_solo_geo_propia"):
         return False
     munis_cert = _munis_de(norm(str(exp.get("entidad_contratante") or "")))
     if not munis_cert:
@@ -753,8 +786,9 @@ def resolver(exp: dict, consulta: Consulta, base=None) -> dict:
     {estado: 'resuelto'|'revision'|'na', cui, via, decision, candidatos[], obra}
     candidatos = [{cui, nombre_obra, departamento, score}] para la cola humana.
 
-    `base` (opcional) es la costura para la base local del MEF; las fases F3+ la
-    cablearán — por ahora se arrastra por la cadena sin usarse.
+    `base` (opcional) es la base local del MEF, YA cableada: rescata el CUI citado
+    que InfoObras no tiene, aporta el nombre oficial al scoring y sostiene los
+    candados de entidad/ubigeo. Sin ella la resolución degrada a InfoObras solo.
 
     Trazado: cada resolución deja su historia en la traza del job (span
     `resolver_cui` + evento `decision` con el porqué) — ver observabilidad/."""
@@ -770,7 +804,7 @@ def resolver(exp: dict, consulta: Consulta, base=None) -> dict:
 def _resolver(exp: dict, consulta: Consulta, base=None) -> dict:
     """Secuencia legible de los pasos de resolución. Cada helper devuelve el
     resultado final o `None`/una tupla para que este orquestador continúe.
-    `base` es la costura del MEF (F3+): se arrastra por la cadena, aún sin usar."""
+    `base` es la base local del MEF (ya en uso en toda la cadena)."""
     # PASO 0 · CUI/SNIP citado
     r = _paso_codigo_citado(exp, consulta, base)
     if r is not None:
@@ -1307,20 +1341,93 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
     return _clasificar_privada(exp, candidatos, vetados, base)
 
 
-def resolver_obras(obras: list[dict], consulta: Consulta, base=None) -> list[dict]:
-    """Resuelve cada sub-obra de un cert MULTI-OBRA por su CUI citado (por_codigo,
-    DETERMINÍSTICO — sin adivinar por nombre). Un cert de rol de gestión/portafolio
-    lista N obras bajo un mismo vínculo; el tiempo se cuenta una vez (en la
-    experiencia), esto solo VERIFICA que cada obra exista en InfoObras.
+# Campos que una SUB-OBRA hereda de su experiencia madre. El contrato del cert es
+# UNO: emisor y entidad contratante son los mismos para todas las sub-obras, y
+# heredarlos mantiene VIVOS los candados que dependen de ellos (entidad pública,
+# `ent_match` contra la ficha MEF, clasificación de privada). NO está `ubicacion`:
+# ver `_exp_derivada`.
+_HEREDA_SUBOBRA = ("entidad_contratante", "entidad_emisora", "ruc_emisor",
+                   "objeto", "tipo_documento")
 
-    Devuelve [{proyecto, cui, estado, obra}] con estado:
-      'resuelto'      → el código existe en InfoObras (`obra` = datos)
-      'no_encontrado' → el código no está en InfoObras (p. ej. un estudio/plan, no obra)
-      'sin_cui'       → el sub-proyecto no cita CUI en el cert
+
+def _exp_derivada(exp_madre: dict, sub: dict) -> dict:
+    """Experiencia SINTÉTICA para resolver UNA sub-obra de un cert multi-obra.
+
+    `resolver()` espera una experiencia completa: sus candados leen campos que la
+    sub-obra (solo `{proyecto, cui}`) no tiene. Heredar TODO o heredar NADA son las
+    dos salidas malas — sin candados se vuelve a la búsqueda por nombre pelada (por
+    donde entró el falso positivo de Chinchinga); con la ubicación de la madre se
+    vetan sub-obras legítimas de un paquete que cruza provincias. La herencia es
+    explícita y auditable acá, campo por campo:
+
+      `proyecto`   → NO se hereda: el de la SUB-OBRA (es el punto del desglose).
+      `cui`        → NO: lo trae la sub-obra o no lo hay.
+      entidad/RUC  → SÍ (`_HEREDA_SUBOBRA`): el contrato es uno solo.
+      fechas       → SÍ, como respaldo: son el rango del vínculo, y solo alimentan
+                     `_elegir_obra` (desempate entre obras de un mismo CUI). El
+                     ranking es 100% identidad, así que no reintroducen la
+                     circularidad de ADR-003. La sub-obra manda si trajo las suyas.
+      `ubicacion`  → NO, y además `_solo_geo_propia` apaga la geografía que entraría
+                     por la entidad heredada (`ubigeo_cert`, `_muni_contradice`):
+                     la única autoridad geográfica sobre la sub-obra es su nombre.
+
+    Devuelve un dict NUEVO: `resolver()` escribe en la exp que recibe
+    (`_ficha_mef_citado`, `_fichas_mef`) y eso no debe tocar a la madre."""
+    d = {k: exp_madre.get(k) for k in _HEREDA_SUBOBRA if exp_madre.get(k) is not None}
+    d["proyecto"] = sub.get("proyecto") or ""
+    d["cui"] = sub.get("cui")
+    d["fecha_inicial"] = sub.get("fecha_inicial") or exp_madre.get("fecha_inicial")
+    d["fecha_final"] = sub.get("fecha_final") or exp_madre.get("fecha_final")
+    d["_solo_geo_propia"] = True
+    return d
+
+
+# `resolver()` → estado de sub-obra. Mapeo ADITIVO: los cuatro estados históricos
+# siguen significando lo mismo (el Excel y la etapa InfoObras los leen), y los dos
+# nuevos entran por el camino por nombre. 'revision' NO manda la experiencia a "Por
+# confirmar" (una sub-obra no tiene clave propia en la cola humana): queda visible
+# con sus candidatos para que el evaluador la juzgue en el Excel.
+_ESTADO_SUBOBRA = {"resuelto": "resuelto", "revision": "revision", "na": "privada"}
+
+
+def _subobra_por_nombre(sub: dict, exp_madre: dict, consulta: Consulta,
+                        base=None) -> dict:
+    """Sub-obra SIN CUI citado → `resolver()` completo (con todos sus candados)
+    sobre la experiencia derivada. Traduce el resultado al shape de sub-obra."""
+    r = resolver(_exp_derivada(exp_madre or {}, sub), consulta, base)
+    if r.get("via") == "PORTAL":       # el portal no respondió: reintentable, no
+        return {"cui": None, "estado": "portal", "obra": None,   # "no existe"
+                "via": "PORTAL", "decision": r.get("decision")}
+    return {"cui": r.get("cui"), "estado": _ESTADO_SUBOBRA.get(r["estado"], "revision"),
+            "obra": r.get("obra"), "via": r.get("via"),
+            "decision": r.get("decision"),
+            "candidatos": r.get("candidatos") or []}
+
+
+def resolver_obras(obras: list[dict], consulta: Consulta, base=None,
+                   exp_madre: Optional[dict] = None) -> list[dict]:
+    """Resuelve cada sub-obra de un cert MULTI-OBRA. Un cert multi-obra documenta un
+    vínculo con N obras; el tiempo se cuenta una vez (en la experiencia madre), esto
+    VERIFICA cada obra por separado. ESCALERA (ADR-011):
+
+      · sub-obra CON CUI citado → `por_codigo`, DETERMINÍSTICO. Si el código no está
+        en InfoObras se queda en 'no_encontrado' y **NO** cae a búsqueda por nombre:
+        el cert citó un código y ese código no es una obra (un estudio/plan, caso
+        Talara) — adivinar por nombre sobre evidencia que ya contradice es
+        exactamente el falso positivo que el ADR-011 quiere evitar.
+      · sub-obra SIN CUI → `resolver()` completo sobre `_exp_derivada` (paquete de
+        inversión, caso HV: el cert no cita ningún código). Acá vive el delta.
+
+    Devuelve [{proyecto, cui, estado, obra, …}] con estado:
+      'resuelto'      → obra identificada (`obra` = datos; `via` = fuerza de la evidencia)
+      'no_encontrado' → el código citado no está en InfoObras
+      'revision'      → sin CUI y sin match fiable (`candidatos` para el evaluador)
+      'privada'       → cliente/obra privada: InfoObras no aplica
+      'sin_cui'       → sin CUI y sin `exp_madre` para derivar (no debería ocurrir)
       'portal'        → InfoObras no respondió (reintentar)
-    Cachea por CUI (el mismo código puede repetirse entre sub-proyectos)."""
+    Cachea por código y por nombre (una sub-obra puede repetirse entre sub-proyectos)."""
     out: list[dict] = []
-    cache: dict[str, dict] = {}
+    cache: dict[tuple, dict] = {}
     for o in obras or []:
         o = o or {}
         # se ARRASTRAN proyecto + fechas POR obra (si el cert las dio): la etapa
@@ -1330,10 +1437,20 @@ def resolver_obras(obras: list[dict], consulta: Consulta, base=None) -> list[dic
                  "fecha_final": o.get("fecha_final")}
         cui = re.sub(r"\D", "", str(o.get("cui") or ""))
         if not 4 <= len(cui) <= 8:
-            out.append({"cui": None, "estado": "sin_cui", "obra": None, **extra})
+            if exp_madre is None:
+                out.append({"cui": None, "estado": "sin_cui", "obra": None, **extra})
+                continue
+            clave = ("nom", norm(o.get("proyecto") or ""))
+            if clave in cache:
+                out.append({**cache[clave], **extra})
+                continue
+            res = _subobra_por_nombre(o, exp_madre, consulta, base)
+            cache[clave] = res
+            out.append({**res, **extra})
             continue
-        if cui in cache:
-            out.append({**cache[cui], **extra})
+        clave = ("cui", cui)
+        if clave in cache:
+            out.append({**cache[clave], **extra})
             continue
         try:
             registros = consulta.por_codigo(cui)
@@ -1343,13 +1460,13 @@ def resolver_obras(obras: list[dict], consulta: Consulta, base=None) -> list[dic
         if registros:
             ob = _elegir_obra(registros)
             cui_out = _cui_de(ob) or cui
-            res = {"cui": cui_out, "estado": "resuelto",
+            res = {"cui": cui_out, "estado": "resuelto", "via": "CODIGO",
                    "obra": {"cui": cui_out, "nombre_obra": ob.get("nombrObra"),
                             "departamento": ob.get("nombrDepartamento"),
                             "obra_id": ob.get("codigoObra") or ob.get("obraId")}}
         else:
             res = {"cui": cui, "estado": "no_encontrado", "obra": None}
-        cache[cui] = res
+        cache[clave] = res
         out.append({**res, **extra})
     return out
 

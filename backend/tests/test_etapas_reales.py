@@ -66,7 +66,13 @@ class ConsultaFake:
             return [{"nombrObra": "MEJORAMIENTO DEL HOSPITAL MATERNO DE AMBO",
                      "nombrDepartamento": "HUANUCO", "codSnip": "395001",
                      "codigoObra": 222, "rucEjecutor": "", "rucSupervisor": "20512345678"}]
-        return []  # Quisqui: sin candidatos → REVISIÓN
+        if "SULLANA" in nombre.upper():
+            # sub-obra 1 del paquete HV: SÍ está en InfoObras, resoluble por nombre
+            return [{"nombrObra": "MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL "
+                                  "HOSPITAL DE APOYO SULLANA II-2",
+                     "nombrDepartamento": "PIURA", "codUniqInv": "2595123",
+                     "codigoObra": 444, "rucEjecutor": "", "rucSupervisor": ""}]
+        return []  # Quisqui y Posope Alto: sin candidatos → REVISIÓN
 
 
 @dataclass
@@ -106,6 +112,10 @@ def fetcher_fake(cui):
     if cui == "395001":
         # cubre el periodo certificado (2019-11 → 2023-03), sin paralización
         return ObraFake(222, "HOSPITAL MATERNO AMBO", avances=_meses((2019, 11), (2023, 3)))
+    if cui == "2595123":
+        # sub-obra 1 del paquete HV: valorizaciones que cubren el vínculo del cert
+        return ObraFake(444, "HOSPITAL DE APOYO SULLANA II-2",
+                        avances=_meses((2022, 3), (2023, 7)))
     if cui == "777999":
         # CUI pegado a mano por el humano → resuelve a una obra que cubre su cert
         # (Quisqui: 2023-11-22 → 2025-07-22)
@@ -999,3 +1009,175 @@ def test_sunat_desempate_por_nombre_exacto():
     assert ctx.enriquecimiento["1:1"]["sunat"]["ruc"] == "20262241441"
     assert ctx.enriquecimiento["1:1"]["sunat"]["via"] == "nombre_exacto"
     assert "ambiguo" not in ctx.enriquecimiento["1:1"]["sunat"]
+
+
+# ── Cert MULTI-OBRA SIN CUI: paquete de inversión (caso real HV Contratistas) ──
+# El certificado documenta UN vínculo continuo (01/03/2022 – 31/07/2023) sobre un
+# nombre COMPUESTO que encadena dos establecimientos bajo la etiqueta "(PAQUETE 6)"
+# y NO cita ningún CUI. La skill deja el nombre verbatim en `proyecto` y lo desglosa
+# limpio en `obras[]` (ADR-011 · PR-1). Fixture CONGELADO: es exactamente el caso que
+# PR-2 (resolver() completo por sub-obra) tiene que hacer resolver por nombre.
+_HV_PAQUETE_6 = ("MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL HOSPITAL DE APOYO "
+                 "SULLANA II-2 Y EL CENTRO DE SALUD POSOPE ALTO I-3 (PAQUETE 6)")
+_HV_SUB_1 = "MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL HOSPITAL DE APOYO SULLANA II-2"
+_HV_SUB_2 = "MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL CENTRO DE SALUD POSOPE ALTO I-3"
+
+ESPEJO_MULTI_OBRA_HV = {
+    "_meta": {"analisis_id": "hv-paquete6", "concurso": "CP-HV/2026",
+              "postor": "HV CONTRATISTAS S.A."},
+    "postor": {},
+    "profesionales": [
+        {"n_prof": 1, "cargo": "GERENTE DE PROYECTO", "nombre": "Prof HV",
+         "requisitos": {"tipo_experiencia": "mínimo 1 año"},
+         "total": {"dias": 518, "anios": 1.42},
+         "experiencias": [
+             {"n": 1, "proyecto": _HV_PAQUETE_6, "cui": None,
+              "entidad_emisora": "HV CONTRATISTAS S.A.",
+              "entidad_contratante": "GOBIERNO REGIONAL DE PIURA",
+              "fecha_inicial": "2022-03-01", "fecha_final": "2023-07-31",
+              "dias": 518, "folio": "300",
+              "obras": [{"proyecto": _HV_SUB_1, "cui": None},
+                        {"proyecto": _HV_SUB_2, "cui": None}]},
+         ]},
+    ],
+    "resumen_evaluacion": {"factores": [], "puntaje_total": None},
+}
+
+
+def test_espejo_multi_obra_sin_cui_valida_contra_el_contrato():
+    """Una sub-obra SIN CUI es válida en el contrato: el desglose de un paquete no
+    cita códigos y aun así tiene que entrar (antes el contrato lo permitía pero la
+    skill solo desglosaba cuando había CUI)."""
+    from schemas.espejo import JsonEspejo
+
+    m = JsonEspejo.model_validate(ESPEJO_MULTI_OBRA_HV)
+    exp = m.profesionales[0].experiencias[0]
+    # el nombre compuesto se conserva VERBATIM en la madre (fidelidad legal)…
+    assert exp.proyecto == _HV_PAQUETE_6 and exp.cui is None
+    # …y el desglose limpio vive en obras[], sin conectores ni etiqueta de paquete
+    assert [o.proyecto for o in exp.obras] == [_HV_SUB_1, _HV_SUB_2]
+    assert [o.cui for o in exp.obras] == [None, None]
+    assert all("PAQUETE" not in o.proyecto and " Y EL " not in o.proyecto
+               for o in exp.obras)
+
+
+def test_multi_obra_sin_cui_resuelve_por_nombre_y_tolera_parcial(tmp_path):
+    """PR-2 · el caso que motivó el ADR-011. Ninguna sub-obra cita CUI: cada una pasa
+    por `resolver()` completo. La 1ª (Sullana) resuelve por NOMBRE; la 2ª (Posope
+    Alto) no tiene candidatos y cae a `revision`.
+
+    Lo que este test protege es el PARCIAL (1 de N): la experiencia sigue contando
+    —su respaldo es el certificado— y la sub-obra no hallada queda VISIBLE en vez de
+    tumbar la experiencia o desaparecer."""
+    motor, repo = hacer_motor(tmp_path)
+    job = motor.correr(motor.crear_job(ESPEJO_MULTI_OBRA_HV).job_id)
+
+    enr = repo.cargar_enriquecimiento(job.job_id)["1:1"]
+    assert enr["via"] == "MULTI_OBRA" and enr["cui"] is None
+    sub = enr["sub_obras"]
+    assert [s["proyecto"] for s in sub] == [_HV_SUB_1, _HV_SUB_2]
+    assert [s["estado"] for s in sub] == ["resuelto", "revision"]
+
+    # la resuelta trae CUI, ficha y la FUERZA de la evidencia (via)
+    assert sub[0]["cui"] == "2595123" and sub[0]["via"] == "NOMBRE"
+    assert sub[0]["ficha"]["obra_nombre"] == "HOSPITAL DE APOYO SULLANA II-2"
+    # la no resuelta no inventa CUI y explica por qué
+    assert sub[1]["cui"] is None and sub[1]["decision"]
+
+    # la experiencia NO se pierde ni va a la cola humana (ADR-011: el identificador
+    # de un cert multi-obra es su portafolio, no un CUI único)
+    assert not [it for it in job.items_revision if not it.resuelto]
+    obs = [o for e in job.etapas for o in e.observaciones if o.codigo == "MULTI_OBRA"]
+    assert len(obs) == 1 and "1 de 2 identificada(s)" in obs[0].mensaje
+    # parcial ⇒ ADVERTENCIA, no INFO: la brecha tiene que verse
+    assert obs[0].severidad.value == "advertencia"
+
+    # el Excel: banda resumen + la hallada como SubExperiencia con su evidencia,
+    # y la no hallada listada con su motivo (no se esconde)
+    ws = openpyxl.load_workbook(tmp_path / job.job_id / "final.xlsx")["P1 GERENTE DE PROYECTO"]
+    texto = "\n".join(str(c.value) for f in ws.iter_rows() for c in f if c.value)
+    assert "CERTIFICADO MULTI-OBRA — 1 de 2 obra(s) hallada(s)" in texto
+    assert "SubExperiencia 1.1" in texto and "identificada por nombre" in texto
+    assert "POSOPE ALTO" in texto and "no se pudo identificar con seguridad" in texto
+
+
+def test_multi_obra_el_tiempo_no_se_duplica_al_resolver_por_nombre(tmp_path):
+    """Regresión anti-duplicación (ADR-011 §2): pasar de `por_codigo` a `resolver()`
+    NO puede cambiar el tiempo. Los días viven en la experiencia MADRE; las
+    SubExperiencias son verificación por obra y no suman."""
+    motor, repo = hacer_motor(tmp_path)
+    job = motor.correr(motor.crear_job(ESPEJO_MULTI_OBRA_HV).job_id)
+
+    p1 = repo.cargar_enriquecimiento(job.job_id)["prof:1"]
+    # 2022-03-01 → 2023-07-31 contado UNA vez, no una por sub-obra
+    assert p1["dias_brutos"] == 518
+
+
+# ── ADR-011 · P1 · candado MULTI-RUBRO ───────────────────────────────────────
+# Mismo vínculo, pero el paquete mezcla salud y vial. Cuánto del tiempo va a cada
+# especialidad es indecidible sin un anexo que lo declare: el backend lo SEÑALA,
+# no lo decide ni lo castiga.
+_HV_SUB_VIAL = "MEJORAMIENTO DE LA CARRETERA VECINAL TAMBOGRANDE - LAS LOMAS"
+
+
+def _espejo_multi_rubro(sub_fechas=False):
+    extra = ({"fecha_inicial": "2022-03-01", "fecha_final": "2022-11-30"}
+             if sub_fechas else {})
+    extra2 = ({"fecha_inicial": "2022-12-01", "fecha_final": "2023-07-31"}
+              if sub_fechas else {})
+    esp = {k: v for k, v in ESPEJO_MULTI_OBRA_HV.items() if k != "profesionales"}
+    esp["profesionales"] = [{
+        "n_prof": 1, "cargo": "GERENTE DE PROYECTO", "nombre": "Prof HV",
+        "requisitos": {"tipo_experiencia": "mínimo 1 año"},
+        "total": {"dias": 518, "anios": 1.42},
+        "experiencias": [{
+            "n": 1, "proyecto": _HV_PAQUETE_6, "cui": None,
+            "entidad_emisora": "HV CONTRATISTAS S.A.",
+            "entidad_contratante": "GOBIERNO REGIONAL DE PIURA",
+            "fecha_inicial": "2022-03-01", "fecha_final": "2023-07-31",
+            "dias": 518, "folio": "300",
+            "obras": [{"proyecto": _HV_SUB_1, "cui": None, **extra},
+                      {"proyecto": _HV_SUB_VIAL, "cui": None, **extra2}]}]}]
+    return esp
+
+
+def test_multi_rubro_sin_sub_fechas_se_señala_pero_no_bloquea(tmp_path):
+    """Salud + vial sin desglose temporal → alerta para el evaluador. Lo que este
+    test fija es que la alerta NO castiga: los días del vínculo son los mismos y la
+    experiencia sigue contando (el ADR mantiene el tiempo en la madre)."""
+    motor, repo = hacer_motor(tmp_path)
+    job = motor.correr(motor.crear_job(_espejo_multi_rubro()).job_id)
+
+    obs = [o for e in job.etapas for o in e.observaciones if o.codigo == "MULTI_RUBRO"]
+    assert len(obs) == 1
+    assert obs[0].severidad.value == "advertencia"
+    assert "salud, vial" in obs[0].mensaje
+
+    enr = repo.cargar_enriquecimiento(job.job_id)
+    assert enr["1:1"]["multi_rubro"] == ["salud", "vial"]
+    # NO bloquea: el tiempo del vínculo queda intacto y la experiencia cuenta
+    assert enr["prof:1"]["dias_brutos"] == 518
+    assert not [it for it in job.items_revision if not it.resuelto]
+
+    ws = openpyxl.load_workbook(tmp_path / job.job_id / "final.xlsx")["P1 GERENTE DE PROYECTO"]
+    texto = "\n".join(str(c.value) for f in ws.iter_rows() for c in f if c.value)
+    assert "Por confirmar" in texto and "especialidades distintas" in texto
+
+
+def test_multi_rubro_no_dispara_si_el_cert_declara_las_sub_fechas(tmp_path):
+    """Escenario B: si el cert declara el tiempo de CADA obra, el desglose existe y
+    no hay nada que confirmar — el candado se calla."""
+    motor, repo = hacer_motor(tmp_path)
+    job = motor.correr(motor.crear_job(_espejo_multi_rubro(sub_fechas=True)).job_id)
+
+    assert not [o for e in job.etapas for o in e.observaciones
+                if o.codigo == "MULTI_RUBRO"]
+    assert "multi_rubro" not in repo.cargar_enriquecimiento(job.job_id)["1:1"]
+
+
+def test_multi_rubro_no_dispara_en_paquete_de_un_solo_rubro(tmp_path):
+    """El paquete HV real es todo salud: no debe salir la alerta."""
+    motor, _ = hacer_motor(tmp_path)
+    job = motor.correr(motor.crear_job(ESPEJO_MULTI_OBRA_HV).job_id)
+    assert not [o for e in job.etapas for o in e.observaciones
+                if o.codigo == "MULTI_RUBRO"]

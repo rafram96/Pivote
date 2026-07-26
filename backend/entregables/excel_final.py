@@ -472,11 +472,22 @@ def construir_hoja_profesional(
     _EST_SUBOBRA = {
         "resuelto": "obra hallada en InfoObras",
         "no_encontrado": "el código no figura como obra (posible estudio/plan)",
+        "revision": "no se pudo identificar con seguridad — confirmar",
+        "privada": "obra/cliente privado — InfoObras no registra obra privada",
         "sin_cui": "el certificado no cita CUI para este proyecto",
         "portal": "InfoObras no respondió — reintentar",
     }
+    # de qué fuerza es la evidencia con que se identificó CADA sub-obra: no es la
+    # misma cosa un código citado que un nombre parecido, y el evaluador decide.
+    _VIA_SUBOBRA = {
+        "CODIGO": "por el código citado en el certificado",
+        "CUI_TEXTO": "por el código citado en el certificado",
+        "RUC": "por el RUC del emisor (ejecutor/supervisor de la obra)",
+        "NOMBRE": "por nombre del establecimiento",
+        "PROBABLE": "por nombre — candidato PROBABLE, conviene un vistazo",
+    }
 
-    def render_multi_obra(top: int, sub: list) -> int:
+    def render_multi_obra(top: int, sub: list, multi_rubro=None) -> int:
         """RESUMEN (banda F:K de la experiencia madre) de un cert multi-obra: cuántas
         obras se hallaron + las NO halladas en compacto. El DETALLE de cada obra
         hallada va como una SubExperiencia FULL-WIDTH debajo (render_subexperiencias)."""
@@ -487,13 +498,31 @@ def construir_hoja_profesional(
                            f"hallada(s); cada una se detalla abajo como SubExperiencia")
         c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
         rr += 1
+        if multi_rubro:
+            # candado multi-rubro (ADR-011 · P1): decisión de criterio del Comité,
+            # no un NO CUMPLE — el tiempo del vínculo no se toca.
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+            c = ws.cell(rr, 6, "Por confirmar — agrupa obras de especialidades "
+                               f"distintas ({', '.join(multi_rubro)}) sin declarar el "
+                               "tiempo de cada una: para repartir la experiencia por "
+                               "especialidad se requiere el anexo de desglose. El "
+                               "tiempo total del vínculo no cambia.")
+            c.font, c.fill, c.border, c.alignment = F_CELL, FILL_ALERTA, BORDER, AL_WRAP
+            ws.row_dimensions[rr].height = max(15, (-(-len(str(c.value)) // 70)) * 13 + 2)
+            rr += 1
         for s in (sub or []):
             if s.get("estado") == "resuelto":
                 continue  # su detalle full-width va abajo (render_subexperiencias)
             est = _EST_SUBOBRA.get(s.get("estado"), s.get("estado") or "—")
             cui_txt = f"  (CUI {s['cui']})" if s.get("cui") else ""
+            # los candidatos de una sub-obra en revisión se MUESTRAN (no hay cola
+            # humana por sub-obra): el evaluador necesita ver qué se encontró.
+            cands = s.get("candidatos") or []
+            cand_txt = ("   ·   candidatos: " + "; ".join(
+                f"CUI {c.get('cui')} {c.get('nombre_obra') or ''}".strip()
+                for c in cands[:2])) if cands else ""
             ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
-            c = ws.cell(rr, 6, f"• {s.get('proyecto') or '—'}{cui_txt} → {est}")
+            c = ws.cell(rr, 6, f"• {s.get('proyecto') or '—'}{cui_txt} → {est}{cand_txt}")
             c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
             ws.row_dimensions[rr].height = max(15, (-(-len(str(c.value)) // 70)) * 13 + 2)
             rr += 1
@@ -508,7 +537,9 @@ def construir_hoja_profesional(
         nonlocal r
         halladas = [s for s in (sub or []) if s.get("estado") == "resuelto"]
         for j, s in enumerate(halladas, 1):
-            cab = f"SubExperiencia {n_exp}.{j}: {s.get('proyecto') or '—'}  (CUI {s.get('cui')})"
+            via = _VIA_SUBOBRA.get(s.get("via") or "")
+            cab = (f"SubExperiencia {n_exp}.{j}: {s.get('proyecto') or '—'}  "
+                   f"(CUI {s.get('cui')})" + (f" — identificada {via}" if via else ""))
             if s.get("sin_verificar"):
                 banda(cab + " — obra hallada; su ficha no cargó (portal), reintentar",
                       F_HEAD, FILL_HEAD, 16)
@@ -1068,7 +1099,7 @@ def construir_hoja_profesional(
         if fx and fx.get("sub_obras"):
             # cert multi-obra: la banda F:K muestra un RESUMEN (cuántas + no halladas);
             # el detalle full-width de cada obra hallada va como SubExperiencia debajo.
-            r_right = render_multi_obra(r_top, fx["sub_obras"])
+            r_right = render_multi_obra(r_top, fx["sub_obras"], fx.get("multi_rubro"))
             r = max(r, r_right + 1)
         elif fx:
             r_right = render_obra(r_top, fx, ini, fin)
@@ -1283,7 +1314,8 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
         # que el render la muestre (sin cambiar la firma de generar_excel_final).
         if enr.get("sub_obras"):
             fichas[(np_, ne)] = {**(fichas.get((np_, ne)) or {}),
-                                 "sub_obras": enr["sub_obras"]}
+                                 "sub_obras": enr["sub_obras"],
+                                 "multi_rubro": enr.get("multi_rubro")}
     return paral, cuis, fichas, sunat
 
 
