@@ -3,7 +3,7 @@
 *(Actualizar al iniciar cualquier trabajo; mover a completed.md al cerrar.)*
 
 - T-TAREA-ADR011 (Issue #26) CERRADA el 2026-07-25 — ver `completed.md`.
-  **PR abierto: rafram96/Pivote#35** (base `demo`), pendiente de revisión/merge.
+  PR #35 REVISADA Y MERGEADA a `demo` (2026-07-26, merge `506815d`); issues #26 y #30 cerradas.
 - **Panel: las sub-obras no se ven** → rafram96/panel-infoObras#1. El hueco es
   de dos lados: el backend no expone `sub_obras` en
   `GET /jobs/{id}/profesionales` (`api/app.py:674-681`, ~2 líneas) y el panel no
