@@ -1,9 +1,32 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-07-26** · rama de trabajo:
-> `rafram96/issue-32-embeber-el-factor-2`
+> Última actualización: **2026-07-26** · rama de trabajo: `demo`
 
 ## Terminado y validado (sin desplegar)
+
+- **Integridad de la evaluación + visibilidad del Excel** (#45/#46/#47, PR #48
+  y ADR-013, en `demo`). Suite **565**. Lo que cambia para el evaluador:
+  - el bloque InfoObras del Excel **muestra el nombre de la obra** (antes solo
+    código y CUI: ninguna identificación era auditable de un vistazo);
+  - la advertencia de revisión **ya no se esconde tras un `elif`** — eran 403
+    de 999 ítems sin resolver (40%) invisibles, en 31 jobs;
+  - **el backend calcula** días/meses/años, `anterior_colegiatura` e
+    `incluye_covid` (etapa VALIDACIÓN): dejan de depender de que el LLM los
+    mande, que es como salieron vacías las corridas del 26-jul;
+  - el consolidador de la skill **falla ruidosamente** si la evaluación no
+    cubre 1:1 lo declarado, y ya no imprime `OK` cuando hay críticos;
+  - **veto por departamento contradictorio** + **candado de nombre genérico**
+    (ADR-013): cierran el caso Tarapoto (Hospital EsSalud de San Martín contra
+    una tomografía en Madre de Dios). Costo medido en el corpus: 0.6% a
+    revisión, y las 6 experiencias del delta del veto son mal-resueltos.
+  - `scripts/reparar_evaluacion.py` rellena jobs viejos sin re-correr la skill.
+- **Golden regenerada** (corrida en vivo autorizada, 26-jul): baseline nuevo
+  230 correctos / 10 incorrectos / 34 revisión, **cero `correcto→incorrecto`**.
+  La caché quedó completa y `--solo-cache` volvió a funcionar offline.
+  ⚠ **La golden es ciega a media regla del resolver**: sus casos solo llevan
+  `proyecto` y `cui`, sin `ubicacion`/`entidad`/`ruc_emisor`, así que los vetos
+  de ubigeo y el candado de nombre no se ejercitan (ADR-013 dio matriz
+  diagonal: probó cero regresión, no validó nada). Ensancharla está en curso.
 
 - **Issue #32 — factor de evaluación al final de cada hoja P** (`17b1e04`):
   cierra el punto 2 del feedback del 28-jul. Verificado e2e con PDFs
