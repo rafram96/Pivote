@@ -369,7 +369,7 @@ test("índice desde 0 → se corrige +1 y se avisa como critical", () => {
 });
 
 // ── 7 · end-to-end: el aviso llega al espejo y NO se pierden datos ──────────
-function taller(evaluacion) {
+function taller(evaluacion, postorMapa) {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), "espejo-test-"));
   fs.mkdirSync(path.join(ws, "_prof"));
   const w = (rel, obj) => fs.writeFileSync(path.join(ws, rel), JSON.stringify(obj), "utf-8");
@@ -383,7 +383,7 @@ function taller(evaluacion) {
   w("roster_bundles.json", {
     roster: HECHOS.map((h) => ({ n_prof: h.n_prof, cargo: h.cargo, nombre: `PROF ${h.n_prof}` })),
     postor: { postor: "CONSORCIO X", formularios: [{ anexo: "1", documento: "Declaración" }],
-              experiencia_postor: [{ n: 1, cliente: "GORE X", monto: 100 }] },
+              experiencia_postor: postorMapa || [{ n: 1, cliente: "GORE X", monto: 100 }] },
   });
   w("evaluacion.json", evaluacion);
   for (const h of HECHOS) {
@@ -455,5 +455,111 @@ test("cli · corrida sana: exit code 0 y la primera línea es «OK»", () => {
   assert.strictEqual(status, 0, `una corrida sana no puede fallar:\n${out}`);
   assert.match(out.split(/\r?\n/)[0], /^OK · espejo escrito/);
   assert.ok(!/CRÍTICO/.test(out));
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
+test("experiencias_eval anidado en profesionales_eval → fallback automático a warning (sin critical)", () => {
+  const anidada = {
+    profesionales_eval: {
+      "1": {
+        cumple: "CUMPLE — OK",
+        experiencias_eval: [
+          { n: 1, dias: 365, meses: 12, anios: 1, cargo_bases_valido: "SÍ", tipo_obra_valido: "SÍ" },
+          { n: 2, dias: 365, meses: 12, anios: 1, cargo_bases_valido: "SÍ", tipo_obra_valido: "SÍ" }
+        ]
+      },
+      "2": {
+        cumple: "CUMPLE — OK",
+        experiencias_eval: [
+          { n: 1, dias: 365, meses: 12, anios: 1, cargo_bases_valido: "SÍ", tipo_obra_valido: "SÍ" },
+          { n: 2, dias: 180, meses: 6, anios: 0.5, cargo_bases_valido: "SÍ", tipo_obra_valido: "SÍ" },
+          { n: 3, dias: 180, meses: 6, anios: 0.5, cargo_bases_valido: "SÍ", tipo_obra_valido: "SÍ" }
+        ]
+      },
+      "3": {
+        cumple: "CUMPLE — OK",
+        experiencias_eval: [
+          { n: 1, dias: 365, meses: 12, anios: 1, cargo_bases_valido: "SÍ", tipo_obra_valido: "SÍ" }
+        ]
+      }
+    }
+  };
+  const ws = taller(anidada);
+  const { status, out } = cli(ws);
+  assert.strictEqual(status, 0, `el fallback debe resolver las experiencias anidadas con exit code 0:\n${out}`);
+  assert.match(out, /OK · espejo escrito/);
+  const esp = JSON.parse(fs.readFileSync(path.join(ws, "espejo.json"), "utf-8"));
+  assert.strictEqual(esp.profesionales[0].experiencias.length, 2);
+  assert.strictEqual(esp.profesionales[1].experiencias.length, 3);
+  const obs = esp.observaciones_claude || [];
+  const tieneAviso = obs.some(a => a.tipo === "evaluacion_experiencias_anidadas");
+  assert.ok(tieneAviso, "debe registrar el aviso evaluacion_experiencias_anidadas en observaciones_claude");
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
+
+// ── 8 · fugas del literal "null" al Excel (análisis Soritor, 27-jul) ────────
+// `pick` descarta las cadenas vacías, así que `pick(x, "")` devuelve null; dentro
+// de un template literal eso se imprime como el TEXTO "null" en la celda.
+// Salieron 8 celdas "0.7 años — null" en el Excel del ingeniero.
+
+test("factor A · sin motivo, NO se imprime la palabra null", () => {
+  const ws = taller({
+    profesionales_eval: { 1: { cumple: "CUMPLE", anios_adicionales: 0.7 } },
+    experiencias_eval: { 1: expsDe(2) },
+  });
+  const espejo = main(ws);
+  const v = espejo.profesionales[0].anios_adicionales;
+  assert.ok(!/null|undefined/i.test(String(v)), `no debe filtrar "null", salió: ${JSON.stringify(v)}`);
+  assert.strictEqual(v, "0.7 años");
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
+test("factor A · con motivo, se anexa después del guión", () => {
+  const ws = taller({
+    profesionales_eval: { 1: { cumple: "CUMPLE", anios_adicionales: 2, factor_a_cuenta: "sí cuenta — supera el mínimo" } },
+    experiencias_eval: { 1: expsDe(2) },
+  });
+  const espejo = main(ws);
+  assert.strictEqual(espejo.profesionales[0].anios_adicionales, "2 años — sí cuenta — supera el mínimo");
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
+// ── 9 · PARTE 2: el juicio del evaluador se pega por `n`, no por posición ───
+// En Soritor salieron 4 columnas de la PARTE 2 vacías porque el juicio por
+// contrato del evaluador (ítem 10) no tenía dónde aterrizar en el espejo.
+
+const MAPA_2 = [
+  { n: 1, cliente: "GORE LORETO", contrato: "Contrato N° 003-2020", proyecto: "OBRA A", monto: 3240897.01 },
+  { n: 2, cliente: "GORE LORETO", contrato: "Contrato N° 014-2020", proyecto: "OBRA B", monto: 1605100 },
+];
+
+test("PARTE 2 · el % objeto y le corresponde del evaluador llegan al espejo", () => {
+  const ws = taller({
+    profesionales_eval: { 1: { cumple: "CUMPLE" } }, experiencias_eval: { 1: expsDe(2) },
+    postor_eval: { experiencia_postor: [
+      { n: 1, pct_objeto: 1, le_corresponde: 3240897.01, tipo_solicitado: "SÍ — supervisión" },
+      { n: 2, pct_objeto: 0.5, le_corresponde: 802550, tipo_solicitado: "SÍ — supervisión" },
+    ] },
+  }, MAPA_2);
+  const ep = main(ws).postor.experiencia_postor;
+  assert.strictEqual(ep[0].pct_objeto, 1);
+  assert.strictEqual(ep[1].le_corresponde, 802550);
+  // y los HECHOS del mapa siguen en su columna, sin correrse
+  assert.strictEqual(ep[0].contrato, "Contrato N° 003-2020");
+  assert.strictEqual(ep[0].proyecto, "OBRA A");
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
+test("PARTE 2 · si el evaluador se salta un contrato, el otro NO se corre", () => {
+  const ws = taller({
+    profesionales_eval: { 1: { cumple: "CUMPLE" } }, experiencias_eval: { 1: expsDe(2) },
+    // solo juzga el n=2; un pegado POSICIONAL le pondría este juicio al n=1
+    postor_eval: { experiencia_postor: [{ n: 2, pct_objeto: 0.5, le_corresponde: 802550 }] },
+  }, MAPA_2);
+  const ep = main(ws).postor.experiencia_postor;
+  assert.strictEqual(ep[0].pct_objeto, null, "el contrato no juzgado queda vacío, no hereda el del otro");
+  assert.strictEqual(ep[1].pct_objeto, 0.5);
+  assert.strictEqual(ep[1].contrato, "Contrato N° 014-2020");
   fs.rmSync(ws, { recursive: true, force: true });
 });
