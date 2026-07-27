@@ -4,6 +4,25 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
+## Nota (2026-07-26) — fixtures preparados para probar el backend nuevo
+
+Detalle completo en [`2026-07-26_claude.md`](2026-07-26_claude.md). En una línea:
+`Pronis_Sonitor/`, `Soritor2/` y `Consorcio-Lircay/` quedaron preparadas con
+`_prep/MAPA.md`; **no había propuestas repetidas** (sí bases triplicadas,
+≈273 MB); mapa de carpetas en `fixtures/ing manuel/_CONCURSOS.md`. Tres cosas
+que importan para cualquier corrida:
+
+1. En **Soritor** el factor **C. Sostenibilidad Social está eliminado**
+   (tachado) — no puntúa.
+2. En **Lircay** las bases dicen "sin tachas" y **sí tienen tachado en 16
+   páginas** (equipamiento estratégico y funciones BIM) → usar
+   `_prep/bases_texto.txt`.
+3. En **Lircay falta la oferta económica** de los 2 postores → sin límite
+   inferior.
+
+Herramientas en `src/tools/`: `detectar_tachado_pdf.py`, `trocear_pdf.py`,
+`render_paginas.py`.
+
 ## Nota de mantenimiento (2026-07-23) — el checklist de deploy RECAYÓ una vez
 
 La auditoría de migración de la base `.ai` (dos niveles) encontró que

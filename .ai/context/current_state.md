@@ -71,6 +71,15 @@
 
 ## En progreso
 
+- **Fixtures listos para probar el backend nuevo** (2026-07-26): preparadas
+  `Pronis_Sonitor/`, `Soritor2/` y `Consorcio-Lircay/` con `_prep/MAPA.md`
+  (inventario, offsets de folio, tachado, descartes). Índice nuevo
+  `fixtures/ing manuel/_CONCURSOS.md` = qué carpeta es qué concurso/postor.
+  Herramientas reusables en `src/tools/`: `detectar_tachado_pdf.py` (validado
+  contra el caso HuachoColpa: 10/10 páginas), `trocear_pdf.py` y
+  `render_paginas.py`. **Mejor fixture para probar: `Soritor2/`** (born-digital,
+  95 MB, sin troceo). Detalle en `handoffs/2026-07-26_claude.md`.
+
 - **Issue #31 — candado cargo↔bases (ADR-012)**, mergeado a `demo` el
   2026-07-26: `backend/validacion/cargo_nucleo.py`
   exige el núcleo de especialidad COMPLETO (OR entre alternativas, AND dentro)
@@ -83,6 +92,12 @@
 
 ## Problemas abiertos
 
+- **Bases de Lircay (`Consorcio-Lircay/`) traen tachado pese a llamarse "sin
+  tachas"**: 16 páginas, y lo eliminado toca equipamiento estratégico (pick-up
+  2021+, software, miras, "Con Estación Total") y las funciones BIM del
+  personal → leer `_prep/bases_texto.txt`, **nunca el PDF crudo**.
+- **Falta la oferta económica de los 2 postores de Lircay** → sin límite
+  inferior ni puntaje de precio. Pedírselas a Manuel.
 - Corridas camino A: aún se **descargan y pintan** secciones de obra
   (valorizaciones ~805 archivos) en expedientes — cosmético/pesado, no afecta
   veredictos. Advertencias COBERTURA se emiten para expedientes (no descuentan).
