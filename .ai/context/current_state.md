@@ -2,6 +2,31 @@
 
 > Última actualización: **2026-07-27** · rama de trabajo: `demo`
 
+## Lo del 2026-07-27 (documentación, entorno, alcance y un fix de veredicto)
+
+- **FALSO CUMPLE cerrado** (#51, PR #56, `cf9804b` en `demo`). Auditando 3 análisis
+  reales (156 experiencias) aparecieron **5 profesionales en verde con el tiempo
+  efectivo por debajo del mínimo** — y el dato que los desmentía estaba en otra
+  hoja del mismo archivo. La conciliación (`cumple_backend`) **ya existía** y estaba
+  doblemente inhabilitada:
+  - `_RE_MINIMO` solo leía «años» y las bases dicen «24/36 meses» → **0 de 44**
+    mínimos captados en los 3 concursos. Ahora lee años/meses/días y compara en
+    DÍAS (convertir a años y redondear volcaba los bordes): **44/44**.
+  - `cumple_backend` solo llegaba a la API. Ahora viaja en el espejo (en vivo) y
+    `regenerar_excel_final` lo reinyecta desde el enriquecimiento (regeneración).
+    En el Excel, si contradice al veredicto la celda se pinta **roja** y el motivo
+    va debajo.
+  - Se cerró el **error inverso**: cobertura de valorizaciones casi nula recorta los
+    días casi a cero y habría dado NO CUMPLE duro; la causa probable es obra mal
+    emparejada (error nuestro) → entra a `veredicto_provisional` → POR VERIFICAR.
+    De los 5 falsos CUMPLE: 1 traslape real (NO CUMPLE), 4 dato faltante (revisión).
+  - 619 tests (5 nuevos con los casos reales BIM y P6 de Lircay).
+- **Dos defectos de la skill arreglados** (`32017b7`): la PARTE 2 llegaba desalineada
+  (el prompt del mapa nunca pedía `contrato` ni `proyecto`, y el juicio del evaluador
+  no tenía dónde aterrizar → ahora se fusiona por la llave `n`), y el literal `null`
+  se imprimía en celdas. De paso, `pick(x,"")` dejaba `observacion: null` en
+  `formularios` — **invalidaba el espejo entero** cuando faltaba ese campo.
+
 ## Lo del 2026-07-27 (documentación, entorno y alcance — sin código de producto)
 
 - **La skill instalada llevaba 13 días de atraso y le faltaba el escudo entero.**

@@ -4,7 +4,20 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
-## Último handoff (2026-07-27) — gobierno y saneamiento
+## Cierre del 2026-07-27 — FALSO CUMPLE corregido
+
+Auditar 3 análisis reales (156 experiencias) destapó **5 profesionales en verde con
+el tiempo efectivo bajo el mínimo**. Cerrado en #51 / PR #56 (`cf9804b` en `demo`),
+619 tests. Lo que hay que saber: **la conciliación ya existía y estaba inhabilitada
+por un regex** que solo leía «años» cuando las bases dicen «meses» (0 de 44). Ver
+`context/current_state.md` y las lecciones nuevas en `memory/common_mistakes.md`.
+
+Queda abierto de esa auditoría: #57 (la columna TOTAL la calcula el LLM y no es
+confiable) y 3 defectos sin dueño — oferta económica incompleta, experiencia del
+postor no computable y jerga técnica en el entregable. Inventario completo en el
+comentario de auditoría de #51.
+
+## Handoff previo (2026-07-27) — gobierno y saneamiento
 
 Detalle completo en [`2026-07-27_claude.md`](2026-07-27_claude.md). Sesión sin
 código de producto; un commit (`27c8cde`). Lo que hay que saber antes de tocar nada:

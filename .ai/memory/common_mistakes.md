@@ -49,3 +49,19 @@
 - **Guardar respaldos dentro de `~/.claude/skills/`**: esa carpeta se
   auto-registra, y un respaldo aparece como skill invocable con la misma
   descripción que la real. Los respaldos van fuera.
+- **Un candado que nunca dispara parece un candado**: `cumple_backend` llevaba meses
+  escrito y jamás se calculó, porque el regex del mínimo solo leía «años» y las
+  bases dicen «meses» (0 de 44 en los 3 concursos auditados). Un mecanismo de
+  seguridad sin una prueba sobre datos REALES es decoración. Al escribir un
+  extractor de texto de bases, probarlo contra los requisitos de varios concursos.
+- **Redondear antes de comparar contra un umbral**: `anios_ef < minimo` con
+  `anios_ef = round(dias/365, 2)` deja pasar 2.996 años como si fueran 3. Los
+  umbrales se comparan en la unidad más fina que se tenga (días), no en la
+  redondeada que se muestra.
+- **Asumir la polaridad al pintar un veredicto**: `_fill_veredicto(v, "neg")` pinta
+  VERDE un «NO CUMPLE» (la polaridad describe si el SÍ es bueno, no si el texto es
+  bueno). Verificar el color antes de dar por buena una celda de alerta.
+- **Dar por abierta una decisión sin leer el código**: la issue #51 planteó como
+  «decisión de diseño pendiente» la distinción NO CUMPLE / revisión, que ya estaba
+  implementada y bien razonada («⚖ Regla legal» en `etapas_reales.py`). Leer la
+  implementación antes de proponer el diseño.
