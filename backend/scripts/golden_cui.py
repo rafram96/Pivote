@@ -20,6 +20,16 @@ Buckets (comparando el CUI resuelto contra la verdad auditada):
   na_privada           · descartado por gate de privadas (obra no pública)
   portal_caido         · el portal no respondió tras los reintentos
 
+CASOS ENSANCHADOS (ver `_enriquecer`): cada caso se arma con la experiencia
+REAL, reconstruida por join contra `datos_pivote/<job>/espejo.json` usando las
+columnas `job` y `prof:exp` de la auditoría. Antes el caso era solo
+`{proyecto, cui}` con fechas en None, y eso volvía INERTES la mitad de las
+reglas del resolver (veto de ubigeo, veto de departamento de ADR-013, candado
+de nombre genérico, `ruc_match`/`ent_match`, clasificación de privadas): la red
+de seguridad no podía ver lo que no se le daba. Si el espejo falta o el par
+(n_prof, n_exp) no calza, el caso se arma como antes y se CUENTA aparte — el
+reporte declara siempre su propia cobertura.
+
 Uso:
     python scripts/golden_cui.py              # corrida completa (live, ~30-90 min)
     python scripts/golden_cui.py --limite 20  # prueba rápida (primeros 20 casos)
@@ -58,12 +68,96 @@ def _solo_digitos(v) -> str:
     return re.sub(r"\D", "", str(v or ""))
 
 
+# ── enriquecimiento del caso con la experiencia REAL del espejo ──────────────
+
+# Campos que `resolucion.cui.resolver` LEE de la experiencia y que la golden no
+# le daba. Sin ellos, esas reglas nunca se ejercitan:
+#   ubicacion / entidad_contratante → veto de ubigeo, veto de departamento
+#                                     (ADR-013), `_muni_contradice`, privadas
+#   entidad_emisora / ruc_emisor    → `ruc_match` contra la ficha MEF
+#   fecha_inicial / fecha_final     → `_elegir_obra` (desempate entre obras del
+#                                     mismo CUI); iban SIEMPRE en None
+#   objeto                          → `_es_experiencia_privada`
+# `objeto` NO existe hoy en el espejo v1.2.0 (0/277 casos): se lee igual para
+# que el día que el contrato lo agregue entre solo, y mientras tanto degrada a
+# ausente — nunca a error.
+CAMPOS_ESPEJO = ("ubicacion", "entidad_contratante", "entidad_emisora",
+                 "ruc_emisor", "objeto", "fecha_inicial", "fecha_final")
+
+_ESPEJOS: dict[str, dict | None] = {}
+
+
+def _indice_espejo(job: str) -> dict | None:
+    """Índice `{(n_prof, n_exp): experiencia}` del espejo de un job.
+    Devuelve None si el espejo no está en disco o no se puede leer (el caso
+    degrada, no revienta). Cacheado por job: 29 jobs para 277 casos."""
+    if job in _ESPEJOS:
+        return _ESPEJOS[job]
+    ruta = BASE / job / "espejo.json"
+    idx: dict | None = None
+    if ruta.exists():
+        try:
+            espejo = json.loads(ruta.read_text(encoding="utf-8"))
+            idx = {}
+            for prof in espejo.get("profesionales") or []:
+                n_prof = prof.get("n_prof")
+                for e in prof.get("experiencias") or []:
+                    idx[(n_prof, e.get("n"))] = e
+        except Exception:   # noqa: BLE001 — espejo ilegible → caso degradado
+            idx = None
+    _ESPEJOS[job] = idx
+    return idx
+
+
+def _enriquecer(caso: dict) -> None:
+    """Rellena `caso['campos']` con los datos REALES de la experiencia y marca
+    `caso['enriquecido']`.
+
+    DEGRADACIÓN HONESTA: si falta el job, si `prof:exp` no viene con el formato
+    `<n_prof>:<n_exp>`, si el espejo no está en disco o si el par no calza, el
+    caso queda como siempre (solo proyecto + CUI citado, fechas en None) y se
+    cuenta con su motivo en `caso['motivo_degradado']`. Un golden que miente
+    sobre su propia cobertura es peor que uno pobre.
+
+    `ruc_emisor` tiene respaldo: la propia auditoría lo trae en su col 9. Se
+    usa solo cuando el espejo no lo dio (o el caso degradó)."""
+    campos: dict[str, object] = {}
+    motivo = None
+    job = caso.get("job") or ""
+    mpe = re.match(r"^\s*(\d+)\s*:\s*(\d+)\s*$", caso.get("prof_exp") or "")
+    if not job:
+        motivo = "la auditoría no trae job"
+    elif not mpe:
+        motivo = f"prof:exp ilegible ({caso.get('prof_exp')!r})"
+    else:
+        idx = _indice_espejo(job)
+        if idx is None:
+            motivo = f"sin espejo legible en disco para el job {job}"
+        else:
+            exp_real = idx.get((int(mpe.group(1)), int(mpe.group(2))))
+            if exp_real is None:
+                motivo = (f"el espejo del job {job} no tiene la experiencia "
+                          f"{caso.get('prof_exp')}")
+            else:
+                campos = {k: exp_real.get(k) for k in CAMPOS_ESPEJO
+                          if exp_real.get(k) not in (None, "", [])}
+    if not campos.get("ruc_emisor") and caso.get("ruc_auditoria"):
+        campos["ruc_emisor"] = caso["ruc_auditoria"]
+    caso["campos"] = campos
+    caso["enriquecido"] = motivo is None
+    caso["motivo_degradado"] = motivo
+
+
 # ── carga de casos desde el xlsx auditado ────────────────────────────────────
 
 def cargar_casos(limite: int | None = None) -> list[dict]:
     """Lee la hoja `auditoria_cui` y deduplica por nombre de proyecto normalizado.
     Toma filas con proyecto Y cui (verdad) no vacíos. El CUI verdad se extrae con
-    regex \\d{6,7} sobre la col 6; el CUI citado en el cert es la col 8."""
+    regex \\d{6,7} sobre la col 6; el CUI citado en el cert es la col 8.
+
+    Cada caso se ENSANCHA con la experiencia real de su espejo (`_enriquecer`);
+    el join usa el job (col 1) y `prof:exp` (col 2) de la fila que ganó el dedup,
+    así el caso sigue siendo el mismo de siempre, solo que completo."""
     import openpyxl
     wb = openpyxl.load_workbook(XLSX, read_only=True, data_only=True)
     ws = wb["auditoria_cui"]
@@ -85,9 +179,45 @@ def cargar_casos(limite: int | None = None) -> list[dict]:
             "cui_verdad": m.group(0),
             "cui_en_cert": cui_cert,
             "riesgo": str(r[0] or "").strip() or "SIN_RIESGO",
+            "job": str(r[1] or "").strip(),
+            "prof_exp": str(r[2] or "").strip(),
+            "ruc_auditoria": _solo_digitos(r[9]) or "",
         }
     ordenados = list(casos.values())
-    return ordenados[:limite] if limite else ordenados
+    if limite:
+        ordenados = ordenados[:limite]   # recortar ANTES: --limite no paga espejos de más
+    for caso in ordenados:
+        _enriquecer(caso)
+    return ordenados
+
+
+def resumen_cobertura(casos: list[dict]) -> dict:
+    """Cuántos casos van con la experiencia real y qué campos traen de verdad.
+    Se imprime y se guarda en el JSON: la golden declara su propia cobertura."""
+    from collections import Counter
+    enr = [c for c in casos if c["enriquecido"]]
+    degradados = [c for c in casos if not c["enriquecido"]]
+    return {
+        "total": len(casos),
+        "enriquecidos": len(enr),
+        "degradados": len(degradados),
+        "campos_no_vacios": {k: sum(1 for c in casos if c["campos"].get(k))
+                             for k in CAMPOS_ESPEJO},
+        "motivos_degradado": dict(Counter(c["motivo_degradado"] for c in degradados)),
+    }
+
+
+def imprimir_cobertura(cob: dict) -> None:
+    total = cob["total"] or 1
+    print("\n  Cobertura del ensanche (casos armados con la experiencia real):")
+    print(f"    enriquecidos {cob['enriquecidos']}/{cob['total']} "
+          f"({cob['enriquecidos'] * 100 / total:.1f}%) · "
+          f"degradados {cob['degradados']}")
+    for k in CAMPOS_ESPEJO:
+        n = cob["campos_no_vacios"][k]
+        print(f"      {k:22} {n:>4}/{cob['total']} ({n * 100 / total:>5.1f}%)")
+    for motivo, n in cob["motivos_degradado"].items():
+        print(f"      ⚠ degradado ×{n}: {motivo}")
 
 
 # ── consulta cacheada en disco (envuelve la real) ────────────────────────────
@@ -187,9 +317,18 @@ def resolver_caso(caso: dict, consulta: ConsultaCacheada, base=None) -> dict:
     del MEF que la corrida vieja nunca consultó — esos van al portal EN VIVO y se
     añaden a la caché (correcto y esperado)."""
     from resolucion.cui import resolver
-    exp = {"proyecto": caso["proyecto"], "cui": caso["cui_en_cert"] or "",
-           "fecha_inicial": None, "fecha_final": None}
+    # base del caso + los campos REALES del espejo (ubicación, entidad, RUC,
+    # fechas). `proyecto` y `cui` mandan desde la auditoría —son la identidad del
+    # caso y lo que ancla el emparejamiento con la baseline— y por eso van
+    # DESPUÉS del spread. Se rearma en cada intento: `resolver` escribe en la exp
+    # que recibe (`_ficha_mef_citado`, `_fichas_mef`) y un reintento debe partir
+    # limpio.
     for intento in range(REINTENTOS_CASO + 1):
+        exp = {**caso.get("campos", {}),
+               "proyecto": caso["proyecto"],
+               "cui": caso["cui_en_cert"] or ""}
+        exp.setdefault("fecha_inicial", None)
+        exp.setdefault("fecha_final", None)
         consulta.hubo_fallo_red = False
         r = resolver(exp, consulta, base=base)
         # el resolver convierte PortalNoResponde en revisión via='PORTAL' (honesto):
@@ -209,7 +348,7 @@ ORDEN_BUCKETS = ["resuelto_correcto", "resuelto_incorrecto", "revision",
 ORDEN_RIESGO = ["BAJO", "MEDIO", "ALTO", "SIN_RIESGO"]
 
 
-def imprimir_reporte(detalle: list[dict], total: int) -> None:
+def imprimir_reporte(detalle: list[dict], total: int, cobertura: dict | None = None) -> None:
     from collections import Counter
     buckets = Counter(d["bucket"] for d in detalle)
     print("\n" + "=" * 78)
@@ -248,6 +387,8 @@ def imprimir_reporte(detalle: list[dict], total: int) -> None:
         pct = caidos * 100 / total
         marca = "  ⚠ ADVERTENCIA" if pct > 10 else ""
         print(f"\n  portal_caido: {caidos}/{total} ({pct:.1f}%){marca}")
+    if cobertura:
+        imprimir_cobertura(cobertura)
     print("=" * 78)
 
 
@@ -379,9 +520,13 @@ def main(argv: list[str]) -> int:
 
     casos = cargar_casos(args.limite)
     total = len(casos)
+    cobertura = resumen_cobertura(casos)
     print(f"Golden CUI · {total} casos únicos del corpus auditado "
           f"({'SOLO-CACHE' if args.solo_cache else 'LIVE'}"
           f"{' · CON-BASE-MEF' if args.con_base else ''})", flush=True)
+    print(f"  casos con la experiencia real del espejo: "
+          f"{cobertura['enriquecidos']}/{total} "
+          f"(degradados: {cobertura['degradados']})", flush=True)
 
     consulta = ConsultaCacheada(solo_cache=args.solo_cache)
     detalle: list[dict] = []
@@ -400,6 +545,9 @@ def main(argv: list[str]) -> int:
             "posible_privada": bool(r.get("posible_privada")),
             "bucket": bucket,
             "riesgo": caso["riesgo"],
+            # ADITIVO: `comparar` no lo lee (empareja por posición + proyecto +
+            # CUI verdad), pero permite aislar el efecto del ensanche.
+            "enriquecido": caso["enriquecido"],
         })
         if not args.solo_cache and i % 5 == 0:
             consulta.guardar()   # crash-safe: persistir cache en corridas largas
@@ -421,12 +569,13 @@ def main(argv: list[str]) -> int:
         "con_base_mef": bool(args.con_base),
         "total": total,
         "buckets": {b: buckets.get(b, 0) for b in ORDEN_BUCKETS},
+        "cobertura": cobertura,
         "detalle": detalle,
     }
     salida_path.write_text(json.dumps(salida, ensure_ascii=False, indent=2),
                            encoding="utf-8")
 
-    imprimir_reporte(detalle, total)
+    imprimir_reporte(detalle, total, cobertura)
     print(f"\nGuardado: {salida_path}")
     print(f"Cache:    {CACHE}")
     return 0
