@@ -40,6 +40,25 @@ HOSPITAL»): cada certificado confirma su propio emisor con 100, y cruzados
 puntúan 87 y 76 — por debajo del umbral de A; y aunque A cediera, B falla porque
 la ventana de Tarapoto no contiene «MOYOBAMBA» (33) ni al revés (37).
 
+La ventana de B lleva holgura, y no es un aflojamiento
+───────────────────────────────────────────────────────
+El alineador devuelve una ventana del largo de la frase buscada. Cuando el OCR
+**inserta** caracteres dentro del membrete —«CONSORC1IO SUPERV1ISOR H0OSPITAL DE
+MOYOBAMBA»— el texto real ocupa más que la frase, la ventana se queda corta y la
+cola cae fuera: el emisor CORRECTO se declaraba ausente («MOYOBAMBA» recortado a
+«MOYOBA») y el folio bueno salía sospechoso. Una alarma falsa no es un error
+menor aquí: es lo que enseña al evaluador a ignorar la alerta, y entonces el
+módulo deja de servir para el folio que sí está corrido.
+
+Por eso la ventana se ensancha `holgura_ventana(largo)` caracteres a cada lado.
+La holgura NO es un número de gusto: es exactamente cuántas inserciones tolera el
+umbral de A. Con similitud de Indel, una frase de largo L que casa contra una
+ventana de largo L+k puntúa `1 − k/(2L+k)`; exigir que eso llegue a UMBRAL_FRASE
+deja `k ≤ 2L·(100−UMBRAL_FRASE)/UMBRAL_FRASE`. Con más inserciones que ésas, A ya
+había rechazado la frase y B nunca corre. Dicho de otro modo: la holgura sólo
+deja de recortar un match que la barrera A ya había aceptado; no admite ni un
+carácter de ruido que A no admitiera antes.
+
 Asimetría deliberada — «un falso CUMPLE es el peor fallo»:
 
   · `ok=True`  el emisor aparece → el folio es coherente.
@@ -57,6 +76,15 @@ en su cuerpo diga «servicios de consultores y contratistas generales» satisfac
 la contigüidad sin ser la misma empresa. Cuando la identidad se reduce a
 genéricos —o a un único término corto— el veredicto correcto es abstenerse, no
 un match débil: sin señal distintiva, ni el sí ni el no son de fiar.
+
+Esa abstención vale **siempre**, traiga o no RUC la experiencia. El RUC es una
+señal aparte: si aparece impreso, acredita por sí solo; si NO aparece, no
+convierte en juzgable un nombre que no lo es. Declararlo no puede habilitar el
+camino del nombre — «CONSORCIO HOSPITAL DEL SUR» contra un certificado del
+«CONSORCIO HOSPITAL DEL SURCO» daba `coincide` con sólo agregar el RUC al
+espejo, que es el falso CUMPLE exacto que el módulo existe para evitar. Por eso
+el candado de identidad vive en `buscar_emisor`, donde el nombre se USA, y no
+sólo en la puerta de entrada del veredicto.
 
 Distinguir `None` de `False` es lo único que hace usable al módulo: en la corrida
 real `95af90f1578e` los 63 recortes son escaneos puros (la capa de texto trae, a
@@ -77,6 +105,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, replace
+from math import ceil
 from pathlib import Path
 
 import fitz
@@ -99,6 +128,11 @@ UMBRAL_FRASE = 90
 # Frase mínima para que la contigüidad signifique algo. Por debajo, coincidir no
 # distingue a nadie.
 LARGO_MIN_FRASE = 8
+
+# Holgura mínima de la ventana de B. Para frases cortas la fórmula proporcional
+# da 1-2 caracteres; dos es el mínimo que cubre el ruido de OCR de un membrete
+# corto sin ensanchar nada de forma apreciable.
+HOLGURA_MINIMA = 2
 
 # Barrera B — cada término distintivo, dentro de la ventana que casó la frase.
 # El fuzzy solo se concede a términos largos: «MOYOBAMBA» contra «MOVOBAMBA»
@@ -311,6 +345,44 @@ def localizar_frase(frase: str, texto_compacto: str) -> tuple[int, int] | None:
     return alineacion.dest_start, alineacion.dest_end
 
 
+def holgura_ventana(largo_frase: int) -> int:
+    """Cuántos caracteres pudo INSERTAR el OCR sin que la barrera A lo notara.
+
+    El alineador devuelve una ventana del largo de la frase buscada; si el
+    documento trae la misma frase con caracteres de más, el sobrante queda fuera
+    y B juzga un recorte incompleto. La cota sale del propio umbral de A: con
+    similitud de Indel, una frase de largo L contra una ventana de largo L+k
+    puntúa `1 − k/(2L+k)`, y exigir `≥ UMBRAL_FRASE` deja
+    `k ≤ 2L·(100−UMBRAL_FRASE)/UMBRAL_FRASE`.
+
+    Es una cota, no una concesión: con más inserciones que ésas la frase no
+    habría pasado A y B ni siquiera correría. Por eso la holgura se deriva del
+    umbral en vez de fijarse a mano — si UMBRAL_FRASE sube, la holgura baja sola.
+    """
+    return max(HOLGURA_MINIMA,
+               ceil(2 * largo_frase * (100 - UMBRAL_FRASE) / UMBRAL_FRASE))
+
+
+def ventana_frase(frase: str, texto_compacto: str, ini: int, fin: int) -> str:
+    """El recorte del documento sobre el que se juzga la barrera B.
+
+    Es la ventana que casó la frase, ensanchada por la holgura a cada lado: las
+    inserciones del OCR pueden haber corrido la cola del membrete hacia la
+    derecha, o el alineador pudo arrancar la ventana unos caracteres tarde y
+    dejar la cabeza afuera. Se cubren los dos lados porque los dos se observaron.
+
+    Lo que NO cambia es la naturaleza de la barrera: sigue siendo un recorte
+    local de unas decenas de caracteres alrededor del membrete, no la página. El
+    falso CUMPLE que B ataja —«SAN» del nombre de un distrito y «CARLOS» del
+    nombre de un ingeniero, a media página de distancia— sigue estando a cientos
+    de caracteres de esta ventana.
+    """
+    h = holgura_ventana(len(frase))
+    ini_amplio = max(0, ini - h)
+    fin_amplio = min(len(texto_compacto), max(fin, ini + len(frase)) + h)
+    return texto_compacto[ini_amplio:fin_amplio]
+
+
 def termino_presente(termino: str, ventana: str) -> bool:
     """¿El término distintivo está DENTRO de la ventana que casó la frase?
 
@@ -319,11 +391,29 @@ def termino_presente(termino: str, ventana: str) -> bool:
     frontera de palabra sobre el texto crudo daba alarmas sobre el documento
     correcto. Acotar la búsqueda a la ventana es lo que hace segura esa laxitud:
     fuera de ella, «UNION» seguiría apareciendo dentro de «reunión».
+
+    El último tramo repara, un nivel más abajo, el mismo defecto que
+    `ventana_frase`: `partial_ratio` compara el término sólo contra trozos de SU
+    MISMO largo, así que un carácter insertado por el OCR dentro de la palabra no
+    se cobra como una inserción sino como sustitución + borrado. «CARLO1S» contra
+    «CARLOS» puntúa 83.3 y quedaba fuera; contra el trozo de largo L+1 puntúa
+    92.3, holgado por encima del umbral. Se ensancha el trozo comparado, NO el
+    umbral: medido contra entidades distintas, dejar crecer el trozo no las
+    acerca (HUANCAYO vs «HUANUCO» sigue en 75.0, TARAPOTO en el membrete de
+    Moyobamba sube de 37.5 a 47.1). Y el propio umbral acota cuánto se puede
+    insertar: con dos caracteres de más, un término de 6 letras cae a 85.7 y se
+    rechaza igual.
     """
     if termino in ventana:
         return True
-    return (len(termino) >= LARGO_MIN_FUZZY
-            and fuzz.partial_ratio(termino, ventana) >= UMBRAL_FUZZY)
+    if len(termino) < LARGO_MIN_FUZZY:
+        return False
+    if fuzz.partial_ratio(termino, ventana) >= UMBRAL_FUZZY:
+        return True
+    tope = len(termino) + holgura_ventana(len(termino))
+    return any(fuzz.ratio(termino, ventana[i:i + largo]) >= UMBRAL_FUZZY
+               for largo in range(len(termino) + 1, tope + 1)
+               for i in range(len(ventana) - largo + 1))
 
 
 def buscar_emisor(texto, entidad=None, ruc=None) -> tuple[str | None, tuple[str, ...], tuple[str, ...]]:
@@ -334,17 +424,25 @@ def buscar_emisor(texto, entidad=None, ruc=None) -> tuple[str | None, tuple[str,
     ventana (B). Si la frase no aparece, se devuelven todos los distintivos como
     faltantes; si aparece pero la ventana no los contiene todos, se devuelve el
     detalle para que el aviso pueda citar qué es lo que no calza.
+
+    El camino del nombre está cerrado cuando la identidad declarada no da para
+    juzgar, y da igual que la experiencia traiga RUC: el RUC acredita si el
+    documento lo imprime, pero no vuelve juzgable un nombre que no lo es. Sin
+    este candado aquí —y no sólo a la entrada del veredicto— bastaba con que el
+    espejo declarara un RUC para que «CONSORCIO HOSPITAL DEL SUR» se diera por
+    confirmado sobre un certificado del «CONSORCIO HOSPITAL DEL SURCO».
     """
     if contiene_ruc(texto, ruc):
         return SENAL_RUC, (), ()
-    distintivos = terminos_emisor(entidad)
-    if not distintivos:
+    if not identidad_verificable(entidad):
         return None, (), ()
-    ventana = localizar_frase(frase_emisor(entidad), compactar(texto))
+    distintivos = terminos_emisor(entidad)
+    frase = frase_emisor(entidad)
+    compacto = compactar(texto)
+    ventana = localizar_frase(frase, compacto)
     if ventana is None:
         return None, (), distintivos
-    ini, fin = ventana
-    recorte = compactar(texto)[ini:fin]
+    recorte = ventana_frase(frase, compacto, *ventana)
     hallados = tuple(t for t in distintivos if termino_presente(t, recorte))
     faltan = tuple(t for t in distintivos if t not in hallados)
     return (None if faltan else SENAL_NOMBRE), hallados, faltan
@@ -375,26 +473,30 @@ def verificar_texto(texto, entidad_emisora=None, ruc_emisor=None) -> Verificacio
             "El documento es una imagen escaneada sin texto legible: no se puede "
             "comprobar el folio.", letras=letras)
 
+    # El orden de abajo ES la asimetría del módulo: primero la señal dura, luego
+    # la abstención, y sólo al final las conclusiones que dependen del nombre.
     senal, hallados, faltan = buscar_emisor(texto, entidad_emisora, ruc_emisor)
     if senal == SENAL_RUC:
         return Verificacion(
             True, ESTADO_OK,
             f"El documento menciona el RUC {ruc_normalizado(ruc_emisor)} del emisor declarado.",
             senal=SENAL_RUC, letras=letras)
-    if senal == SENAL_NOMBRE:
-        return Verificacion(
-            True, ESTADO_OK,
-            f"El documento menciona a «{entidad_emisora}».",
-            senal=SENAL_NOMBRE, letras=letras, encontrados=hallados)
     if not nombre_sirve:
         # Tiene RUC (por eso llegó hasta aquí) pero el documento no lo imprime, y
         # el nombre no da para juzgar. Un certificado válido puede perfectamente
-        # no llevar el RUC: callarse aquí es obligatorio.
+        # no llevar el RUC: callarse aquí es obligatorio. Va ANTES del veredicto
+        # por nombre, no después: al revés, un nombre inservible podía «confirmar»
+        # el folio con sólo llevar un RUC al lado.
         return Verificacion(
             None, ESTADO_NO_VERIFICABLE,
             f"El documento no menciona el RUC {ruc_normalizado(ruc_emisor)} y "
             f"«{entidad_emisora}» no aporta un nombre distintivo con el que "
             "contrastarlo: no se puede concluir nada sobre el folio.", letras=letras)
+    if senal == SENAL_NOMBRE:
+        return Verificacion(
+            True, ESTADO_OK,
+            f"El documento menciona a «{entidad_emisora}».",
+            senal=SENAL_NOMBRE, letras=letras, encontrados=hallados)
     if hallados:
         detalle = (f"aparece un nombre parecido, pero no calza en "
                    f"{', '.join(f'«{t}»' for t in faltan)}")
