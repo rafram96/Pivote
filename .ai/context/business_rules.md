@@ -18,6 +18,25 @@ destruye el producto. **Ante ambigüedad, abstenerse y mostrar candidatos.**
 - El MEF a veces registra la inversión bajo la sede de la entidad ejecutora,
   no la obra física → los vetos de ubicación exigen contradicción DECLARADA en
   ambos lados, nunca por ausencia de datos.
+- **Desempatar ≠ contradecir** (ADR-013). El departamento sigue SIN desempatar
+  homónimos (viven en el mismo, ADR-005), pero cuando está declarado en ambos
+  lados y se CONTRADICE, **veta** — mismo criterio que ya rige para la
+  provincia, un nivel más arriba. Cubre los certificados que declaran el
+  departamento pero no la provincia (caso Tarapoto: "Ciudad de Tarapoto" no
+  calza `provincia de X` porque Tarapoto es distrito).
+  - Solo cuenta el departamento declarado con **intención geográfica** (campo
+    `ubicacion` o rótulo «departamento/región de X»): los establecimientos SE
+    LLAMAN como departamentos ("I.E. San Martín de Porres", en Lima).
+  - Rigen las exenciones de siempre: `ruc_match` exime, sin ficha MEF es
+    inerte, y el CUI citado en el certificado nunca pasa por el veto.
+- **Un nombre sin término propio no identifica una obra** (ADR-013). Si tras
+  descartar genéricos y nombres de ENTIDAD del Estado (ESSALUD, MINSA,
+  PRONIED, MUNICIPALIDAD…) no queda ningún token distintivo —"HOSPITAL DE
+  ESSALUD" describe decenas de hospitales—, el match por nombre exige
+  corroboración dura (RUC del emisor en la obra, N° de institución, entidad ≈
+  ficha MEF, o provincia/distrito coincidente) o va a **revisión con los
+  candidatos visibles**. El departamento NO corrobora. Umbral: basta UN token
+  distintivo (exigir dos mandaría a revisión el 11.5% del corpus resuelto).
 
 ## Expedientes (camino A)
 

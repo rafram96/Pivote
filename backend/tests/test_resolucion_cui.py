@@ -9,7 +9,7 @@ import itertools
 from resolucion.cui import (
     _es_experiencia_expediente, _es_experiencia_privada, _exp_derivada,
     _muni_contradice, _puntuar, _sin_prefijo, norm, resolver, resolver_obras,
-    rubros_mixtos, ubicacion, ubigeo_cert)
+    rubros_mixtos, tokens_distintivos, ubicacion, ubigeo_cert)
 
 
 def test_ubicacion_no_confunde_ica_dentro_de_huancavelica():
@@ -555,3 +555,158 @@ def test_rubros_mixtos_ignora_las_sub_obras_de_rubro_indeterminado():
     assert rubros_mixtos(_obras("HOSPITAL DE APOYO SULLANA II-2",
                                 "OBRA SIN PALABRAS DE RUBRO ALGUNO",
                                 "CARRETERA VECINAL X")) == {"salud", "vial"}
+
+
+# ── ADR-013 · CANDADO DE NOMBRE GENÉRICO ────────────────────────────────────
+# Un `proyecto` cuyo nombre no aporta NINGÚN término propio —solo genéricos de
+# obra, palabras de rubro y el nombre de una entidad del Estado— no puede
+# sostener `via = NOMBRE`: describe a decenas de obras. Se exige corroboración
+# dura o se va a revisión con los candidatos VISIBLES.
+
+class _ConsultaFija:
+    def __init__(self, obras):
+        self.obras = obras
+
+    def por_codigo(self, codigo):
+        return [o for o in self.obras if str(o.get("codUniqInv")) == str(codigo)]
+
+    def buscar(self, nombre):
+        return list(self.obras)
+
+
+class _BaseFichas:
+    """Base MEF de juguete: solo fichas por CUI (sin candidatos propios)."""
+
+    def __init__(self, fichas):
+        self.fichas = fichas
+
+    def disponible(self):
+        return True
+
+    def buscar_candidatos(self, nombre, topn=10):
+        return []
+
+    def existe_cui(self, codigo):
+        return self.fichas.get(str(codigo))
+
+    def es_entidad_publica(self, nombre):
+        return (True, 100)
+
+
+def test_tokens_distintivos_descuenta_genericos_y_entidades():
+    # el caso que motiva el candado: 3 palabras, ninguna identifica una obra
+    assert tokens_distintivos("HOSPITAL DE ESSALUD") == set()
+    assert tokens_distintivos("MEJORAMIENTO DE LOS SERVICIOS DE SALUD") == set()
+    # un nombre propio SÍ cuenta, aunque venga con genéricos y con la entidad
+    assert tokens_distintivos("HOSPITAL DE ESSALUD DE MOYOBAMBA") == {"MOYOBAMBA"}
+    assert "KREAR" in tokens_distintivos(
+        "Mejoramiento de la Infraestructura Educativa KREAR")
+
+
+_OBRA_GENERICA = {
+    "codUniqInv": "2405647", "codigoObra": 33793,
+    "nombrObra": ("INSTALACION DE LOS SERVICIOS DE TOMOGRAFIA DEL HOSPITAL I "
+                  "VICTOR ALFREDO LAZO PERALTA DE ESSALUD - PUERTO MALDONADO"),
+    "nombrDepartamento": "MADRE DE DIOS",
+}
+_FICHA_GENERICA = {"cui": "2405647", "nombre": _OBRA_GENERICA["nombrObra"],
+                   "dpto": "MADRE DE DIOS", "prov": "TAMBOPATA",
+                   "dist": "TAMBOPATA", "entidad": "SEGURO SOCIAL DE SALUD"}
+
+
+def test_nombre_generico_sin_corroboracion_va_a_revision():
+    """«HOSPITAL DE ESSALUD» no puede sostener un `resuelto` por nombre: sin RUC,
+    sin N° de institución, sin entidad que calce y sin ubigeo coincidente, el
+    candidato queda VISIBLE en revisión — nunca descartado en silencio."""
+    exp = {"proyecto": "HOSPITAL DE ESSALUD", "fecha_inicial": "2012-10-26"}
+    r = resolver(exp, _ConsultaFija([_OBRA_GENERICA]),
+                 base=_BaseFichas({"2405647": _FICHA_GENERICA}))
+    assert r["estado"] == "revision" and r["cui"] is None, r
+    assert "2405647" in {c["cui"] for c in r["candidatos"]}
+    assert "término propio" in r["decision"]
+
+
+def test_nombre_generico_con_ruc_del_emisor_si_resuelve():
+    """El candado exige CORROBORACIÓN, no un nombre perfecto: el RUC del emisor
+    figurando como ejecutor de la obra es evidencia dura y basta."""
+    exp = {"proyecto": "HOSPITAL DE ESSALUD", "ruc_emisor": "20544148380",
+           "fecha_inicial": "2012-10-26"}
+    obra = dict(_OBRA_GENERICA, rucEjecutor="20544148380")
+    r = resolver(exp, _ConsultaFija([obra]),
+                 base=_BaseFichas({"2405647": _FICHA_GENERICA}))
+    assert r["estado"] == "resuelto" and r["via"] == "RUC", r
+
+
+def test_nombre_generico_con_ubigeo_coincidente_si_resuelve():
+    """Ubigeo POSITIVO (la provincia/distrito del MEF coincide con la declarada)
+    también corrobora. El departamento NO cuenta como corroboración: ADR-005 midió
+    que no desempata homónimos."""
+    exp = {"proyecto": "HOSPITAL DE ESSALUD",
+           "ubicacion": "Distrito de Tambopata, Provincia de Tambopata",
+           "fecha_inicial": "2016-06-18"}
+    r = resolver(exp, _ConsultaFija([_OBRA_GENERICA]),
+                 base=_BaseFichas({"2405647": _FICHA_GENERICA}))
+    assert r["estado"] == "resuelto" and r["cui"] == "2405647", r
+
+
+def test_nombre_generico_con_entidad_TAMBIEN_generica_no_se_salva():
+    """`ent_match` NO corrobora si la entidad del certificado es ella misma
+    genérica. «SEGURO SOCIAL DE SALUD» es el nombre formal de EsSalud: casa con
+    CUALQUIER inversión de EsSalud del país, así que "confirma" el candidato con
+    la misma palabra que ya hacía genérico al nombre. Corroborarse a sí mismo no
+    es corroborar — es el caso exacto del ADR-013 (Hospital EsSalud de Tarapoto
+    contra una tomografía en Madre de Dios)."""
+    exp = {"proyecto": "HOSPITAL DE ESSALUD",
+           "entidad_contratante": "SEGURO SOCIAL DE SALUD",
+           "fecha_inicial": "2012-10-26"}
+    r = resolver(exp, _ConsultaFija([_OBRA_GENERICA]),
+                 base=_BaseFichas({"2405647": _FICHA_GENERICA}))
+    assert r["estado"] == "revision" and r["cui"] is None, r
+    assert any(c.get("cui") == "2405647" for c in r["candidatos"]), r
+
+
+def test_nombre_generico_con_entidad_PROPIA_si_resuelve():
+    """La otra cara: una entidad con término propio (una municipalidad concreta)
+    SÍ es señal dura — identifica a un contratante entre miles, no a un sector."""
+    ficha = {**_FICHA_GENERICA, "entidad": "MUNICIPALIDAD DISTRITAL DE PERENE"}
+    exp = {"proyecto": "HOSPITAL DE ESSALUD",
+           "entidad_contratante": "MUNICIPALIDAD DISTRITAL DE PERENE",
+           "fecha_inicial": "2012-10-26"}
+    r = resolver(exp, _ConsultaFija([_OBRA_GENERICA]),
+                 base=_BaseFichas({"2405647": ficha}))
+    assert r["estado"] == "resuelto" and r["cui"] == "2405647", r
+
+
+def test_un_solo_token_distintivo_basta_umbral_n1():
+    """Calibración N=1 (medida sobre las 1519 experiencias del corpus): exigir DOS
+    términos propios mandaría a revisión el 11.5% del corpus resuelto. Con uno
+    solo, el candado no se activa."""
+    proyecto = "MEJORAMIENTO DEL HOSPITAL DE ESSALUD DE MOYOBAMBA"
+    assert len(tokens_distintivos(proyecto)) == 1
+    obra = {"codUniqInv": "2900030", "codigoObra": 30, "nombrObra": proyecto,
+            "nombrDepartamento": "SAN MARTIN"}
+    ficha = {"cui": "2900030", "nombre": proyecto, "dpto": "SAN MARTIN",
+             "prov": "MOYOBAMBA", "dist": "MOYOBAMBA"}
+    r = resolver({"proyecto": proyecto, "fecha_inicial": "2015-01-01"},
+                 _ConsultaFija([obra]), base=_BaseFichas({"2900030": ficha}))
+    assert r["estado"] == "resuelto" and r["cui"] == "2900030", r
+
+
+def test_candado_de_nombre_no_toca_el_cui_citado():
+    """Un CUI escrito en el certificado se resuelve en el PASO 0 y no pasa por las
+    compuertas por nombre: sigue siendo autoritativo aunque el nombre sea genérico
+    (el certificado suele citar un componente del proyecto integral)."""
+    exp = {"proyecto": "HOSPITAL DE ESSALUD", "cui": "2405647",
+           "fecha_inicial": "2016-06-18"}
+    r = resolver(exp, _ConsultaFija([_OBRA_GENERICA]),
+                 base=_BaseFichas({"2405647": _FICHA_GENERICA}))
+    assert r["estado"] == "resuelto" and r["cui"] == "2405647", r
+    assert r["via"] in ("CUI_TEXTO", "PROBABLE")
+
+
+def test_candado_de_nombre_tambien_actua_sin_base_mef():
+    """Sin base MEF no hay fichas y `geo_match`/`ent_match` no existen, pero el
+    candado es el mismo: un nombre sin término propio no resuelve por nombre."""
+    exp = {"proyecto": "HOSPITAL DE ESSALUD", "fecha_inicial": "2012-10-26"}
+    r = resolver(exp, _ConsultaFija([_OBRA_GENERICA]), base=None)
+    assert r["estado"] == "revision" and r["cui"] is None, r

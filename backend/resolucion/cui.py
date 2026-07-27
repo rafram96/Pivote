@@ -340,8 +340,10 @@ def _rubro_contradice(rub_cert: set[str], texto_obra: str) -> bool:
 #
 # CUIDADO (documentado, ver _puntuar): el MEF a veces registra la inversión bajo la
 # sede de la entidad EJECUTORA, no la ubicación física de la obra. Por eso:
-#   • el VETO exige contradicción de PROVINCIA con AMBAS partes declaradas
-#     explícitamente (nunca por ausencia de datos de un lado);
+#   • el VETO exige contradicción de PROVINCIA —o de DEPARTAMENTO, ADR-013— con
+#     AMBAS partes declaradas explícitamente (nunca por ausencia de datos de un
+#     lado); del lado del certificado el departamento debe venir con intención
+#     geográfica (`depto_declarado`), no ser un topónimo del nombre propio;
 #   • una contradicción SOLO de distrito (misma provincia) PENALIZA (−25), no veta
 #     (obras intermunicipales existen);
 #   • sin ficha MEF del candidato la señal es INERTE (no cambia nada).
@@ -362,6 +364,12 @@ _RE_ROTULO_GEO = re.compile(
     r"^(provincia|prov|distrito|dist|departamento|dpto|regi[oó]n|reg|localidad|"
     r"sector|centro poblado|c\.?p\.?)\s+(de\s+)?", re.I)
 
+# Rótulo EXPLÍCITO de departamento ("departamento de San Martín", "región Junín").
+# Solo se usa para el veto de DEPARTAMENTO (ADR-013): ver `ubigeo_cert`.
+_RE_DEPTO_KW = re.compile(
+    r"(?:departamento|dpto|regi[oó]n)\s+(?:de\s+|del\s+)?([A-Za-zÁÉÍÓÚÜÑ. ]+?)"
+    r"(?=\s*[,;\-–|(/]|$)", re.I)
+
 
 def _deptos_en(texto: str) -> set[str]:
     """Departamentos nombrados en un texto (con alias HVCA→HUANCAVELICA)."""
@@ -369,6 +377,21 @@ def _deptos_en(texto: str) -> set[str]:
     for ab, full in DEPTO_ALIAS.items():
         n = re.sub(rf"\b{ab}\b", full, n)
     return {d for d in DEPTOS if re.search(rf"\b{d}\b", n)}
+
+
+def _segmentos_ubicacion(texto: str) -> set[str]:
+    """Segmentos de un campo de ubicación, en limpio.
+
+    Parte por los separadores del texto ORIGINAL: `norm()` borra los guiones (no
+    las comas), así que partir después dejaría "Chimbote – Santa – Áncash" como un
+    único término y perdería el departamento del final."""
+    out: set[str] = set()
+    for p in re.split(r"[,;|/()\-–—]+", str(texto or "")):
+        p = _RE_ROTULO_GEO.sub("", norm(p).strip()).strip(" .-")
+        p = re.sub(r"^DE\s+", "", p).strip()
+        if p:
+            out.add(p)
+    return out
 
 
 def _terminos_geo(texto: str) -> list[str]:
@@ -403,8 +426,22 @@ def _provincia_desde_cola(terminos: list[str]) -> set[str]:
 
 def ubigeo_cert(exp: dict) -> dict:
     """Señales de ubicación DECLARADAS por el certificado: provincia(s),
-    distrito(s), departamento(s) y el pool completo de términos de ubicación.
-    Mira `proyecto` + `ubicacion` + `entidad_contratante` del espejo.
+    distrito(s), departamento(s), departamento(s) declarados con INTENCIÓN
+    geográfica (`depto_declarado`, ver abajo) y el pool completo de términos de
+    ubicación. Mira `proyecto` + `ubicacion` + `entidad_contratante` del espejo.
+
+    `depto` vs `depto_declarado` (ADR-013): `depto` se queda con CUALQUIER nombre
+    de departamento que aparezca en el texto — sirve para PUNTUAR y para eximir del
+    veto (cuantos más departamentos tolerados, menos veta). Pero como base de un
+    VETO sería peligroso: un colegio o un hospital pueden LLAMARSE como un
+    departamento ("I.E. San Martín" en Junín, "Hospital San Martín de Pangoa"), y
+    ahí el topónimo es un nombre propio, no una ubicación. `depto_declarado` exige
+    intención geográfica —el campo `ubicacion` del certificado o un rótulo
+    explícito "departamento/región de X"— y es el ÚNICO que habilita el veto.
+    Medido sobre el corpus (1519 experiencias): 92.9% declara el departamento así,
+    solo 1.3% lo tiene únicamente en el título, y el delta del veto es idéntico
+    (6 casos con una señal y con la otra) — la restricción no cuesta nada y cierra
+    la clase de falso negativo del topónimo espurio.
 
     SUB-OBRA de un paquete (`_solo_geo_propia`, ver `_exp_derivada`): solo cuenta la
     geografía de SU PROPIO nombre. Un paquete cruza provincias, así que la ubicación
@@ -423,8 +460,19 @@ def ubigeo_cert(exp: dict) -> dict:
     prov |= _provincia_desde_cola(terms_proj)
     prov |= _provincia_desde_cola(terms_ubic)
     depto = ubicacion(proyecto) | _deptos_en(ubic) | _deptos_en(ent)
+    # Departamento con intención geográfica. En `ubicacion` NO basta que el nombre
+    # aparezca: tiene que ser un SEGMENTO COMPLETO (separado por comas/guiones y ya
+    # sin rótulo). Los establecimientos y urbanizaciones se llaman como
+    # departamentos —"San Martín de Porres" (distrito de Lima), "Urbanización La
+    # Libertad" (Chiclayo)— y tomar ese topónimo como el departamento de la obra
+    # vetaría al candidato CORRECTO: el falso negativo que ADR-005 temía. Fuera de
+    # `ubicacion` solo cuenta el rótulo explícito ("departamento/región de X").
+    depto_decl = {d for d in DEPTOS if d in _segmentos_ubicacion(ubic)}
+    for m in _RE_DEPTO_KW.findall(texto):
+        depto_decl |= _deptos_en(m)
     loc = set(prov) | set(dist) | set(terms_proj) | set(terms_ubic) | set(depto)
-    return {"prov": prov, "dist": dist, "depto": depto, "loc": loc}
+    return {"prov": prov, "dist": dist, "depto": depto,
+            "depto_declarado": depto_decl, "loc": loc}
 
 
 _RE_MUNI = re.compile(r"\bMUNICIPALIDAD\s+(DISTRITAL|PROVINCIAL)\s+DE\s+"
@@ -475,11 +523,34 @@ def _loc_eq(a: str, b: str) -> bool:
     return len(corto) >= 4 and re.search(rf"\b{re.escape(corto)}\b", largo) is not None
 
 
+# Centinelas de "sin dato" del Banco de Inversiones: una inversión multi-región
+# no declara UN departamento, declara que no aplica. Tratar `-MUL.DEP-` como si
+# fuera un departamento real convierte el veto en un veto POR AUSENCIA, que es
+# justo lo que ADR-005 prohíbe (medido: 481 filas de la base local, casi todas de
+# ministerios y programas nacionales).
+_RE_MEF_SIN_DATO = re.compile(r"^(TODOS|MUL\s*DEP\w*|MULTI\w*|NO\s+APLICA|SIN\s+\w+)$")
+
+
+def _sin_dato_mef(val: str) -> bool:
+    """True si el valor de ubicación de la ficha MEF es un centinela de 'no aplica'
+    (multi-departamental / todos), no una ubicación real.
+
+    `norm` NO limpia la puntuación de estos valores (llegan como `-MUL.DEP-`), así
+    que aquí se reduce a letras y espacios antes de comparar."""
+    limpio = re.sub(r"[^A-Z0-9]+", " ", norm(val or "").upper()).strip()
+    return bool(_RE_MEF_SIN_DATO.match(limpio))
+
+
 def _ubigeo_contra(sig: dict, ficha: Optional[dict]) -> tuple[bool, bool, bool]:
     """(prov_contra, dist_contra, depto_contra) del certificado vs la ficha MEF de
     un candidato. Cada contradicción exige AMBAS partes declaradas y que el valor
     del MEF no aparezca en NINGÚN término de ubicación del certificado (evita vetar
-    cuando el MEF registra la provincia donde el cert la nombró como distrito)."""
+    cuando el MEF registra la provincia donde el cert la nombró como distrito).
+
+    `depto_contra` se calcula contra `sig['depto_declarado']` (departamento con
+    intención geográfica), NO contra `sig['depto']` — ver `ubigeo_cert` y ADR-013.
+    Un `sig` construido a mano sin esa clave deja el departamento INERTE: la
+    ausencia de información nunca veta."""
     if not ficha:
         return (False, False, False)
     loc = sig["loc"]
@@ -488,7 +559,7 @@ def _ubigeo_contra(sig: dict, ficha: Optional[dict]) -> tuple[bool, bool, bool]:
     depto_mef = norm(ficha.get("dpto") or "")
 
     def _contra(cert_set: set[str], val_mef: str) -> bool:
-        if not cert_set or not val_mef:
+        if not cert_set or not val_mef or _sin_dato_mef(val_mef):
             return False
         if any(_loc_eq(c, val_mef) for c in cert_set):
             return False               # el MEF coincide con lo declarado
@@ -498,7 +569,23 @@ def _ubigeo_contra(sig: dict, ficha: Optional[dict]) -> tuple[bool, bool, bool]:
 
     return (_contra(sig["prov"], prov_mef),
             _contra(sig["dist"], dist_mef),
-            _contra(sig["depto"], depto_mef))
+            _contra(sig.get("depto_declarado") or set(), depto_mef))
+
+
+def _ubigeo_coincide(sig: dict, ficha: Optional[dict]) -> bool:
+    """True si la ficha MEF del candidato coincide POSITIVAMENTE con una provincia
+    o un distrito DECLARADO por el certificado. Es una señal DURA de identidad (la
+    usa el candado de nombre genérico, ADR-013).
+
+    El DEPARTAMENTO no cuenta como coincidencia: ADR-005 midió que no desempata
+    homónimos —viven en el mismo departamento—, así que admitirlo como
+    corroboración sería regalar la señal justo donde no discrimina."""
+    if not ficha:
+        return False
+    prov_mef = norm(ficha.get("prov") or "")
+    dist_mef = norm(ficha.get("dist") or "")
+    return bool((prov_mef and any(_loc_eq(c, prov_mef) for c in sig["prov"]))
+                or (dist_mef and any(_loc_eq(c, dist_mef) for c in sig["dist"])))
 
 
 def _palabras(s: str) -> set[str]:
@@ -517,6 +604,36 @@ _RE_COLA_GEO = re.compile(
 def _tokens_clave(est_key: str) -> set[str]:
     sin_geo = _RE_COLA_GEO.sub("", est_key or "")
     return {t for t in _palabras(sin_geo) if len(t) >= 4 and t not in _STOP}
+
+
+# Nombres y siglas de ENTIDADES del Estado. No identifican una obra: aparecen en
+# cientos de inversiones del Banco de Inversiones (ESSALUD solo tiene centenares).
+# Están FUERA de `_STOP` a propósito —como token de búsqueda y de puntuación sí
+# ayudan a acotar— y se descuentan únicamente al medir cuánto contenido PROPIO
+# tiene el nombre del certificado (`tokens_distintivos`, candado de ADR-013).
+_ENTIDADES = {
+    # sector salud
+    "ESSALUD", "MINSA", "DIRESA", "GERESA", "DIRIS", "PRONIS",
+    # sector educación
+    "MINEDU", "PRONIED", "PRONABEC",
+    # otros programas / entidades nacionales
+    "MIDIS", "MIDAGRI", "MINAGRI", "PROVIAS", "AGRORURAL", "FONCODES",
+    "QALIWARMA", "SEDAPAL", "INPE", "ARCC", "OSCE",
+    # genéricos de organismo público
+    "GOBIERNO", "MUNICIPALIDAD", "DISTRITAL", "PROVINCIAL", "MINISTERIO",
+    "DIRECCION", "UNIDAD", "EJECUTORA", "ENTIDAD", "PUBLICA", "NACIONAL",
+    "PERU", "ESTADO", "SEGURO", "SOCIAL", "ASISTENCIAL",
+}
+
+
+def tokens_distintivos(proyecto: str) -> set[str]:
+    """Tokens del nombre del proyecto que identifican ALGO en concreto: los del
+    gate (`_tokens_clave`) menos los nombres de entidad del Estado.
+
+    "HOSPITAL DE ESSALUD" → HOSPITAL es genérico, DE es preposición y ESSALUD es
+    la entidad → conjunto VACÍO: ese nombre no distingue una obra de otra."""
+    return {t for t in _tokens_clave(establecimiento(proyecto or ""))
+            if t not in _ENTIDADES}
 
 
 def _anio_de(fecha_iniobra) -> Optional[int]:
@@ -1122,8 +1239,10 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
         nums_cand = _numero_obra(o.get("nombrObra") or "")
         num_match = bool(nums_cert and nums_cand and (nums_cert & nums_cand))
         ent_match = False
+        geo_match = False
         ficha = None
         veto_geo = False
+        veto_nivel = ""
         if base_ok:
             # el score de nombre y la compuerta de tokens se apoyan también en el
             # nombre OFICIAL del MEF (rescata nombres corruptos en InfoObras)
@@ -1135,24 +1254,48 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
             ent_mef = norm((ficha or {}).get("entidad") or "")
             if ent_cert and ent_mef and fuzz.token_set_ratio(ent_cert, ent_mef) >= 90:
                 ent_match = True
-            # F8 · ubicación: contradicción de PROVINCIA (ambas declaradas) → veto;
-            # solo de DISTRITO (misma provincia) → penaliza, no veta (obras
-            # intermunicipales; y el MEF a veces registra la sede de la entidad).
-            prov_c, dist_c, _dep_c = _ubigeo_contra(sig_geo, ficha)
-            if prov_c and not ruc_match:
+            # F8 · ubicación: contradicción de PROVINCIA o de DEPARTAMENTO (ambas
+            # partes declaradas) → veto; solo de DISTRITO (misma provincia) →
+            # penaliza, no veta (obras intermunicipales).
+            #
+            # ADR-013 · el DEPARTAMENTO veta. ADR-005 lo excluía porque no DESEMPATA
+            # homónimos (viven en el mismo departamento) — y eso sigue siendo cierto:
+            # acá no desempata nada, CONTRADICE. Es el mismo criterio que ya habilita
+            # el veto de provincia (contradicción positiva declarada en ambos lados),
+            # aplicado un nivel más arriba para los certificados que declaran el
+            # departamento pero no la provincia (caso Tarapoto: "Ciudad de Tarapoto,
+            # Departamento de San Martín" no calza `provincia de X` porque Tarapoto
+            # es distrito, así que el veto de provincia quedaba mudo y el resolver
+            # daba por buena una obra de Madre de Dios).
+            #
+            # La salvaguarda que ADR-005 protegía (el MEF registra la inversión bajo
+            # la SEDE de la entidad ejecutora, no la obra física) NO se abandona: el
+            # veto exige `depto_declarado` en el certificado —intención geográfica,
+            # no un topónimo que sea nombre propio— y el MEF no puede aparecer en
+            # ningún otro término de ubicación del cert. Medido sobre el corpus: los
+            # 5 casos con ficha MEF en LIMA (el patrón de sede) contradicen TAMBIÉN
+            # la provincia, o sea que ADR-005 ya los vetaba por su propia regla; el
+            # veto de departamento no abre esa clase de falso negativo.
+            prov_c, dist_c, dep_c = _ubigeo_contra(sig_geo, ficha)
+            if (prov_c or dep_c) and not ruc_match:
                 veto_geo = True
+                veto_nivel = "provincia" if prov_c else "departamento"
             elif dist_c:
                 sc -= 25
+            # coincidencia POSITIVA de ubigeo → señal dura de identidad (ADR-013)
+            geo_match = _ubigeo_coincide(sig_geo, ficha)
             # contratante municipal ≠ entidad municipal del CUI (mismo tipo):
             # dos municipalidades distintas no contratan la misma obra
             if not veto_geo and not ruc_match and _muni_contradice(exp, ficha):
                 veto_geo = True
+                veto_nivel = "municipalidad"
         cand = {"cui": cui, "nombre_obra": (o.get("nombrObra") or ""),
                 "full": full,
                 "departamento": o.get("nombrDepartamento"),
                 "obra_id": o.get("codigoObra") or o.get("obraId"),
                 "ruc_match": ruc_match, "num_match": num_match,
-                "ent_match": ent_match, "score": round(sc, 1),
+                "ent_match": ent_match, "geo_match": geo_match,
+                "score": round(sc, 1),
                 # estado del MEF: "" = el CUI NO está en la base local (desconocido,
                 # que no es lo mismo que vivo — ver `_estado_separa`).
                 "mef_estado": ((ficha or {}).get("estado_dataset") or ""),
@@ -1172,9 +1315,13 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
             continue
         if veto_geo:
             cand["veto"] = "ubigeo"
+            cand["veto_nivel"] = veto_nivel
             _traza().ev("veto_ubigeo", cui=cui, score=cand["score"],
+                        nivel=veto_nivel,
                         prov_cert=sorted(sig_geo["prov"]),
                         prov_mef=(ficha or {}).get("prov"),
+                        depto_cert=sorted(sig_geo.get("depto_declarado") or ()),
+                        depto_mef=(ficha or {}).get("dpto"),
                         obra=cand["nombre_obra"])
             vetados.append(cand)
             continue
@@ -1204,6 +1351,25 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
                     key=lambda x: (-x["score"], x.get("mef_desactivada", False),
                                    _num(x["cui"]), _num(x["obra_id"])))
     return ranked, vetados
+
+
+def _corroborado(c: dict, exp: Optional[dict] = None) -> bool:
+    """¿Alguna señal DURA de identidad respalda al candidato, más allá del parecido
+    de nombre? RUC del emisor en la obra, N° de institución compartido, entidad
+    contratante ≈ ficha MEF, o coincidencia positiva de provincia/distrito.
+    Es el conjunto del candado MEF (F7) más el ubigeo positivo de ADR-013.
+
+    `ent_match` NO corrobora cuando la entidad del certificado es ella misma
+    genérica (ESSALUD, MINSA, PRONIED…): esas entidades ejecutan cientos de
+    inversiones, así que casan con cualquier candidato del sector y la señal es
+    VACÍA justo donde el nombre también lo es — el caso «HOSPITAL DE ESSALUD»
+    contratado por «ESSALUD» se corroboraría a sí mismo."""
+    if c.get("ruc_match") or c.get("num_match") or c.get("geo_match"):
+        return True
+    if not c.get("ent_match"):
+        return False
+    ent = (exp or {}).get("entidad_contratante") or ""
+    return bool(tokens_distintivos(ent)) if ent else True
 
 
 def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict:
@@ -1289,6 +1455,10 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
     # el desactivado, la duda sigue viva y se manda a revisión como siempre.
     _DELTA_EMPATE = 4.0
     if best and not _es_experiencia_privada(exp):
+        # OJO: NO es `_corroborado`. Este trío está calibrado contra la golden
+        # (ADR-005) y sumarle `geo_match` movería el guard de empate sin haber
+        # vuelto a correr la golden. El ubigeo positivo entra solo en el candado
+        # de nombre genérico (ADR-013), que es una puerta nueva y separada.
         def _senal_dura(c: dict) -> bool:
             return bool(c.get("ruc_match") or c.get("num_match") or c.get("ent_match"))
 
@@ -1334,9 +1504,34 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
             return {"estado": "revision", "cui": None, "via": "NOMBRE",
                     "decision": _con_pista_mef(exp,
                         "un proyecto homónimo quedó apartado por estar en otra "
-                        "provincia y ninguna señal separa a los candidatos — "
+                        "ubicación y ninguna señal separa a los candidatos — "
                         "confirmar cuál corresponde"),
                     "candidatos": candidatos + [_proj(rival_geo)], "obra": None}
+
+    # ── CANDADO DE NOMBRE GENÉRICO (ADR-013) ─────────────────────────────────
+    # Un `proyecto` sin NINGÚN token distintivo —solo genéricos de obra, palabras
+    # de rubro y el nombre de una entidad del Estado— no puede sostener una
+    # resolución por NOMBRE: "HOSPITAL DE ESSALUD" describe a decenas de hospitales
+    # en 25 departamentos, así que el score alto mide parecido de vocabulario, no
+    # identidad. Se exige corroboración DURA (las mismas cuatro señales del candado
+    # MEF de F7 más la coincidencia positiva de ubigeo); sin ella, revisión con los
+    # candidatos VISIBLES — nunca un descarte silencioso.
+    #
+    # Umbral N=1 (basta UN token distintivo), calibrado sobre el corpus de 37
+    # espejos / 1519 experiencias: exigir ≥1 afecta al 1.1% de los nombres y solo a
+    # 3 de las 909 resueltas (0.20% del corpus); exigir ≥2 se llevaría el 25.5% de
+    # los nombres y el 11.5% del corpus resuelto — por encima del techo aceptable,
+    # sería un candado que manda a revisión trabajo bien hecho.
+    if best and not tokens_distintivos(proyecto) and not _corroborado(best, exp):
+        _traza().ev("candado_nombre_generico", cui=best["cui"],
+                    score=best["score"], proyecto=proyecto[:120])
+        return {"estado": "revision", "cui": None, "via": "NOMBRE",
+                "decision": _con_pista_mef(exp,
+                    "el nombre del certificado no tiene ningún término propio que "
+                    "identifique la obra (solo palabras genéricas y el nombre de la "
+                    "entidad) y ninguna señal dura confirma al candidato — elegir "
+                    "en revisión"),
+                "candidatos": candidatos, "obra": None}
 
     if best and gate and best["score"] >= 70:
         return {"estado": "resuelto", "cui": best["cui"], "via": "NOMBRE",
@@ -1379,8 +1574,17 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
         if all(c.get("veto") == "rubro" for c in vetados):
             motivo = "los candidatos hallados son de otro rubro de servicio — confirmar"
         elif all(c.get("veto") == "ubigeo" for c in vetados):
-            motivo = ("los candidatos hallados están en otra provincia que la del "
-                      "certificado — confirmar")
+            niveles = {c.get("veto_nivel") for c in vetados}
+            if niveles == {"departamento"}:
+                lugar = "en otro departamento que el"
+            elif niveles == {"municipalidad"}:
+                lugar = "a nombre de otra municipalidad que la"
+            elif niveles == {"provincia"}:
+                lugar = "en otra provincia que la"
+            else:
+                lugar = "en otra ubicación que la"
+            motivo = (f"los candidatos hallados están {lugar} del certificado "
+                      "— confirmar")
         else:
             motivo = ("los candidatos hallados contradicen el rubro o la ubicación "
                       "del certificado — confirmar")
