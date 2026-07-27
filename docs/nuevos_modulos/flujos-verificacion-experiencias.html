@@ -9,6 +9,7 @@
     --bg:#f8f9fb; --panel:#ffffff; --ink:#1a2233; --muted:#5b6474;
     --line:#d7dce4; --arrow:#9aa3b2;
     --ok-bg:#e8f6ee; --ok-bd:#2f9e63; --ok-tx:#1d6f44;
+    --dep-bg:#e9f0fb; --dep-bd:#3b6fd4; --dep-tx:#2455ad;
     --cot-bg:#fdf3e3; --cot-bd:#d99a2b; --cot-tx:#96660d;
     --no-bg:#fbeaea; --no-bd:#cf5a5a; --no-tx:#a03434;
     --dec-bg:#eef1f6; --dec-bd:#8e99ab;
@@ -19,6 +20,7 @@
       --bg:#12151b; --panel:#1a1f28; --ink:#e8ebf1; --muted:#9aa3b2;
       --line:#313947; --arrow:#5b6474;
       --ok-bg:#15291e; --ok-bd:#2f9e63; --ok-tx:#6fd39e;
+      --dep-bg:#151f2e; --dep-bd:#4f83e0; --dep-tx:#8fb5f2;
       --cot-bg:#2c2312; --cot-bd:#d99a2b; --cot-tx:#eec06a;
       --no-bg:#2e1a1a; --no-bd:#cf5a5a; --no-tx:#ef9a9a;
       --dec-bg:#222835; --dec-bd:#5b6474;
@@ -39,6 +41,7 @@
   .leyenda span{display:inline-flex; align-items:center; gap:8px; font-size:.86rem; color:var(--muted)}
   .chip{display:inline-block; min-width:14px; height:14px; border-radius:4px; border:1.5px solid}
   .chip.ok{background:var(--ok-bg); border-color:var(--ok-bd)}
+  .chip.dep{background:var(--dep-bg); border-color:var(--dep-bd)}
   .chip.cot{background:var(--cot-bg); border-color:var(--cot-bd)}
   .chip.no{background:var(--no-bg); border-color:var(--no-bd)}
 
@@ -90,11 +93,13 @@
     display:flex; justify-content:space-between; gap:10px; align-items:center;
   }
   li.ok {background:var(--ok-bg);  border-color:var(--ok-bd)}
+  li.dep{background:var(--dep-bg); border-color:var(--dep-bd)}
   li.cot{background:var(--cot-bg); border-color:var(--cot-bd)}
   li.no {background:var(--no-bg);  border-color:var(--no-bd); }
   li.no .txt{text-decoration:line-through; opacity:.75}
   .tag{flex:none; font-size:.72rem; font-weight:700; padding:1px 8px; border-radius:99px; white-space:nowrap}
   .tag.ok {color:var(--ok-tx);  background:color-mix(in srgb, var(--ok-bd) 18%, transparent)}
+  .tag.dep{color:var(--dep-tx); background:color-mix(in srgb, var(--dep-bd) 18%, transparent)}
   .tag.cot{color:var(--cot-tx); background:color-mix(in srgb, var(--cot-bd) 18%, transparent)}
   .tag.no {color:var(--no-tx);  background:color-mix(in srgb, var(--no-bd) 18%, transparent)}
 
@@ -111,13 +116,20 @@
 <body>
 
 <h1>Flujos de verificación por tipo de experiencia</h1>
-<p class="sub">Según el flujograma del Ing. Manuel (Excel "para RAFAEL-V2", Hoja1) · anotado con el estado real de cada verificación en el sistema — <b>v2 · 22&nbsp;jul&nbsp;2026</b>: el sistema ya distingue automáticamente expediente vs obra (y tiene modo «concurso de expedientes» para casos como San Isidro)</p>
+<p class="sub">Según el flujograma del Ing. Manuel (Excel "para RAFAEL", Hoja1) · anotado con el estado real de cada verificación en el sistema — <b>v3 · 27&nbsp;jul&nbsp;2026</b>: se separa lo que ya corre en el servidor del cliente de lo que está construido pero <b>aún no desplegado</b>.</p>
 
 <div class="leyenda">
-  <span><i class="chip ok"></i> Ya en producción (sin costo adicional)</span>
-  <span><i class="chip cot"></i> Cotizable — paquete T-004 … T-007 (T-003 y T-008 ya construidos)</span>
+  <span><i class="chip ok"></i> En producción — corriendo hoy en el servidor</span>
+  <span><i class="chip dep"></i> Construido y probado — <b>falta el despliegue</b></span>
+  <span><i class="chip cot"></i> Cotizable — por desarrollar (T-004 · T-005 · T-006)</span>
   <span><i class="chip no"></i> Descartado con evidencia (falsos positivos)</span>
 </div>
+
+<p class="nota" style="margin:-22px 0 30px; padding:10px 14px; border-left:3px solid var(--dep-bd); background:var(--dep-bg); color:var(--dep-tx); border-radius:0 8px 8px 0">
+  <b>Qué sigue, en una línea:</b> todo lo azul ya está hecho y esperando un solo despliegue.
+  Hasta que ese despliegue ocurra, el servidor sigue corriendo la versión del 12&nbsp;de&nbsp;julio
+  y nada de lo azul es visible para el evaluador.
+</p>
 
 <!-- ============ FLUJO 1 ============ -->
 <section>
@@ -136,8 +148,10 @@
         <div class="paso">
           <div class="titulo"><span class="num">1</span><b>Ubicar el CUI del proyecto</b></div>
           <ul>
-            <li class="ok"><span class="txt">Base local del Banco de Inversiones (452,793 CUIs, sin captcha) + vetos de identidad · errores silenciosos 16→10 en auditoría de 277 casos</span><span class="tag ok">T-008 ✔ construido</span></li>
-            <li class="ok"><span class="txt">La experiencia se clasifica como EXPEDIENTE automáticamente (o por el modo «concurso de expedientes»)</span><span class="tag ok">T-008 ✔ camino A</span></li>
+            <li class="dep"><span class="txt">Base local del Banco de Inversiones (579,481 CUIs, sin captcha) + vetos de identidad · errores silenciosos 16→10 en auditoría de 277 casos</span><span class="tag dep">T-008 ✔ construido</span></li>
+            <li class="dep"><span class="txt">La experiencia se clasifica como EXPEDIENTE automáticamente (o por el modo «concurso de expedientes»)</span><span class="tag dep">T-008 ✔ camino A</span></li>
+            <li class="dep"><span class="txt"><b>Veto por departamento contradictorio</b>: si el certificado dice San Martín y el candidato está en Madre de Dios, se rechaza en vez de aceptarse por parecido de nombre</span><span class="tag dep">ADR-013</span></li>
+            <li class="dep"><span class="txt">El Excel <b>muestra el nombre de la obra</b> resuelta y ya no esconde el aviso de revisión — antes había 403 de 999 ítems sin resolver que el evaluador no veía</span><span class="tag dep">✔ integridad</span></li>
           </ul>
         </div>
         <div class="flecha"></div>
@@ -145,15 +159,15 @@
           <div class="titulo"><span class="num">2</span><b>Validez del contrato (SEACE + MEF)</b></div>
           <ul>
             <li class="cot"><span class="txt">Bajar contrato DEL EXPEDIENTE y sus bases (SEACE)</span><span class="tag cot">T-004</span></li>
-            <li class="ok"><span class="txt">Bajar resolución de aprobación del expediente (Formato 08-A) + contrato del MEF cuando el Banco lo registra</span><span class="tag ok">T-003 ✔ construido</span></li>
-            <li class="ok"><span class="txt">Al expediente NO se le exigen valorizaciones de la construcción posterior</span><span class="tag ok">T-008 ✔ camino A</span></li>
+            <li class="dep"><span class="txt">Bajar resolución de aprobación del expediente (Formato 08-A) + contrato del MEF cuando el Banco lo registra</span><span class="tag dep">T-003 ✔ construido</span></li>
+            <li class="dep"><span class="txt">Al expediente NO se le exigen valorizaciones de la construcción posterior</span><span class="tag dep">T-008 ✔ camino A</span></li>
           </ul>
         </div>
         <div class="flecha"></div>
         <div class="paso">
           <div class="titulo"><span class="num">3</span><b>Verificaciones sobre el certificado</b></div>
           <ul>
-            <li class="ok"><span class="txt">El cargo que postula figura en las bases</span><span class="tag ok">✔ en producción</span></li>
+            <li class="dep"><span class="txt">El cargo que postula figura en las bases — ahora se exige el <b>núcleo de especialidad completo</b> y las funciones sirven de segunda puerta</span><span class="tag dep">ADR-012</span></li>
             <li class="cot"><span class="txt">Inicio del profesional ≥ firma del contrato (fecha anterior = MAL)</span><span class="tag cot">T-005</span></li>
             <li class="cot"><span class="txt">Término ≤ fecha de aprobación del expediente</span><span class="tag cot">T-005</span></li>
           </ul>
@@ -163,7 +177,7 @@
           <div class="titulo"><span class="num">4</span><b>SUNAT — emisor del certificado</b></div>
           <ul>
             <li class="ok"><span class="txt">La empresa ya existía al inicio de la experiencia</span><span class="tag ok">✔ ALT-04</span></li>
-            <li class="cot"><span class="txt">Condición del contribuyente: HABIDO / activo</span><span class="tag cot">T-007 · bolsa</span></li>
+            <li class="dep"><span class="txt">Condición del contribuyente: ¿estaba <b>HABIDO</b> al emitir el certificado y durante toda la obra? + cuadro histórico</span><span class="tag dep">T-007 ✔ falta panel</span></li>
             <li class="no"><span class="txt">El firmante es el representante legal</span><span class="tag no">descartado</span></li>
           </ul>
         </div>
@@ -178,7 +192,7 @@
           <div class="titulo"><span class="num">1</span><b>SUNAT — emisor del certificado</b></div>
           <ul>
             <li class="ok"><span class="txt">La empresa ya existía al inicio de la experiencia</span><span class="tag ok">✔ ALT-04</span></li>
-            <li class="cot"><span class="txt">Condición del contribuyente: HABIDO / activo</span><span class="tag cot">T-007 · bolsa</span></li>
+            <li class="dep"><span class="txt">Condición del contribuyente: ¿estaba <b>HABIDO</b> al emitir el certificado y durante toda la obra? + cuadro histórico</span><span class="tag dep">T-007 ✔ falta panel</span></li>
             <li class="no"><span class="txt">El firmante es el representante legal</span><span class="tag no">descartado</span></li>
           </ul>
         </div>
@@ -207,7 +221,8 @@
         <div class="paso">
           <div class="titulo"><span class="num">1</span><b>Ubicar el CUI del proyecto</b></div>
           <ul>
-            <li class="ok"><span class="txt">Base local del Banco de Inversiones (452,793 CUIs, sin captcha) + vetos de identidad</span><span class="tag ok">T-008 ✔ construido</span></li>
+            <li class="dep"><span class="txt">Base local del Banco de Inversiones (579,481 CUIs, sin captcha) + vetos de identidad</span><span class="tag dep">T-008 ✔ construido</span></li>
+            <li class="dep"><span class="txt"><b>Veto por departamento contradictorio</b> + candado de nombre genérico: cierra el caso «Hospital EsSalud de San Martín» resuelto contra una obra de Madre de Dios</span><span class="tag dep">ADR-013</span></li>
           </ul>
         </div>
         <div class="flecha"></div>
@@ -215,7 +230,7 @@
           <div class="titulo"><span class="num">2</span><b>Validez del contrato (SEACE)</b></div>
           <ul>
             <li class="cot"><span class="txt">Bajar contrato DE SUPERVISIÓN y sus bases (SEACE)</span><span class="tag cot">T-004</span></li>
-            <li class="ok"><span class="txt">El cargo que postula figura en las bases</span><span class="tag ok">✔ en producción</span></li>
+            <li class="dep"><span class="txt">El cargo que postula figura en las bases — ahora se exige el <b>núcleo de especialidad completo</b> y las funciones sirven de segunda puerta</span><span class="tag dep">ADR-012</span></li>
           </ul>
         </div>
         <div class="flecha"></div>
@@ -223,7 +238,7 @@
           <div class="titulo"><span class="num">3</span><b>SUNAT — emisor del certificado</b></div>
           <ul>
             <li class="ok"><span class="txt">La empresa ya existía al inicio de la experiencia</span><span class="tag ok">✔ ALT-04</span></li>
-            <li class="cot"><span class="txt">Condición del contribuyente: HABIDO / activo</span><span class="tag cot">T-007 · bolsa</span></li>
+            <li class="dep"><span class="txt">Condición del contribuyente: ¿estaba <b>HABIDO</b> al emitir el certificado y durante toda la obra? + cuadro histórico</span><span class="tag dep">T-007 ✔ falta panel</span></li>
             <li class="no"><span class="txt">El firmante es el representante legal</span><span class="tag no">descartado</span></li>
           </ul>
         </div>
@@ -238,7 +253,7 @@
         <div class="paso">
           <div class="titulo"><span class="num">5</span><b>RENIPRESS — solo si es obra de salud</b></div>
           <ul>
-            <li class="cot"><span class="txt">Verificar que el establecimiento de salud existe</span><span class="tag cot">T-006</span></li>
+            <li class="cot"><span class="txt">Verificar que el establecimiento de salud existe — <b>sonda ✔ GO</b>: se consulta sin captcha, falta integrarlo</span><span class="tag cot">T-006 · por integrar</span></li>
           </ul>
         </div>
         <div class="flecha"></div>
@@ -252,7 +267,7 @@
           <div class="titulo"><span class="num">1</span><b>SUNAT — emisor del certificado</b></div>
           <ul>
             <li class="ok"><span class="txt">La empresa ya existía al inicio de la experiencia</span><span class="tag ok">✔ ALT-04</span></li>
-            <li class="cot"><span class="txt">Condición del contribuyente: HABIDO / activo</span><span class="tag cot">T-007 · bolsa</span></li>
+            <li class="dep"><span class="txt">Condición del contribuyente: ¿estaba <b>HABIDO</b> al emitir el certificado y durante toda la obra? + cuadro histórico</span><span class="tag dep">T-007 ✔ falta panel</span></li>
             <li class="no"><span class="txt">El firmante es el representante legal</span><span class="tag no">descartado</span></li>
           </ul>
         </div>
@@ -260,18 +275,46 @@
         <div class="paso">
           <div class="titulo"><span class="num">2</span><b>RENIPRESS — solo si es clínica / salud</b></div>
           <ul>
-            <li class="cot"><span class="txt">Verificar que esa clínica existe o no</span><span class="tag cot">T-006</span></li>
+            <li class="cot"><span class="txt">Verificar que esa clínica existe o no — <b>sonda ✔ GO</b>: se consulta sin captcha, falta integrarlo</span><span class="tag cot">T-006 · por integrar</span></li>
           </ul>
         </div>
         <div class="flecha"></div>
         <div class="fin">Veredicto + alertas en Excel y panel</div>
-        <p class="nota">Las obras privadas no aparecen en InfoObras ni tienen CUI. Desde el 21&nbsp;jul el sistema primero AGOTA la búsqueda pública y recién al final clasifica la privada — con un catálogo de 11,004 entidades públicas (del propio MEF) que atrapa clientes privados aunque el certificado no diga «privada» (asociaciones, S.A.C., ONGs). Lo no clasificable queda en «Por confirmar» con la marca «posible obra privada».</p>
+        <p class="nota">Las obras privadas no aparecen en InfoObras ni tienen CUI. Desde el 21&nbsp;jul el sistema primero AGOTA la búsqueda pública y recién al final clasifica la privada — con un catálogo de 11,011 entidades públicas (del propio MEF) que atrapa clientes privados aunque el certificado no diga «privada» (asociaciones, S.A.C., ONGs). Lo no clasificable queda en «Por confirmar» con la marca «posible obra privada».</p>
       </div>
     </div>
   </div>
 </section>
 
-<p class="nota">Fuente del flujo: Hoja1 del Excel «para RAFAEL-V2» (Ing. Manuel Echandía). Los rótulos T-003…T-008 corresponden al paquete de extras; «✔ construido» (T-003 y T-008) es trabajo ya ejecutado y validado, pendiente de acordar precio; el resto es por desarrollar (ver <b>plan-desarrollo-extras.html</b>).</p>
+<!-- ============ QUÉ SIGUE ============ -->
+<section>
+  <h2>Qué sigue</h2>
+  <p class="h2sub">Los tres bloques están en orden: cada uno depende del anterior.</p>
+  <div class="flujo">
+    <div class="nodo dep" style="border-color:var(--dep-bd); background:var(--dep-bg); max-width:520px">
+      <b>1 · Desplegar lo azul</b>
+      <small>un solo despliegue enciende: base de CUIs, vetos de identidad, camino de expedientes, candado de cargo, HABIDO de SUNAT y las correcciones de integridad del Excel</small>
+    </div>
+    <div class="flecha"></div>
+    <div class="nodo" style="max-width:520px">
+      <b>2 · Cierre del contrato</b>
+      <small>propuestas reales corridas en el servidor del cliente · manual · capacitación</small>
+    </div>
+    <div class="flecha"></div>
+    <div class="nodo" style="border-color:var(--cot-bd); background:var(--cot-bg); max-width:520px">
+      <b>3 · Construir lo amarillo</b>
+      <small>en este orden por dependencia: T-004 (SEACE) → T-005 (cruces de fechas, necesita el contrato de T-004) → T-006 (RENIPRESS, independiente)</small>
+    </div>
+    <p class="nota">
+      Las dos casillas amarillas de <b>T-005</b> del Flujo 1 —«inicio ≥ firma del contrato» y
+      «término ≤ aprobación del expediente»— son las únicas del flujograma que <b>no se pueden
+      hacer hoy</b> con ninguna fuente disponible: dependen de la fecha de firma del contrato,
+      que llega con T-004. Todo lo demás del Excel ya está resuelto o descartado con evidencia.
+    </p>
+  </div>
+</section>
+
+<p class="nota">Fuente del flujo: Hoja1 del Excel «para RAFAEL» (Ing. Manuel Echandía). Los rótulos T-003…T-008 corresponden al paquete de extras (ver <b>plan-desarrollo-extras.html</b>). <b>Azul</b> = construido y probado, esperando despliegue — el servidor del cliente corre hoy la versión del 12&nbsp;de&nbsp;julio y no lo tiene. <b>Amarillo</b> = por desarrollar.</p>
 
 </body>
 </html>

@@ -117,13 +117,20 @@
 <body>
 
 <h1>Plan de desarrollo y cotización de extras</h1>
-<p class="sub">Todo lo pedido en el Excel «para RAFAEL-V2», organizado en componentes cotizables (T-003 … T-008) · <b>v3 — 22&nbsp;jul&nbsp;2026</b>: incorpora el <b>refactor de resolución de CUI ya construido y validado</b> (T-008: base local MEF + camino expedientes/obra + optimización de la skill) además de las sondas SEACE/CONOSCE/OCDS (ver <b>resolucion-cui-datos-abiertos.html</b>)</p>
+<p class="sub">Todo lo pedido en el Excel «para RAFAEL», organizado en componentes cotizables (T-003 … T-008) · <b>v4 — 27&nbsp;jul&nbsp;2026</b>: T-007 (SUNAT HABIDO) pasa a <b>construido</b>, la sonda de RENIPRESS ya dio GO, y el alcance de T-008 se ajusta a lo que existe hoy en el código.</p>
 
 <div class="leyenda">
   <span><i class="chip ok"></i> Ya construido (se cotiza como entregado)</span>
   <span><i class="chip cot"></i> Por desarrollar</span>
-  <span><i class="chip ver"></i> Requiere verificación previa (sonda GO/NO-GO)</span>
+  <span><i class="chip ver"></i> Verificación previa (sonda) — todas ya ejecutadas</span>
 </div>
+
+<p class="nota" style="margin:-24px 0 30px; padding:10px 14px; border-left:3px solid var(--ok-bd); background:var(--ok-bg); border-radius:0 8px 8px 0">
+  <b>Todo lo «ya construido» está en el repositorio, probado y sin desplegar.</b>
+  El servidor del cliente corre hoy la versión del 12&nbsp;de&nbsp;julio: nada de esto es
+  visible para el evaluador hasta que se haga el despliegue. La demo de estos extras
+  y la entrega del hito final dependen del mismo paso.
+</p>
 
 <!-- ============ 1. RESUMEN ============ -->
 <section>
@@ -143,7 +150,7 @@
     </tr>
     <tr>
       <td class="num">T-008</td>
-      <td>Refactor de resolución de CUI + <b>Módulo ETL & Ingesta Automática del MEF</b>: base local del Banco de Inversiones (452,793 CUIs offline, refresco semanal por cron, sin captcha) + <b>Arquitectura Dual de Datos</b> (16 campos calientes Hot Path + 68 campos crudos JSONB Cold Path) + carga atómica zero-downtime en PostgreSQL + vetos de identidad (rubro/ubicación/entidad) + clasificación <b>expediente vs obra</b> + engine de búsqueda paralela $N$ profesionales + optimización de la skill</td>
+      <td>Refactor de resolución de CUI + <b>ingesta automática del Banco de Inversiones del MEF</b>: base local (579,481 CUIs offline, refresco semanal por cron, sin captcha) con reemplazo atómico de la base + catálogo de 11,011 entidades públicas + vetos de identidad (rubro/ubicación/entidad) + clasificación <b>expediente vs obra</b> + optimización de la skill</td>
       <td><span class="tag ok">✔ construido</span></td>
       <td>Ya validado: auditoría golden de 277 casos reales (errores silenciosos 16→10, cero regresiones) + 2 corridas completas (105 y 68 experiencias)</td>
       <td class="num">— (invertido)</td>
@@ -171,18 +178,18 @@
     <tr>
       <td class="num">T-006</td>
       <td>RENIPRESS: verificación de establecimientos de salud (obras privadas de salud)</td>
-      <td><span class="tag cot">por desarrollar</span></td>
-      <td><span class="tag ver">sonda corta</span> buscador SUSALUD</td>
-      <td class="num">1.5–2 días<br><small>(10 h)</small></td>
+      <td><span class="tag cot">por integrar</span></td>
+      <td>✔ Completada: GO validado, se consulta sin captcha</td>
+      <td class="num">1–1.5 días<br><small>(8 h)</small></td>
       <td>—</td>
       <td class="num">S/ 800</td>
     </tr>
     <tr>
       <td class="num">T-007</td>
       <td>SUNAT: condición HABIDO / estado ACTIVO del emisor del certificado</td>
-      <td><span class="tag cot">por desarrollar</span></td>
-      <td>Ninguna (misma consulta que ALT-04)</td>
-      <td class="num">0.5 día<br><small>(3–4 h)</small></td>
+      <td><span class="tag ok">✔ construido</span></td>
+      <td>✔ Probado en vivo contra 6 RUCs</td>
+      <td class="num">— (invertido)<br><small>falta render en panel</small></td>
       <td>—</td>
       <td class="num">bolsa 8 h · S/ 520</td>
     </tr>
@@ -223,12 +230,12 @@
     <div class="flecha"></div>
     <div class="fila">
       <div class="etapa"><b>SUNAT</b><small>consultar_ruc: fecha de constitución (ALT-04)</small></div>
-      <div class="plugs"><span class="plug cot">T-007: mismos datos de la consulta → condición HABIDO + estado</span></div>
+      <div class="plugs"><span class="plug ok">T-007 ✔ condición HABIDO + histórico del emisor</span></div>
     </div>
     <div class="flecha"></div>
     <div class="fila">
       <div class="etapa"><b>Clasificación de privadas (al final)</b><small>primero se agota lo público; catálogo de 11k entidades públicas → «posible obra privada»</small></div>
-      <div class="plugs"><span class="plug ok">T-008 ✔ catálogo + público-primero</span><span class="plug cot">T-006: si es privada de salud → RENIPRESS antes de «Por confirmar»</span></div>
+      <div class="plugs"><span class="plug ok">T-008 ✔ catálogo + público-primero</span><span class="plug cot">T-006: si es privada de salud → RENIPRESS antes de «Por confirmar» (sonda ✔ GO)</span></div>
     </div>
     <div class="flecha"></div>
     <div class="fila">
@@ -273,16 +280,22 @@
   <!-- T-008 -->
   <div class="card ok">
     <div class="head"><h3>T-008 — Módulo ETL del MEF + Refactor de resolución de CUI + Base Local + Camino Expedientes</h3><span class="tag ok">✔ construido y validado</span><span class="precio">S/ 2,800</span></div>
-    <p class="meta">Construido el 20-21&nbsp;jul (rama <code>sonda/refactor-cui</code>, 11 commits). El sistema ya no depende de los buscadores web del MEF: lleva una ingesta ETL atómica del Banco de Inversiones completo (activas + cerradas + desactivadas) y resuelve por IDENTIDAD — nunca por conveniencia de fechas. Incluye la clasificación automática expediente/obra que pide el flujograma V2, con modo «concurso de expedientes» (usado en San Isidro).</p>
+    <p class="meta">Construido el 20-21&nbsp;jul (rama <code>sonda/refactor-cui</code>, 13 commits). El sistema ya no depende de los buscadores web del MEF: lleva una ingesta atómica del Banco de Inversiones completo (activas + cerradas + desactivadas) y resuelve por IDENTIDAD — nunca por conveniencia de fechas. Incluye la clasificación automática expediente/obra que pide el flujograma, con modo «concurso de expedientes» (usado en San Isidro).</p>
+    <p class="meta" style="border-left:3px solid var(--cot-bd,#d99a2b); padding-left:10px">
+      <b>Alcance, dicho con precisión:</b> la base local vive hoy como un archivo compacto
+      que el backend consulta directamente. Llevarla a tablas PostgreSQL con índice de
+      similitud es la <b>evolución prevista</b> del módulo — está en el backlog técnico,
+      <b>no está construida y no está incluida en este precio</b>. Para el evaluador el
+      resultado es idéntico: misma cobertura, mismas respuestas, sin captcha.
+    </p>
     <div class="cols">
       <div class="col">
         <h4>Qué incluye (ya entregado)</h4>
         <ul>
-          <li><b>Módulo ETL & Ingesta Resiliente</b>: Descarga streaming por bloques con reintentos para los 3 CSVs de Datos Abiertos del MEF (~523&nbsp;MB → ~26&nbsp;MB comprimido) + parámetro <code>--desde-dir</code> para ejecución offline.</li>
-          <li><b>Arquitectura Dual de Datos (Hot / Cold Path)</b>: Extracción de 16 campos calientes indexados para búsquedas en &lt; 15&nbsp;ms + almacenamiento del payload crudo de 68 campos en <code>JSONB</code> para auditorías sin pérdida de información.</li>
-          <li><b>Persistencia PostgreSQL & Zero-Downtime Swap</b>: Gate de calidad ($\ge 400,000$ registros) e intercambio atómico de tablas en una sola transacción (<code>mef_inversiones_staging</code> → <code>mef_inversiones</code>) sin interrumpir el servicio.</li>
-          <li><b>Engine de Búsqueda Paralela</b>: Procesamiento concurrente de $N$ profesionales y sus $M$ experiencias vía <code>asyncio</code> y <code>ThreadPoolExecutor</code> (&lt; 3&nbsp;s por concurso).</li>
-          <li><b>Catálogo de Entidades & Siglas</b>: 11,004 entidades del Estado con extracción automática de siglas (ej. <code>- AGN</code>, <code>- INABIF</code>) para desempates por emisor.</li>
+          <li><b>Ingesta resiliente</b>: Descarga por bloques con reintentos para los 3 CSVs de Datos Abiertos del MEF (~523&nbsp;MB → 31&nbsp;MB comprimido), tolerante a cortes, con modo offline desde carpeta local.</li>
+          <li><b>Base local del Banco de Inversiones</b>: 620,985 filas → <b>579,481 CUIs distintos</b> (activas, cerradas y desactivadas), consultables sin salir a la red y sin captcha. Control de volumen antes de aceptar una base nueva.</li>
+          <li><b>Reemplazo atómico</b>: la base vieja sigue sirviendo consultas hasta que la nueva está íntegra; una descarga a medias nunca deja al sistema sin datos.</li>
+          <li><b>Catálogo de Entidades & Siglas</b>: 11,011 entidades del Estado con extracción automática de siglas (ej. <code>- AGN</code>, <code>- INABIF</code>) para desempates por emisor.</li>
           <li><b>Resolver público-primero</b>: Vetos de identidad por rubro, provincia/distrito y entidad municipal; ante homónimos indistinguibles, «Por confirmar» con candidatos — nunca adivina.</li>
           <li><b>Clasificación expediente vs obra (Camino A)</b>: Al expediente técnico no se le exigen valorizaciones de la construcción posterior.</li>
           <li><b>Optimización de la skill</b>: Eliminó el paso que quemaba ~3M de tokens por corrida (resolución de CUIs trasladada al backend).</li>
@@ -361,13 +374,13 @@
 
   <!-- T-006 -->
   <div class="card">
-    <div class="head"><h3>T-006 — RENIPRESS: establecimientos de salud</h3><span class="tag cot">por desarrollar</span><span class="tag ver">sonda corta</span><span class="precio">S/ 800 · 1.5–2 días</span></div>
-    <p class="meta">Cubre el «si es salud, ¿esa clínica existe?» del flujograma. Aplica solo a obras privadas de salud — las públicas ya se verifican por CUI/InfoObras.</p>
+    <div class="head"><h3>T-006 — RENIPRESS: establecimientos de salud</h3><span class="tag cot">por integrar</span><span class="tag ver">sonda ✔ hecha</span><span class="precio">S/ 800 · 1–1.5 días</span></div>
+    <p class="meta">Cubre el «si es salud, ¿esa clínica existe?» del flujograma. Aplica solo a obras privadas de salud — las públicas ya se verifican por CUI/InfoObras. <b>La sonda ya se ejecutó y dio GO</b>: el registro de SUSALUD se consulta por nombre, RUC o código sin captcha; la incógnita de «¿por código o por navegación?» quedó resuelta.</p>
     <div class="cols">
       <div class="col">
-        <h4>Plan de desarrollo</h4>
+        <h4>Plan de desarrollo (la sonda ya está invertida)</h4>
         <ol>
-          <li><b>Sonda del buscador</b> <span class="dias">· 0.5 día</span> — RENIPRESS (SUSALUD): ¿consulta por código o navegación? Riesgo bajo.</li>
+          <li><b>Portar la sonda al backend</b> <span class="dias">· 0.5 día</span> — módulo de consulta al registro, con los combos que el servicio exige por defecto.</li>
           <li><b>Matching</b> <span class="dias">· 0.5–1 día</span> — por nombre del establecimiento + distrito/provincia; manejo de homónimos.</li>
           <li><b>Salida en 3 estados</b> <span class="dias">· 0.5 día</span> — «Existe en RENIPRESS» / «No encontrado» (alerta) / «Homónimos — revisar»; prueba con casos reales.</li>
         </ol>
@@ -384,14 +397,19 @@
 
   <!-- T-007 -->
   <div class="card">
-    <div class="head"><h3>T-007 — SUNAT: condición HABIDO / estado ACTIVO</h3><span class="tag cot">por desarrollar</span><span class="precio">bolsa 8 h (S/ 520) · 0.5 día</span></div>
-    <p class="meta">Ampliación menor sobre la consulta SUNAT que ya corre en producción para ALT-04. Ideal como primer consumo de la bolsa de horas.</p>
+    <div class="head"><h3>T-007 — SUNAT: condición HABIDO / estado ACTIVO</h3><span class="tag ok">✔ construido</span><span class="precio">bolsa 8 h (S/ 520)</span></div>
+    <p class="meta">Ampliación sobre la consulta SUNAT que ya corre en producción para ALT-04. <b>Ya está construido y probado en vivo contra 6 RUCs.</b> El Excel responde «¿estaba HABIDO al emitir el certificado y durante toda la obra?» con cobertura completa del periodo, más un cuadro con el historial de condición. Una sola consulta por RUC por análisis — cero costo de red adicional. Es el primer consumo natural de la bolsa de horas.</p>
     <div class="cols">
       <div class="col">
-        <h4>Plan de desarrollo</h4>
+        <h4>Qué incluye (ya entregado)</h4>
+        <ul>
+          <li><b>Condición durante todo el periodo</b>, no solo hoy: si la cobertura del historial es incompleta, la respuesta queda en «por confirmar» en vez de dar un verde falso.</li>
+          <li><b>Cuadro histórico</b> de razón social, condición y domicilio del emisor.</li>
+          <li>Representantes legales del emisor, <b>informativos</b> — no se usan para validar la firma del certificado (eso se descartó con evidencia).</li>
+        </ul>
+        <h4 style="margin-top:12px">Qué falta</h4>
         <ol>
-          <li><b>Extender consultar_ruc</b> <span class="dias">· 2 h</span> — capturar condición (HABIDO / NO HABIDO) y estado (ACTIVO / BAJA), que vienen en la misma respuesta.</li>
-          <li><b>Alerta nueva + prueba</b> <span class="dias">· 1–2 h</span> — alerta si el emisor está NO HABIDO o de baja; verificar con RUCs conocidos.</li>
+          <li><b>Render en el panel</b> <span class="dias">· 2–3 h</span> — el dato ya viaja y ya sale en el Excel; falta mostrarlo en la ficha del panel.</li>
         </ol>
       </div>
       <div class="col">
@@ -413,10 +431,10 @@
     <div class="gantt">
       <div class="gfila cab"><div></div><div>Sem 1</div><div>Sem 2</div><div>Sem 3</div><div></div><div></div></div>
       <div class="gfila"><div>Sondas SEACE/CONOSCE/OCDS</div><div class="barra ok"><span>✔ ya ejecutadas (GO, 86% medido)</span></div><div></div><div></div><div></div><div></div></div>
-      <div class="gfila"><div>T-007 SUNAT habido</div><div class="barra cot"><span>0.5 día</span></div><div></div><div></div><div></div><div></div></div>
+      <div class="gfila"><div>T-007 SUNAT habido</div><div class="barra ok"><span>✔ ya construido — falta render en panel</span></div><div></div><div></div><div></div><div></div></div>
       <div class="gfila"><div>T-004 datos abiertos + candado</div><div class="barra cot"><span>integración</span></div><div class="barra cot"><span>ZIP + prueba real</span></div><div></div><div></div><div></div></div>
       <div class="gfila"><div>T-005 Cruces + cronología</div><div></div><div class="barra cot"><span>2–2.5 días</span></div><div></div><div></div><div></div></div>
-      <div class="gfila"><div>T-006 RENIPRESS</div><div></div><div></div><div class="barra cot"><span>1.5–2 días</span></div><div></div><div></div></div>
+      <div class="gfila"><div>T-006 RENIPRESS</div><div></div><div></div><div class="barra cot"><span>1–1.5 días (sonda ✔ hecha)</span></div><div></div><div></div></div>
       <div class="gfila"><div>Prueba integral + entrega</div><div></div><div></div><div class="barra ok"><span>corrida completa real</span></div><div></div><div></div></div>
     </div>
     <p class="nota">Hito de decisión único: <b>fin de Sem 3</b> — corrida integral sobre una propuesta real con todos los componentes activos. El GO/NO-GO desapareció del cronograma porque ya se resolvió (sondas RENIPRESS ✔ GO y SEACE ✔ GO por datos abiertos, ambas validadas en vivo).</p>

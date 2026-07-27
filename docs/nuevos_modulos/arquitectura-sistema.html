@@ -12,6 +12,7 @@
     --exi-bg:#eef1f6; --exi-bd:#8e99ab; --exi-tx:#4a5261;
     --a-bg:#e9f0fb;  --a-bd:#3b6fd4;  --a-tx:#2a54a8;
     --b-bg:#f3edfb;  --b-bd:#7d5bb8;  --b-tx:#5d3f96;
+    --pen-bg:#fdf3e3; --pen-bd:#d99a2b; --pen-tx:#96660d;
   }
   @media (prefers-color-scheme: dark){
     :root{
@@ -21,6 +22,7 @@
       --exi-bg:#222835; --exi-bd:#5b6474; --exi-tx:#b6bdc9;
       --a-bg:#18233a; --a-bd:#3b6fd4; --a-tx:#8fb0f0;
       --b-bg:#241a33; --b-bd:#7d5bb8; --b-tx:#c3a9ee;
+      --pen-bg:#2c2312; --pen-bd:#d99a2b; --pen-tx:#eec06a;
     }
   }
   *{box-sizing:border-box; margin:0}
@@ -38,6 +40,9 @@
   .chip{display:inline-block; min-width:14px; height:14px; border-radius:4px; border:1.5px solid}
   .chip.exi{background:var(--exi-bg); border-color:var(--exi-bd)}
   .chip.ok {background:var(--ok-bg);  border-color:var(--ok-bd)}
+  .chip.pen{background:var(--pen-bg); border-color:var(--pen-bd)}
+  .comp.pendiente{border-color:var(--pen-bd); background:var(--pen-bg)}
+  .nodo.pendiente{border-color:var(--pen-bd); background:var(--pen-bg); border-style:dashed}
 
   .mapa{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:22px 20px}
   .capa{margin-bottom:18px}
@@ -83,11 +88,12 @@
 <body>
 
 <h1>Arquitectura del sistema — componentes y caminos</h1>
-<p class="sub">Mapa visual del sistema tras el refactor (rama <code style="font-size:.85em">sonda/refactor-cui</code>) · 22&nbsp;jul&nbsp;2026</p>
+<p class="sub">Mapa visual del sistema tras el refactor de resolución de CUI y el trabajo de integridad de la evaluación — <b>v2 · 27&nbsp;jul&nbsp;2026</b></p>
 
 <div class="leyenda">
-  <span><i class="chip exi"></i> Componente existente</span>
-  <span><i class="chip ok"></i> Componente nuevo (refactor T-008 / camino A)</span>
+  <span><i class="chip exi"></i> Componente existente — en producción</span>
+  <span><i class="chip ok"></i> Componente nuevo — construido y probado, <b>pendiente de despliegue</b></span>
+  <span><i class="chip pen"></i> Evolución prevista — <b>no construido</b>, fuera del precio actual</span>
 </div>
 
 <!-- ============ 1 · MAPA DE COMPONENTES ============ -->
@@ -109,9 +115,10 @@
     <div class="capa">
       <h3>Backend · datos de referencia</h3>
       <div class="grid">
-        <div class="comp nuevo"><b>ETL base MEF</b><small>descarga y compacta el Banco de Inversiones</small></div>
-        <div class="comp nuevo"><b>Base local de CUIs</b><small>452,793 proyectos consultables sin red</small></div>
-        <div class="comp nuevo"><b>Catálogo de entidades públicas</b><small>11,004 nombres + siglas</small></div>
+        <div class="comp nuevo"><b>Ingesta semanal del MEF</b><small>descarga y compacta el Banco de Inversiones</small></div>
+        <div class="comp nuevo"><b>Base local de CUIs</b><small>579,481 proyectos consultables sin red</small></div>
+        <div class="comp nuevo"><b>Catálogo de entidades públicas</b><small>11,011 nombres + siglas</small></div>
+        <div class="comp pendiente"><b>Persistencia en Postgres</b><small>evolución prevista — ver sección 2</small></div>
       </div>
     </div>
 
@@ -123,7 +130,10 @@
         <div class="comp nuevo"><b>Clasificador expediente/obra</b><small>elige el camino A o B por experiencia</small></div>
         <div class="comp"><b>InfoObras</b><small>ficha, valorizaciones, documentos de obra</small></div>
         <div class="comp"><b>Verificación MEF de expedientes</b><small>contrato + resolución de aprobación (08-A)</small></div>
-        <div class="comp"><b>SUNAT</b><small>antigüedad del emisor (ALT-04)</small></div>
+        <div class="comp"><b>SUNAT</b><small>antigüedad del emisor (ALT-04) + condición HABIDO</small></div>
+        <div class="comp nuevo"><b>Recálculo determinístico</b><small>días, meses, años y colegiatura los calcula el backend</small></div>
+        <div class="comp nuevo"><b>Escudo de integridad</b><small>si la evaluación no cubre lo declarado, falla ruidosamente</small></div>
+        <div class="comp nuevo"><b>Candado cargo ↔ bases</b><small>exige el núcleo de especialidad completo</small></div>
         <div class="comp"><b>Motor de reglas + Paso 5</b><small>alertas y días efectivos</small></div>
         <div class="comp"><b>Excel final + ZIP</b><small>formato del cliente con imágenes embebidas</small></div>
       </div>
@@ -143,17 +153,31 @@
 
 <!-- ============ 2 · ETL ============ -->
 <section>
-  <h2>2 · Módulo ETL & Ingesta Automática del MEF (semanal)</h2>
-  <p class="h2sub">Una sola ingesta streaming a la semana independiza al sistema de los buscadores web del MEF y garantiza búsquedas ultra-rápidas.</p>
+  <h2>2 · Ingesta automática del Banco de Inversiones del MEF (semanal)</h2>
+  <p class="h2sub">Una sola ingesta a la semana independiza al sistema de los buscadores web del MEF: se dejó de depender de captchas y de que el portal esté arriba.</p>
   <div class="flujo">
     <div class="nodo"><b>MEF Datos Abiertos</b><small>3 CSV: activas · cerradas · desactivadas (~523 MB)</small></div>
     <div class="flecha lbl"><i>cron semanal</i></div>
-    <div class="nodo nuevo"><b>Pipeline ETL</b><small>ingesta streaming + sanity check (≥400k filas)</small></div>
+    <div class="nodo nuevo"><b>Ingesta con reintentos</b><small>descarga por bloques, tolerante a cortes · modo offline desde carpeta</small></div>
     <div class="flecha"></div>
-    <div class="nodo nuevo"><b>Estructuración Dual</b><small>Hot Path (16 campos indexados) + Cold Path (68 campos JSONB)</small></div>
-    <div class="flecha lbl"><i>swap atómico zero-downtime</i></div>
-    <div class="nodo nuevo"><b>PostgreSQL / Base Local</b><small>índice trigrama pg_trgm (&lt; 15 ms) + motor de búsqueda paralela N profesionales</small></div>
+    <div class="nodo nuevo"><b>Normalización y compactado</b><small>620,985 filas → 579,481 CUIs distintos + 11,011 entidades públicas · de 523 MB a 31 MB</small></div>
+    <div class="flecha lbl"><i>reemplazo atómico (la base vieja sirve hasta que la nueva está completa)</i></div>
+    <div class="nodo nuevo"><b>Base local consultable</b><small>búsqueda por nombre, RUC y ubicación sin salir a la red</small></div>
     <p class="nota">Si la base falta o envejece, el sistema avisa y sigue funcionando con InfoObras (degradación segura).</p>
+  </div>
+
+  <h3 style="font-size:.95rem; margin:26px 0 4px">Evolución prevista — persistencia en PostgreSQL</h3>
+  <p class="h2sub">No está construido. Se documenta porque es el siguiente paso natural de este módulo, no porque forme parte de lo entregado.</p>
+  <div class="flujo">
+    <div class="nodo pendiente"><b>Tablas en PostgreSQL</b><small>carga en tabla de paso e intercambio atómico, sin cortar el servicio</small></div>
+    <div class="flecha lbl"><i>por construir</i></div>
+    <div class="nodo pendiente"><b>Índice de búsqueda por similitud</b><small>respuesta en milisegundos y consulta histórica sin pérdida de información</small></div>
+    <p class="nota">
+      <b>Qué cambia y qué no:</b> hoy la base vive como un archivo compacto y el resultado
+      para el evaluador es el mismo — misma cobertura, mismas respuestas, sin captcha.
+      Lo que aporta Postgres es velocidad a escala y auditoría histórica, no precisión.
+      Está desglosado en el backlog técnico (épico ETL) y <b>no está incluido en el precio de T-008</b>.
+    </p>
   </div>
 </section>
 
