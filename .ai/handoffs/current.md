@@ -102,6 +102,37 @@ El viejo se conservó como `golden_cui_baseline.prerefactor.json`.
 dudosa"** que ya estaban en el backlog (Tocache vs Loreto). Antes de tratarlo como
 regresión hay que resolver cuál es la verdad.
 
+## Nota (2026-07-26) — la golden ANCHA es el baseline, y lo que revela
+
+La golden armaba cada caso con solo `proyecto` + `cui` (fechas en None), así que
+**toda regla que lea `ubicacion`, `entidad_contratante` o `ruc_emisor` era INERTE
+en ella**: los vetos de ubigeo, ADR-013 entero, `ruc_match`, `ent_match` y la
+clasificación de privadas nunca se ejercitaban. Se comprobó cuando ADR-013 dio
+matriz perfectamente diagonal — probó cero regresión y no validó nada.
+
+Ensanchada (`golden_cui.py` hace join contra el espejo de origen por
+`job` + `prof:exp`): **277/277 casos enriquecidos, 0 degradados**. El baseline
+ancho ya está promovido (autorizado 26-jul); los anteriores quedan como
+`golden_cui_baseline.estrecha.json` y `.prerefactor.json`.
+
+⚠ **Lo que revela, y hay que mirarlo**: con los datos completos el resolver
+saca **14 mal-resueltos, no 10**, y aparece **1 `correcto → incorrecto`** más 3
+`revisión → incorrecto`, varios **vía RUC**. No es regresión del código: es que
+la golden estrecha nunca lo midió. La hipótesis a investigar es que la exención
+«`ruc_match` exime de todo veto» sea demasiado fuerte — el RUC del emisor casa
+con una obra donde esa empresa participó, pero no con la del certificado.
+
+## Nota (2026-07-26) — #47: los certificados son escaneos
+
+De los **729 recortes** del corpus, **solo 2 traen capa de texto**; los otros 727
+son escaneos puros. La verificación folio↔emisor está implementada y cableada en
+VALIDACIÓN, pero solo puede pronunciarse sobre el 0.3%: el caso que motivó la
+issue (`95af90f1578e` prof 1 exp 1, folio 358 en vez de 359) es un escaneo y el
+módulo se abstiene. Decisión del desarrollador: **la abstención "No verificable"
+es el comportamiento correcto**; adivinar sobre 727 escaneos sería ruido en masa.
+Detectar el corrimiento de folio en general exige verificar ANTES del recorte
+(lado skill, donde está el PDF completo) o meter OCR.
+
 ## ¿Qué se estaba haciendo?
 
 Semana 20-22 jul: **refactor completo del resolver de CUI** (rama
