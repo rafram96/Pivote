@@ -32,10 +32,11 @@ import pytest
 from config import data_dir
 from validacion.folios import (
     ESTADO_NO_VERIFICABLE, ESTADO_OK, ESTADO_SOSPECHOSO, LETRAS_MINIMAS,
-    SENAL_NOMBRE, SENAL_RUC, Verificacion, compactar, contiene_ruc,
-    extraer_paginas, frase_emisor, identidad_verificable, normalizar,
-    revisar_certificados, ruta_certificado, terminos_emisor,
-    verificar_certificado, verificar_paginas, verificar_texto,
+    SENAL_NOMBRE, SENAL_RUC, UMBRAL_FRASE, Verificacion, buscar_emisor,
+    compactar, contiene_ruc, extraer_paginas, frase_emisor, holgura_ventana,
+    identidad_verificable, localizar_frase, normalizar, revisar_certificados,
+    ruc_normalizado, ruta_certificado, terminos_emisor, verificar_certificado,
+    verificar_paginas, verificar_texto,
 )
 
 # ── Textos de certificado (recortados de los reales, sin datos del cliente) ──
@@ -246,6 +247,123 @@ def test_el_membrete_puede_omitir_la_forma_societaria():
     assert verificar_texto(texto, EMISOR_SAN_CARLOS, None).ok is True
 
 
+# ── El OCR que INSERTA caracteres (grave 2) ─────────────────────────────────
+#
+# Una letra mal leída ya estaba cubierta. Lo que rompía era que el OCR metiera
+# caracteres de MÁS dentro del membrete: el alineador devuelve una ventana del
+# largo de la frase buscada, el texto real ocupa más, y la cola del nombre queda
+# fuera de la ventana sobre la que se juzga la barrera B. El emisor CORRECTO se
+# declaraba ausente y el folio bueno salía sospechoso.
+#
+# Una falsa alarma no es un error menor en este módulo: un folio marcado
+# sospechoso sin serlo es ruido que enseña al evaluador a ignorar la alerta, y
+# entonces el candado deja de servir para el folio que sí está corrido.
+
+COLA_CONSTANCIA = (
+    "\nCONSTANCIA DE PRESTACION DE SERVICIOS a favor del profesional que se "
+    "desempeño como Jefe de Supervision durante la ejecucion de la obra "
+    "indicada en el presente documento y sus anexos correspondientes.")
+
+
+def _con_inserciones(nombre: str, k: int) -> str:
+    """El membrete con k caracteres espurios repartidos: ruido de OCR real."""
+    letras = list(nombre)
+    paso = max(1, len(letras) // (k + 1))
+    for i in range(k):
+        letras.insert(min(len(letras) - 1, paso * (i + 1) + i), "1")
+    return "".join(letras)
+
+
+def _barrera_a_acepta(emisor: str, texto: str) -> bool:
+    """¿La barrera A (frase contigua) llegó a localizar el membrete?"""
+    return localizar_frase(frase_emisor(emisor), compactar(texto)) is not None
+
+
+def test_caracteres_insertados_no_sacan_la_cola_del_nombre_de_la_ventana():
+    """«CONSORC1IO SUPERV1ISOR H0OSPITAL DE MOYOBAMBA»: tres caracteres de más.
+
+    La frase sigue casando (92.1, por encima del umbral), pero la ventana de
+    largo fijo terminaba en «...DEMOYOBA» y «MOYOBAMBA» caía fuera: el emisor
+    correcto se reportaba ausente sobre su propio certificado.
+    """
+    emisor = "CONSORCIO SUPERVISOR HOSPITAL DE MOYOBAMBA"
+    texto = "CONSORC1IO SUPERV1ISOR H0OSPITAL DE MOYOBAMBA" + COLA_CONSTANCIA
+    assert _barrera_a_acepta(emisor, texto), "el fixture debe pasar la barrera A"
+    v = verificar_texto(texto, emisor, None)
+    assert (v.ok, v.senal) == (True, SENAL_NOMBRE), f"falso sospechoso: {v.motivo}"
+    assert v.faltantes == ()
+
+
+def test_un_caracter_insertado_dentro_del_termino_distintivo_tampoco_es_alarma():
+    """El mismo defecto un nivel más abajo: el carácter cae DENTRO de la palabra
+    que identifica. «CARLO1S» contra «CARLOS» se comparaba sólo con trozos de su
+    mismo largo (83.3) en vez de con el trozo de largo+1 (92.3)."""
+    texto = ("SAN CARLO1S CONTRATISTAS GENERALES S.R.L." + COLA_CONSTANCIA)
+    assert _barrera_a_acepta(EMISOR_SAN_CARLOS, texto)
+    v = verificar_texto(texto, EMISOR_SAN_CARLOS, None)
+    assert v.ok is True and v.encontrados == ("SAN", "CARLOS")
+
+
+def test_si_la_barrera_a_acepta_el_membrete_la_b_no_inventa_una_alarma():
+    """La propiedad, no el ejemplo: A es la que decide cuánto ruido se tolera.
+
+    B existe para separar el membrete de las palabras dispersas por la página,
+    NO para volver a juzgar el ruido del OCR. Así que para todo emisor y toda
+    cantidad de caracteres insertados: si A llegó a localizar la frase, el
+    veredicto no puede ser «sospechoso». Cuando el ruido pasa de lo que A
+    tolera, A rechaza y ahí sí corresponde la alarma.
+    """
+    emisores = [
+        "CONSORCIO SUPERVISOR HOSPITAL DE MOYOBAMBA",
+        EMISOR_SAN_CARLOS,
+        "PROYECTO ESPECIAL ALTO MAYO",
+        "CONSTRUCTORA PICHILINGUE MUGRUZA SAC",
+    ]
+    for emisor in emisores:
+        for k in range(9):
+            texto = _con_inserciones(emisor, k) + COLA_CONSTANCIA
+            if not _barrera_a_acepta(emisor, texto):
+                continue
+            v = verificar_texto(texto, emisor, None)
+            assert v.ok is True, (
+                f"falso sospechoso sobre el emisor correcto: {emisor!r} con {k} "
+                f"caracteres insertados — A aceptó la frase y B la contradijo "
+                f"(faltantes={v.faltantes})")
+
+
+def test_la_holgura_sale_del_umbral_y_no_de_un_numero_puesto_a_mano():
+    """La holgura es la cota de inserciones que UMBRAL_FRASE ya tolera.
+
+    Que se derive del umbral es lo que impide que sea un aflojamiento: no admite
+    ni un carácter de ruido que la barrera A no admitiera antes, y si algún día
+    el umbral sube, la holgura se estrecha sola.
+    """
+    for largo in (10, 24, 30, 38, 60):
+        assert holgura_ventana(largo) == pytest.approx(
+            2 * largo * (100 - UMBRAL_FRASE) / UMBRAL_FRASE, abs=1)
+    # Nunca es cero: una frase corta también sufre el ruido del OCR.
+    assert holgura_ventana(1) >= 2
+    # Y crece con el largo, no a saltos arbitrarios.
+    assert holgura_ventana(60) > holgura_ventana(20)
+
+
+def test_la_ventana_ancha_no_da_por_bueno_un_certificado_ajeno():
+    """El contrapeso del ensanche: entidades que se distinguen sólo por la cola
+    del nombre siguen separándose. Si ensanchar la ventana las hubiera juntado,
+    el arreglo del falso sospechoso habría comprado un falso CUMPLE."""
+    ajenos = [
+        ("CONSORCIO SUPERVISOR HOSPITAL LIMA NORTE",
+         "CONSORCIO SUPERVISOR HOSPITAL LIMA SUR" + COLA_CONSTANCIA),
+        ("EMPRESA CONSTRUCTORA HUANCAYO SRL",
+         "EMPRESA CONSTRUCTORA HUANUCO SRL" + COLA_CONSTANCIA),
+        ("CONSORCIO VIAL AREQUIPA",
+         "CONSORCIO VIAL CUSCO AREQUIPA 2019" + COLA_CONSTANCIA),
+    ]
+    for emisor, texto in ajenos:
+        v = verificar_texto(texto, emisor, None)
+        assert v.ok is not True, f"certificado ajeno dado por bueno: {emisor!r}"
+
+
 # ── Lo que el módulo existe para atrapar ────────────────────────────────────
 
 def test_documento_de_otro_emisor_es_sospechoso(tmp_path):
@@ -320,6 +438,77 @@ def test_con_identidad_debil_el_ruc_ausente_no_es_alarma():
 def test_con_identidad_debil_el_ruc_presente_si_confirma(tmp_path):
     """La abstención por identidad genérica no debe tapar la señal dura."""
     v = verificar_texto(CERT_SAN_CARLOS, "Empresa Constructora S.A.C.", RUC_SAN_CARLOS)
+    assert (v.ok, v.senal) == (True, SENAL_RUC)
+
+
+# ── Declarar un RUC no habilita el camino del nombre (grave 1) ──────────────
+#
+# La abstención por identidad débil sólo gateaba la ENTRADA del veredicto: si la
+# experiencia traía RUC, el camino del nombre se abría igual y el módulo emitía
+# un veredicto duro con un nombre que no da para sostenerlo. Justo al revés de lo
+# que corresponde: la identidad débil es CUÁNDO hay que abstenerse.
+#
+# Medido sobre los espejos reales del corpus: 195 de 1519 experiencias declaran
+# RUC y a la vez un emisor de identidad no verificable — la población entera que
+# quedaba expuesta a un falso CUMPLE en cuanto los recortes traigan OCR.
+
+CERT_SURCO = ("CONSORCIO HOSPITAL DEL SURCO\n"
+              "CONSTANCIA DE PRESTACION DE SERVICIOS a favor del profesional que se "
+              "desempeño como Jefe de Supervision durante la ejecucion de la obra.")
+
+
+def test_el_ruc_declarado_no_habilita_el_camino_del_nombre():
+    """El falso CUMPLE exacto: «CONSORCIO HOSPITAL DEL SUR» contra un certificado
+    del «CONSORCIO HOSPITAL DEL SURCO». Son entidades distintas, la frase entra
+    como subcadena y «SUR» vive dentro de «SURCO». Sin RUC el módulo se abstenía
+    —correcto—; bastaba agregar el RUC al espejo para que dijera «coincide»."""
+    v = verificar_texto(CERT_SURCO, "CONSORCIO HOSPITAL DEL SUR", RUC_SAN_CARLOS)
+    assert (v.ok, v.estado) == (None, ESTADO_NO_VERIFICABLE)
+    assert v.senal is None and not v.sospechoso
+
+
+def test_el_ruc_que_el_documento_no_imprime_no_cambia_el_veredicto():
+    """La propiedad detrás del caso: cuando el documento NO trae el RUC, ese dato
+    del espejo no aporta nada, y el veredicto tiene que ser el mismo que sin él.
+    Cualquier diferencia significa que el RUC está abriendo una puerta que la
+    identidad débil debía tener cerrada."""
+    debiles = [
+        ("CONSORCIO HOSPITAL DEL SUR", CERT_SURCO),
+        ("Corporación KG Consultoría y Construcción S.A.C.",
+         "CORPORACION KG CONSULTORIA Y CONSTRUCCION SAC\n"
+         "CERTIFICADO DE TRABAJO. El que suscribe deja constancia de los servicios "
+         "prestados por el profesional en la obra de la referencia."),
+        ("S & S CONSULTORES Y CONTRATISTAS GENERALES S.A.C.",
+         "JJ CONTRATISTAS GENERALES S.R.L.\nCONSTANCIA DE TRABAJO. La empresa, "
+         "dedicada a servicios de consultores y contratistas generales, deja "
+         "constancia de los servicios prestados por el profesional."),
+    ]
+    for emisor, texto in debiles:
+        assert not identidad_verificable(emisor), "el fixture debe ser de identidad débil"
+        assert not contiene_ruc(texto, RUC_SAN_CARLOS), "el documento no debe imprimir el RUC"
+        sin_ruc = verificar_texto(texto, emisor, None)
+        con_ruc = verificar_texto(texto, emisor, RUC_SAN_CARLOS)
+        assert sin_ruc.ok is None, f"{emisor!r}: sin RUC ya debía abstenerse"
+        assert con_ruc.ok is None, (
+            f"{emisor!r}: declarar un RUC que el documento no imprime convirtió una "
+            f"abstención en «{con_ruc.estado}»")
+
+
+def test_buscar_emisor_no_usa_un_nombre_que_no_da_para_juzgar():
+    """El candado vive donde el nombre se USA, no sólo en la puerta de entrada:
+    así ningún camino futuro hacia `buscar_emisor` lo puede rodear."""
+    senal, hallados, faltan = buscar_emisor(
+        CERT_SURCO, "CONSORCIO HOSPITAL DEL SUR", RUC_SAN_CARLOS)
+    assert senal is None and hallados == () and faltan == ()
+    # Con la identidad sí verificable, la misma función sigue acreditando.
+    senal, _, _ = buscar_emisor(CERT_SAN_CARLOS, EMISOR_SAN_CARLOS, None)
+    assert senal == SENAL_NOMBRE
+
+
+def test_con_identidad_debil_y_ruc_impreso_el_ruc_sigue_mandando():
+    """El candado no puede tapar la señal dura: si el documento imprime el RUC,
+    la identidad débil del nombre da igual — el folio queda confirmado."""
+    v = verificar_texto(CERT_SAN_CARLOS, "CONSORCIO HOSPITAL DEL SUR", RUC_SAN_CARLOS)
     assert (v.ok, v.senal) == (True, SENAL_RUC)
 
 
@@ -518,6 +707,165 @@ def test_certs_reales_de_la_corrida_del_folio_corrido(capsys):
     # el veredicto que saldrá cuando el recorte del folio 358 traiga capa de texto.
     v = verificar_texto(CERT_OTRO_EMISOR, p1e1.get("entidad_emisora"), p1e1.get("ruc_emisor"))
     assert v.ok is False, "el documento del folio 358 debe salir sospechoso, no coincide"
+
+
+def _todos_los_espejos() -> list[tuple[str, Path, dict]]:
+    """(job, carpeta de certs, espejo) de cada job del corpus local con recortes."""
+    raiz = data_dir()
+    if not raiz.is_dir():
+        pytest.skip(f"datos reales no disponibles en esta máquina: {raiz}")
+    salida = []
+    for d in sorted(raiz.iterdir()):
+        if not d.is_dir() or not (d / "certs").is_dir() or not (d / "espejo.json").is_file():
+            continue
+        try:
+            salida.append((d.name, d / "certs",
+                           json.loads((d / "espejo.json").read_text(encoding="utf-8"))))
+        except (ValueError, OSError):
+            continue
+    if not salida:
+        pytest.skip("el corpus local no trae ningún job con recortes")
+    return salida
+
+
+def test_corpus_real_completo_sin_una_sola_falsa_alarma(capsys):
+    """El barrido de TODO el corpus local, que es el control de falsos positivos.
+
+    Aquí se mide de una vez el alcance real del módulo hoy: de los recortes que
+    produce el recortador, casi ninguno trae capa de texto. Ese número es el que
+    hay que mirar antes de prometer nada sobre este candado.
+    """
+    total = con_texto = sospechosos = confirmados = 0
+    detalle = []
+    for job, carpeta, espejo in _todos_los_espejos():
+        r = revisar_certificados(carpeta, espejo)
+        legibles = [v for v in r if v.letras >= LETRAS_MINIMAS]
+        total += len(r)
+        con_texto += len(legibles)
+        sospechosos += sum(v.ok is False for v in r)
+        confirmados += sum(v.ok is True for v in r)
+        detalle.append((job, len(r), len(legibles),
+                        sum(v.ok is False for v in r)))
+    with capsys.disabled():
+        print(f"\n  corpus local: {total} recortes en {len(detalle)} jobs — "
+              f"{con_texto} con capa de texto, {confirmados} confirmados, "
+              f"{sospechosos} sospechosos")
+        for job, n, legibles, sosp in detalle:
+            print(f"    {job}: {n:3d} recortes, {legibles:2d} legibles, {sosp} sospechosos")
+    assert total, "el corpus local no trajo recortes"
+    # Lo único que el módulo promete sobre un escaneo es callarse. Un sospechoso
+    # sobre un recorte sin texto sería una falsa alarma por experiencia.
+    assert sospechosos == 0, "falsas alarmas sobre recortes sin capa de texto"
+    assert confirmados == con_texto, \
+        "todo recorte legible del corpus es del emisor declarado: debe confirmarse"
+
+
+def test_los_recortes_del_folio_corrido_no_tienen_ni_una_letra(capsys):
+    """El límite de alcance, dicho con todas las letras y medido, no supuesto.
+
+    El folio corrido de referencia (`95af90f1578e`, P1_E1, folio 358) **no se
+    puede atrapar con este módulo hoy**: los 63 recortes de esa corrida son
+    imágenes puras y su capa de texto trae CERO letras. No es que el módulo falle
+    en silencio — es que no hay nada que leer. El día que el recortador entregue
+    OCR, el veredicto sale solo; hasta entonces, la abstención es honesta.
+    """
+    carpeta, espejo = _certs_reales("95af90f1578e")
+    letras = []
+    for prof in espejo.get("profesionales") or []:
+        for exp in prof.get("experiencias") or []:
+            paginas = extraer_paginas(ruta_certificado(carpeta, prof.get("n_prof"), exp.get("n")))
+            if paginas is not None:
+                letras.append(max((sum(c.isalpha() for c in p) for p in paginas), default=0))
+    with capsys.disabled():
+        print(f"\n  95af90f1578e — letras por recorte (máximo entre sus páginas): "
+              f"max={max(letras, default=0)}, con texto útil="
+              f"{sum(l >= LETRAS_MINIMAS for l in letras)}/{len(letras)}")
+    assert letras, "no se pudo leer ningún recorte de la corrida de referencia"
+    assert max(letras) < LETRAS_MINIMAS, (
+        "esta copia SÍ trae recortes con texto: entonces el test debe exigir que "
+        "P1_E1 salga sospechoso, no que el módulo se abstenga")
+
+
+def test_texto_real_con_ruido_de_ocr_insertado_sigue_confirmando(capsys):
+    """Grave 2 sobre texto REAL, no sobre un fixture cómodo.
+
+    Se toman los dos únicos recortes reales con capa de texto y se les inyecta el
+    ruido que rompía el módulo —caracteres de más dentro del membrete— sobre el
+    ruido que el OCR ya les había dejado. Mientras la barrera A siga localizando
+    el membrete, el emisor declarado tiene que seguir apareciendo.
+    """
+    carpeta, espejo = _certs_reales("36d710f27694")
+    casos = []
+    for n_exp in (1, 2):
+        exp = _experiencia_real(espejo, 1, n_exp)
+        texto = _pagina_principal_real(carpeta, 1, n_exp)
+        if sum(c.isalpha() for c in texto) < LETRAS_MINIMAS:
+            continue
+        casos.append((n_exp, exp.get("entidad_emisora"), texto))
+    if not casos:
+        pytest.skip("esta copia de los datos no trae recortes con capa de texto")
+
+    revisados = 0
+    with capsys.disabled():
+        print()
+    for n_exp, emisor, texto in casos:
+        for k in range(1, 6):
+            # el ruido se mete en el membrete, que es la primera línea del cert
+            cabeza, _, cola = texto.partition("\n")
+            sucio = _con_inserciones(cabeza, k) + "\n" + cola
+            if not _barrera_a_acepta(emisor, sucio):
+                continue
+            revisados += 1
+            v = verificar_texto(sucio, emisor, None)
+            with capsys.disabled():
+                print(f"  P1_E{n_exp} +{k} caracteres insertados: {v.estado} "
+                      f"faltantes={v.faltantes}")
+            assert v.ok is True, (
+                f"P1_E{n_exp} con {k} caracteres insertados: el certificado real de "
+                f"«{emisor}» salió {v.estado} contra su propio emisor")
+    assert revisados, "ningún caso llegó a ejercitar la barrera A"
+
+
+def test_emisores_reales_de_identidad_debil_nunca_reciben_veredicto_por_nombre(capsys):
+    """Grave 1 sobre las identidades REALES declaradas en los espejos.
+
+    Se recorren todos los emisores del corpus, se separan los que no dan para
+    juzgar («Gobierno Regional Junín» se apoya entero en JUNIN; «Consorcio CIBA»
+    en CIBA) y que ADEMÁS declaran RUC — la población exacta que el agujero
+    exponía — y se los enfrenta a un documento que contiene su frase. Ninguno
+    puede salir «coincide» por nombre: el RUC acredita si el documento lo
+    imprime, pero no vuelve juzgable un nombre que no lo es.
+    """
+    debiles, con_ruc_y_debil, total = {}, 0, 0
+    for _, _, espejo in _todos_los_espejos():
+        for prof in espejo.get("profesionales") or []:
+            for exp in prof.get("experiencias") or []:
+                ent, ruc = exp.get("entidad_emisora"), exp.get("ruc_emisor")
+                total += 1
+                if identidad_verificable(ent):
+                    continue
+                if ruc_normalizado(ruc) is not None:
+                    con_ruc_y_debil += 1
+                    if ent and ent not in debiles:
+                        debiles[ent] = ruc
+    with capsys.disabled():
+        print(f"\n  corpus: {total} experiencias con emisor; {con_ruc_y_debil} declaran "
+              f"RUC y una identidad NO verificable ({len(debiles)} emisores distintos)")
+        for ent in list(debiles)[:6]:
+            print(f"    {ent!r} -> distintivos={terminos_emisor(ent)}")
+    if not debiles:
+        pytest.skip("el corpus local no trae emisores de identidad débil con RUC")
+
+    for emisor, ruc in debiles.items():
+        # un documento que contiene la frase declarada: el peor caso para el módulo
+        texto = (f"{emisor}\nCONSTANCIA DE PRESTACION DE SERVICIOS a favor del "
+                 "profesional que se desempeño en la obra de la referencia durante "
+                 "el periodo indicado en el presente documento.")
+        v = verificar_texto(texto, emisor, ruc)
+        assert v.senal != SENAL_NOMBRE, (
+            f"«{emisor}» no da para juzgar (distintivos={terminos_emisor(emisor)}) y aun "
+            f"así el módulo lo confirmó por nombre")
+        assert v.ok is not False, f"«{emisor}»: abstención convertida en alarma"
 
 
 def test_verificacion_es_inmutable():
