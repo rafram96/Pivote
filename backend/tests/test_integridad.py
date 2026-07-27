@@ -24,6 +24,18 @@ descubierto por estos candados: cada profesional cargaba los requisitos y el
 sustento del siguiente. Las correcciones de la ronda 2 (cobertura por
 profesional, patrón para invalidar, fallar cerrado, `cargos_validos` en los
 requisitos) no movieron ni un veredicto de esos 37.
+
+Ronda 3 (el hueco de nivel PROFESIONAL y la ceguera ante lo que rellena el
+propio backend). Medido sobre los mismos 37, ninguno de los 27 `confiable` se
+movió ni ganó un hallazgo; lo que cambió fue todo hacia el lado seguro:
+  · `95af90f1578e` volvió de `revisar` a `no_confiable` — llegó SIN una sola
+    respuesta del evaluador y el recálculo del backend (días, colegiatura) la
+    disfrazaba de corrida a medias. Es la trampa que documenta el cableado.
+  · `36d710f27694` recupera el `PROFESIONAL SIN EVALUAR` del nº10, por lo mismo.
+  · `COBERTURA NULA` baja de 23 a 14 avisos: los 9 que se van son de columnas
+    (días, colegiatura) que hoy calcula el backend — avisos falsos.
+  · el candado nuevo de nivel profesional dispara UNA vez en los 37
+    (`fc3d8236815c`, ya `no_confiable`): sin falsos positivos en masa.
 """
 from __future__ import annotations
 
@@ -44,7 +56,10 @@ from validacion.integridad import (
 # ── Constructores de espejos sintéticos ─────────────────────────────────────
 
 def _exp(n: int, **campos) -> dict:
-    base = {"n": n, "folio": 100 + n, "dias": 365, "cargo_bases_valido": "SÍ",
+    # Las fechas van de verdad para que `recalcular_espejo` pueda correr sobre
+    # estos mismos espejos: los tests del orden lo necesitan.
+    base = {"n": n, "folio": 100 + n, "fecha_inicial": "2018-01-01",
+            "fecha_final": "2018-12-31", "dias": 365, "cargo_bases_valido": "SÍ",
             "tipo_obra_valido": "SÍ", "anterior_colegiatura": "NO"}
     base.update(campos)
     return base
@@ -224,26 +239,153 @@ def test_si_a_nadie_le_calcularon_nada_se_dice_una_vez_como_columna():
 
 def test_columna_vacia_suelta_es_alerta_no_critica():
     """Falta una columna, no la evaluación entera: se avisa, no se invalida."""
-    profs = [dict(p, experiencias=[dict(e, dias=None) for e in p["experiencias"]])
+    profs = [dict(p, experiencias=[dict(e, tipo_obra_valido=None)
+                                   for e in p["experiencias"]])
              for p in SANO]
     hallazgos = cobertura_evaluador(_espejo(profs))
     assert _codigos(hallazgos) == ["COBERTURA_NULA"]
     assert hallazgos[0].severidad == ALERTA
-    assert "días" in hallazgos[0].mensaje
+    assert "tipo de obra" in hallazgos[0].mensaje
     assert evaluar_confiabilidad(_espejo(profs)).veredicto == "revisar"
 
 
 def test_un_dato_faltante_aislado_es_legitimo():
-    """Una fecha ilegible deja `dias` en null y eso NO es una falla del evaluador:
-    el criterio es cobertura CERO, nunca un porcentaje."""
-    profs = [dict(SANO[0], experiencias=[_exp(1, dias=None), _exp(2), _exp(3)])] + SANO[1:]
+    """Un dato ilegible en UNA fila NO es una falla del evaluador: el criterio es
+    cobertura CERO, nunca un porcentaje."""
+    profs = [dict(SANO[0],
+                  experiencias=[_exp(1, tipo_obra_valido=None), _exp(2), _exp(3)])] + SANO[1:]
     assert cobertura_evaluador(_espejo(profs)) == []
 
 
 def test_pocas_experiencias_no_alcanzan_para_hablar_de_columna_vacia():
-    """Con 2 experiencias, ambas sin días pueden ser dos fechas ilegibles."""
-    profs = [dict(SANO[0], experiencias=[_exp(1, dias=None), _exp(2, dias=None)])]
+    """Con 2 experiencias, ambas sin ese dato pueden ser dos folios ilegibles."""
+    profs = [dict(SANO[0], experiencias=[_exp(1, tipo_obra_valido=None),
+                                         _exp(2, tipo_obra_valido=None)])]
     assert "COBERTURA_NULA" not in _codigos(cobertura_evaluador(_espejo(profs)))
+
+
+def test_los_dias_ya_no_son_senal_porque_los_calcula_el_backend():
+    """Que el evaluador no mande días dejó de ser una falla: el backend los
+    calcula (son aritmética). Alertar ahí sería gritar en corridas buenas — y un
+    escudo que grita en las buenas se termina ignorando."""
+    profs = [dict(p, experiencias=[dict(e, dias=None, meses=None, anios=None,
+                                        anterior_colegiatura=None)
+                                   for e in p["experiencias"]])
+             for p in SANO]
+    assert revisar_integridad(_espejo(profs)) == []
+
+
+# ── El veredicto no llegó, pero el cálculo sí (el agujero TODO-O-NADA) ──────
+#
+# El consolidador busca DOS veces con el mismo índice: el veredicto por un lado
+# (`profesionales_eval`) y el cálculo de las experiencias por otro
+# (`experiencias_eval`). Si falla solo la PRIMERA, al profesional «le llegó algo»
+# —sus filas— y el candado de cobertura lo daba por evaluado; sus dos columnas de
+# nivel profesional salían en blanco sin que nadie avisara, porque `COBERTURA_NULA`
+# es todo-o-nada y le bastaba UN profesional con veredicto para callarse.
+
+def _sin_veredicto(prof: dict) -> dict:
+    """Le llegó el cálculo de sus experiencias, pero no el veredicto."""
+    return dict(prof, cumple=None, profesion_valida=None)
+
+
+def test_veredicto_vaciado_en_la_mayoria_con_las_filas_intactas_es_critico():
+    """EL grave: 5 de 6 sin veredicto y las experiencias intactas. Antes esto
+    devolvía «confiable» y CERO hallazgos — un Excel con la columna donde se
+    decide cada resultado en blanco, presentado como sano."""
+    profs = [SANO[0]] + [_sin_veredicto(p) for p in SANO[1:]]
+    conf = evaluar_confiabilidad(_espejo(profs))
+    assert conf.veredicto == "no_confiable"
+    assert conf.hallazgos[0].codigo == "VEREDICTOS_INCOMPLETOS"
+    assert conf.hallazgos[0].severidad == CRITICA
+    assert "5 de los 6" in conf.hallazgos[0].mensaje
+
+
+def test_un_solo_profesional_sin_veredicto_se_senala_y_no_pasa_como_sano():
+    """Un hueco suelto no invalida la corrida, pero jamás sale «confiable»."""
+    profs = list(SANO)
+    profs[3] = _sin_veredicto(SANO[3])
+    conf = evaluar_confiabilidad(_espejo(profs))
+    assert conf.veredicto == "revisar"
+    assert _codigos(conf.hallazgos) == ["PROFESIONAL_SIN_VEREDICTO"]
+    assert conf.hallazgos[0].n_prof == 4 and conf.hallazgos[0].severidad == ALERTA
+
+
+def test_falta_un_solo_campo_del_veredicto_y_tambien_se_dice():
+    """El consolidador puede perder solo una de las dos celdas."""
+    profs = list(SANO)
+    profs[2] = dict(SANO[2], profesion_valida=None)
+    hallazgos = cobertura_evaluador(_espejo(profs))
+    assert _codigos(hallazgos) == ["PROFESIONAL_SIN_VEREDICTO"]
+    assert "la profesión" in hallazgos[0].mensaje
+    assert "veredicto de cumplimiento" not in hallazgos[0].mensaje
+
+
+def test_muchos_sin_veredicto_se_agregan_en_un_solo_aviso():
+    """Un panel con 29 avisos de la misma cosa no se lee."""
+    profs = [SANO[0], SANO[1]] + [_sin_veredicto(p) for p in SANO[2:]]
+    hallazgos = [h for h in cobertura_evaluador(_espejo(profs))
+                 if h.codigo == "PROFESIONAL_SIN_VEREDICTO"]
+    assert len(hallazgos) == 1 and hallazgos[0].n_prof is None
+    assert "4 de los 6" in hallazgos[0].mensaje
+
+
+def test_si_a_nadie_le_llego_el_veredicto_se_dice_una_vez_como_columna():
+    """Sin contraste no es un problema DE nadie en particular: es la columna
+    entera, y eso ya lo dice `COBERTURA NULA`. Repetirlo por cabeza sería ruido."""
+    profs = [_sin_veredicto(p) for p in SANO]
+    codigos = _codigos(cobertura_evaluador(_espejo(profs)))
+    assert "PROFESIONAL_SIN_VEREDICTO" not in codigos
+    assert codigos.count("COBERTURA_NULA") == 2
+
+
+def test_un_solo_profesional_no_tiene_con_quien_contrastar():
+    """Sin hermanos no se puede decir «a él le faltó lo que a los demás sí llegó»,
+    porque no hay demás: el candado se abstiene igual que el de las filas."""
+    profs = [_sin_veredicto(SANO[0])]
+    assert "PROFESIONAL_SIN_VEREDICTO" not in _codigos(cobertura_evaluador(_espejo(profs)))
+
+
+# ── El escudo no se ciega con lo que rellena el propio backend ──────────────
+
+def test_el_recalculo_del_backend_no_ciega_al_escudo():
+    """LA trampa del cableado: el recálculo rellena días y colegiatura. Si esas
+    celdas contaran como «entregado», una corrida SIN una sola respuesta del
+    evaluador se vería completa apenas el backend la rellenara."""
+    from validacion.recalculo import recalcular_espejo
+
+    espejo = _espejo([_sin_evaluar(p) for p in SANO])
+    assert evaluar_confiabilidad(espejo).veredicto == "no_confiable"
+
+    recalculo = recalcular_espejo(espejo)
+    assert recalculo.rellenos, "el recálculo tiene que haber llenado celdas"
+    conf = evaluar_confiabilidad(espejo)
+    assert conf.veredicto == "no_confiable"
+    assert "SIN_EVALUACION" in _codigos(conf.hallazgos)
+
+
+def test_la_marca_del_candado_de_cargo_no_cuenta_como_respuesta_del_evaluador():
+    """`anotar_cargo_nucleo` reescribe `cargo bases válido`. Sobre una celda vacía
+    el texto es 100% del backend; sobre una contestada conserva lo del evaluador
+    entre ⟦…⟧. Solo el segundo caso prueba que el evaluador contestó."""
+    from validacion.cargo_nucleo import Hallazgo as HallazgoCargo, _texto_marca
+
+    h = HallazgoCargo(n_exp=1, cargo_ocupado="RESIDENTE", faltantes=("supervisión",),
+                      referencia=None, funciones=False, llm=None)
+    del_backend = _texto_marca(h, None, "POR VERIFICAR (candado:")
+    con_eco = _texto_marca(h, "SÍ", "NO (candado:")
+
+    profs = [dict(SANO[0], cumple=None, profesion_valida=None,
+                  experiencias=[_exp(1, cargo_bases_valido=del_backend,
+                                     tipo_obra_valido=None)])] + SANO[1:]
+    conf = evaluar_confiabilidad(_espejo(profs))
+    assert "PROFESIONAL_SIN_EVALUAR" in _codigos(conf.hallazgos)
+
+    profs[0] = dict(profs[0], experiencias=[_exp(1, cargo_bases_valido=con_eco,
+                                                 tipo_obra_valido=None)])
+    codigos = _codigos(evaluar_confiabilidad(_espejo(profs)).hallazgos)
+    assert "PROFESIONAL_SIN_EVALUAR" not in codigos   # sí contestó: solo falta el veredicto
+    assert "PROFESIONAL_SIN_VEREDICTO" in codigos
 
 
 # ── Síntoma A · corrimiento / veredicto ajeno ───────────────────────────────
@@ -576,6 +718,51 @@ def test_conversion_a_observaciones_del_pipeline():
     assert all(o.mensaje for o in obs)
 
 
+# ── Cableado: la etapa VALIDACIÓN del pipeline ──────────────────────────────
+
+def _correr_validacion(espejo: dict):
+    """La etapa real, sin red ni disco."""
+    from orquestador.etapas import Contexto
+    from orquestador.etapas_reales import EtapaValidacionReal
+
+    ctx = Contexto(job=None, espejo=espejo, enriquecimiento={})
+    return EtapaValidacionReal().correr(ctx), ctx
+
+
+def test_la_etapa_de_validacion_emite_los_hallazgos_del_escudo():
+    from schemas.pipeline import EstadoEtapa, Etapa, Severidad
+
+    res, _ctx = _correr_validacion(_espejo(CORRIDO))
+    del_escudo = [o for o in res.observaciones if o.codigo in CODIGOS]
+    assert "CORRIMIENTO" in {o.codigo for o in del_escudo}
+    assert any(o.severidad is Severidad.CRITICA for o in del_escudo)
+    assert all(o.origen is Etapa.VALIDACION for o in del_escudo)
+    # No bloquea (el evaluador prefiere un Excel con alerta a no tener Excel),
+    # pero tampoco termina en verde.
+    assert res.estado is EstadoEtapa.OK_CON_REVISION
+
+
+def test_la_etapa_de_validacion_de_una_corrida_sana_termina_en_verde():
+    from schemas.pipeline import EstadoEtapa
+
+    res, _ctx = _correr_validacion(_espejo(SANO))
+    assert [o.codigo for o in res.observaciones if o.codigo in CODIGOS] == []
+    assert res.estado is EstadoEtapa.OK
+
+
+def test_la_etapa_mira_el_espejo_ANTES_de_que_el_backend_lo_rellene():
+    """Si el escudo corriera después del recálculo, vería días y colegiatura
+    llenos POR EL BACKEND y daría por entregado lo que nunca llegó."""
+    from schemas.pipeline import EstadoEtapa
+
+    espejo = _espejo([_sin_evaluar(p) for p in SANO])
+    res, ctx = _correr_validacion(espejo)
+    assert "SIN_EVALUACION" in {o.codigo for o in res.observaciones}
+    assert res.estado is EstadoEtapa.OK_CON_REVISION
+    # y el recálculo sí corrió: la etapa completa lo que puede, no se planta
+    assert ctx.espejo["profesionales"][0]["experiencias"][0]["dias"] == 365
+
+
 # Un espejo por cada código: el test de lenguaje los recorre TODOS (antes solo
 # veía tres de los dieciséis y los peores mensajes nunca se revisaban).
 def _un_espejo_por_codigo() -> dict[str, list]:
@@ -592,12 +779,18 @@ def _un_espejo_por_codigo() -> dict[str, list]:
                     validos="Instalaciones Eléctricas"),
               _prof(2, "ESPECIALISTA EN ESTRUCTURAS", "CUMPLE — 800 días.",
                     validos="Estructuras")]
+    un_hueco = list(SANO)
+    un_hueco[3] = _sin_veredicto(SANO[3])
     return {
         "SIN_EVALUACION": revisar_integridad(_espejo([_sin_evaluar(p) for p in SANO])),
         "EVALUACION_INCOMPLETA": revisar_integridad(
             _espejo([SANO[0]] + [_sin_evaluar(p) for p in SANO[1:]])),
+        "VEREDICTOS_INCOMPLETOS": revisar_integridad(
+            _espejo([SANO[0]] + [_sin_veredicto(p) for p in SANO[1:]])),
+        "PROFESIONAL_SIN_VEREDICTO": revisar_integridad(_espejo(un_hueco)),
         "COBERTURA_NULA": revisar_integridad(_espejo(
-            [dict(p, experiencias=[dict(e, dias=None) for e in p["experiencias"]])
+            [dict(p, experiencias=[dict(e, tipo_obra_valido=None)
+                                   for e in p["experiencias"]])
              for p in SANO])),
         "EXPERIENCIA_SIN_EVALUAR": revisar_integridad(_espejo(
             [dict(SANO[0], experiencias=huecas + [_exp(6)]),
@@ -739,6 +932,48 @@ def test_real_corrida_sana_ffbda008a346_sin_falsos_positivos():
     conf = evaluar_confiabilidad(_espejo_real("ffbda008a346"))
     assert conf.hallazgos == [], [f"{h.codigo}: {h.mensaje}" for h in conf.hallazgos]
     assert conf.veredicto == "confiable"
+
+
+def test_real_veredicto_vaciado_3289eca1419b_no_pasa_como_sano():
+    """El escenario con el que el revisor tumbó la ronda 2, sobre el espejo real
+    de 30 profesionales: se vacía el VEREDICTO de 29 y se dejan las experiencias
+    intactas. El escudo devolvía «confiable» y CERO hallazgos."""
+    espejo = _espejo_real("3289eca1419b")
+    for prof in espejo["profesionales"][1:]:
+        prof["cumple"] = prof["profesion_valida"] = None
+    conf = evaluar_confiabilidad(espejo)
+    assert conf.veredicto == "no_confiable"
+    assert conf.hallazgos[0].codigo == "VEREDICTOS_INCOMPLETOS"
+    assert "29 de los 30" in conf.hallazgos[0].mensaje
+
+
+def test_real_sana_ffbda008a346_sigue_sana_despues_de_que_el_backend_la_toque():
+    """La corrida buena no puede empezar a producir hallazgos porque el backend
+    haya rellenado sus columnas — ni al revés, taparlos."""
+    from validacion.cargo_nucleo import anotar_cargo_nucleo
+    from validacion.recalculo import recalcular_espejo
+
+    espejo = _espejo_real("ffbda008a346")
+    recalcular_espejo(espejo)
+    anotar_cargo_nucleo(espejo)
+    conf = evaluar_confiabilidad(espejo)
+    assert conf.hallazgos == [], [f"{h.codigo}: {h.mensaje}" for h in conf.hallazgos]
+    assert conf.veredicto == "confiable"
+
+
+def test_real_ausencia_total_95af90f1578e_sobrevive_al_recalculo():
+    """El mismo espejo sin evaluación, pasado por el backend antes del escudo:
+    días y colegiatura quedan llenos por el recálculo y la corrida sigue siendo
+    la que llegó vacía. Es la trampa del cableado, medida sobre datos reales."""
+    from validacion.cargo_nucleo import anotar_cargo_nucleo
+    from validacion.recalculo import recalcular_espejo
+
+    espejo = _espejo_real("95af90f1578e")
+    recalcular_espejo(espejo)
+    anotar_cargo_nucleo(espejo)
+    conf = evaluar_confiabilidad(espejo)
+    assert conf.veredicto == "no_confiable"
+    assert "SIN_EVALUACION" in _codigos(conf.hallazgos)
 
 
 def test_real_corrida_sana_ffbda008a346_con_un_hueco_si_lo_reporta():

@@ -23,7 +23,8 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from schemas import pipeline
-from validacion import (anotar_cargo_nucleo, observaciones_recalculo,
+from validacion import (a_observaciones, anotar_cargo_nucleo,
+                        evaluar_confiabilidad, observaciones_recalculo,
                         recalcular_espejo, verificar_espejo)
 from resolucion import (ConsultaInfoObras, resolver_con_dedup, resolver_obras,
                         rubros_mixtos)
@@ -186,6 +187,24 @@ class EtapaValidacionReal:
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
         ctx.reportar(self.nombre, 0, 0, "Revisando la consistencia de la propuesta")
+        # ESCUDO DE INTEGRIDAD (#45 · L1) — lo PRIMERO de la etapa, sobre el espejo
+        # tal como llegó. No re-evalúa la propuesta: comprueba que lo que entregó
+        # `agent-evaluador` corresponda a los profesionales y experiencias del
+        # análisis (que no falten veredictos, que ningún sustento sea de otro).
+        #
+        # ⚠ TRAMPA (resuelta en dos capas, ambas necesarias):
+        # `recalcular_espejo` rellena días/colegiatura y `anotar_cargo_nucleo`
+        # reescribe `cargo_bases_valido`. Si el escudo corriera después, vería
+        # esas celdas llenas POR EL BACKEND y daría por entregado lo que nunca
+        # llegó. Medido: con el orden invertido, el job 12b7cb15ab1e —que llegó
+        # sin UNA sola celda del evaluador— pasaba de «no confiable» a «revisar».
+        #   1ª capa · el escudo va primero, antes de que nada se toque.
+        #   2ª capa · el escudo NO usa como señal ninguna celda que el backend
+        #     sepa escribir (`integridad.CAMPOS_EXP` y `_entregado`). Hace falta
+        #     porque el espejo se PERSISTE ya recalculado: en un re-disparo, ir
+        #     primero no basta — las celdas del backend ya vienen en el archivo.
+        confiabilidad = evaluar_confiabilidad(ctx.espejo)
+        observaciones = a_observaciones(confiabilidad.hallazgos)
         # ANTES de verificar: días/meses/años, ¿anterior a colegiatura? y ¿COVID?
         # son ARITMÉTICA, no juicio — el backend los calcula y deja de depender de
         # que el LLM los mande (#45 · L2). Con el defecto `sobrescribir=False` solo
@@ -194,14 +213,23 @@ class EtapaValidacionReal:
         # DESPUÉS de `verificar_espejo`: las NOTAS 9 y 10 comparan contra lo que
         # escribió Claude y ya no lo encontrarían.
         recalculo = recalcular_espejo(ctx.espejo)
-        observaciones = observaciones_recalculo(recalculo, origen=E.VALIDACION)
+        observaciones += observaciones_recalculo(recalculo, origen=E.VALIDACION)
         observaciones += verificar_espejo(ctx.espejo)
         # DESPUÉS de verificar (que lee el veredicto original de Claude para
         # detectar la contradicción): marca en rojo, dentro del espejo que va al
         # Excel, las experiencias que no acreditan ni cargo ni funciones (#31).
         anotar_cargo_nucleo(ctx.espejo)
         n_exp = sum(len(p.get("experiencias", [])) for p in ctx.espejo.get("profesionales", []))
-        return _res(self.nombre, EE.OK, _met(n_exp, n_exp), observaciones)
+        # El escudo NO bloquea el job. Abortar dejaría al evaluador SIN Excel, y
+        # el contrato del pipeline es entregar lo que se tenga + la lista de lo
+        # que hay que mirar (ver `ItemRevision`): un análisis con una alerta
+        # enorme le sirve; ninguno, no. Pero un archivo que PARECE válido y no lo
+        # es sí es peor que ninguno, así que una corrida no confiable jamás puede
+        # terminar en verde: la etapa queda `ok_con_revision` (el panel la pinta
+        # distinto) y los hallazgos viajan como observaciones CRÍTICAS del job,
+        # con el texto redactado para que lo lea el evaluador.
+        estado = EE.OK if confiabilidad.confiable else EE.OK_CON_REVISION
+        return _res(self.nombre, estado, _met(n_exp, n_exp), observaciones)
 
 
 # ── 2 · Identificación de obras (CUI) ────────────────────────────────────────

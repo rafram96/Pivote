@@ -28,16 +28,26 @@ Tres principios que fijan la calibración:
   3. **Falla CERRADO.** Si el espejo no tiene la forma esperada, el veredicto es
      `no_revisable` — nunca «confiable». Un escudo que llama sano a lo que no
      pudo mirar es peor que no tener escudo.
+  4. **El escudo nunca se mira a sí mismo.** Solo cuenta como «entregado» lo que
+     el backend NO sabe escribir. El recálculo del backend rellena días, meses,
+     años, colegiatura y COVID, y `anotar_cargo_nucleo` reescribe el cargo: si
+     esas celdas contaran, una corrida sin una sola respuesta del evaluador se
+     vería completa después de que el propio backend la rellenara. Y como el
+     espejo se PERSISTE ya recalculado, en el re-disparo la ceguera sería
+     permanente — por eso la defensa es por CAMPO, no por orden de llamadas
+     (ver `CAMPOS_EXP` y `_entregado`).
 
 Todas las funciones son puras: reciben el espejo como dict y devuelven
 `Hallazgo`. El cableado al pipeline lo hace el integrador; `a_observaciones()`
 convierte a `pipeline.Observacion` en una línea.
 
-Dos fallas reales medidas (26-jul) que fijan la calibración:
+Tres fallas reales medidas (26-jul) que fijan la calibración:
   A · corrimiento +1  (job 36d710f27694) — 10 profesionales con el veredicto del
       siguiente; el nº10 sin veredicto; 7 avisos `cargo_corregido`.
   B · ausencia total  (job 95af90f1578e) — 0/63 experiencias y 0/10
       profesionales con campos del evaluador.
+  C · veredicto ausente con las filas llenas (medido sobre 3289eca1419b, 30
+      profesionales) — el caso que motiva `_veredictos_sin_llegar`.
   Referencia sana (no debe disparar NI UN hallazgo): ffbda008a346.
 """
 from __future__ import annotations
@@ -47,6 +57,13 @@ import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Optional
+
+# Las marcas con las que `anotar_cargo_nucleo` REESCRIBE `cargo_bases_valido`.
+# Se importan (en vez de copiar el literal) para que un cambio allá reviente aquí
+# de forma ruidosa: si estas dos cadenas se desincronizan, el escudo empieza a
+# leer una celda del backend como si la hubiera escrito el evaluador y se queda
+# ciego en silencio — que es exactamente el fallo que este módulo persigue.
+from .cargo_nucleo import _MARCA_NO, _MARCA_PEND
 
 # ── Vocabulario de severidades ───────────────────────────────────────────────
 # Strings iguales a los valores de `schemas.pipeline.Severidad`, para que el
@@ -65,7 +82,9 @@ _ORDEN_SEV = {CRITICA: 0, ALERTA: 1, ADVERTENCIA: 2, INFO: 3}
 CODIGOS = (
     "SIN_EVALUACION",           # nadie tiene nada del evaluador
     "EVALUACION_INCOMPLETA",    # falta buena parte del equipo
+    "VEREDICTOS_INCOMPLETOS",   # a buena parte del equipo le falta el veredicto
     "PROFESIONAL_SIN_EVALUAR",  # a ESE profesional no le llegó nada
+    "PROFESIONAL_SIN_VEREDICTO",  # a ESE le calcularon las filas pero no el veredicto
     "EXPERIENCIA_SIN_EVALUAR",  # a ESA fila no le llegó nada
     "COBERTURA_NULA",           # una columna del formato sale en blanco
     "VEREDICTO_AJENO",          # el sustento habla de otra especialidad
@@ -121,27 +140,45 @@ class Confiabilidad:
 
 
 # ── Campos que produce EXCLUSIVAMENTE agent-evaluador ────────────────────────
-# Verificado en skill/scripts/consolidar_espejo.js: estos cuatro salen solo de
-# `j` (la fila de experiencias_eval). Los que tienen respaldo del extractor
+# Verificado en skill/scripts/consolidar_espejo.js: salen solo de `j` (la fila de
+# experiencias_eval). Los que tienen respaldo del extractor
 # (`cert_antes_culminar`, `cargo_valido_emitir`, `funciones_similares`) NO van
 # aquí: aparecen llenos aunque el evaluador no haya entregado nada, así que no
 # dicen nada sobre su cobertura.
+#
+# ⚠ Tampoco van aquí `dias`/`meses`/`anios`/`anterior_colegiatura`/`incluye_covid`
+# —aunque el consolidador los tome del evaluador—, porque el BACKEND los rellena
+# por su cuenta (`recalculo.CAMPOS`, issue #45 · L2): son aritmética, no juicio.
+# Mirarlos sería mirarse a sí mismo. Medido sobre los espejos reales: el job
+# 12b7cb15ab1e llegó SIN una sola celda del evaluador, y con `dias` en la lista
+# el escudo pasaba de «no confiable» a «revisar» en cuanto el recálculo corría —
+# ciego justo en la corrida más rota. Peor todavía, el espejo que se guarda en
+# disco YA viene recalculado, así que en un re-disparo la ceguera es permanente
+# y ningún orden de llamadas la arregla: la única defensa robusta es no usar
+# como señal ninguna celda que el backend sepa escribir.
 CAMPOS_EXP = {
-    "dias": "los días de experiencia",
     "cargo_bases_valido": "si el cargo certificado vale para las bases",
     "tipo_obra_valido": "si el tipo de obra vale para las bases",
-    "anterior_colegiatura": "si la experiencia es anterior a la colegiatura",
 }
 CAMPOS_PROF = {
     "cumple": "el veredicto de cumplimiento",
     "profesion_valida": "si la profesión es la que piden las bases",
 }
 
-# Una experiencia sin `dias` es legítima (fecha ilegible); TODAS sin `dias` no lo
-# es. Por eso el criterio es cobertura CERO, no un porcentaje: así un vacío
-# legítimo aislado nunca dispara. Con 1 ó 2 filas el vacío total todavía puede
-# ser legítimo, de modo que se exige un mínimo de filas para hablar de "columna
-# en blanco" (medido sobre el corpus real: ningún espejo sano llega a cero).
+# `anotar_cargo_nucleo` también escribe en `cargo_bases_valido` (marca en rojo las
+# experiencias que no acreditan el cargo). Cuando la celda traía algo del
+# evaluador lo conserva entre ⟦…⟧; cuando estaba vacía, el texto es 100% del
+# backend. Ese eco es lo que distingue «el evaluador contestó» de «el backend
+# rellenó el hueco».
+_ECO_EVALUADOR = "⟦Claude:"
+_MARCAS_BACKEND = (_MARCA_NO, _MARCA_PEND)
+
+# Una experiencia con una celda vacía es legítima (un folio ilegible); TODAS
+# vacías no lo es. Por eso el criterio es cobertura CERO, no un porcentaje: así
+# un vacío legítimo aislado nunca dispara. Con 1 ó 2 filas el vacío total todavía
+# puede ser legítimo, de modo que se exige un mínimo de filas para hablar de
+# "columna en blanco" (medido sobre el corpus real: ningún espejo sano llega a
+# cero en estas dos columnas).
 MIN_FILAS_COBERTURA = 3
 
 # Más de esto y se agrega en un solo hallazgo por profesional: un panel con 19
@@ -222,6 +259,22 @@ def _lleno(v) -> bool:
     return v is not None and not (isinstance(v, str) and not v.strip())
 
 
+def _entregado(exp: dict, campo: str) -> bool:
+    """¿Esa celda de la experiencia la llenó el EVALUADOR (y no el backend)?
+
+    Una celda que empieza con la marca del candado de cargo la escribió
+    `anotar_cargo_nucleo`. Si dentro trae el eco ⟦…⟧, el evaluador sí había
+    contestado y el backend solo la anotó; sin eco, la celda estaba vacía y
+    contarla como entregada dejaría al escudo mirándose a sí mismo.
+    """
+    valor = exp.get(campo)
+    if not _lleno(valor):
+        return False
+    if isinstance(valor, str) and valor.lstrip().startswith(_MARCAS_BACKEND):
+        return _ECO_EVALUADOR in valor
+    return True
+
+
 def _etiqueta(prof: dict) -> str:
     """«N°7 (Especialista en Inst. Comunicaciones TIC)» — para el mensaje.
 
@@ -256,12 +309,11 @@ def _trae_algo_del_evaluador(prof: dict) -> bool:
     """
     if any(_lleno(prof.get(campo)) for campo in CAMPOS_PROF):
         return True
-    return any(_lleno(exp.get(campo))
-               for exp in _experiencias(prof) for campo in CAMPOS_EXP)
+    return any(not _experiencia_vacia(exp) for exp in _experiencias(prof))
 
 
 def _experiencia_vacia(exp: dict) -> bool:
-    return not any(_lleno(exp.get(campo)) for campo in CAMPOS_EXP)
+    return not any(_entregado(exp, campo) for campo in CAMPOS_EXP)
 
 
 def cobertura_evaluador(espejo: dict) -> list[Hallazgo]:
@@ -301,6 +353,7 @@ def cobertura_evaluador(espejo: dict) -> list[Hallazgo]:
 
     evaluados = [p for p in profs if _trae_algo_del_evaluador(p)]
     out += _columnas_en_blanco(evaluados)
+    out += _veredictos_sin_llegar(evaluados)
     out += _filas_sin_evaluar(evaluados)
     return out
 
@@ -312,7 +365,12 @@ def _columnas_en_blanco(evaluados: list[dict]) -> list[Hallazgo]:
 
     if len(exps) >= MIN_FILAS_COBERTURA:
         for campo, glosa in CAMPOS_EXP.items():
-            if any(_lleno(e.get(campo)) for e in exps):
+            # `_entregado`, no `_lleno`: el backend también escribe en estas
+            # columnas (`anotar_cargo_nucleo` rellena `cargo_bases_valido`), y una
+            # sola celda suya daría la columna por cubierta — el escudo se cegaría
+            # con lo que él mismo escribió. Medido: con `_lleno`, vaciar esa
+            # columna en `ffbda008a346` pasa de `revisar` a `confiable`.
+            if any(_entregado(e, campo) for e in exps):
                 continue
             out.append(Hallazgo(
                 "COBERTURA_NULA", ALERTA,
@@ -328,6 +386,75 @@ def _columnas_en_blanco(evaluados: list[dict]) -> list[Hallazgo]:
                 "COBERTURA_NULA", ALERTA,
                 f"No se registró {glosa} en NINGUNO de los {len(evaluados)} "
                 f"profesionales evaluados: esa columna del formato sale en blanco."))
+    return out
+
+
+def _veredictos_sin_llegar(evaluados: list[dict]) -> list[Hallazgo]:
+    """Veredicto vacío en unos profesionales y lleno en otros.
+
+    Gemelo exacto de `_filas_sin_evaluar`, un nivel más arriba — y el agujero que
+    faltaba tapar. El consolidador hace DOS búsquedas independientes con el mismo
+    índice (una para el veredicto, otra para el cálculo de las experiencias); si
+    solo falla la primera, al profesional «le llegó algo» y no se le señala,
+    mientras sus dos columnas de nivel profesional salen en blanco.
+
+    `_columnas_en_blanco` no lo atrapa porque es TODO-O-NADA: le basta UN
+    profesional con veredicto para callarse los otros veintinueve. Medido sobre
+    el espejo real 3289eca1419b (30 profesionales): vaciando el veredicto de 29 y
+    dejando las experiencias intactas, el escudo devolvía «confiable» y CERO
+    hallazgos. Aquí el criterio es el contrario y el correcto: el contraste
+    contra los hermanos que SÍ lo tienen.
+
+    Se exige ese contraste —alguien con el campo lleno— justamente para no pisar
+    a `_columnas_en_blanco`: si NADIE lo tiene, es una columna entera y ya se
+    dijo una vez.
+    """
+    if len(evaluados) < 2:
+        return []                      # sin hermanos no hay con qué contrastar
+    faltan: dict[int, list[str]] = {}
+    for campo, glosa in CAMPOS_PROF.items():
+        llenos = sum(1 for p in evaluados if _lleno(p.get(campo)))
+        if llenos == 0 or llenos == len(evaluados):
+            continue                   # ninguno → columna en blanco; todos → nada que decir
+        for i, prof in enumerate(evaluados):
+            if not _lleno(prof.get(campo)):
+                faltan.setdefault(i, []).append(glosa)
+    if not faltan:
+        return []
+
+    out: list[Hallazgo] = []
+    # Sin NINGÚN campo de nivel profesional = a ese no le llegó el veredicto. Si
+    # le pasa a la mayoría, la columna donde se decide cada resultado sale casi
+    # entera en blanco: eso ya no es un hueco, es media evaluación que no llegó.
+    sin_nada = [i for i, glosas in faltan.items() if len(glosas) == len(CAMPOS_PROF)]
+    if len(sin_nada) >= 2 and len(sin_nada) * 2 >= len(evaluados):
+        out.append(Hallazgo(
+            "VEREDICTOS_INCOMPLETOS", CRITICA,
+            f"A {len(sin_nada)} de los {len(evaluados)} profesionales evaluados no "
+            f"les llegó el veredicto: sus experiencias sí se calcularon, pero la "
+            f"columna donde se dice si cumplen o no sale en blanco. El archivo se ve "
+            f"lleno y la decisión no está tomada: hay que volver a correrlo."))
+
+    if len(faltan) > MAX_FILAS_DETALLADAS:
+        glosas = sorted({g for gs in faltan.values() for g in gs})
+        out.append(Hallazgo(
+            "PROFESIONAL_SIN_VEREDICTO", ALERTA,
+            f"{len(faltan)} de los {len(evaluados)} profesionales evaluados se "
+            f"quedaron sin {' ni '.join(glosas)}, aunque sus experiencias sí se "
+            f"calcularon y a los demás sí se les registró. Esas celdas del formato "
+            f"salen en blanco justo donde se decide cada resultado."))
+        return out
+
+    for i in sorted(faltan):
+        prof = evaluados[i]
+        out.append(Hallazgo(
+            "PROFESIONAL_SIN_VEREDICTO", ALERTA,
+            f"En el profesional {_etiqueta(prof)} no quedó registrado "
+            f"{' ni '.join(faltan[i])}, aunque sus experiencias sí se calcularon y "
+            f"a los demás profesionales sí se les registró. Esa parte del formato "
+            f"sale en blanco justo donde se decide su resultado: hay que "
+            f"completarla antes de usar este archivo.",
+            n_prof=prof.get("n_prof")))
     return out
 
 
@@ -381,9 +508,9 @@ def _filas_sin_evaluar(evaluados: list[dict]) -> list[Hallazgo]:
             out.append(Hallazgo(
                 "EXPERIENCIA_SIN_EVALUAR", ALERTA,
                 f"La experiencia n°{n} del profesional {_etiqueta(prof)}"
-                f"{de_donde} quedó sin evaluar: no tiene días ni validación de "
-                f"cargo ni de tipo de obra, aunque sus otras experiencias sí. Esa "
-                f"fila del formato sale en blanco.",
+                f"{de_donde} quedó sin evaluar: no dice si el cargo certificado "
+                f"vale para las bases ni si el tipo de obra vale, aunque sus otras "
+                f"experiencias sí. Esa fila del formato sale en blanco.",
                 n_prof=prof.get("n_prof"), n_exp=n))
     return out
 
