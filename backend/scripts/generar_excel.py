@@ -276,7 +276,7 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
     b.parte("PARTE 1: FORMULARIOS DEL POSTOR")
     b.headers(["ANEXO", "DESCRIPCIÓN", "OBSERVACIÓN", "FOLIO"])
     for f in p.get("formularios", []):
-        b.row([f.get("anexo", ""), f.get("descripcion", ""), f.get("observacion", ""), f.get("folio", "")])
+        b.row([f.get("anexo", ""), f.get("documento") or f.get("descripcion", ""), f.get("observacion", ""), f.get("folio", "")])
     b.blank()
     oe = p.get("oferta_economica", {})
     if oe:

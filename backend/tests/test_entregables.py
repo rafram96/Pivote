@@ -12,6 +12,7 @@ import openpyxl
 import pytest
 
 from entregables import construir_zip_infoobras, generar_excel_final, inventariar
+from scripts.generar_excel import generar_excel
 from schemas.cargo import etiqueta_hoja
 from reglas import dias_efectivos_profesional
 
@@ -1168,3 +1169,25 @@ def test_regenerar_excel_final_conserva_los_embeds(tmp_path):
     fila_anios = _fila_de(ws, "AÑOS EFECTIVOS")
     assert fila_anios > 0
     assert _fila_de(ws, "FACTOR DE EVALUACIÓN") > fila_anios
+
+
+def test_generar_excel_parte_1_documento_o_descripcion(tmp_path):
+    espejo = {
+        "_meta": {"analisis_id": "test", "concurso": "C", "postor": "P"},
+        "postor": {
+            "formularios": [
+                {"anexo": "Anexo 1", "documento": "Documento Vigente", "folio": "10"},
+                {"anexo": "Anexo 2", "descripcion": "Descripcion Trujillo", "folio": "20"}
+            ]
+        },
+        "profesionales": [],
+        "resumen_evaluacion": {"factores": []}
+    }
+    salida = tmp_path / "claude.xlsx"
+    generar_excel(espejo, salida)
+    wb = openpyxl.load_workbook(salida)
+    ws = wb["CLAUDE"]
+    texto = "\n".join(str(c.value) for fila in ws.iter_rows() for c in fila if c.value)
+    assert "Documento Vigente" in texto
+    assert "Descripcion Trujillo" in texto
+
