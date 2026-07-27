@@ -1181,3 +1181,141 @@ def test_multi_rubro_no_dispara_en_paquete_de_un_solo_rubro(tmp_path):
     job = motor.correr(motor.crear_job(ESPEJO_MULTI_OBRA_HV).job_id)
     assert not [o for e in job.etapas for o in e.observaciones
                 if o.codigo == "MULTI_RUBRO"]
+
+
+# ── #51 · el veredicto no puede quedar verde contra los días efectivos ────────
+
+def test_minimo_en_meses_se_capta(tmp_path):
+    """El regex viejo solo leía «años» → en Lircay (17 cargos con «Experiencia
+    mínima: 24/36 meses») captaba 0 de 17 y `cumple_backend` no se calculaba nunca."""
+    from orquestador.etapas_reales import _minimo_exigido
+    assert _minimo_exigido({"a": "Experiencia mínima: 24 meses (en la supervisión…)"}) == (720, "24 meses")
+    assert _minimo_exigido({"a": "Experiencia mínima: 36 meses"}) == (1080, "36 meses")
+    assert _minimo_exigido({"a": "mínimo de 3 años"}) == (1095, "3 años")
+    assert _minimo_exigido({"a": "experiencia mínima 720 días"}) == (720, "720 días")
+    assert _minimo_exigido({"a": "sin requisito de tiempo"}) is None
+
+
+def _espejo_bim(fecha_pares):
+    """Caso real Lircay/ESP. BIM: 4 constancias que suman 781 días nominales, con
+    65 de traslape (la profesional figura en 2 consorcios a la vez). Mínimo 24 meses."""
+    return {
+        "_meta": {"analisis_id": "bim", "concurso": "CP-02-2025", "postor": "x"},
+        "postor": {},
+        "profesionales": [{
+            "n_prof": 1, "cargo": "ESP. BIM", "nombre": "PROF BIM",
+            "cumple": "CUMPLE (PROVISIONAL) — la suma nominal supera el mínimo",
+            "requisitos": {"tipo_experiencia": "Experiencia mínima: 24 meses (en la supervisión)"},
+            "experiencias": [
+                {"n": i + 1, "proyecto": f"OBRA {i+1}", "entidad_emisora": "CONSORCIO X",
+                 "fecha_inicial": a, "fecha_final": b}
+                for i, (a, b) in enumerate(fecha_pares)
+            ],
+        }],
+    }
+
+
+BIM_PERIODOS = [("2024-02-23", "2025-01-16"), ("2025-03-19", "2025-08-22"),
+                ("2025-08-04", "2025-11-14"), ("2025-09-30", "2026-04-09")]
+
+
+def test_traslape_real_bajo_el_minimo_da_no_cumple(tmp_path):
+    """781 días nominales − 65 de traslape = 716 efectivos < 720 exigidos.
+    Con datos verificados, el NO CUMPLE es DURO."""
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
+                                fetcher_infoobras=lambda *a, **k: None,
+                                consultor_sunat=lambda r: None,
+                                descargar=lambda *a, **k: None), repo)
+    job = motor.correr(motor.crear_job(_espejo_bim(BIM_PERIODOS)).job_id)
+    p = repo.cargar_enriquecimiento(job.job_id)["prof:1"]
+    assert p["minimo_dias"] == 720 and p["minimo_texto"] == "24 meses"
+    assert p["dias_traslape"] == 65, "los 65 días de doble conteo deben descontarse"
+    assert p["dias_efectivos"] == 716
+    assert p["cumple_backend"].startswith("NO CUMPLE")
+    assert "24 meses" in p["cumple_backend"]
+
+
+def test_el_veredicto_del_backend_llega_al_excel_al_regenerar(tmp_path):
+    """Sin esto, `cumple_backend` se calcula y muere en el enriquecimiento: la hoja
+    resumen del Excel solo recibe el espejo (era el defecto de fondo de #51).
+
+    El espejo se persiste UNA vez al crear el job y no se vuelve a guardar, así que
+    al regenerar desde disco hay que reinyectarlo desde el enriquecimiento."""
+    from entregables.excel_final import inyectar_veredicto_backend
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
+                                fetcher_infoobras=lambda *a, **k: None,
+                                consultor_sunat=lambda r: None,
+                                descargar=lambda *a, **k: None), repo)
+    job = motor.correr(motor.crear_job(_espejo_bim(BIM_PERIODOS)).job_id)
+    espejo_disco = repo.cargar_espejo(job.job_id)
+    assert "cumple_backend" not in espejo_disco["profesionales"][0],         "el espejo en disco es el de ingreso; el veredicto vive en el enriquecimiento"
+    inyectar_veredicto_backend(espejo_disco, repo.cargar_enriquecimiento(job.job_id))
+    prof = espejo_disco["profesionales"][0]
+    assert prof["cumple_backend"].startswith("NO CUMPLE")
+    assert prof["dias_efectivos_backend"] == 716
+    assert prof["minimo_exigido_backend"] == "24 meses"
+    # y el veredicto del LLM se conserva: el backend no lo reescribe, lo contradice
+    assert prof["cumple"].startswith("CUMPLE")
+
+
+def test_excel_pinta_la_contradiccion_en_rojo(tmp_path):
+    """El CUMPLE del LLM se pinta ROJO cuando el backend lo desmiente, y el veredicto
+    del backend queda inmediatamente debajo — no a 500 filas en otra hoja."""
+    import openpyxl
+    from scripts.generar_excel import construir_hoja_evaluacion, FILL_NO_CUMPLE
+    espejo = _espejo_bim(BIM_PERIODOS)
+    espejo["profesionales"][0].update({
+        "cumple_backend": "NO CUMPLE — 716 días efectivos (1.96 años) contra un mínimo de 24 meses",
+        "dias_efectivos_backend": 716, "minimo_exigido_backend": "24 meses",
+    })
+    ws = openpyxl.Workbook().active
+    construir_hoja_evaluacion(ws, espejo)
+    filas = {str(ws.cell(r, 1).value): r for r in range(1, ws.max_row + 1)}
+    r_llm = filas["¿EL PROFESIONAL CUMPLE?"]
+    assert ws.cell(r_llm, 2).fill.start_color.rgb == FILL_NO_CUMPLE.start_color.rgb, \
+        "el CUMPLE contradicho tiene que dejar de estar en verde"
+    r_be = filas["⚠ Verificación del tiempo efectivo:"]
+    assert r_be == r_llm + 1, "el veredicto del backend va pegado, no al final del archivo"
+    assert "716 días efectivos" in str(ws.cell(r_be, 2).value)
+
+
+def test_cobertura_casi_nula_no_da_no_cumple_duro(tmp_path):
+    """Caso P6 de Lircay-supervisión: 1581 días declarados → 248 efectivos porque la
+    obra emparejada casi no solapa el periodo certificado. La causa más probable es
+    una obra mal emparejada (error NUESTRO), no una experiencia inexistente → POR
+    VERIFICAR, nunca NO CUMPLE duro (ADR-005: la ausencia no invalida).
+
+    Mismo montaje que `test_cobertura_baja_marca_revision`, con un mínimo exigido que
+    los días recortados NO alcanzan."""
+    espejo = {
+        "_meta": {"analisis_id": "cob", "concurso": "c", "postor": "p"},
+        "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N",
+             "cumple": "CUMPLE — 1,581 días segun el declarante",
+             "requisitos": {"tipo_experiencia": "Experiencia mínima: 36 meses"},
+             "experiencias": [
+                 {"n": 1, "proyecto": "Centro de Salud Pillco Marca, Huanuco", "cui": "2418877",
+                  "fecha_inicial": "2016-06-10", "fecha_final": "2017-05-15", "folio": "1"},
+             ]},
+        ],
+        "resumen_evaluacion": {"factores": []},
+    }
+
+    def fetcher_no_cubre(cui):
+        return ObraFake(111, "OBRA", avances=_meses((2015, 1), (2016, 7)))
+
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
+                                fetcher_infoobras=fetcher_no_cubre,
+                                consultor_sunat=lambda r: None,
+                                descargar=lambda *a, **k: None), repo)
+    job = motor.correr(motor.crear_job(espejo).job_id)
+    p = repo.cargar_enriquecimiento(job.job_id)["prof:1"]
+    v = p["cumple_backend"]
+    assert v.startswith("POR VERIFICAR"), f"esperaba abstención, salió: {v}"
+    assert "NO CUMPLE" not in v
+    assert "obra equivocada" in v, "debe nombrar la causa real, no 'no se pudo consultar'"
+    assert p["cobertura_baja"] == [1]

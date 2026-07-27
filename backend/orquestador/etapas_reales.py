@@ -571,6 +571,15 @@ class EtapaInfoObrasReal:
             cob = _cobertura_cert(getattr(obra, "avances", []) or [], cert_ini, cert_fin)
             if not es_exp_aprobado and cob is not None and cob < _COBERTURA_MIN:
                 pct = round(cob * 100)
+                # La etapa REGLAS necesita saberlo: si el clamp deja al profesional
+                # bajo el mínimo POR una cobertura casi nula, el NO CUMPLE no puede
+                # ser duro — la causa más probable es una obra mal emparejada
+                # (error nuestro), no una experiencia inexistente. Ver la «Regla
+                # legal» de EtapaReglasReal.
+                k_cob = _clave(np_, ne)
+                enr_cob = ctx.enriquecimiento.get(k_cob) or {}
+                enr_cob["cobertura_baja"] = pct
+                ctx.enriquecimiento[k_cob] = enr_cob
                 cod = getattr(obra, "codigo_infoobras", None)
                 motivo = _motivo_cobertura(getattr(obra, "avances", []) or [],
                                            cert_ini, cert_fin, cod, pct)
@@ -1075,7 +1084,34 @@ class EtapaSunatReal:
 
 # ── 4 · Cálculo de días efectivos (Paso 5 + mínimo de las bases) ─────────────
 
-_RE_MINIMO = re.compile(r"m[ií]nimo\s+(?:de\s+)?(\d+)\s+a[ñn]os?", re.I)
+# El mínimo exigido se escribe en AÑOS, MESES o DÍAS según las bases; el regex
+# anterior solo entendía "años" y por eso `cumple_backend` casi nunca se calculaba:
+# en el concurso de Lircay (CP-02-2025) los 17 cargos dicen "Experiencia mínima:
+# 24/36 meses" → 0 de 17 mínimos captados, y los 5 falsos CUMPLE del análisis
+# quedaron sin contraveredicto (#51).
+#
+# `m[ií]nim[ao]` cubre "mínimo de 3 años" y "Experiencia mínima: 24 meses"; el
+# hueco intermedio es corto y no-codicioso para no saltar a otra cifra de la frase.
+_RE_MINIMO = re.compile(
+    r"m[ií]nim[ao][^0-9]{0,20}?(\d+)\s*(a[ñn]os?|meses|mes|d[ií]as?)", re.I)
+
+# Conversión a días: la MISMA convención que `reglas.anios` (365) y `reglas.meses`
+# (30). Usar otra haría que el umbral contradiga la cifra que se muestra al lado.
+_DIAS_POR_UNIDAD = {"a": 365, "m": 30, "d": 1}
+
+
+def _minimo_exigido(requisitos) -> Optional[tuple[int, str]]:
+    """Mínimo de las bases normalizado a `(días, texto_literal)`.
+
+    Se compara en DÍAS y no en años porque es la unidad que el Paso 5 calcula sin
+    pérdida: convertir los efectivos a años y redondear puede volcar un caso de
+    borde (2.996 años redondea a 3.0 y un mínimo de "3 años" pasaría a cumplir)."""
+    for v in (requisitos or {}).values():
+        m = _RE_MINIMO.search(str(v))
+        if m:
+            n, unidad = int(m.group(1)), m.group(2).lower()[0]
+            return n * _DIAS_POR_UNIDAD[unidad], f"{n} {m.group(2)}"
+    return None
 
 
 class EtapaReglasReal:
@@ -1091,6 +1127,7 @@ class EtapaReglasReal:
             periodos: list[tuple[date, date]] = []
             paral_por_idx: dict[int, list[tuple[date, date]]] = {}
             sin_verificar: list[int] = []   # experiencias sin ventana conocida
+            cobertura_baja: list[int] = []  # obra verificada pero casi sin solape
             fechas_invalidas: list[int] = []  # fecha sin leer (ej. "POR VERIFICAR")
             for e in p.get("experiencias", []):
                 ini, fin = _fecha_iso(e.get("fecha_inicial")), _fecha_iso(e.get("fecha_final"))
@@ -1105,6 +1142,14 @@ class EtapaReglasReal:
                 enr = ctx.enriquecimiento.get(_clave(np_, e.get("n"))) or {}
                 if enr.get("sin_verificar"):
                     sin_verificar.append(e.get("n"))
+                # Distinta de `sin_verificar`: acá el portal SÍ respondió, pero sus
+                # valorizaciones casi no solapan el periodo certificado, así que el
+                # clamp del Paso 5 recortó casi todo. La causa más probable es una obra
+                # mal emparejada (error nuestro), no una experiencia inexistente → no
+                # puede sostener un NO CUMPLE duro. Su ítem de revisión ya lo creó la
+                # etapa de InfoObras; acá solo ablanda el veredicto.
+                elif enr.get("cobertura_baja") is not None:
+                    cobertura_baja.append(e.get("n"))
                 paral_crudo = [periodo_fechas(x) for x in enr.get("paralizaciones", [])]
                 paral = [(a, b) for (a, b) in paral_crudo if b >= a]
                 invertidas = len(paral_crudo) - len(paral)
@@ -1129,27 +1174,37 @@ class EtapaReglasReal:
                 "anios_efectivos": anios_ef,
             }
             # mínimo exigido: de los requisitos del cargo (texto de las bases)
-            minimo = None
-            for v in (p.get("requisitos") or {}).values():
-                m = _RE_MINIMO.search(str(v))
-                if m:
-                    minimo = int(m.group(1))
-                    break
-            if minimo is not None:
-                datos["minimo_anios"] = minimo
-                if anios_ef < minimo:
+            exigido = _minimo_exigido(p.get("requisitos"))
+            if exigido is not None:
+                min_dias, min_texto = exigido
+                datos["minimo_dias"] = min_dias
+                datos["minimo_texto"] = min_texto
+                # `minimo_anios` se conserva (lo leen panel y tests); es informativo
+                # y queda entero cuando el requisito venía en años.
+                datos["minimo_anios"] = (min_dias // 365 if min_dias % 365 == 0
+                                         else round(min_dias / 365, 2))
+                if res.dias_efectivos < min_dias:
                     datos["cumple_backend"] = (
-                        f"NO CUMPLE — {anios_ef} años efectivos (mínimo: {minimo})")
+                        f"NO CUMPLE — {res.dias_efectivos} días efectivos "
+                        f"({anios_ef} años) contra un mínimo de {min_texto}")
                     obs.append(pipeline.Observacion(
                         codigo="PASO5", severidad=pipeline.Severidad.ALERTA,
-                        mensaje=f"profesional {np_}: {anios_ef} años efectivos tras descontar "
-                                f"paralizaciones y traslapes — por debajo del mínimo de {minimo} años",
+                        mensaje=f"profesional {np_}: {res.dias_efectivos} días efectivos tras "
+                                f"descontar paralizaciones y traslapes — por debajo del mínimo "
+                                f"de {min_texto}",
                         origen=self.nombre, referencia=f"prof={np_}"))
             # veredicto provisional: alguna experiencia no se pudo verificar en
-            # InfoObras (fetch fallido) → la ventana es desconocida, no se clampó,
-            # así que el número puede estar inflado. Va a revisión humana.
+            # InfoObras (fetch fallido → ventana desconocida, no se clampó, el número
+            # puede estar inflado) o la obra emparejada casi no cubre el periodo
+            # certificado (clamp casi total → el número puede estar hundido). Las dos
+            # son incertidumbre nuestra sobre la obra: van a revisión humana.
+            if cobertura_baja:
+                datos["cobertura_baja"] = cobertura_baja
+                datos["veredicto_provisional"] = (
+                    datos.get("veredicto_provisional", []) + cobertura_baja)
             if sin_verificar:
-                datos["veredicto_provisional"] = sin_verificar
+                datos["veredicto_provisional"] = (
+                    datos.get("veredicto_provisional", []) + sin_verificar)
                 exp0 = next((x for x in p.get("experiencias", [])
                              if x.get("n") == sin_verificar[0]), {})
                 ya = any(it.n_prof == np_ and it.n_exp == sin_verificar[0] and not it.resuelto
@@ -1190,12 +1245,33 @@ class EtapaReglasReal:
             prov = datos.get("veredicto_provisional")
             if prov and str(datos.get("cumple_backend", "")).startswith("NO CUMPLE"):
                 exps = ", ".join(map(str, sorted(set(prov))))
+                # El motivo se nombra tal cual es: «no respondió» y «casi no cubre el
+                # periodo» mandan al evaluador a revisar cosas distintas.
+                causas = []
+                if sin_verificar:
+                    causas.append("no se pudo consultar la obra en InfoObras")
+                if cobertura_baja:
+                    causas.append("la obra encontrada casi no cubre el periodo del "
+                                  "certificado (puede ser la obra equivocada)")
+                if fechas_invalidas:
+                    causas.append("hay una fecha del certificado sin leer")
                 datos["cumple_backend"] = (
-                    f"POR VERIFICAR — {datos['anios_efectivos']} años efectivos PROVISIONALES "
-                    f"(mínimo {datos.get('minimo_anios')}): la(s) experiencia(s) {exps} no se "
-                    f"pudo verificar en InfoObras. La ausencia de datos NO invalida la "
-                    f"experiencia — confirmar a mano antes de concluir; el cómputo puede estar incompleto.")
+                    f"POR VERIFICAR — {res.dias_efectivos} días efectivos PROVISIONALES "
+                    f"({datos['anios_efectivos']} años) contra un mínimo de "
+                    f"{datos.get('minimo_texto', datos.get('minimo_anios'))}: en la(s) "
+                    f"experiencia(s) {exps}, {'; '.join(causas)}. La ausencia de datos NO "
+                    f"invalida la experiencia — confirmar a mano antes de concluir; el "
+                    f"cómputo puede estar incompleto.")
             ctx.enriquecimiento[f"prof:{np_}"] = datos
+            # El veredicto del backend viaja TAMBIÉN en el espejo: la hoja resumen del
+            # Excel (`construir_hoja_evaluacion`) solo recibe el espejo, y hasta ahora
+            # `cumple_backend` moría en el enriquecimiento — se calculaba, se guardaba
+            # y el evaluador nunca lo veía (#51). El campo es aditivo: `Profesional`
+            # es passthrough/lax en las dos copias del contrato.
+            if datos.get("cumple_backend"):
+                p["cumple_backend"] = datos["cumple_backend"]
+                p["dias_efectivos_backend"] = res.dias_efectivos
+                p["minimo_exigido_backend"] = datos.get("minimo_texto")
             ok += 1
         # B2 — resumen de incertidumbre InfoObras: "X de Y no encontrados". Solo en
         # corrida COMPLETA (en re-disparo de un item no se recalcula → evita duplicar,
