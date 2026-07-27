@@ -556,8 +556,16 @@ def test_espejo_real_95af_queda_con_dias(capsys):
     profs = espejo["profesionales"]
     exps = [e for p in profs for e in p.get("experiencias", [])]
     assert len(exps) == 63
+    # El test REPRODUCE el estado del bug en vez de asumirlo: el job en disco pudo
+    # repararse ya (`scripts/reparar_evaluacion.py`), y un test que dependa de que
+    # un dato real siga roto se cae solo el día que se arregla.
+    for e in exps:
+        for campo in ("dias", "meses", "anios", "anterior_colegiatura"):
+            e[campo] = None
+    for p in profs:
+        p["total"] = {}
     assert sum(1 for e in exps if e.get("dias") is not None) == 0   # el bug de #45
-    assert all(not p.get("total") for p in profs)                   # y la fila TOTAL vacía
+    assert all(not (p.get("total") or {}).get("dias") for p in profs)
 
     res = recalcular_espejo(espejo)
 
