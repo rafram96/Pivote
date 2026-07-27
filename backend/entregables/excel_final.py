@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import calendar
 import io
+import json
 import re
 from datetime import date
 from pathlib import Path
@@ -568,18 +569,151 @@ def construir_hoja_profesional(
         rr += 1
         return rr - 1
 
-    # ── Anti-duplicado del detalle de obra: RETIRADO a propósito ─────────────
-    # Hubo una versión que colapsaba el 2º bloque de una obra ya detallada en la
-    # hoja y lo sustituía por "la ficha y las valorizaciones están en Experiencia
-    # N". Se retiró porque BORRA EVIDENCIA: dos experiencias con el mismo CUI
-    # pueden resolver a obras DISTINTAS (`_fetch_obra` desambigua por la ventana
-    # del certificado), así que la referencia apuntaba a otra obra y a otro
-    # periodo — y una ficha sin valorizaciones quedaba renderizada como si las
-    # tuviera en otro sitio. Es exactamente "ausencia de dato tratada como
-    # evidencia", lo que el producto prohíbe.
-    # NO reintroducirlo a medias: hace falta clave (cui, codigo_infoobras),
-    # registrar QUÉ se pintó (con o sin tabla de valorizaciones) y exigir siempre
-    # igualdad de periodo. Va aparte, con su propio diseño.
+    # ── Anti-duplicado del detalle de obra (issue #46 · punto 6) ─────────────
+    # Una propuesta puede traer la MISMA obra muchas veces en la hoja de un mismo
+    # profesional: p. ej. 4 órdenes de servicio consecutivas del mismo contrato,
+    # cada una certificando las mismas 3 obras → 12 bloques idénticos.
+    #
+    # La PRIMERA versión de este colapso se retiró porque BORRABA EVIDENCIA:
+    # colapsaba por CUI y afirmaba "la ficha y las valorizaciones están en
+    # Experiencia N" aunque el CUI apuntara a OTRA obra (`_fetch_obra` desambigua
+    # por la ventana del certificado) y aunque el bloque destino no tuviera
+    # valorizaciones — una AUSENCIA de dato renderizada como puntero a evidencia.
+    #
+    # Este rediseño no colapsa por identidad, colapsa por CONTENIDO:
+    #   · clave de la obra = (CUI, código InfoObras) — el CUI solo no basta;
+    #   · huella = TODO lo que el bloque pintaría (campos de la ficha, cada
+    #     valorización con sus importes, la verificación/aprobación del
+    #     expediente, las modificaciones de plazo y el representante de obra) y,
+    #     cuando hay valorizaciones, el periodo del certificado — ver
+    #     `_huella_obra`;
+    #   · solo colapsa si clave Y huella coinciden exactas → lo omitido es
+    #     literalmente idéntico a lo ya pintado, y el reemplazo dice QUÉ hay allá
+    #     y en qué fila.
+    # Ante cualquier diferencia se pinta completo: repetir es inofensivo,
+    # colapsar mal borra evidencia.
+    #
+    # El registro es una variable LOCAL de esta función → vive por HOJA de
+    # profesional. Cada profesional arranca de cero y jamás se referencia la hoja
+    # de otro (un "ver Experiencia 3" que apunte a otra pestaña es inservible).
+    _obras_pintadas: dict[tuple, list[dict]] = {}
+
+    def _canon(v) -> str:
+        """Forma canónica y comparable de un valor anidado (dict/list/fechas)."""
+        return json.dumps(v, sort_keys=True, default=str, ensure_ascii=False)
+
+    def _clave_obra(fx: Optional[dict]) -> Optional[tuple]:
+        """Identidad de la obra que se pinta: (CUI, código InfoObras). Si falta
+        cualquiera de los dos NO hay identidad comprobable → None, y sin clave
+        nunca se colapsa."""
+        cui = str((fx or {}).get("cui") or "").strip()
+        cod = str((fx or {}).get("codigo_infoobras") or "").strip()
+        return (cui, cod) if (cui and cod) else None
+
+    def _tipo_bloque(fx: dict, vals: list) -> str:
+        """Qué variante pinta `render_obra`: la tabla de valorizaciones o el
+        bloque de EXPEDIENTE TÉCNICO. Misma condición que allá."""
+        verif, aprob = fx.get("verificacion_expediente"), fx.get("aprobacion_expediente")
+        return "expediente" if (verif or (aprob and not vals)) else "valorizaciones"
+
+    def _huella_obra(fx: Optional[dict], ini, fin) -> tuple:
+        """QUÉ se pintaría en el bloque, no solo de qué obra es: cada campo que
+        `render_obra` (y el `render_representante` que lo acompaña) escriben.
+
+        Sobre el PERIODO: dentro del bloque lo único que depende de él es el
+        resaltado amarillo de las valorizaciones, así que se exige que el periodo
+        coincida exacto siempre que haya valorizaciones. Cuando NO las hay, el
+        bloque no muestra nada que dependa del periodo (dice literalmente "sin
+        valorizaciones registradas"), y exigir ahí igualdad de periodo dejaría el
+        colapso inerte justo en el caso que motiva esta función — 4 órdenes de
+        servicio consecutivas, con periodos distintos por definición, sobre obras
+        sin valorizar. La marca de resaltado NO va en la huella por redundante:
+        es función de (anio, mes, ini, fin) y los cuatro ya están aquí.
+
+        Tampoco va el tipo de bloque (valorizaciones vs expediente): se deriva de
+        `verificacion_expediente`, `aprobacion_expediente` y si hay o no
+        valorizaciones, y los tres ya están."""
+        fx = fx or {}
+        vals = sorted(fx.get("valorizaciones") or [],
+                      key=lambda v: (v.get("anio") or 0, v.get("mes") or 0), reverse=True)
+        filas_val = tuple(
+            (v.get("anio"), v.get("mes"), v.get("fisico_real"), v.get("valorizado_real"),
+             v.get("estado"), v.get("docs"))
+            for v in vals)
+        return (
+            fx.get("obra_nombre"), fx.get("estado"), fx.get("monto"),
+            fx.get("fecha_inicio"), fx.get("fecha_fin"),
+            _canon(fx.get("verificacion_expediente")),
+            _canon(fx.get("aprobacion_expediente")),
+            filas_val,
+            _canon(fx.get("modificaciones_plazo") or []),
+            _canon(fx.get("representante_obra")),
+            (str(ini), str(fin)) if vals else None,
+        )
+
+    def _registrar_obra(fx: Optional[dict], ini, fin, etiqueta: str, fila: int) -> None:
+        """Anota que en `fila` quedó pintado el bloque completo de esta obra con
+        esta huella. Se guarda una entrada por huella DISTINTA: si la misma obra
+        se pintó con contenidos distintos (p. ej. la ficha recargó con más
+        valorizaciones), cada variante puede recibir sus propias repeticiones."""
+        clave = _clave_obra(fx)
+        if not clave:
+            return
+        huella = _huella_obra(fx, ini, fin)
+        lista = _obras_pintadas.setdefault(clave, [])
+        if not any(x["huella"] == huella for x in lista):
+            lista.append({"etiqueta": etiqueta, "fila": fila, "huella": huella})
+
+    def _ya_pintada(fx: Optional[dict], ini, fin) -> Optional[dict]:
+        """El bloque ya pintado en ESTA hoja que es idéntico al que tocaría
+        pintar, o None (ante la mínima diferencia, se pinta completo)."""
+        clave = _clave_obra(fx)
+        if not clave:
+            return None
+        huella = _huella_obra(fx, ini, fin)
+        for x in _obras_pintadas.get(clave, []):
+            if x["huella"] == huella:
+                return x
+        return None
+
+    def render_ya_pintada(top: int, fx: dict, ref: dict) -> int:
+        """Reemplazo compacto del detalle de una obra YA pintada, IDÉNTICA, más
+        arriba en esta MISMA hoja. Solo se usa con huella coincidente exacta, así
+        que no oculta ni un dato: dice qué hay allá (ficha con N valorizaciones /
+        sin valorizaciones / verificación de expediente) y en qué fila."""
+        rr = top
+        vals = fx.get("valorizaciones") or []
+        if _tipo_bloque(fx, vals) == "expediente":
+            que = "la ficha y la verificación del expediente técnico"
+        elif len(vals) == 1:
+            que = "la ficha y su única valorización"
+        elif vals:
+            que = f"la ficha y sus {len(vals)} valorizaciones"
+        else:
+            que = "la ficha (InfoObras no registra valorizaciones de esta obra)"
+        ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+        c = ws.cell(rr, 6, "OBRA YA DETALLADA EN ESTA HOJA")
+        c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
+        rr += 1
+        txt = (f"Misma obra (código InfoObras {fx.get('codigo_infoobras') or '—'} · "
+               f"CUI {fx.get('cui') or '—'}) y MISMO contenido que en "
+               f"{ref['etiqueta']}, fila {ref['fila']} de esta hoja: allí está "
+               f"{que}. No se repite aquí solo para no alargar la hoja; no se "
+               f"omite ningún dato. Si algo difiriera — otra obra del mismo CUI, "
+               f"otras valorizaciones u otro periodo resaltado — el detalle se "
+               f"pintaría completo.")
+        # F:K ≈ 82 caracteres y una celda COMBINADA no auto-ajusta su alto: hay que
+        # repartir a mano las filas para que el texto no quede cortado.
+        filas = 3
+        ws.merge_cells(start_row=rr, start_column=6, end_row=rr + filas - 1, end_column=11)
+        c = ws.cell(rr, 6, txt)
+        c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
+        alto = (-(-len(txt) // 82)) * 13 + 4
+        for k in range(filas):
+            ws.row_dimensions[rr + k].height = max(
+                ws.row_dimensions[rr + k].height or 15, -(-alto // filas))
+        rr += filas
+        return rr - 1
 
     _EST_SUBOBRA = {
         "resuelto": "obra hallada en InfoObras",
@@ -667,18 +801,26 @@ def construir_hoja_profesional(
                       F_HEAD, FILL_HEAD, 16)
                 separador()
                 continue
+            fila_cab = r
             banda(cab, F_HEAD, FILL_HEAD, 16)
             r_top2 = r
             # ítem completo: ficha + TODAS las valorizaciones (F:K). El resaltado usa
             # el rango POR obra si el cert lo dio; si no, el periodo total del cert.
             oi = _fecha_iso(s.get("fecha_inicial")) or ini
             of = _fecha_iso(s.get("fecha_final")) or fin
-            r_right = render_obra(r_top2, ficha, oi, of)
-            r = max(r, r_right + 1)
-            # representante de obra (R:U) si la ficha lo trae
-            rep = ficha.get("representante_obra")
-            if rep:
-                r = max(r, render_representante(r_top2, rep) + 1)
+            ref = _ya_pintada(ficha, oi, of)
+            if ref:
+                # esta MISMA obra, con este MISMO contenido, ya está detallada más
+                # arriba en la hoja → puntero a su fila en vez del bloque repetido.
+                r = max(r, render_ya_pintada(r_top2, ficha, ref) + 1)
+            else:
+                r_right = render_obra(r_top2, ficha, oi, of)
+                r = max(r, r_right + 1)
+                # representante de obra (R:U) si la ficha lo trae
+                rep = ficha.get("representante_obra")
+                if rep:
+                    r = max(r, render_representante(r_top2, rep) + 1)
+                _registrar_obra(ficha, oi, of, f"SubExperiencia {n_exp}.{j}", fila_cab)
             # cobertura del tiempo del cert para esta obra (si el cert dio rango por obra)
             cob = s.get("cobertura")
             if cob:
@@ -1238,6 +1380,11 @@ def construir_hoja_profesional(
                    else render_aviso_revision(r_top, motivo_rev, accion_rev) + 1)
             r_right = render_obra(top, fx, ini, fin)
             r = max(r, r_right + 1)
+            # el bloque de la experiencia SE PINTA SIEMPRE completo (es la
+            # evidencia de ESA experiencia, en la franja pegada a su cuadro de
+            # hitos); solo se registra para que una SubExperiencia posterior con
+            # exactamente el mismo contenido pueda apuntar aquí.
+            _registrar_obra(fx, ini, fin, f"Experiencia {n_exp}", r_top)
         elif motivo_rev:
             r_right = render_revision(r_top, motivo_rev, accion_rev)
             r = max(r, r_right + 1)

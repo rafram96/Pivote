@@ -658,11 +658,14 @@ def test_sin_obra_el_bloque_usa_la_accion_del_item_si_la_trae(tmp_path):
 
 
 def test_una_obra_repetida_se_detalla_completa_en_cada_experiencia(tmp_path):
-    """Candado del colapso RETIRADO (issue #46 punto 6): hubo una versión que
-    sustituía el 2º bloque de la misma obra por "la ficha está en Experiencia N".
-    Borraba evidencia — dos experiencias con el mismo CUI pueden resolver a obras
-    DISTINTAS, porque la ventana del certificado desambigua. Hasta que se rediseñe,
-    cada experiencia muestra SU ficha completa."""
+    """El bloque de UNA EXPERIENCIA se pinta siempre completo, aunque la obra ya
+    esté detallada arriba: es la evidencia de esa experiencia, en la franja pegada
+    a su cuadro de hitos. El colapso (issue #46 punto 6) solo aplica a las
+    SubExperiencias repetidas de un cert multi-obra.
+
+    Además cubre el caso que hizo RETIRAR la primera versión del colapso: mismo
+    CUI, obras DISTINTAS (la ventana del certificado desambigua). La clave es
+    (CUI, código InfoObras), así que ni siquiera son la misma obra."""
     espejo = {
         "_meta": {}, "postor": {},
         "profesionales": [{
@@ -686,7 +689,322 @@ def test_una_obra_repetida_se_detalla_completa_en_cada_experiencia(tmp_path):
 
     assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 2
     assert "999" in texto and "OBRA B" in texto          # la 2ª ficha no se borró
-    assert "ya detallada" not in texto
+    assert "YA DETALLADA" not in texto
+
+
+def test_la_misma_obra_en_dos_experiencias_no_colapsa_nunca(tmp_path):
+    """Ni siquiera con ficha IDÉNTICA: dos experiencias distintas (dos
+    certificados) se pintan completas cada una. Colapsar la franja F:K de una
+    experiencia dejaría su cuadro de hitos sin la evidencia al lado."""
+    espejo = {
+        "_meta": {}, "postor": {},
+        "profesionales": [{
+            "n_prof": 1, "cargo": "JEFE", "nombre": "N", "experiencias": [
+                {"n": 1, "proyecto": "Orden 1", "fecha_inicial": "2019-01-01",
+                 "fecha_final": "2019-06-30"},
+                {"n": 2, "proyecto": "Orden 2", "fecha_inicial": "2019-01-01",
+                 "fecha_final": "2019-06-30"}]}],
+        "resumen_evaluacion": {"factores": []},
+    }
+    ficha = {"cui": "2418877", "codigo_infoobras": "111", "obra_nombre": "OBRA A",
+             "estado": "Finalizado", "valorizaciones": []}
+    salida = generar_excel_final(espejo, tmp_path / "dup2.xlsx",
+                                 fichas={(1, 1): dict(ficha), (1, 2): dict(ficha)})
+    celdas = _celdas(_hoja_de(salida, 1, "JEFE"))
+    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 2
+    assert not any(v.startswith("OBRA YA DETALLADA") for v in celdas)
+
+
+# ── Colapso de sub-obras repetidas (issue #46 punto 6, rediseñado) ────────────
+# Fixtures MODELADAS COMO EL PIPELINE REAL: `_enriquecer_subobra` SIEMPRE mete
+# las valorizaciones de la obra dentro de `ficha`, así que una sub-obra con
+# `valorizaciones: []` solo representa a una obra que InfoObras no valorizó.
+
+def _espejo_multi(n_exps: int, periodos: list[tuple[str, str]]) -> dict:
+    return {
+        "_meta": {}, "postor": {},
+        "profesionales": [{
+            "n_prof": 1, "cargo": "JEFE", "nombre": "N",
+            "experiencias": [
+                {"n": i, "proyecto": f"Orden de servicio {i}",
+                 "fecha_inicial": periodos[i - 1][0], "fecha_final": periodos[i - 1][1]}
+                for i in range(1, n_exps + 1)],
+        }],
+        "resumen_evaluacion": {"factores": []},
+    }
+
+
+def _sub(cui, cod, nombre, vals, obra_nombre=None, **extra):
+    """Sub-obra como la deja `_enriquecer_subobra`. `nombre` es el proyecto tal
+    como lo DECLARA el certificado y `obra_nombre` el de InfoObras: en los certs
+    multi-obra reales pueden diferir (dos establecimientos declarados aparte que
+    son una sola obra registrada)."""
+    return {"estado": "resuelto", "cui": cui, "via": "CODIGO", "proyecto": nombre,
+            "fecha_inicial": None, "fecha_final": None,
+            "ficha": {"cui": cui, "codigo_infoobras": cod,
+                      "obra_nombre": obra_nombre or nombre,
+                      "estado": "En Ejecución", "monto": 100.0,
+                      "fecha_inicio": "2018-01-01", "fecha_fin": "2019-01-01",
+                      "modificaciones_plazo": [], "valorizaciones": vals},
+            **extra}
+
+
+def test_subobras_identicas_de_ordenes_consecutivas_se_colapsan(tmp_path):
+    """El caso real del job 95af90f1578e / P3. Arquit: 4 órdenes de servicio
+    consecutivas del mismo contrato, cada una certificando las MISMAS 3 obras →
+    12 bloques de detalle idénticos. Se pintan 3 y las 9 repeticiones quedan como
+    puntero a la fila donde está el detalle."""
+    periodos = [("2025-06-11", "2025-08-31"), ("2025-09-02", "2025-12-30"),
+                ("2026-01-28", "2026-03-31"), ("2026-04-07", "2026-06-30")]
+    espejo = _espejo_multi(4, periodos)
+    subs = [_sub("2377760", "92111", "OBRA PONGO", []),
+            _sub("2377762", "92112", "OBRA CHAZUTA", []),
+            _sub("2377764", "92168", "OBRA TABALOSOS", [])]
+    fichas = {(1, i): {"sub_obras": [dict(s) for s in subs]} for i in range(1, 5)}
+    salida = generar_excel_final(espejo, tmp_path / "multi.xlsx", fichas=fichas)
+    celdas = _celdas(_hoja_de(salida, 1, "JEFE"))
+
+    # las 12 SubExperiencias SIGUEN estando: cada certificado declara esas obras y
+    # ese hecho es evidencia de ESE certificado — lo que se colapsa es el detalle.
+    assert sum(1 for v in celdas if v.startswith("SubExperiencia ")) == 12
+    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 3
+    assert sum(1 for v in celdas if v.startswith("OBRA YA DETALLADA")) == 9
+    texto = "\n".join(celdas)
+    # el puntero nombra la obra, dónde está el detalle y QUÉ hay allá
+    assert "código InfoObras 92111" in texto
+    assert "SubExperiencia 1.1" in texto
+    assert "InfoObras no registra valorizaciones de esta obra" in texto
+
+
+def test_dos_subobras_del_mismo_cert_al_mismo_cui_colapsan_una_vez(tmp_path):
+    """Caso real P1. Jefe Superv exp 3: dos sub-obras declaradas con nombres
+    distintos (C.S. TONGOD y P.S. PISIT) resuelven a la MISMA obra de InfoObras
+    → un detalle y un puntero. El nombre declarado de la 2ª NO se pierde."""
+    espejo = _espejo_multi(1, [("2024-06-12", "2024-09-16")])
+    vals = [{"anio": 2024, "mes": 10, "estado": "En ejecución",
+             "fisico_real": 71.6, "valorizado_real": 3142323.82, "docs": 1}]
+    obra = "MEJORAMIENTO ... C.S TONGOD Y P.S PISIT ... SAN MIGUEL - CAJAMARCA"
+    fichas = {(1, 1): {"sub_obras": [
+        _sub("2440017", "504249", "C.S. TONGOD", list(vals), obra_nombre=obra),
+        _sub("2440017", "504249", "P.S. PISIT", list(vals), obra_nombre=obra)]}}
+    salida = generar_excel_final(espejo, tmp_path / "tongod.xlsx", fichas=fichas)
+    celdas = _celdas(_hoja_de(salida, 1, "JEFE"))
+    texto = "\n".join(celdas)
+
+    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 1
+    assert sum(1 for v in celdas if v.startswith("OBRA YA DETALLADA")) == 1
+    # los DOS nombres declarados siguen visibles (las cabeceras no se colapsan):
+    # que dos establecimientos declarados sean una sola obra es justo lo que el
+    # evaluador tiene que ver.
+    assert "P.S. PISIT" in texto and "C.S. TONGOD" in texto
+    assert "su única valorización" in texto
+
+
+def test_no_colapsa_si_el_periodo_resaltado_cambia(tmp_path):
+    """Dos apariciones de la MISMA obra con valorizaciones pero periodos de
+    certificado distintos pintan resaltados distintos: son información distinta →
+    ambas completas. Es la condición de igualdad de periodo."""
+    espejo = _espejo_multi(2, [("2019-03-01", "2019-03-31"),
+                               ("2019-05-01", "2019-05-31")])
+    vals = [{"anio": 2019, "mes": 3, "estado": "En ejecución"},
+            {"anio": 2019, "mes": 5, "estado": "En ejecución"}]
+    fichas = {(1, i): {"sub_obras": [_sub("2418877", "111", "OBRA A", list(vals))]}
+              for i in (1, 2)}
+    salida = generar_excel_final(espejo, tmp_path / "per.xlsx", fichas=fichas)
+    celdas = _celdas(_hoja_de(salida, 1, "JEFE"))
+    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 2
+    assert not any(v.startswith("OBRA YA DETALLADA") for v in celdas)
+
+
+def test_no_colapsa_por_periodo_distinto_aunque_no_cambie_el_resaltado(tmp_path):
+    """La igualdad de periodo se exige en crudo, no solo por sus efectos: aquí
+    ninguna valorización cae dentro de ninguna de las dos ventanas, así que el
+    resaltado sería el mismo — y aun así los periodos distintos bloquean el
+    colapso."""
+    espejo = _espejo_multi(2, [("2021-01-01", "2021-01-31"),
+                               ("2022-06-01", "2022-06-30")])
+    vals = [{"anio": 2019, "mes": 3, "estado": "En ejecución"}]
+    fichas = {(1, i): {"sub_obras": [_sub("2418877", "111", "OBRA A", list(vals))]}
+              for i in (1, 2)}
+    salida = generar_excel_final(espejo, tmp_path / "perb.xlsx", fichas=fichas)
+    celdas = _celdas(_hoja_de(salida, 1, "JEFE"))
+    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 2
+    assert not any(v.startswith("OBRA YA DETALLADA") for v in celdas)
+
+
+def test_no_colapsa_si_cambian_los_montos_de_las_valorizaciones(tmp_path):
+    """Mismo número de valorizaciones no es el mismo contenido. El portal de
+    InfoObras es inestable (tablas que varían entre corridas): si dos fichas de
+    la misma obra traen importes distintos, esa diferencia es justo lo que hay
+    que ver, no lo que hay que esconder tras un puntero."""
+    espejo = _espejo_multi(2, [("2019-01-01", "2019-12-31"),
+                               ("2019-01-01", "2019-12-31")])
+    fichas = {
+        (1, 1): {"sub_obras": [_sub("2418877", "111", "OBRA A", [
+            {"anio": 2019, "mes": 3, "estado": "En ejecución", "valorizado_real": 100.0}])]},
+        (1, 2): {"sub_obras": [_sub("2418877", "111", "OBRA A", [
+            {"anio": 2019, "mes": 3, "estado": "En ejecución", "valorizado_real": 999.0}])]},
+    }
+    salida = generar_excel_final(espejo, tmp_path / "mon.xlsx", fichas=fichas)
+    celdas = _celdas(_hoja_de(salida, 1, "JEFE"))
+    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 2
+    assert not any(v.startswith("OBRA YA DETALLADA") for v in celdas)
+    assert 999.0 in [c.value for f in _hoja_de(salida, 1, "JEFE").iter_rows() for c in f]
+
+
+@pytest.mark.parametrize("campo,valor", [
+    ("obra_nombre", "OTRA OBRA"),
+    ("estado", "Finalizado"),
+    ("monto", 999.0),
+    ("fecha_inicio", "2010-01-01"),
+    ("fecha_fin", "2030-12-31"),
+    ("modificaciones_plazo", [{"tipo": "Ampliación", "dias": 30}]),
+    ("representante_obra", {"contratistas": [{"ruc": "20100000001",
+                                              "nombre_empresa": "CONSTRUCTORA X"}]}),
+])
+def test_no_colapsa_si_difiere_cualquier_campo_de_la_ficha(tmp_path, campo, valor):
+    """Cada campo que el bloque pinta entra en la huella. Si la 2ª aparición de la
+    misma obra trae algo distinto — otro estado, otro monto, otras fechas de obra,
+    una ampliación de plazo, el representante — se pinta completa: esa diferencia
+    es información, y esconderla tras "igual que arriba" sería mentir."""
+    espejo = _espejo_multi(2, [("2019-01-01", "2019-12-31"),
+                               ("2019-01-01", "2019-12-31")])
+    sub2 = _sub("2418877", "111", "OBRA A", [])
+    sub2["ficha"][campo] = valor
+    fichas = {(1, 1): {"sub_obras": [_sub("2418877", "111", "OBRA A", [])]},
+              (1, 2): {"sub_obras": [sub2]}}
+    salida = generar_excel_final(espejo, tmp_path / f"{campo}.xlsx", fichas=fichas)
+    celdas = _celdas(_hoja_de(salida, 1, "JEFE"))
+    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 2
+    assert not any(v.startswith("OBRA YA DETALLADA") for v in celdas)
+
+
+def test_no_colapsa_si_una_ficha_es_expediente_y_la_otra_obra(tmp_path):
+    """Misma obra, mismo periodo, pero una aparición trae la verificación del
+    EXPEDIENTE TÉCNICO (MEF) y la otra no: son bloques que dicen cosas distintas."""
+    espejo = _espejo_multi(2, [("2019-01-01", "2019-12-31"),
+                               ("2019-01-01", "2019-12-31")])
+    verif = {"contratista": {"valor": "CONSORCIO X", "veredicto": "ok"},
+             "contrato": {"numero": "007"}, "resolucion": {"numero": "R-1"},
+             "cui_confirmado": "2418877", "fuentes": ["MEF"]}
+    sub_con = _sub("2418877", "111", "OBRA A", [])
+    sub_con["ficha"]["verificacion_expediente"] = verif
+    fichas = {(1, 1): {"sub_obras": [sub_con]},
+              (1, 2): {"sub_obras": [_sub("2418877", "111", "OBRA A", [])]}}
+    salida = generar_excel_final(espejo, tmp_path / "exp.xlsx", fichas=fichas)
+    celdas = _celdas(_hoja_de(salida, 1, "JEFE"))
+    texto = "\n".join(celdas)
+    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 2
+    assert not any(v.startswith("OBRA YA DETALLADA") for v in celdas)
+    assert "VERIFICACIÓN SEACE / MEF" in texto and "CONSORCIO X" in texto
+
+
+def test_colapso_de_bloque_de_expediente_dice_que_es_un_expediente(tmp_path):
+    """Cuando lo repetido SÍ es un bloque de expediente, el puntero lo nombra:
+    nunca dice "valorizaciones" donde no las hay."""
+    espejo = _espejo_multi(1, [("2019-01-01", "2019-12-31")])
+    verif = {"contratista": {"valor": "CONSORCIO X", "veredicto": "ok"},
+             "contrato": {"numero": "007"}, "resolucion": {"numero": "R-1"},
+             "cui_confirmado": "2418877", "fuentes": ["MEF"]}
+
+    def _con_verif(nombre):
+        s = _sub("2418877", "111", nombre, [], obra_nombre="OBRA A")
+        s["ficha"]["verificacion_expediente"] = dict(verif)
+        return s
+
+    fichas = {(1, 1): {"sub_obras": [_con_verif("Tramo A"), _con_verif("Tramo B")]}}
+    salida = generar_excel_final(espejo, tmp_path / "expc.xlsx", fichas=fichas)
+    texto = _texto(_hoja_de(salida, 1, "JEFE"))
+    assert "OBRA YA DETALLADA" in texto
+    assert "la verificación del expediente técnico" in texto
+    assert "valorizaciones de esta obra" not in texto
+
+
+def test_no_colapsa_si_una_ficha_trae_valorizaciones_y_la_otra_no(tmp_path):
+    """La trampa que hundió la primera versión: una ficha SIN valorizaciones
+    referida a otra que SÍ las tiene renderiza una AUSENCIA de dato como puntero
+    a evidencia. Aunque sea la misma obra y el mismo periodo, no se colapsa."""
+    espejo = _espejo_multi(2, [("2019-01-01", "2019-12-31"),
+                               ("2019-01-01", "2019-12-31")])
+    fichas = {
+        (1, 1): {"sub_obras": [_sub("2418877", "111", "OBRA A",
+                                    [{"anio": 2019, "mes": 3, "estado": "En ejecución"}])]},
+        (1, 2): {"sub_obras": [_sub("2418877", "111", "OBRA A", [])]},
+    }
+    salida = generar_excel_final(espejo, tmp_path / "vac.xlsx", fichas=fichas)
+    celdas = _celdas(_hoja_de(salida, 1, "JEFE"))
+    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 2
+    assert not any(v.startswith("OBRA YA DETALLADA") for v in celdas)
+    assert "Sin valorizaciones registradas en InfoObras" in "\n".join(celdas)
+
+
+def test_no_colapsa_dos_obras_distintas_del_mismo_cui(tmp_path):
+    """Mismo CUI, códigos InfoObras distintos = obras distintas (`_fetch_obra`
+    desambigua por la ventana del certificado). La clave lleva los dos."""
+    espejo = _espejo_multi(2, [("2019-01-01", "2019-12-31"),
+                               ("2019-01-01", "2019-12-31")])
+    fichas = {
+        (1, 1): {"sub_obras": [_sub("2418877", "111", "OBRA A", [])]},
+        (1, 2): {"sub_obras": [_sub("2418877", "999", "OBRA B", [])]},
+    }
+    salida = generar_excel_final(espejo, tmp_path / "cui.xlsx", fichas=fichas)
+    celdas = _celdas(_hoja_de(salida, 1, "JEFE"))
+    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 2
+    assert "OBRA B" in "\n".join(celdas)
+    assert not any(v.startswith("OBRA YA DETALLADA") for v in celdas)
+
+
+def test_sin_codigo_infoobras_no_hay_identidad_y_no_se_colapsa(tmp_path):
+    """Sin código de obra no hay identidad comprobable: ausencia de dato NUNCA
+    habilita el colapso."""
+    espejo = _espejo_multi(2, [("2019-01-01", "2019-12-31"),
+                               ("2019-01-01", "2019-12-31")])
+    sub = _sub("2418877", None, "OBRA A", [])
+    fichas = {(1, i): {"sub_obras": [dict(sub)]} for i in (1, 2)}
+    salida = generar_excel_final(espejo, tmp_path / "sincod.xlsx", fichas=fichas)
+    celdas = _celdas(_hoja_de(salida, 1, "JEFE"))
+    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 2
+    assert not any(v.startswith("OBRA YA DETALLADA") for v in celdas)
+
+
+def test_el_registro_de_obras_pintadas_es_por_hoja_de_profesional(tmp_path):
+    """Un "ver SubExperiencia 1.1, fila 92" que apunte a la pestaña de OTRO
+    profesional es inservible: cada hoja arranca de cero."""
+    espejo = {
+        "_meta": {}, "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "JEFE", "nombre": "Uno",
+             "experiencias": [{"n": 1, "proyecto": "Orden 1",
+                               "fecha_inicial": "2019-01-01", "fecha_final": "2019-12-31"}]},
+            {"n_prof": 2, "cargo": "ESTRUCTURAS", "nombre": "Dos",
+             "experiencias": [{"n": 1, "proyecto": "Orden 1",
+                               "fecha_inicial": "2019-01-01", "fecha_final": "2019-12-31"}]},
+        ],
+        "resumen_evaluacion": {"factores": []},
+    }
+    sub = _sub("2418877", "111", "OBRA A", [])
+    fichas = {(1, 1): {"sub_obras": [dict(sub)]}, (2, 1): {"sub_obras": [dict(sub)]}}
+    salida = generar_excel_final(espejo, tmp_path / "hojas.xlsx", fichas=fichas)
+    for n_prof, cargo in ((1, "JEFE"), (2, "ESTRUCTURAS")):
+        celdas = _celdas(_hoja_de(salida, n_prof, cargo))
+        assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 1, cargo
+        assert not any(v.startswith("OBRA YA DETALLADA") for v in celdas), cargo
+
+
+def test_el_colapso_no_pisa_la_cobertura_de_la_subexperiencia(tmp_path):
+    """La cobertura del tiempo es POR sub-experiencia (la ventana del certificado
+    contra las valorizaciones), no de la obra: se sigue pintando aunque el detalle
+    de la obra se haya colapsado."""
+    espejo = _espejo_multi(1, [("2019-01-01", "2019-12-31")])
+    fichas = {(1, 1): {"sub_obras": [
+        _sub("2418877", "111", "OBRA A", []),
+        _sub("2418877", "111", "OBRA A", [],
+             cobertura={"cubierto": False, "pct": 40, "cert_ini": "2019-01-01",
+                        "cert_fin": "2019-12-31"})]}}
+    salida = generar_excel_final(espejo, tmp_path / "cob.xlsx", fichas=fichas)
+    texto = _texto(_hoja_de(salida, 1, "JEFE"))
+    assert "OBRA YA DETALLADA" in texto
+    assert "cobertura 40%" in texto and "PARCIAL, revisar" in texto
 
 
 # ── Hoja CLAUDE: formato de Manuel (blanco + verde/rojo semántico) ─────────────
