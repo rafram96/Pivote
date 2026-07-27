@@ -27,4 +27,25 @@
   Cotabambas/Antabamba) — ante discrepancia sistemática, cuestionar también la
   referencia.
 - **Documentos comerciales al repo**: `docs/comercial/` está gitignored a
-  propósito; no forzar con `-f`.
+  propósito; no forzar con `-f`. **Y el repo es PÚBLICO**: no es una preferencia
+  de orden, es que publicarías precios y cuentas por cobrar en internet, de forma
+  irreversible (el historial queda). Antes de commitear un HTML nuevo, mirar si
+  tiene montos, IP del servidor o postura de negociación. El 27-jul un dashboard
+  con S/ 10,300 por cobrar y `192.168.100.5:8001` estaba en `docs/nuevos_modulos/`
+  — la carpeta que se le comprime al cliente.
+- **Crear issues sin leer `.ai/decisions/` primero**: el 27-jul se abrió la issue
+  #50 re-derivando ADR-010 (decidido el 25-jul), con vocabulario distinto
+  (`_meta.tipo_concurso` vs el real `concurso.tipo_evaluacion`) y reabriendo una
+  pregunta que el cliente ya había cerrado (el concurso es homogéneo). **Antes de
+  proponer un diseño, buscar en `decisions/` por el tema.**
+- **Asumir que la skill instalada es la del repo**: durante 13 días
+  `~/.claude/skills/` corrió una copia del 14-jul **sin el escudo de integridad**
+  — podía subir corridas incompletas, que es justo la falla que el escudo arregla.
+  Nada avisa cuando derivan. Hoy es un junction al repo; si alguna vez se
+  reinstala como copia, la deriva vuelve.
+- **`rm -rf` sobre un junction de Windows**: se recorre hacia adentro y borra el
+  DESTINO. Así se perdió `backend/datos_pivote`. Para quitar un enlace:
+  `cmd //c rmdir "<ruta>"` (sin `/S`) o `(Get-Item ruta).Delete()` en PowerShell.
+- **Guardar respaldos dentro de `~/.claude/skills/`**: esa carpeta se
+  auto-registra, y un respaldo aparece como skill invocable con la misma
+  descripción que la real. Los respaldos van fuera.
