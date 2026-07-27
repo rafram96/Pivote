@@ -25,7 +25,8 @@ from typing import Callable, Optional
 from schemas import pipeline
 from validacion import (a_observaciones, anotar_cargo_nucleo,
                         evaluar_confiabilidad, observaciones_recalculo,
-                        recalcular_espejo, verificar_espejo)
+                        recalcular_espejo, revisar_certificados,
+                        verificar_espejo)
 from resolucion import (ConsultaInfoObras, resolver_con_dedup, resolver_obras,
                         rubros_mixtos)
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
@@ -185,6 +186,13 @@ def _fx_de_obra(obra, cui) -> dict:
 class EtapaValidacionReal:
     nombre = E.VALIDACION
 
+    def __init__(self, dir_datos=None):
+        # La carpeta de datos solo hace falta para leer los recortes de los
+        # certificados (#47). Opcional: sin ella la etapa corre igual y la
+        # verificación de folio se salta — así los tests que la construyen sin
+        # argumentos siguen valiendo.
+        self.dir_datos = Path(dir_datos) if dir_datos else None
+
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
         ctx.reportar(self.nombre, 0, 0, "Revisando la consistencia de la propuesta")
         # ESCUDO DE INTEGRIDAD (#45 · L1) — lo PRIMERO de la etapa, sobre el espejo
@@ -219,6 +227,25 @@ class EtapaValidacionReal:
         # detectar la contradicción): marca en rojo, dentro del espejo que va al
         # Excel, las experiencias que no acreditan ni cargo ni funciones (#31).
         anotar_cargo_nucleo(ctx.espejo)
+        # FOLIO ↔ CERTIFICADO (#47): ¿la página que se embebe como sustento es la
+        # del emisor declarado? Solo LEE los recortes; no muta el espejo.
+        #
+        # Únicamente se reporta el SOSPECHOSO (`ok is False`): confirmar un folio
+        # no es un hallazgo y llenaría el Excel de ruido verde, y `ok is None` es
+        # ausencia de evidencia, no una alarma. Eso último no es un detalle
+        # menor: 727 de los 729 recortes del corpus son escaneos SIN capa de
+        # texto, así que hoy la verificación solo puede pronunciarse sobre el
+        # 0.3% — abstenerse en el resto es la única respuesta honesta (decisión
+        # del desarrollador, 2026-07-26).
+        certs = (carpeta_job(self.dir_datos, ctx.job.job_id) / "certs"
+                 if self.dir_datos else None)
+        for v in (revisar_certificados(certs, ctx.espejo) if certs else []):
+            if not v.sospechoso:
+                continue
+            observaciones.append(pipeline.Observacion(
+                codigo="FOLIO", severidad=pipeline.Severidad.ALERTA,
+                mensaje=v.motivo, origen=self.nombre,
+                referencia=f"prof={v.n_prof} exp={v.n_exp} folio={v.folio}"))
         n_exp = sum(len(p.get("experiencias", [])) for p in ctx.espejo.get("profesionales", []))
         # El escudo NO bloquea el job. Abortar dejaría al evaluador SIN Excel, y
         # el contrato del pipeline es entregar lo que se tenga + la lista de lo
@@ -1251,7 +1278,7 @@ def etapas_reales(dir_datos: Path, *, consulta_cui=None, fetcher_infoobras=None,
     en producción quedan los clientes en vivo."""
     return [
         EtapaIngesta(),
-        EtapaValidacionReal(),
+        EtapaValidacionReal(Path(dir_datos)),
         EtapaResolucionCuiReal(consulta=consulta_cui),
         EtapaInfoObrasReal(fetcher=fetcher_infoobras, dir_descargas=Path(dir_datos),
                            descargar=descargar, verificador_mef=verificador_mef),
