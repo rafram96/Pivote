@@ -20,3 +20,26 @@
   (la consola cp1252 revienta con flechas/emoji).
 - Archivos temporales: NUNCA en la raíz del repo (usar scratchpad de la sesión
   o `backend/datos_pivote/` que está gitignored).
+
+## Entorno de desarrollo
+
+- **La skill instalada es un enlace al repo, no una copia** (27-jul-2026):
+
+  ```
+  ~/.claude/skills/analizar-licitacion-osce  →  Pivote\skill
+  ```
+
+  Es un **junction** de Windows (`New-Item -ItemType Junction`); el symlink real
+  requiere modo desarrollador. Motivo: durante 13 días el entorno corrió una copia
+  del 14-jul **sin el escudo de integridad**, y nada avisa cuando derivan. Con el
+  enlace, cambiar de rama cambia la skill.
+
+  Se descartó un script de sincronización: sigue dependiendo de que alguien lo
+  corra, que es justo lo que falló.
+
+  ⛔ **Nunca borrar ese enlace con `rm -rf`** — un junction se recorre hacia
+  adentro y se lleva `Pivote/skill/` completo (así se perdió `datos_pivote`).
+  Para quitarlo: `cmd //c rmdir "<ruta>"` sin `/S`.
+
+  ⛔ **Los respaldos de skills no van dentro de `~/.claude/skills/`**: esa carpeta
+  se auto-registra y el respaldo aparece como skill invocable.

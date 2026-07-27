@@ -192,7 +192,34 @@ function normalizarEval(ev) {
 
   // ── experiencias_eval: una LISTA por profesional ──
   let EE = {};
-  const rawEE = E.experiencias_eval;
+  let rawEE = E.experiencias_eval;
+
+  // Fallback: si no viene en top-level, buscar si venía anidado dentro de profesionales_eval
+  if ((!rawEE || (typeof rawEE === "object" && !Array.isArray(rawEE) && Object.keys(rawEE).length === 0)) && E.profesionales_eval) {
+    const fallbackEE = {};
+    let count = 0;
+    const peSource = E.profesionales_eval;
+    const items = Array.isArray(peSource)
+      ? peSource
+      : Object.entries(peSource).map(([k, v]) => ({ ...(v || {}), _key: k }));
+
+    for (const item of items) {
+      if (!item || typeof item !== "object") continue;
+      const nProf = item.n_prof != null ? item.n_prof : (item.n != null ? item.n : item._key);
+      if (Array.isArray(item.experiencias_eval) && item.experiencias_eval.length > 0 && nProf != null) {
+        fallbackEE[String(nProf)] = item.experiencias_eval;
+        count += item.experiencias_eval.length;
+      }
+    }
+
+    if (count > 0) {
+      rawEE = fallbackEE;
+      avisos.push(obs("warning", "evaluacion_experiencias_anidadas",
+        `agent-evaluador anidó experiencias_eval dentro de profesionales_eval (${count} experiencias): se extrajo automáticamente al nivel superior.`,
+        "evaluacion.json → experiencias_eval"));
+    }
+  }
+
   if (Array.isArray(rawEE)) {
     if (rawEE.length && rawEE.every((x) => Array.isArray(x))) {
       rawEE.forEach((x, k) => { EE[String(k + 1)] = x; });
@@ -605,8 +632,13 @@ function consolidar(WS) {
         referencia: `profesional ${i}`,
       });
     }
+    // `pick` DESCARTA las cadenas vacías, así que `pick(x, "")` nunca puede
+    // devolver "" — devuelve null, y el template lo imprime como el texto
+    // "null" en la celda del Excel (8 celdas así en el análisis de Soritor).
+    // El motivo se anexa solo si existe.
+    const motivoFactorA = pick(pe.factor_a_cuenta);
     const aniosAd = pe.anios_adicionales != null
-      ? `${pe.anios_adicionales} años — ${pick(pe.factor_a_cuenta, "")}`.trim()
+      ? (motivoFactorA ? `${pe.anios_adicionales} años — ${motivoFactorA}` : `${pe.anios_adicionales} años`)
       : null;
 
     const cargoBasesNombre = pick(matchDet && matchDet.nombre, pe.cargo_bases_nombre, rRow.cargo_bases_nombre);
@@ -658,8 +690,11 @@ function consolidar(WS) {
 
   const formularios = Array.isArray(P.formularios) ? P.formularios.map((f) => ({
     anexo: pick(f.anexo, "—"),
-    documento: pick(f.documento, ""),
-    observacion: pick(f.observacion, f["observación"], ""),
+    // Mismo motivo que en `anios_adicionales`: `pick(x, "")` NUNCA devuelve ""
+    // (descarta las cadenas vacías) → devolvía null, y el contrato exige string
+    // en `observacion` → un formulario sin observación invalidaba el espejo ENTERO.
+    documento: pick(f.documento) || "",
+    observacion: pick(f.observacion, f["observación"]) || "",
     folio: f.folio != null ? f.folio : "",
   })) : [];
   if (!formularios.length) avisos.push({
@@ -668,21 +703,34 @@ function consolidar(WS) {
     referencia: "postor.formularios",
   });
 
-  const experiencia_postor = Array.isArray(P.experiencia_postor) ? P.experiencia_postor.map((x, idx) => ({
-    n: x.n != null ? x.n : idx + 1,
-    cliente: pick(x.cliente, x.emisor, x.entidad),
-    contrato: pick(x.contrato),
-    proyecto: pick(x.proyecto),
-    tipo_acreditacion: pick(x.tipo_acreditacion),
-    monto: numify(x.monto),
-    pct_objeto: pick(x.pct_objeto),
-    le_corresponde: pick(x.le_corresponde),
-    acredita: pick(x.acredita),
-    folio: x.folio != null ? x.folio : null,
-    ultimos_20_anios: pick(x.ultimos_20_anios, "POR VERIFICAR (corte 20 años — backend/Comité)"),
-    tipo_solicitado: pick(x.tipo_solicitado),
-    observaciones: pick(x.observaciones),
-  })) : [];
+  // El mapa aporta los HECHOS del cuadro-resumen (emisor, contrato, proyecto,
+  // monto, folio); el evaluador aporta el JUICIO por contrato (% objeto, le
+  // corresponde, ¿tipo solicitado?). Se pegan por `n`, NO por posición: si el
+  // evaluador se salta un contrato, un pegado posicional corre todos los
+  // siguientes (misma trampa que el candado 1:1 de los profesionales).
+  const pByN = {};
+  for (const e of (ev.postor_eval || {}).experiencia_postor || []) {
+    if (e && e.n != null) pByN[String(e.n)] = e;
+  }
+  const experiencia_postor = Array.isArray(P.experiencia_postor) ? P.experiencia_postor.map((x, idx) => {
+    const n = x.n != null ? x.n : idx + 1;
+    const j = pByN[String(n)] || {};
+    return {
+      n,
+      cliente: pick(x.cliente, x.emisor, x.entidad),
+      contrato: pick(x.contrato),
+      proyecto: pick(x.proyecto),
+      tipo_acreditacion: pick(x.tipo_acreditacion),
+      monto: numify(x.monto),
+      pct_objeto: pick(j.pct_objeto, x.pct_objeto),
+      le_corresponde: pick(j.le_corresponde, x.le_corresponde),
+      acredita: pick(x.acredita),
+      folio: x.folio != null ? x.folio : null,
+      ultimos_20_anios: pick(x.ultimos_20_anios, "POR VERIFICAR (corte 20 años — backend/Comité)"),
+      tipo_solicitado: pick(j.tipo_solicitado, x.tipo_solicitado),
+      observaciones: pick(j.observaciones, x.observaciones),
+    };
+  }) : [];
   if (!experiencia_postor.length) avisos.push({
     severidad: "warning", tipo: "postor_incompleto",
     mensaje: "roster_bundles.json no trae postor.experiencia_postor — el bloque de experiencia del postor quedó vacío (req. 3.4, criterio manual del Comité).",

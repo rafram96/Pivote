@@ -347,8 +347,21 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
         b.row(["", "", "", "", "", "", "", "", "", "", "TOTAL",
                t.get("dias"), t.get("meses"), t.get("anios"), "", "", "", "", "", "", "", ""],
               bold=True, fmts=m4, backend_cols={12, 13, 14})
+        # El veredicto lo escribe el LLM sobre los días DECLARADOS; el backend calcula
+        # los EFECTIVOS (menos paralizaciones y traslapes, recortados a la ventana de
+        # valorizaciones). Cuando el backend contradice al veredicto, la celda se pinta
+        # como alerta y el motivo va debajo: antes el CUMPLE salía en verde y el número
+        # que lo desmentía vivía 500 filas más abajo, en otra hoja (#51).
+        vb = prof.get("cumple_backend")
+        contradice = bool(vb) and str(prof.get("cumple", "")).upper().startswith("CUMPLE")
         if prof.get("cumple"):
-            b.kv("¿EL PROFESIONAL CUMPLE?", prof["cumple"], verdict="pos")
+            b.kv("¿EL PROFESIONAL CUMPLE?", prof["cumple"],
+                 verdict="neg" if contradice else "pos")
+        if vb:
+            # `pos` sobre el TEXTO del backend: su "NO CUMPLE" se pinta rojo y su
+            # "POR VERIFICAR" amarillo. Con `neg` un NO CUMPLE saldría VERDE.
+            b.kv("⚠ Verificación del tiempo efectivo:" if contradice
+                 else "Verificación del tiempo efectivo:", vb, verdict="pos")
         if prof.get("anios_adicionales"):
             b.kv("Años adicionales (Factor A):", prof["anios_adicionales"])
         b.blank()

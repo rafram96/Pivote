@@ -1,6 +1,51 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-07-26** · rama de trabajo: `demo`
+> Última actualización: **2026-07-27** · rama de trabajo: `demo`
+
+## Lo del 2026-07-27 (documentación, entorno y alcance — sin código de producto)
+
+- **La skill instalada llevaba 13 días de atraso y le faltaba el escudo entero.**
+  `~/.claude/skills/analizar-licitacion-osce` era una copia del 14-jul (rastreada
+  al commit `1a2b5a2`): **cero** apariciones de `INCOMPLETO`, sin
+  `process.exitCode = 1`, sin el bloque ⛔ GATE en `SKILL.md`. Es decir: no podía
+  detener una corrida incompleta — exactamente la falla del 26-jul (veredictos
+  corridos +1 y corrida sin evaluación, ambas subidas como buenas). El arreglo
+  vivía en `demo` desde `0271ea7` y nunca llegó al entorno.
+  **Resuelto de raíz**: la ruta instalada es ahora un **junction a `Pivote/skill/`**
+  (ver `conventions/coding.md`) — la skill instalada ES la del repo, la deriva ya
+  no es posible. 18/18 archivos en paridad, 31 tests verdes a través del enlace.
+- **Alcance de T-008 corregido en el material comercial** (commit `27c8cde`):
+  `plan-desarrollo-extras.html` y `arquitectura-sistema.html` vendían «Arquitectura
+  Dual Hot/Cold Path JSONB», «swap atómico `mef_inversiones_staging`» y «pg_trgm».
+  **Nada de eso existe en el código** (`grep` → cero): el ETL produce
+  `inversiones.csv.gz` + `os.replace` sobre un archivo. Se reescribió describiendo
+  lo real y el Postgres quedó como *evolución prevista, no construida y fuera del
+  precio* — que es lo que ADR-009 tiene EN CONSTRUCCIÓN y el épico ETL (#12-#25).
+- **Cifras reales de la base MEF** (metadata del 26-jul): **620,985 filas →
+  579,481 CUIs distintos** y **11,011 entidades**. Los docs decían 452,793 y 11,004.
+- **Documento nuevo `docs/nuevos_modulos/caminos-a-b-estado.html`**: los 4 caminos
+  del Excel (A/B × pública/privada) en cuadrícula con tablero de estado. Deja ver
+  que una experiencia pública pasa por 7-9 verificaciones y una privada por 2-3 —
+  por eso clasificar mal a privada es el error caro. Y que las 3 piezas sin
+  desplegar (CUI, cargo↔bases, HABIDO) aparecen en los 4 caminos.
+- **Cuarto estado en los diagramas**: «construido, falta desplegar» separado de «en
+  producción». Antes el material decía «✔ en producción» sobre trabajo que vive
+  solo en `demo`.
+- **Issues nuevas**: [#49 Economizar Skill](https://github.com/rafram96/Pivote/issues/49)
+  (con inventario de las responsabilidades que absorbió el backend) y
+  [#50 parámetro de tipo de concurso](https://github.com/rafram96/Pivote/issues/50)
+  (= implementación de **ADR-010**, ya decidido — ver la corrección en el hilo).
+- **Corrección de un dato que este archivo daba mal**: `demo` **sí está pusheada**
+  (`origin/demo` 0/0). El checklist decía «solo local, falta push» desde el 23-jul.
+
+## Dos huecos del flujograma, abiertos con el cliente
+
+Aparecieron al ordenar el Excel por camino (no se ven en su disposición original):
+
+1. **RENIPRESS no se pide para expedientes privados** — solo para obra. Un
+   expediente técnico de una clínica privada tiene el mismo problema de existencia.
+2. **Los cruces de fechas solo se piden en el camino A** — en obra el Excel pide
+   únicamente el cargo, aunque la misma regla aplicaría con el contrato de supervisión.
 
 ## Terminado y validado (sin desplegar)
 
@@ -108,10 +153,18 @@
 
 ## Riesgos
 
-- Hay un **deploy pendiente**: el refactor ya está mergeado a `demo`
-  (fast-forward 2026-07-23, SOLO local — falta push), pero el server corre el
-  código viejo. Los pasos y el ORDEN del deploy viven SOLO en
-  `InfoObras/.ai/tasks/active.md` (fuente única).
+- Hay un **deploy pendiente**: el refactor ya está mergeado a `demo` y **pusheado**
+  (verificado 27-jul: `origin/demo` 0/0), pero el server corre el código viejo.
+  Los pasos y el ORDEN del deploy viven SOLO en `InfoObras/.ai/tasks/_active.md`
+  (fuente única).
+- **El repo `Pivote` es PÚBLICO.** Todo lo que se commitea se publica en internet
+  de forma permanente (el historial no se borra). `docs/comercial/` está gitignored
+  por eso — el 27-jul un dashboard con S/ 10,300 en cuentas por cobrar, precios por
+  ticket y la IP del servidor del cliente llegó a estar a un `git add` de publicarse.
+- **`ai-cli validate` falla en este nivel con 67 errores preexistentes**: los 13 ADR
+  y los 3 índices de `tasks/` no tienen frontmatter YAML, y `counters.json` está en
+  `{CAP:0, TSK:0, ADR:0}` con ADR-013 ya existiendo → **`ai-cli new` colisionaría**.
+  El nivel InfoObras valida limpio. Reparación pendiente (ver handoff del 27-jul).
 - Límite de gasto mensual de Claude alcanzado el 21-jul (los subagentes pueden
   morir a mitad — el trabajo F8 se terminó a mano por eso).
 

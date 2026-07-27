@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Los 4 caminos de verificación — estado actual</title>
+<style>
+  :root{
+    --bg:#f8f9fb; --panel:#ffffff; --ink:#1a2233; --muted:#5b6474;
+    --line:#d7dce4; --arrow:#9aa3b2;
+    --ok-bg:#e8f6ee;  --ok-bd:#2f9e63;  --ok-tx:#1d6f44;
+    --dep-bg:#e9f0fb; --dep-bd:#3b6fd4; --dep-tx:#2455ad;
+    --cot-bg:#fdf3e3; --cot-bd:#d99a2b; --cot-tx:#96660d;
+    --no-bg:#fbeaea;  --no-bd:#cf5a5a;  --no-tx:#a03434;
+    --dec-bg:#eef1f6; --dec-bd:#8e99ab;
+    --a:#3b6fd4; --b:#7d5bb8; --pub:#2f9e63; --priv:#c2732b;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12151b; --panel:#1a1f28; --ink:#e8ebf1; --muted:#9aa3b2;
+      --line:#313947; --arrow:#5b6474;
+      --ok-bg:#15291e;  --ok-bd:#2f9e63;  --ok-tx:#6fd39e;
+      --dep-bg:#151f2e; --dep-bd:#4f83e0; --dep-tx:#8fb5f2;
+      --cot-bg:#2c2312; --cot-bd:#d99a2b; --cot-tx:#eec06a;
+      --no-bg:#2e1a1a;  --no-bd:#cf5a5a;  --no-tx:#ef9a9a;
+      --dec-bg:#222835; --dec-bd:#5b6474;
+      --a:#7aa0ee; --b:#a98be0; --pub:#6fd39e; --priv:#e0a463;
+    }
+  }
+  *{box-sizing:border-box; margin:0}
+  body{background:var(--bg); color:var(--ink);
+    font:15px/1.5 "Segoe UI", system-ui, sans-serif;
+    padding:32px 24px 64px; max-width:1320px; margin:0 auto}
+  h1{font-size:1.5rem; margin-bottom:4px}
+  h2{font-size:1.12rem; margin-bottom:2px}
+  .sub{color:var(--muted); margin-bottom:20px; font-size:.92rem}
+  .h2sub{color:var(--muted); font-size:.88rem; margin-bottom:16px}
+  section{margin-bottom:48px}
+
+  .leyenda{display:flex; flex-wrap:wrap; gap:10px 22px; margin-bottom:28px;
+    background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 16px}
+  .leyenda span{display:inline-flex; align-items:center; gap:8px; font-size:.86rem; color:var(--muted)}
+  .chip{display:inline-block; min-width:14px; height:14px; border-radius:4px; border:1.5px solid}
+  .chip.ok {background:var(--ok-bg);  border-color:var(--ok-bd)}
+  .chip.dep{background:var(--dep-bg); border-color:var(--dep-bd)}
+  .chip.cot{background:var(--cot-bg); border-color:var(--cot-bd)}
+  .chip.no {background:var(--no-bg);  border-color:var(--no-bd)}
+
+  /* --- las dos decisiones de entrada --- */
+  .entrada{background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:22px 20px; margin-bottom:34px}
+  .dec2{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:14px}
+  .dec{border:1.5px dashed var(--dec-bd); background:var(--dec-bg); border-radius:11px; padding:13px 15px}
+  .dec b{display:block; font-size:.95rem; margin-bottom:3px}
+  .dec p{font-size:.83rem; color:var(--muted)}
+  .dec .como{margin-top:8px; font-size:.8rem; padding:7px 10px; border-radius:7px;
+    background:var(--bg); border:1px solid var(--line)}
+
+  /* --- cuadrícula de 4 caminos --- */
+  .quad{display:grid; grid-template-columns:1fr 1fr; gap:20px}
+  .via{background:var(--panel); border:1.5px solid var(--line); border-radius:14px;
+    padding:18px 16px 20px; position:relative}
+  .via.A{border-color:var(--a)} .via.B{border-color:var(--b)}
+  .via > .etiqueta{position:absolute; top:-11px; left:16px; padding:1px 12px; border-radius:99px;
+    font-size:.76rem; font-weight:700; letter-spacing:.4px; color:#fff}
+  .via.A > .etiqueta{background:var(--a)} .via.B > .etiqueta{background:var(--b)}
+  .via > .sello{position:absolute; top:-11px; right:16px; padding:1px 11px; border-radius:99px;
+    font-size:.72rem; font-weight:700; color:#fff}
+  .sello.pub{background:var(--pub)} .sello.priv{background:var(--priv)}
+  .via h3{font-size:.98rem; margin:6px 0 2px}
+  .via .cuando{font-size:.8rem; color:var(--muted); margin-bottom:12px}
+
+  ol.pasos{list-style:none; display:flex; flex-direction:column; gap:0}
+  ol.pasos li{position:relative; padding-left:30px; padding-bottom:12px}
+  ol.pasos li:last-child{padding-bottom:0}
+  ol.pasos li::before{content:attr(data-n); position:absolute; left:0; top:1px;
+    width:21px; height:21px; border-radius:50%; font-size:.72rem; font-weight:700;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--ink); color:var(--bg)}
+  ol.pasos li:not(:last-child)::after{content:""; position:absolute; left:10px; top:24px; bottom:1px;
+    border-left:2px solid var(--line)}
+  .caja{border:1.3px solid; border-radius:8px; padding:6px 10px; font-size:.85rem}
+  .caja.ok {background:var(--ok-bg);  border-color:var(--ok-bd)}
+  .caja.dep{background:var(--dep-bg); border-color:var(--dep-bd)}
+  .caja.cot{background:var(--cot-bg); border-color:var(--cot-bd)}
+  .caja.no {background:var(--no-bg);  border-color:var(--no-bd)}
+  .caja .qn{display:block; font-weight:600}
+  .caja.no .qn{text-decoration:line-through; opacity:.7}
+  .caja .quien{display:block; font-size:.75rem; color:var(--muted); margin-top:2px}
+  .caja .tag{float:right; font-size:.7rem; font-weight:700; padding:0 7px; border-radius:99px;
+    margin-left:8px; white-space:nowrap}
+  .caja.ok .tag {color:var(--ok-tx);  background:color-mix(in srgb, var(--ok-bd) 20%, transparent)}
+  .caja.dep .tag{color:var(--dep-tx); background:color-mix(in srgb, var(--dep-bd) 20%, transparent)}
+  .caja.cot .tag{color:var(--cot-tx); background:color-mix(in srgb, var(--cot-bd) 20%, transparent)}
+  .caja.no .tag {color:var(--no-tx);  background:color-mix(in srgb, var(--no-bd) 20%, transparent)}
+
+  .salida{margin-top:14px; text-align:center; font-size:.82rem; font-weight:600;
+    border:1.5px solid var(--dec-bd); background:var(--dec-bg); color:var(--muted);
+    border-radius:99px; padding:6px 14px}
+
+  /* --- tablero --- */
+  table{width:100%; border-collapse:collapse; background:var(--panel);
+    border:1px solid var(--line); border-radius:12px; overflow:hidden; font-size:.87rem}
+  .tabla-wrap{overflow-x:auto; border-radius:12px}
+  th,td{padding:9px 12px; text-align:left; border-bottom:1px solid var(--line)}
+  th{font-size:.76rem; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); background:var(--bg)}
+  tr:last-child td{border-bottom:none}
+  td.c{text-align:center; font-weight:700; white-space:nowrap}
+  .n.ok{color:var(--ok-tx)} .n.dep{color:var(--dep-tx)}
+  .n.cot{color:var(--cot-tx)} .n.no{color:var(--no-tx)} .n.z{color:var(--muted); font-weight:400}
+
+  .aviso{font-size:.85rem; border-left:3px solid; border-radius:0 8px 8px 0;
+    padding:10px 14px; margin-top:16px}
+  .aviso.q{border-color:var(--cot-bd); background:var(--cot-bg); color:var(--cot-tx)}
+  .aviso.i{border-color:var(--dep-bd); background:var(--dep-bg); color:var(--dep-tx)}
+  .nota{margin-top:14px; font-size:.82rem; color:var(--muted)}
+
+  @media (max-width:900px){ .quad,.dec2{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+
+<h1>Los 4 caminos de verificación — estado actual</h1>
+<p class="sub">Camino <b>A</b> (expedientes y estudios) y camino <b>B</b> (ejecución y supervisión de obra), cada uno con su rama pública y privada · derivado de la Hoja1 del Excel «para RAFAEL» · <b>27&nbsp;jul&nbsp;2026</b></p>
+
+<div class="leyenda">
+  <span><i class="chip ok"></i> En producción — corriendo hoy en el servidor</span>
+  <span><i class="chip dep"></i> Construido y probado — <b>falta desplegar</b></span>
+  <span><i class="chip cot"></i> Por construir</span>
+  <span><i class="chip no"></i> Descartado con evidencia</span>
+</div>
+
+<!-- ============ LAS DOS DECISIONES ============ -->
+<section>
+  <h2>Antes de los 4 caminos: dos decisiones</h2>
+  <p class="h2sub">Cada experiencia cae en uno de los cuatro cuadrantes según cómo se resuelvan estas dos preguntas. Ninguna la responde una persona.</p>
+  <div class="entrada">
+    <div class="dec2">
+      <div class="dec">
+        <b>1 · ¿Expediente (A) o ejecución de obra (B)?</b>
+        <p>Lo decide el clasificador leyendo toda la evidencia del certificado, no una palabra suelta.</p>
+        <div class="como">Se puede <b>forzar a camino A</b> cuando el concurso entero es de expedientes — se usó así en San Isidro.</div>
+      </div>
+      <div class="dec">
+        <b>2 · ¿Pública o privada?</b>
+        <p>No es un interruptor al inicio: es el <b>resultado</b> de agotar primero la búsqueda pública.</p>
+        <div class="como">Si no se resuelve el CUI <i>y</i> el cliente no está en el catálogo de 11,011 entidades del Estado → «posible obra privada». Lo dudoso queda en <b>«Por confirmar»</b>, nunca se fuerza a privada.</div>
+      </div>
+    </div>
+    <p class="aviso i" style="margin-top:16px">
+      <b>Por qué importa el orden:</b> una experiencia mal clasificada como privada se salta el 70% de las
+      verificaciones del camino público y sale limpia sin haber sido verificada. Por eso lo público se agota
+      primero y la privada es siempre la última hipótesis, nunca la primera.
+    </p>
+  </div>
+</section>
+
+<!-- ============ LOS 4 CAMINOS ============ -->
+<section>
+  <h2>Los 4 caminos</h2>
+  <p class="h2sub">Cada casilla es una verificación. El color dice si existe hoy, si está construida pero sin desplegar, o si falta.</p>
+
+  <div class="quad">
+
+    <!-- ============== A · PÚBLICA ============== -->
+    <div class="via A">
+      <span class="etiqueta">CAMINO A</span><span class="sello pub">PÚBLICA</span>
+      <h3>Expediente técnico o estudio · obra pública</h3>
+      <p class="cuando">El certificado acredita haber elaborado (o supervisado) un expediente técnico. El camino más cargado: 9 verificaciones.</p>
+      <ol class="pasos">
+        <li data-n="1"><div class="caja dep"><span class="tag">construido</span><span class="qn">Ubicar el CUI del proyecto</span><span class="quien">Base local del MEF · 579,481 CUIs · vetos por rubro, ubicación y entidad</span></div></li>
+        <li data-n="2"><div class="caja dep"><span class="tag">construido</span><span class="qn">Clasificar como expediente</span><span class="quien">No se le exigen valorizaciones de la construcción posterior</span></div></li>
+        <li data-n="3"><div class="caja cot"><span class="tag">T-004</span><span class="qn">Bajar contrato del expediente + bases</span><span class="quien">SEACE por datos abiertos — sonda ✔ GO, falta integrar</span></div></li>
+        <li data-n="4"><div class="caja dep"><span class="tag">T-003</span><span class="qn">Bajar resolución de aprobación del ET</span><span class="quien">Formato 08-A del MEF, al ZIP de sustento</span></div></li>
+        <li data-n="5"><div class="caja dep"><span class="tag">ADR-012</span><span class="qn">El cargo declarado figura en las bases</span><span class="quien">Exige el núcleo de especialidad completo; las funciones son segunda puerta</span></div></li>
+        <li data-n="6"><div class="caja cot"><span class="tag">T-005</span><span class="qn">Inicio del profesional ≥ firma del contrato</span><span class="quien">Si el certificado declara una fecha anterior, está mal · <b>necesita T-004</b></span></div></li>
+        <li data-n="7"><div class="caja cot"><span class="tag">T-005</span><span class="qn">Término ≤ aprobación del expediente</span><span class="quien">No se puede haber trabajado después de aprobado · <b>necesita T-004</b></span></div></li>
+        <li data-n="8"><div class="caja ok"><span class="tag">ALT-04</span><span class="qn">La empresa emisora ya existía</span><span class="quien">SUNAT · fecha de constitución vs inicio de la experiencia</span></div></li>
+        <li data-n="9"><div class="caja dep"><span class="tag">T-007</span><span class="qn">¿Estaba HABIDO al emitir y durante la obra?</span><span class="quien">SUNAT · cobertura del periodo completo + cuadro histórico</span></div></li>
+        <li data-n="10"><div class="caja no"><span class="tag">descartado</span><span class="qn">El firmante es el representante legal</span><span class="quien">Quien firma una constancia casi nunca lo es → falsos positivos en masa</span></div></li>
+      </ol>
+      <div class="salida">Veredicto + alertas → Excel y panel</div>
+    </div>
+
+    <!-- ============== B · PÚBLICA ============== -->
+    <div class="via B">
+      <span class="etiqueta">CAMINO B</span><span class="sello pub">PÚBLICA</span>
+      <h3>Supervisión o ejecución de obra · obra pública</h3>
+      <p class="cuando">El certificado acredita haber supervisado o ejecutado una obra. Es el camino original del sistema, el más maduro.</p>
+      <ol class="pasos">
+        <li data-n="1"><div class="caja dep"><span class="tag">construido</span><span class="qn">Ubicar el CUI del proyecto</span><span class="quien">Base local del MEF + veto por departamento contradictorio (ADR-013)</span></div></li>
+        <li data-n="2"><div class="caja cot"><span class="tag">T-004</span><span class="qn">Bajar contrato de supervisión + bases</span><span class="quien">SEACE por datos abiertos — sonda ✔ GO, falta integrar</span></div></li>
+        <li data-n="3"><div class="caja dep"><span class="tag">ADR-012</span><span class="qn">El cargo declarado figura en las bases</span><span class="quien">Exige el núcleo de especialidad completo; las funciones son segunda puerta</span></div></li>
+        <li data-n="4"><div class="caja ok"><span class="tag">ALT-04</span><span class="qn">La empresa emisora ya existía</span><span class="quien">SUNAT · fecha de constitución vs inicio de la experiencia</span></div></li>
+        <li data-n="5"><div class="caja dep"><span class="tag">T-007</span><span class="qn">¿Estaba HABIDO al emitir y durante la obra?</span><span class="quien">SUNAT · cobertura del periodo completo + cuadro histórico</span></div></li>
+        <li data-n="6"><div class="caja no"><span class="tag">descartado</span><span class="qn">El firmante es el representante legal</span><span class="quien">Quien firma una constancia casi nunca lo es → falsos positivos en masa</span></div></li>
+        <li data-n="7"><div class="caja ok"><span class="tag">producción</span><span class="qn">Verificar la ejecución en InfoObras</span><span class="quien">Ficha, valorizaciones, paralizaciones, días efectivos y documentos al ZIP</span></div></li>
+        <li data-n="8"><div class="caja cot"><span class="tag">T-006</span><span class="qn">Si es de salud: ¿el establecimiento existe?</span><span class="quien">RENIPRESS — sonda ✔ GO, falta integrar</span></div></li>
+      </ol>
+      <div class="salida">Veredicto + alertas → Excel y panel</div>
+    </div>
+
+    <!-- ============== A · PRIVADA ============== -->
+    <div class="via A">
+      <span class="etiqueta">CAMINO A</span><span class="sello priv">PRIVADA</span>
+      <h3>Expediente técnico o estudio · obra privada</h3>
+      <p class="cuando">Sin CUI no hay MEF ni SEACE. La única fuente estatal que queda es SUNAT — 2 verificaciones activas.</p>
+      <ol class="pasos">
+        <li data-n="1"><div class="caja ok"><span class="tag">ALT-04</span><span class="qn">La empresa emisora ya existía</span><span class="quien">SUNAT · fecha de constitución vs inicio de la experiencia</span></div></li>
+        <li data-n="2"><div class="caja dep"><span class="tag">T-007</span><span class="qn">¿Estaba HABIDO al emitir y durante la obra?</span><span class="quien">SUNAT · cobertura del periodo completo + cuadro histórico</span></div></li>
+        <li data-n="3"><div class="caja no"><span class="tag">descartado</span><span class="qn">El firmante es el representante legal</span><span class="quien">Quien firma una constancia casi nunca lo es → falsos positivos en masa</span></div></li>
+      </ol>
+      <div class="salida">Lo no verificable → «Por confirmar»</div>
+      <p class="aviso q">
+        <b>Hueco del flujograma:</b> el Excel pide RENIPRESS solo en el bloque de obra, no acá.
+        Pero un expediente técnico de una clínica privada tiene exactamente el mismo problema de
+        existencia que la obra. <b>Decisión pendiente</b>: ¿se extiende T-006 a este cuadrante?
+      </p>
+    </div>
+
+    <!-- ============== B · PRIVADA ============== -->
+    <div class="via B">
+      <span class="etiqueta">CAMINO B</span><span class="sello priv">PRIVADA</span>
+      <h3>Supervisión o ejecución de obra · obra privada</h3>
+      <p class="cuando">No aparece en InfoObras ni tiene CUI. SUNAT, más RENIPRESS si es de salud — 3 verificaciones activas.</p>
+      <ol class="pasos">
+        <li data-n="1"><div class="caja ok"><span class="tag">ALT-04</span><span class="qn">La empresa emisora ya existía</span><span class="quien">SUNAT · fecha de constitución vs inicio de la experiencia</span></div></li>
+        <li data-n="2"><div class="caja dep"><span class="tag">T-007</span><span class="qn">¿Estaba HABIDO al emitir y durante la obra?</span><span class="quien">SUNAT · cobertura del periodo completo + cuadro histórico</span></div></li>
+        <li data-n="3"><div class="caja no"><span class="tag">descartado</span><span class="qn">El firmante es el representante legal</span><span class="quien">Quien firma una constancia casi nunca lo es → falsos positivos en masa</span></div></li>
+        <li data-n="4"><div class="caja cot"><span class="tag">T-006</span><span class="qn">¿Esa clínica existe o no?</span><span class="quien">RENIPRESS — sonda ✔ GO, falta integrar</span></div></li>
+      </ol>
+      <div class="salida">Lo no verificable → «Por confirmar»</div>
+      <p class="aviso q">
+        <b>El cuadrante más frágil:</b> tres verificaciones, y ninguna mira la obra en sí — solo a quién
+        firmó el certificado. Que una obra privada «pase» significa que no se encontró nada en contra,
+        no que se haya comprobado que existió.
+      </p>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============ TABLERO ============ -->
+<section>
+  <h2>Tablero de control</h2>
+  <p class="h2sub">Cuántas verificaciones tiene cada camino y en qué estado están.</p>
+  <div class="tabla-wrap">
+  <table>
+    <tr>
+      <th>Camino</th><th>Verificaciones activas</th>
+      <th>En producción</th><th>Construido, sin desplegar</th><th>Por construir</th><th>Descartado</th>
+      <th>Qué falta, en concreto</th>
+    </tr>
+    <tr>
+      <td><b>A · pública</b></td><td class="c">9</td>
+      <td class="c"><span class="n ok">1</span></td><td class="c"><span class="n dep">5</span></td>
+      <td class="c"><span class="n cot">3</span></td><td class="c"><span class="n no">1</span></td>
+      <td>SEACE (T-004) y, encadenados a él, los dos cruces de fechas (T-005)</td>
+    </tr>
+    <tr>
+      <td><b>B · pública</b></td><td class="c">7</td>
+      <td class="c"><span class="n ok">2</span></td><td class="c"><span class="n dep">3</span></td>
+      <td class="c"><span class="n cot">2</span></td><td class="c"><span class="n no">1</span></td>
+      <td>SEACE (T-004) y RENIPRESS para obras de salud (T-006)</td>
+    </tr>
+    <tr>
+      <td><b>A · privada</b></td><td class="c">2</td>
+      <td class="c"><span class="n ok">1</span></td><td class="c"><span class="n dep">1</span></td>
+      <td class="c"><span class="n z">0</span></td><td class="c"><span class="n no">1</span></td>
+      <td>Nada pedido — pero queda abierta la pregunta de RENIPRESS</td>
+    </tr>
+    <tr>
+      <td><b>B · privada</b></td><td class="c">3</td>
+      <td class="c"><span class="n ok">1</span></td><td class="c"><span class="n dep">1</span></td>
+      <td class="c"><span class="n cot">1</span></td><td class="c"><span class="n no">1</span></td>
+      <td>RENIPRESS (T-006)</td>
+    </tr>
+  </table>
+  </div>
+
+  <p class="aviso i">
+    <b>Lo que salta a la vista:</b> las tres piezas azules —CUI, cargo↔bases y HABIDO— aparecen en
+    <b>los cuatro caminos</b>. Un solo despliegue mueve la aguja en todos a la vez. Y las tres piezas
+    amarillas se reducen a <b>dos módulos</b>: T-004 (que además desbloquea T-005) y T-006.
+  </p>
+  <p class="aviso q">
+    <b>Asimetría heredada del flujograma:</b> los cruces de fechas (inicio ≥ firma del contrato,
+    término ≤ aprobación) solo se piden para expedientes. En obra, el Excel pide únicamente el cargo.
+    Técnicamente la misma regla aplicaría a B con el contrato de supervisión. <b>Confirmar con Manuel</b>
+    si fue una omisión o una decisión.
+  </p>
+</section>
+
+<p class="nota">
+  Fuente: Hoja1 del Excel «para RAFAEL» (Ing. Manuel Echandía), reorganizada por camino.
+  Documentos hermanos: <b>flujos-verificacion-experiencias.html</b> (el mismo flujo, ordenado como el Excel) ·
+  <b>arquitectura-sistema.html</b> (componentes) · <b>plan-desarrollo-extras.html</b> (cotización).
+</p>
+
+</body>
+</html>

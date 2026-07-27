@@ -102,6 +102,17 @@ Para cada experiencia, cruzándola con los requisitos del cargo en `bases`:
 ### Experiencia del postor (Parte 2)
 10. Por contrato: **% por objeto**, **le corresponde (S/)**, **¿acredita?**, y si
     **el postor cumple 3.4** (suma vs cuantía requerida) — con razón literal.
+
+    > Estos van en `postor_eval.experiencia_postor[]`, **con el mismo `n` que te
+    > llegó** — el consolidador los pega por esa llave, no por posición. Uno por
+    > contrato: `{ n, pct_objeto, le_corresponde, tipo_solicitado, observaciones }`.
+    > Sin `n`, la fila se descarta y esas columnas del Excel salen vacías (pasó en
+    > Soritor: 4 columnas de la PARTE 2 en blanco). No repitas acá los hechos que
+    > ya trae el mapa (emisor, contrato, proyecto, monto, folio).
+    >
+    > ⚠ `pct_objeto` es una **fracción numérica entre 0 y 1** (100% → `1`,
+    > 50% → `0.5`). El contrato la valida como número: la cadena `"100%"` hace
+    > fallar el espejo entero. `le_corresponde` es un monto en soles, sin símbolo.
     **Oferta económica**: compara el monto ofertado contra el `limite_inferior`
     (90% de la cuantía) que entregó `agent-bases`; si la oferta < límite inferior,
     **descalificación económica** (márcala en rojo, con razón literal).
@@ -197,7 +208,15 @@ los campos de juicio dentro de cada `experiencia` y `profesional`, y
              "cargo_valido_emitir": "SÍ (ASUMIDO — …)", "observaciones": null } ],
     "2": [ { "n": 1, "…": "…" } ]
   },
-  "postor_eval": { "…": "…" },
+  "postor_eval": {
+    "experiencia_postor": [
+      { "n": 1, "pct_objeto": 1, "le_corresponde": 8466709.55,
+        "tipo_solicitado": "SÍ — supervisión de edificaciones (…)", "observaciones": null }
+    ],
+    "experiencia_postor_total": { "le_corresponde": 8466709.55, "acredita": "…" },
+    "postor_cumple": "SÍ — acredita S/… frente al requisito de S/… (…)",
+    "oferta_economica": { "…": "…" }
+  },
   "resumen_evaluacion": { "factores": [], "puntaje_total": 0, "nota": "…" },
   "observaciones_claude": []
 }

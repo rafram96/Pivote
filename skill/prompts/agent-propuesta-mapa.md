@@ -75,9 +75,20 @@ Es el bloque grande y **manual** (req. 3.4; el backend no lo recomputa). Devuelv
 - `experiencia_postor_folios`: el **rango de folios** de toda la sección, para que
   quede acotada y nadie la lea a fondo.
 - `experiencia_postor[]`: la lista de contratos **al nivel del cuadro/resumen del
-  postor** (no de cada constancia) — por contrato `{ emisor, monto,
-  tipo_acreditacion, folio, acredita }` (a qué consorciado pertenece): los
-  **hechos** que el postor ya tabula, sin abrir cada constancia ni decidir si cumple.
+  postor** (no de cada constancia) — por contrato
+  `{ emisor, contrato, proyecto, monto, tipo_acreditacion, folio, acredita }`:
+  los **hechos** que el postor ya tabula, sin abrir cada constancia ni decidir si
+  cumple.
+
+  > ⚠ **Cada campo lleva UNA cosa** — no los mezcles (pasó en Soritor: el N° de
+  > contrato terminó en `tipo_acreditacion` y el tipo se corrió a `acredita`,
+  > dejando dos columnas del Excel vacías):
+  > - `contrato` = el **identificador** del contrato/OS/factura: `"Contrato N° 003-2020-GRL-GGR-GRI"`.
+  > - `proyecto` = el **nombre de la obra o servicio** contratado.
+  > - `tipo_acreditacion` = con **qué documento** se acredita: `"Contrato + constancia"`.
+  > - `acredita` = a **qué consorciado** le corresponde: `"consorcio 40%"`.
+  >
+  > Si un dato no está en el cuadro, déjalo en `null` — no lo rellenes con otro.
 
 Si no hay cuadro-resumen y toca listar desde las constancias, hazlo **somero**
 (emisor + monto + folio de la 1ª página de cada una), no transcripción completa.
@@ -126,7 +137,7 @@ Guárdala como **`roster_bundles.json`**. El consolidador (Paso 4) lee `roster`
     "oferta_economica": { "cuantia": 18015551.75, "limite_inferior": 16213996.58, "propuesta": 16213996.58, "detalle": "literal si aparece en la propuesta" },
     "experiencia_postor_folios": "32-1097",
     "experiencia_postor": [
-      { "emisor": "MINSA/PRONIS", "monto": 21166773.88, "tipo_acreditacion": "Contrato + constancia", "folio": "32-90", "acredita": "consorcio 40% — criterio del Comité" }
+      { "emisor": "MINSA/PRONIS", "contrato": "Contrato N° 045-2021-MINSA", "proyecto": "Supervisión del Hospital de Andahuaylas", "monto": 21166773.88, "tipo_acreditacion": "Contrato + constancia", "folio": "32-90", "acredita": "consorcio 40% — criterio del Comité" }
     ],
     "consorciados": [],
     "isos_certificaciones": [

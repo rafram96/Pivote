@@ -1623,6 +1623,23 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
     return paral, cuis, fichas, sunat
 
 
+def inyectar_veredicto_backend(espejo: dict, enriquecimiento: Optional[dict]) -> None:
+    """Copia `cumple_backend` del enriquecimiento a cada profesional del espejo.
+
+    El espejo se persiste UNA vez (al crear el job) y no se vuelve a guardar; el
+    enriquecimiento sí se persiste tras cada etapa. En la corrida en vivo la etapa
+    REGLAS ya deja el veredicto en el espejo en memoria, pero al REGENERAR el Excel
+    desde disco ese espejo viene sin él — y la hoja resumen volvería a mostrar solo
+    el veredicto del LLM, que es justo el defecto de #51. Modifica `espejo` in situ.
+    """
+    for p in (espejo or {}).get("profesionales", []):
+        d = (enriquecimiento or {}).get(f"prof:{p.get('n_prof')}") or {}
+        if d.get("cumple_backend"):
+            p["cumple_backend"] = d["cumple_backend"]
+            p["dias_efectivos_backend"] = d.get("dias_efectivos")
+            p["minimo_exigido_backend"] = d.get("minimo_texto")
+
+
 def regenerar_excel_final(espejo: dict, enriquecimiento: Optional[dict],
                           salida: Path, revisiones: Optional[dict] = None,
                           certificados: Optional[dict] = None) -> Path:
@@ -1634,6 +1651,7 @@ def regenerar_excel_final(espejo: dict, enriquecimiento: Optional[dict],
     pasaban en absoluto, así que regenerar arrancaba TODAS las imágenes embebidas
     (constancias, TDR, Anexo 16) del entregable — silenciosamente."""
     paral, cuis, fichas, sunat = desempaquetar_enriquecimiento(enriquecimiento)
+    inyectar_veredicto_backend(espejo, enriquecimiento)
     salida = Path(salida)
     if certificados is None:
         certificados = _mapear_dir_certs(salida.parent / "certs")

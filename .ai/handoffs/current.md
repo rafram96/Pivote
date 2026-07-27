@@ -1,8 +1,28 @@
 # Handoff — punto de continuación
 
-> Actualizado: **2026-07-23**. Si eres un agente nuevo: lee esto completo,
+> Actualizado: **2026-07-27**. Si eres un agente nuevo: lee esto completo,
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
+
+## Último handoff (2026-07-27) — gobierno y saneamiento
+
+Detalle completo en [`2026-07-27_claude.md`](2026-07-27_claude.md). Sesión sin
+código de producto; un commit (`27c8cde`). Lo que hay que saber antes de tocar nada:
+
+1. **La skill instalada ahora es un junction a `Pivote/skill/`**, no una copia.
+   Llevaba 13 días corriendo una versión del 14-jul **sin el escudo de integridad**
+   (podía subir corridas incompletas). ⛔ **Nunca borrar ese enlace con `rm -rf`**
+   — se lleva el destino. Ver `conventions/coding.md`.
+2. **El repo es PÚBLICO.** Antes de commitear un documento, revisar si trae precios,
+   cuentas por cobrar o la IP del servidor. `docs/comercial/` está gitignored por eso.
+3. **Antes de proponer un diseño, buscar en `decisions/`.** Hoy se abrió una issue
+   re-derivando ADR-010, que ya estaba decidido.
+4. **T-008 ya no promete Postgres/Hot-Cold/pg_trgm** en el material comercial —
+   no existe en el código. El épico ETL #12-#25 es trabajo pendiente, no hecho.
+5. ⚠ **`ai-cli` no se puede usar en este nivel**: `counters.json` está en 0 con
+   ADR-013 existiendo → `ai-cli new` colisiona. Y `validate` da 67 errores
+   preexistentes (frontmatter faltante en los 13 ADR y en 3 índices de `tasks/`).
+   El nivel `InfoObras/.ai` valida limpio.
 
 ## Nota (2026-07-26) — fixtures preparados para probar el backend nuevo
 
