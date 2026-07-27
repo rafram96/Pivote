@@ -365,7 +365,12 @@ def _columnas_en_blanco(evaluados: list[dict]) -> list[Hallazgo]:
 
     if len(exps) >= MIN_FILAS_COBERTURA:
         for campo, glosa in CAMPOS_EXP.items():
-            if any(_lleno(e.get(campo)) for e in exps):
+            # `_entregado`, no `_lleno`: el backend también escribe en estas
+            # columnas (`anotar_cargo_nucleo` rellena `cargo_bases_valido`), y una
+            # sola celda suya daría la columna por cubierta — el escudo se cegaría
+            # con lo que él mismo escribió. Medido: con `_lleno`, vaciar esa
+            # columna en `ffbda008a346` pasa de `revisar` a `confiable`.
+            if any(_entregado(e, campo) for e in exps):
                 continue
             out.append(Hallazgo(
                 "COBERTURA_NULA", ALERTA,
