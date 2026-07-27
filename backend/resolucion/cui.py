@@ -379,6 +379,21 @@ def _deptos_en(texto: str) -> set[str]:
     return {d for d in DEPTOS if re.search(rf"\b{d}\b", n)}
 
 
+def _segmentos_ubicacion(texto: str) -> set[str]:
+    """Segmentos de un campo de ubicación, en limpio.
+
+    Parte por los separadores del texto ORIGINAL: `norm()` borra los guiones (no
+    las comas), así que partir después dejaría "Chimbote – Santa – Áncash" como un
+    único término y perdería el departamento del final."""
+    out: set[str] = set()
+    for p in re.split(r"[,;|/()\-–—]+", str(texto or "")):
+        p = _RE_ROTULO_GEO.sub("", norm(p).strip()).strip(" .-")
+        p = re.sub(r"^DE\s+", "", p).strip()
+        if p:
+            out.add(p)
+    return out
+
+
 def _terminos_geo(texto: str) -> list[str]:
     """Términos de ubicación (limpios de rótulo) en el orden del texto, partiendo
     por separadores geográficos (coma, guion, barra, paréntesis)."""
@@ -445,8 +460,14 @@ def ubigeo_cert(exp: dict) -> dict:
     prov |= _provincia_desde_cola(terms_proj)
     prov |= _provincia_desde_cola(terms_ubic)
     depto = ubicacion(proyecto) | _deptos_en(ubic) | _deptos_en(ent)
-    # departamento con intención geográfica: campo `ubicacion` + rótulo explícito
-    depto_decl = _deptos_en(ubic)
+    # Departamento con intención geográfica. En `ubicacion` NO basta que el nombre
+    # aparezca: tiene que ser un SEGMENTO COMPLETO (separado por comas/guiones y ya
+    # sin rótulo). Los establecimientos y urbanizaciones se llaman como
+    # departamentos —"San Martín de Porres" (distrito de Lima), "Urbanización La
+    # Libertad" (Chiclayo)— y tomar ese topónimo como el departamento de la obra
+    # vetaría al candidato CORRECTO: el falso negativo que ADR-005 temía. Fuera de
+    # `ubicacion` solo cuenta el rótulo explícito ("departamento/región de X").
+    depto_decl = {d for d in DEPTOS if d in _segmentos_ubicacion(ubic)}
     for m in _RE_DEPTO_KW.findall(texto):
         depto_decl |= _deptos_en(m)
     loc = set(prov) | set(dist) | set(terms_proj) | set(terms_ubic) | set(depto)
@@ -502,6 +523,24 @@ def _loc_eq(a: str, b: str) -> bool:
     return len(corto) >= 4 and re.search(rf"\b{re.escape(corto)}\b", largo) is not None
 
 
+# Centinelas de "sin dato" del Banco de Inversiones: una inversión multi-región
+# no declara UN departamento, declara que no aplica. Tratar `-MUL.DEP-` como si
+# fuera un departamento real convierte el veto en un veto POR AUSENCIA, que es
+# justo lo que ADR-005 prohíbe (medido: 481 filas de la base local, casi todas de
+# ministerios y programas nacionales).
+_RE_MEF_SIN_DATO = re.compile(r"^(TODOS|MUL\s*DEP\w*|MULTI\w*|NO\s+APLICA|SIN\s+\w+)$")
+
+
+def _sin_dato_mef(val: str) -> bool:
+    """True si el valor de ubicación de la ficha MEF es un centinela de 'no aplica'
+    (multi-departamental / todos), no una ubicación real.
+
+    `norm` NO limpia la puntuación de estos valores (llegan como `-MUL.DEP-`), así
+    que aquí se reduce a letras y espacios antes de comparar."""
+    limpio = re.sub(r"[^A-Z0-9]+", " ", norm(val or "").upper()).strip()
+    return bool(_RE_MEF_SIN_DATO.match(limpio))
+
+
 def _ubigeo_contra(sig: dict, ficha: Optional[dict]) -> tuple[bool, bool, bool]:
     """(prov_contra, dist_contra, depto_contra) del certificado vs la ficha MEF de
     un candidato. Cada contradicción exige AMBAS partes declaradas y que el valor
@@ -520,7 +559,7 @@ def _ubigeo_contra(sig: dict, ficha: Optional[dict]) -> tuple[bool, bool, bool]:
     depto_mef = norm(ficha.get("dpto") or "")
 
     def _contra(cert_set: set[str], val_mef: str) -> bool:
-        if not cert_set or not val_mef:
+        if not cert_set or not val_mef or _sin_dato_mef(val_mef):
             return False
         if any(_loc_eq(c, val_mef) for c in cert_set):
             return False               # el MEF coincide con lo declarado
@@ -1314,13 +1353,23 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
     return ranked, vetados
 
 
-def _corroborado(c: dict) -> bool:
+def _corroborado(c: dict, exp: Optional[dict] = None) -> bool:
     """¿Alguna señal DURA de identidad respalda al candidato, más allá del parecido
     de nombre? RUC del emisor en la obra, N° de institución compartido, entidad
     contratante ≈ ficha MEF, o coincidencia positiva de provincia/distrito.
-    Es el conjunto del candado MEF (F7) más el ubigeo positivo de ADR-013."""
-    return bool(c.get("ruc_match") or c.get("num_match")
-                or c.get("ent_match") or c.get("geo_match"))
+    Es el conjunto del candado MEF (F7) más el ubigeo positivo de ADR-013.
+
+    `ent_match` NO corrobora cuando la entidad del certificado es ella misma
+    genérica (ESSALUD, MINSA, PRONIED…): esas entidades ejecutan cientos de
+    inversiones, así que casan con cualquier candidato del sector y la señal es
+    VACÍA justo donde el nombre también lo es — el caso «HOSPITAL DE ESSALUD»
+    contratado por «ESSALUD» se corroboraría a sí mismo."""
+    if c.get("ruc_match") or c.get("num_match") or c.get("geo_match"):
+        return True
+    if not c.get("ent_match"):
+        return False
+    ent = (exp or {}).get("entidad_contratante") or ""
+    return bool(tokens_distintivos(ent)) if ent else True
 
 
 def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict:
@@ -1473,7 +1522,7 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
     # 3 de las 909 resueltas (0.20% del corpus); exigir ≥2 se llevaría el 25.5% de
     # los nombres y el 11.5% del corpus resuelto — por encima del techo aceptable,
     # sería un candado que manda a revisión trabajo bien hecho.
-    if best and not tokens_distintivos(proyecto) and not _corroborado(best):
+    if best and not tokens_distintivos(proyecto) and not _corroborado(best, exp):
         _traza().ev("candado_nombre_generico", cui=best["cui"],
                     score=best["score"], proyecto=proyecto[:120])
         return {"estado": "revision", "cui": None, "via": "NOMBRE",

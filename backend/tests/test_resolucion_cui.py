@@ -649,12 +649,31 @@ def test_nombre_generico_con_ubigeo_coincidente_si_resuelve():
     assert r["estado"] == "resuelto" and r["cui"] == "2405647", r
 
 
-def test_nombre_generico_con_entidad_que_calza_si_resuelve():
+def test_nombre_generico_con_entidad_TAMBIEN_generica_no_se_salva():
+    """`ent_match` NO corrobora si la entidad del certificado es ella misma
+    genérica. «SEGURO SOCIAL DE SALUD» es el nombre formal de EsSalud: casa con
+    CUALQUIER inversión de EsSalud del país, así que "confirma" el candidato con
+    la misma palabra que ya hacía genérico al nombre. Corroborarse a sí mismo no
+    es corroborar — es el caso exacto del ADR-013 (Hospital EsSalud de Tarapoto
+    contra una tomografía en Madre de Dios)."""
     exp = {"proyecto": "HOSPITAL DE ESSALUD",
            "entidad_contratante": "SEGURO SOCIAL DE SALUD",
            "fecha_inicial": "2012-10-26"}
     r = resolver(exp, _ConsultaFija([_OBRA_GENERICA]),
                  base=_BaseFichas({"2405647": _FICHA_GENERICA}))
+    assert r["estado"] == "revision" and r["cui"] is None, r
+    assert any(c.get("cui") == "2405647" for c in r["candidatos"]), r
+
+
+def test_nombre_generico_con_entidad_PROPIA_si_resuelve():
+    """La otra cara: una entidad con término propio (una municipalidad concreta)
+    SÍ es señal dura — identifica a un contratante entre miles, no a un sector."""
+    ficha = {**_FICHA_GENERICA, "entidad": "MUNICIPALIDAD DISTRITAL DE PERENE"}
+    exp = {"proyecto": "HOSPITAL DE ESSALUD",
+           "entidad_contratante": "MUNICIPALIDAD DISTRITAL DE PERENE",
+           "fecha_inicial": "2012-10-26"}
+    r = resolver(exp, _ConsultaFija([_OBRA_GENERICA]),
+                 base=_BaseFichas({"2405647": ficha}))
     assert r["estado"] == "resuelto" and r["cui"] == "2405647", r
 
 
