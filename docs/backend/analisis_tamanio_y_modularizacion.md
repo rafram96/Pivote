@@ -368,7 +368,7 @@ Los PRs 0-4 (5.25 d) son autónomos y entregan la mayor parte del valor. Si hay 
 3. **Su densidad no lo exige.** ~80 funciones de ~22 líneas de media. Es un archivo grande, no un archivo enredado. El beneficio marginal de partirlo es el menor de los seis.
 4. **La v1 subestimaba el reparto.** El grueso está en `_compuertas` (239 líneas), `_rankear` (149) y el bloque geográfico (~280). `cliente_infoobras.py`, en cambio, serían ~95 líneas: un módulo por una clase.
 
-**Condición de reingreso**: se abre `T-REFACTOR-005` cuando (a) la circularidad del solape esté resuelta o formalmente descartada, y (b) `golden_cui_baseline.json` lleve dos semanas sin moverse. Mientras tanto queda como hallazgo registrado, no como trabajo pendiente.
+**Condición de reingreso** *(actualizada 2026-07-28 — el corpus de la golden v3 se perdió irremediablemente, ver `handoffs/current.md`)*: se abre `T-REFACTOR-005` cuando (a) la circularidad del solape esté resuelta o formalmente descartada, (b) **exista la golden v4** (corpus reconstruido con `exportar_verdades_panel.py` + caché + baseline regeneradas) y (c) esa baseline lleve dos semanas sin moverse. Sin instrumento de regresión, refactorizar el núcleo de decisión es volar a ciegas — la condición se ENDURECE, no se relaja.
 
 ---
 

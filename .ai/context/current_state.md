@@ -1,6 +1,25 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-07-27** · rama de trabajo: `demo`
+> Última actualización: **2026-07-28** · rama de trabajo: **`fix/identidad-lircay`** (sobre `demo`, sin push)
+
+## Lo del 2026-07-28 (resumen — detalle en `handoffs/2026-07-28_claude.md`)
+
+- **9 issues resueltas en la rama** `fix/identidad-lircay`: #58/#59/#60/#61
+  (identidad: DEDUP exige emisor, tope al CUI citado, veto de fase ET,
+  procedencia del CUI en el Excel — diagnóstico con certificados FÍSICOS del
+  Tomo II de Lircay), #52/#53 completadas (parser de oferta conservador +
+  candado `OFERTA_INCOMPLETA` + prompt multi-tomo) y #47 implementada
+  (verificación folio↔emisor en la skill + `folio_verificado` en el contrato +
+  el Excel no embebe sin confirmar). Suite: **637 passed**.
+- **⚠ LA GOLDEN SE PERDIÓ** (corpus v3 + caché + baseline, irreversible).
+  Sustituto: abstención pura + replay (`replay_enriquecimiento.py`, corrido:
+  152 exps, solo cambian los 3 casos del ing.) + plan corpus v4
+  (`exportar_verdades_panel.py` en el server). Ver nota en `handoffs/current.md`.
+- **ETL re-planificado** "documento primero": 14→5 issues; bug confirmado
+  #19 (12,102 entidades perdidas por `NOMBRE_*` vs `NOM_*`). Doc ancla:
+  `docs/backend/modulo_etl_mef.md`.
+- **Corrida viva de divino_nino EN CURSO** (Tesseract local = Camino A activo
+  por primera vez). Al terminar: validar el tren + push/PR + redeploy.
 
 ## Lo del 2026-07-27 (documentación, entorno, alcance y un fix de veredicto)
 
