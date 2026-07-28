@@ -751,3 +751,36 @@ def test_dedup_requiere_coincidencia_de_emisor_acepta_mismo():
     assert res[(1, 2)]["estado"] == "resuelto"
     assert res[(1, 2)]["via"] == "DEDUP"
     assert res[(1, 2)]["cui"] == "222222"
+
+
+def test_cui_citado_que_contradice_nombre_depto_y_rubro_cae_a_revision():
+    """Fix #59 (Caso Navarro, P9-E3): Un CUI citado que en InfoObras apunta a una obra que
+    contradice NOMBRE (0 tokens en común), DEPARTAMENTO y RUBRO simultáneamente cae a revisión."""
+    # Certificado dice Salud en Pasco: "C.S. Yanahuanca"
+    exp = {"proyecto": "CENTRO DE SALUD YANAHUANCA - PASCO", "cui": "49922",
+           "ubicacion": "Distrito de Yanahuanca, Provincia de Daniel Alcides Carrión, Departamento de Pasco"}
+    # El CUI 49922 en InfoObras resulta ser veredas en Ferreñafe (Lambayeque)
+    obra_veredas = {
+        "codUniqInv": "49922", "codigoObra": 49922,
+        "nombrObra": "CONSTRUCCION DE VEREDAS Y SARDINELES EN FERREÑAFE",
+        "nombrDepartamento": "LAMBAYEQUE"
+    }
+    r = resolver(exp, _ConsultaFija([obra_veredas]), base=None)
+    assert r["estado"] == "revision"
+    assert r["cui"] is None
+    assert "contradice el nombre, el departamento y el rubro" in r["decision"]
+
+
+def test_cui_citado_coar_no_se_demota_por_ubigeo():
+    """Regresión #59 (Caso COAR): Si el CUI citado coincide y mantiene afinidad de nombre
+    o rubro, se resuelve aunque el departamento difiera (obras multiregionales COAR)."""
+    exp = {"proyecto": "MEJORAMIENTO DEL SERVICIO EDUCATIVO COAR CUSCO", "cui": "2429909",
+           "ubicacion": "Departamento de Cusco"}
+    obra_coar = {
+        "codUniqInv": "2429909", "codigoObra": 2429909,
+        "nombrObra": "CREACION DEL SERVICIO EDUCATIVO ESPECIALIZADO COAR EN PASCO",
+        "nombrDepartamento": "PASCO"
+    }
+    r = resolver(exp, _ConsultaFija([obra_coar]), base=None)
+    assert r["estado"] == "resuelto"
+    assert r["cui"] == "2429909"

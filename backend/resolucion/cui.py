@@ -1050,7 +1050,7 @@ def _paso_codigo_citado(exp: dict, consulta: Consulta, base=None) -> Optional[di
     # Yanahuanca/Pasco → veredas Ferreñafe, job 371fa5a1e704 exp 9:3). El caso
     # COAR (F8, abajo) sobrevive: allí hay afinidad de nombre (n_hit ≥ 1) o el
     # rubro no se contradice — la democión exige las TRES señales en contra.
-    deptos_cert = ubicacion(proyecto)
+    deptos_cert = ubicacion(proyecto) | ubicacion(exp.get("ubicacion") or "")
     dep_obra = norm(o.get("nombrDepartamento") or "")
     contra_dep = bool(deptos_cert) and bool(dep_obra) and dep_obra not in deptos_cert
     contra_rubro = _rubro_contradice(rubros_de(proyecto), o.get("nombrObra") or "")
