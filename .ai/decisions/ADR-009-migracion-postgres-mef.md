@@ -6,16 +6,35 @@
 
 ## Contexto
 
-*Pendiente de documentar* — por qué el índice en memoria actual
-(`sys.intern` + índice invertido, ~370-402 MB, ver `architecture/backend.md`)
-ya no es suficiente o qué motiva el cambio (multi-worker, arranque, consultas
-concurrentes…). Completar con evidencia, no con proyecciones.
+> **Encuadre corregido por el desarrollador (2026-07-28)** — reemplaza la
+> premisa original de este ADR. Detalle en `docs/backend/modulo_etl_mef.md` §1.
+
+1. **La RAM NO es la motivación.** Hay memoria de sobra; los ~370-402 MB del
+   índice en memoria **no motivan nada** y ningún argumento debe partir de ahí.
+2. **La motivación es de CAPACIDAD**: hoy la ingesta descarta ~58 de los 68
+   campos del MEF y lo descartado no es recuperable sin re-descargar ~480 MB y
+   reprocesar. El cold path JSONB (issue #18) existe para que ningún dato se
+   pierda. **PG queda CONFIRMADO como necesario** para eso.
+3. **Esto NO es una migración del alcance de ADR-002, es un MÓDULO NUEVO,
+   completo y COTIZABLE** (épica #12). ADR-002 cubre lo *mínimo* para que el
+   resolver tenga candidatos sin red, y **sigue vigente en su alcance: no se
+   reabre ni se supersede**. Son alcances distintos, no posturas enfrentadas —
+   lo construido bajo ADR-002 se conserva y el módulo nuevo lo absorbe o
+   convive con él.
+
+*Pendiente de documentar en sesión dedicada*: la decisión de convivencia (ver
+abajo) y las consecuencias.
 
 ## Decisión
 
-Se migrará a PostgreSQL. Postgres pasa a ser una dependencia **OBLIGATORIA**
-del backend, reemplazando el rol actual de `RepositorioConRespaldo`
-(hoy opcional / write-through best-effort).
+Se construye la capa de persistencia PG del módulo ETL (#12).
+
+⚠ **PENDIENTE — no dar por decidido**: si Postgres pasa a dependencia
+**obligatoria** del backend, o si convive con el índice en memoria como camino
+de lectura rápido. **Como la RAM no es restricción, la convivencia es viable y
+probablemente preferible**: preserva la degradación limpia a «InfoObras-solo»
+que hoy existe cuando falta la base. La redacción original de este ADR daba por
+sentada la obligatoriedad apoyándose en la premisa de recursos, que era falsa.
 
 ## Puntos pendientes de definir antes de implementar
 

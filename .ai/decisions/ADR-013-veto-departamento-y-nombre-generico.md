@@ -1,7 +1,9 @@
 # ADR-013 · Veto de departamento contradictorio y candado de nombre genérico
 
-- Fecha: 2026-07-26 · Estado: **implementado, pendiente de validación golden**
-  (issue #46, puntos 3 y 4)
+- Fecha: 2026-07-26 · Estado: **implementado y validado con la golden ANCHA**
+  (26-jul: la golden estrecha era inerte para estos vetos — solo `proyecto`+`cui`;
+  se ensanchó con join contra el espejo, 277/277 casos enriquecidos, 0 degradados,
+  baseline promovido en `f56e97f`). Issue #46 cerrada 2026-07-28.
 - Precisa parcialmente: **ADR-005** (§3, "el departamento NO desempata homónimos")
 
 ## Contexto
