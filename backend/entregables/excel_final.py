@@ -1416,8 +1416,16 @@ def construir_hoja_profesional(
 
         # imagen del certificado presentado (Fase 2): la skill recortó sus folios a
         # un PDF chico (principal primero); aquí se renderiza y embebe.
+        # #47 · si la skill NO pudo confirmar que la página citada muestre al
+        # emisor (folio_verificado=False), NO se embebe: una imagen equivocada es
+        # el sustento que audita el Comité — peor que ninguna. None = legado.
         cert_pdf = certificados.get((n_prof, n_exp))
-        if cert_pdf:
+        if e.get("folio_verificado") is False:
+            banda(f"⚠ DOCUMENTO NO EMBEBIDO — no se pudo confirmar que el folio "
+                  f"{e.get('folio') or '—'} corresponda al emisor de esta "
+                  "experiencia (posible folio corrido) — verificar en la propuesta",
+                  F_AVISO, FILL_AVISO)
+        elif cert_pdf:
             embeber_cert(cert_pdf)
 
         separador()   # 2 filas amarillas (A:Z) cerrando la experiencia

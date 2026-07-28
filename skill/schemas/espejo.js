@@ -90,6 +90,9 @@ const ExperienciaProf = z.object({
   // El folio impreso del borde ≠ la página del PDF NO siempre → esto evita recortar
   // la hoja equivocada. `folio` queda para citar; `paginas_pdf` para el recorte.
   paginas_pdf: z.array(z.number().int().positive()).nullable().optional(),
+  // #47 · ¿la página citada MUESTRA al emisor? true = confirmado (o corregido);
+  // false = no confirmable → el backend NO embebe la imagen; null/ausente = legado.
+  folio_verificado: z.boolean().nullable().optional(),
   dias: monto, meses: monto, anios: monto,
   anterior_colegiatura: txt, cargo_ocupado: txt, cargo_bases_valido: txt,
   funciones_similares: txt, cert_antes_culminar: txt, incluye_covid: txt,

@@ -1218,3 +1218,24 @@ def test_excel_cui_rotulo_distingue_certificado_vs_sistema(tmp_path):
     assert "No consignado en el certificado — el sistema identificó el CUI 222222" in celdas
 
 
+
+
+def test_folio_no_verificado_no_embebe_y_avisa(tmp_path):
+    """#47: si la skill no pudo confirmar que la pagina citada muestre al emisor
+    (folio_verificado=False), el certificado NO se embebe y el aviso queda
+    visible — una imagen equivocada es el sustento que audita el Comite."""
+    import copy
+    espejo = copy.deepcopy(_ESPEJO_1EXP)
+    espejo["profesionales"][0]["experiencias"][0]["folio_verificado"] = False
+    espejo["profesionales"][0]["experiencias"][0]["folio"] = "358"
+    salida = generar_excel_final(espejo, tmp_path / "f47.xlsx")
+    t = _texto(_hoja_de(salida, 1, "JEFE"))
+    assert "DOCUMENTO NO EMBEBIDO" in t and "358" in t
+
+
+def test_folio_verificado_true_no_cambia_nada(tmp_path):
+    import copy
+    espejo = copy.deepcopy(_ESPEJO_1EXP)
+    espejo["profesionales"][0]["experiencias"][0]["folio_verificado"] = True
+    salida = generar_excel_final(espejo, tmp_path / "f47b.xlsx")
+    assert "DOCUMENTO NO EMBEBIDO" not in _texto(_hoja_de(salida, 1, "JEFE"))

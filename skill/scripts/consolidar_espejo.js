@@ -581,6 +581,10 @@ function consolidar(WS) {
         fecha_emision: fechaOk(pick(e.fecha_emision, e.fecha_emision_constancia)),
         folio: folio,
         paginas_pdf: pag.length ? pag : null,
+        // #47 · verificación folio↔emisor hecha por el agente (true/false);
+        // null = no reportada (legado). Booleano estricto: cualquier otra cosa
+        // se descarta — un "sí" en texto no es una verificación.
+        folio_verificado: typeof e.folio_verificado === "boolean" ? e.folio_verificado : null,
         dias: numify(j.dias),
         meses: numify(j.meses),
         anios: numify(j.anios),

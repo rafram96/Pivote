@@ -34,6 +34,22 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
    **folio impreso del borde ≠ la página del PDF** no siempre (puede haber desfase):
    acá pon la página REAL que lees, NO el folio, para que el recorte tome la hoja
    correcta. `folio` queda como el número impreso (para citar).
+
+   > ⚠ **VERIFICA el folio contra el emisor ANTES de citarlo** (#47 — tú eres el
+   > único que VE las páginas; el 99.7% son escaneos y el backend no puede leerlas):
+   > la página principal que cites en `paginas_pdf` debe **mostrar al emisor de esa
+   > experiencia** (membrete/nombre de `entidad_emisora`, o su RUC). Casos reales de
+   > folio corrido: Cáceres Nuñez citó 358 y su certificado estaba en 359 (el Excel
+   > embebió el documento de OTRA entidad); en Lircay dos experiencias salieron con
+   > los folios de sus vecinas y el backend heredó una obra equivocada por ese número.
+   > - ¿La página citada NO muestra al emisor? Mira las **páginas vecinas (±2) del
+   >   bundle**, corrige `folio`/`paginas_pdf` y deja `observaciones_claude` severidad
+   >   `warning`, tipo `folio_corregido` («decía 358, el certificado de X está en 359»).
+   > - ¿Confirmado (en la citada o tras corregir)? → `folio_verificado: true`.
+   > - ¿No pudiste confirmarlo (página ilegible, emisor no visible)? →
+   >   `folio_verificado: false` + observación — el backend entonces NO embebe la
+   >   imagen (una imagen equivocada es peor que ninguna: es el sustento que audita
+   >   el Comité).
 4. **Fechas**: ISO `YYYY-MM-DD`. Si el documento solo consigna mes/año →
    `"YYYY-MM (anotación literal)"`. Si es ilegible/no consta tras reintentar
    (NOTA 12) → `"POR VERIFICAR (motivo)"`. Nada fuera de esas tres formas.
