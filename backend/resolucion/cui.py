@@ -144,6 +144,18 @@ def _es_experiencia_expediente(proyecto: str) -> bool:
                 or _RE_EXPEDIENTE.search(expandir_abrev(proyecto)))
 
 
+_RE_REGISTRO_ET = re.compile(
+    r"\bELABORACION\s+DE(?:L)?\s+(?:UN\s+)?EXPEDIENTE(?:S)?\s+TECNICO")
+
+
+def _es_registro_expediente(nombre_obra) -> bool:
+    """True si el REGISTRO de InfoObras corresponde a la ELABORACIÓN DEL
+    EXPEDIENTE TÉCNICO (fase de consultoría), no a la ejecución de la obra.
+    Un CUI puede tener ambos registros; sus valorizaciones no son
+    intercambiables (#61 — caso Santa Anita, job 371fa5a1e704 exp 2:3)."""
+    return bool(_RE_REGISTRO_ET.search(norm(str(nombre_obra or ""))))
+
+
 def es_expediente_exp(exp: dict) -> bool:
     """Clasificación expediente/obra mirando TODA la evidencia de la experiencia,
     no solo `proyecto`. Caso real (San Isidro P1:E2): el certificado dice "se ha
@@ -1029,6 +1041,38 @@ def _paso_codigo_citado(exp: dict, consulta: Consulta, base=None) -> Optional[di
     # el certificado suele citar un componente del proyecto integral)
     nombre_ok = ((toks and n_hit >= max(1, (len(toks) + 1) // 2)) or depmatch) \
         and not _rubro_contradice(rubros_de(proyecto), o.get("nombrObra") or "")
+    # #59 · TOPE de la exención F8: un código citado que calza «exacto» pero cuya
+    # obra contradice al certificado en NOMBRE (cero tokens propios en común),
+    # DEPARTAMENTO y RUBRO **a la vez** ya no es «un componente del proyecto
+    # integral»: con alta probabilidad es otra obra. El calce exacto compara
+    # contra codUniqInv Y codSnip, y los espacios de numeración se SOLAPAN — un
+    # CUI citado puede calzar con el SNIP de una obra sin ninguna relación (caso
+    # Yanahuanca/Pasco → veredas Ferreñafe, job 371fa5a1e704 exp 9:3). El caso
+    # COAR (F8, abajo) sobrevive: allí hay afinidad de nombre (n_hit ≥ 1) o el
+    # rubro no se contradice — la democión exige las TRES señales en contra.
+    deptos_cert = ubicacion(proyecto)
+    dep_obra = norm(o.get("nombrDepartamento") or "")
+    contra_dep = bool(deptos_cert) and bool(dep_obra) and dep_obra not in deptos_cert
+    contra_rubro = _rubro_contradice(rubros_de(proyecto), o.get("nombrObra") or "")
+    sin_afinidad = bool(toks) and n_hit == 0
+    if cui_exacto and not nombre_ok and sin_afinidad and contra_dep and contra_rubro:
+        solo_snip = codigo != re.sub(r"\D", "", str(o.get("codUniqInv") or ""))
+        _traza().ev("cui_citado_contradice_todo", codigo=codigo,
+                    solo_snip=solo_snip, obra=(o.get("nombrObra") or "")[:80])
+        extra = " (el código calzó contra el SNIP de esa obra)" if solo_snip else ""
+        return {"estado": "revision", "cui": None, "via": "CUI_TEXTO",
+                "decision": _con_pista_mef(exp,
+                    f"el código {codigo} del certificado apunta en InfoObras a "
+                    f"«{(o.get('nombrObra') or '')[:70]}» "
+                    f"({o.get('nombrDepartamento') or 'dpto. desconocido'}), que "
+                    "contradice el nombre, el departamento y el rubro del "
+                    f"certificado a la vez{extra} — confirmar la obra o pegar el "
+                    "CUI correcto"),
+                "candidatos": [{"cui": cui_out,
+                                "nombre_obra": (o.get("nombrObra") or ""),
+                                "departamento": o.get("nombrDepartamento"),
+                                "score": 50}],
+                "obra": None}
     # F8 · DECISIÓN sobre el CUI citado (caso 2:27, COAR Cusco → CUI Pasco): NO se
     # degrada por contradicción de ubicación. Un CUI escrito en el certificado y
     # hallado EXACTO en InfoObras es un código único nacional → autoritativo, aunque
@@ -1430,6 +1474,29 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
     obra_best = best and {"cui": best["cui"], "nombre_obra": best["nombre_obra"],
                           "departamento": best["departamento"], "obra_id": best.get("obra_id")}
 
+    # ── #61 · VETO DE FASE: el registro del ET no respalda una experiencia de
+    # obra. Un CUI puede tener en InfoObras el registro de la ELABORACIÓN DEL
+    # EXPEDIENTE TÉCNICO y el de la EJECUCIÓN; sus valorizaciones no son
+    # intercambiables. El emisor suele participar en ambas fases, así que
+    # `ruc_match` NO distingue la fase (caso Santa Anita: supervisión de obra
+    # 2019-21 clampada contra el ET que valorizó 2018-19 → recortes sin
+    # sentido). Aplica a TODA vía de resolución sobre `best` (RUC y también
+    # NOMBRE/PROBABLE: el nombre del ET contiene al del proyecto, la afinidad
+    # es esperable). El desempate usa el OBJETO del certificado (identidad),
+    # nunca el solape de fechas declarado (circularidad documentada).
+    if best and _es_registro_expediente(best.get("nombre_obra")) \
+            and not es_expediente_exp(exp):
+        _traza().ev("veto_fase_registro_et", cui=best["cui"],
+                    ruc=bool(best.get("ruc_match")), score=best["score"])
+        return {"estado": "revision", "cui": None,
+                "via": "RUC" if best.get("ruc_match") else "NOMBRE",
+                "decision": _con_pista_mef(exp,
+                    "el registro hallado en InfoObras es la ELABORACIÓN DEL "
+                    "EXPEDIENTE TÉCNICO del proyecto, pero el certificado "
+                    "acredita la ejecución/supervisión de la obra — confirmar "
+                    "el registro de ejecución o pegar el CUI correcto"),
+                "candidatos": candidatos, "obra": None}
+
     if best and best.get("ruc_match"):
         return {"estado": "resuelto", "cui": best["cui"], "via": "RUC",
                 "decision": "el RUC del emisor es ejecutor/supervisor de la obra",
@@ -1741,20 +1808,47 @@ def _folio_base(folio) -> Optional[str]:
     return m.group(0) if m else None
 
 
+def _emisor_compatible(a, b) -> bool:
+    """#58 · La herencia por folio SOLO procede entre filas del MISMO certificado,
+    y el emisor es la firma de esa identidad. Exige AMBOS emisores presentes y
+    match fuerte (≥85: «misma empresa, posible diferencia de sufijo»). Sin emisor
+    de un lado NO se hereda — la ausencia no es evidencia, y el folio puede venir
+    corrido por la skill (#47): heredar a ciegas convertía ese corrimiento en una
+    obra inventada (Lurigancho→Picota, job 371fa5a1e704 exp 2:4)."""
+    a, b = str(a or "").strip(), str(b or "").strip()
+    if not a or not b:
+        return False
+    from scraping.sunat import score_match_empresa
+    return score_match_empresa(a, b) >= 85
+
+
 def resolver_con_dedup(experiencias: list[tuple[dict, object]], consulta: Consulta,
                        base=None):
     """Itera [(exp, clave), …] resolviendo con herencia por folio (el '2º periodo
-    del mismo certificado' hereda el CUI del hermano). Yields (clave, resultado).
+    del mismo certificado' hereda el CUI del hermano) — y la herencia exige
+    además MISMO EMISOR (#58). Yields (clave, resultado).
     `base` (opcional) se arrastra a `resolver` — costura del MEF para F3+."""
     por_folio: dict[str, dict] = {}
     for exp, clave in experiencias:
         r = resolver(exp, consulta, base)
         fb = _folio_base(exp.get("folio"))
         if r["estado"] == "revision" and fb and fb in por_folio:
-            heredado = por_folio[fb]
-            r = {"estado": "resuelto", "cui": heredado["cui"], "via": "DEDUP",
-                 "decision": "mismo certificado que otra experiencia ya identificada",
-                 "candidatos": [], "obra": heredado.get("obra")}
+            madre = por_folio[fb]
+            if _emisor_compatible(exp.get("entidad_emisora"), madre["emisor"]):
+                heredado = madre["res"]
+                r = {"estado": "resuelto", "cui": heredado["cui"], "via": "DEDUP",
+                     "decision": "mismo certificado que otra experiencia ya identificada",
+                     "candidatos": [], "obra": heredado.get("obra")}
+            else:
+                _traza().ev("dedup_emisor_distinto", folio=fb,
+                            emisor=str(exp.get("entidad_emisora") or "")[:60],
+                            emisor_madre=str(madre.get("emisor") or "")[:60])
+                r = dict(r)
+                r["decision"] = (str(r.get("decision") or "").rstrip() +
+                                 " · otra experiencia comparte el n° de folio pero "
+                                 "su emisor difiere — no se hereda su obra (posible "
+                                 "folio corrido)")
         if r["estado"] == "resuelto" and fb:
-            por_folio.setdefault(fb, r)
+            por_folio.setdefault(fb, {"res": r,
+                                      "emisor": exp.get("entidad_emisora")})
         yield clave, r

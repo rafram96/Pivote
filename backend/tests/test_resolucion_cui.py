@@ -7,9 +7,10 @@ from __future__ import annotations
 import itertools
 
 from resolucion.cui import (
-    _es_experiencia_expediente, _es_experiencia_privada, _exp_derivada,
-    _muni_contradice, _puntuar, _sin_prefijo, norm, resolver, resolver_obras,
-    rubros_mixtos, tokens_distintivos, ubicacion, ubigeo_cert)
+    _es_experiencia_expediente, _es_experiencia_privada, _es_registro_expediente,
+    _exp_derivada, _muni_contradice, _puntuar, _sin_prefijo, norm, resolver,
+    resolver_con_dedup, resolver_obras, rubros_mixtos, tokens_distintivos,
+    ubicacion, ubigeo_cert)
 
 
 def test_ubicacion_no_confunde_ica_dentro_de_huancavelica():
@@ -710,3 +711,43 @@ def test_candado_de_nombre_tambien_actua_sin_base_mef():
     exp = {"proyecto": "HOSPITAL DE ESSALUD", "fecha_inicial": "2012-10-26"}
     r = resolver(exp, _ConsultaFija([_OBRA_GENERICA]), base=None)
     assert r["estado"] == "revision" and r["cui"] is None, r
+
+
+def test_dedup_requiere_coincidencia_de_emisor_rechaza_diferente():
+    """Fix #58: DEDUP por folio exige que el emisor coincida. Si dos experiencias
+    comparten folio pero tienen emisores distintos (ej. Arcadia vs Picota por folio 84),
+    la segunda NO hereda el CUI de la primera."""
+    from resolucion.cui import resolver_con_dedup
+    obra = {"codUniqInv": "222222", "codigoObra": 222, "nombrObra": "OBRA SANTA ANITA"}
+    exp1 = {"proyecto": "OBRA SANTA ANITA", "folio": "84",
+            "entidad_emisora": "MUNICIPALIDAD DISTRITAL DE SANTA ANITA", "cui": "222222"}
+    exp2 = {"proyecto": "OBRA PICOTA INEXISTENTE EN INFOOBRAS", "folio": "84",
+            "entidad_emisora": "MUNICIPALIDAD PROVINCIAL DE PICOTA"}
+
+    exps = [(exp1, (1, 1)), (exp2, (1, 2))]
+    res = dict(resolver_con_dedup(exps, _ConsultaFija([obra]), base=None))
+
+    assert res[(1, 1)]["estado"] == "resuelto"
+    assert res[(1, 1)]["cui"] == "222222"
+    # Exp 2 NO hereda de Exp 1 porque el emisor es distinto
+    assert res[(1, 2)]["estado"] == "revision"
+    assert res[(1, 2)].get("via") != "DEDUP"
+
+
+def test_dedup_requiere_coincidencia_de_emisor_acepta_mismo():
+    """Fix #58: DEDUP por folio sí hereda cuando el emisor es la misma entidad
+    (caso legítimo de 2° periodo del mismo certificado)."""
+    from resolucion.cui import resolver_con_dedup
+    obra = {"codUniqInv": "222222", "codigoObra": 222, "nombrObra": "OBRA SANTA ANITA"}
+    exp1 = {"proyecto": "OBRA SANTA ANITA PERIODO 1", "folio": "84",
+            "entidad_emisora": "MUNICIPALIDAD DISTRITAL DE SANTA ANITA S.A.C.", "cui": "222222"}
+    exp2 = {"proyecto": "PERIODO 2 - CONTINUACION DE SERVICIO", "folio": "84",
+            "entidad_emisora": "MUNICIPALIDAD DISTRITAL DE SANTA ANITA"}
+
+    exps = [(exp1, (1, 1)), (exp2, (1, 2))]
+    res = dict(resolver_con_dedup(exps, _ConsultaFija([obra]), base=None))
+
+    assert res[(1, 1)]["estado"] == "resuelto"
+    assert res[(1, 2)]["estado"] == "resuelto"
+    assert res[(1, 2)]["via"] == "DEDUP"
+    assert res[(1, 2)]["cui"] == "222222"
