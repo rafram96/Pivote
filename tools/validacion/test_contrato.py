@@ -9,12 +9,14 @@ Corre los fixtures de espejo COMPLETO por los dos validadores del contrato
 La divergencia es el bug caro: un espejo que la skill valida OK en la PC del
 ingeniero pero que el backend rechaza en ingesta (o viceversa).
 
-NO corre `fixtures/cp02_lircay/bd_experiencias_espejo.json`: ese archivo es una
-BD de experiencias para probar resolución de CUI (otra forma, sin postor ni
-resumen), no un espejo del contrato.
+Los espejos se DESCUBREN, no se apuntan: los fixtures viejos hardcodeados
+(fixtures/trujillo, new_format) se movieron/perdieron y dejaron el test roto.
+Ahora corre contra todo `backend/datos_pivote/<job>/espejo.json` (jobs reales,
+presentes en local y en el server) + cualquier `*espejo*.json` de `fixtures/`
+que exista.
 
 Uso:
-    python tools/test_contrato.py
+    python tools/validacion/test_contrato.py
 Salida: tabla de veredictos; exit 0 solo si todo OK y sin divergencias.
 """
 from __future__ import annotations
@@ -30,11 +32,18 @@ sys.path.insert(0, str(RAIZ / "backend"))
 from pydantic import ValidationError  # noqa: E402
 from schemas.espejo import JsonEspejo  # noqa: E402
 
-FIXTURES = [
-    RAIZ / "fixtures/new_format/libertador_espejo.json",
-    RAIZ / "fixtures/trujillo/trujillo_espejo.json",
-    RAIZ / "fixtures/trujillo/trujillo_espejo_full.json",
-]
+
+def _descubrir_fixtures() -> list[Path]:
+    vistos = []
+    vistos += sorted((RAIZ / "backend/datos_pivote").glob("*/espejo.json"))
+    # espejos sueltos en fixtures/ (si los hay); se excluyen las BD de
+    # experiencias (otra forma: sin postor ni resumen, no son el contrato)
+    vistos += sorted(p for p in (RAIZ / "fixtures").rglob("*espejo*.json")
+                     if "bd_experiencias" not in p.name)
+    return vistos
+
+
+FIXTURES = _descubrir_fixtures()
 VALIDADOR_JS = RAIZ / "skill/scripts/validar_espejo.js"
 
 
@@ -63,12 +72,11 @@ def veredicto_zod(ruta: Path) -> tuple[bool, str]:
 
 
 def main() -> int:
+    if not FIXTURES:
+        print("⚠ sin espejos que probar (ni jobs en datos_pivote ni fixtures)")
+        return 1
     fallas = 0
     for fixture in FIXTURES:
-        if not fixture.exists():
-            print(f"⚠ {fixture.relative_to(RAIZ)}: NO EXISTE (fixtures locales, gitignored)")
-            fallas += 1
-            continue
         ok_py, msg_py = veredicto_pydantic(fixture)
         ok_js, msg_js = veredicto_zod(fixture)
         nombre = fixture.relative_to(RAIZ)
