@@ -1275,7 +1275,11 @@ def construir_hoja_profesional(
                       f"{io_ini.strftime('%d/%m/%Y')} – "
                       f"{io_fin.strftime('%d/%m/%Y') if io_fin else '(sin fin)'}")
         cui_cert = e.get("cui")
-        if cui_cert:
+        if cui_cert and cui and str(cui_cert).strip() != str(cui).strip():
+            # ambos existen y difieren: el del documento manda, el del sistema se
+            # muestra al lado — nunca uno disfrazado del otro (#60)
+            cui_text = f"{cui_cert} · el sistema identificó el CUI {cui} — verificar"
+        elif cui_cert:
             cui_text = str(cui_cert)
         elif cui:
             cui_text = f"No consignado en el certificado — el sistema identificó el CUI {cui}"
