@@ -784,3 +784,20 @@ def test_cui_citado_coar_no_se_demota_por_ubigeo():
     r = resolver(exp, _ConsultaFija([obra_coar]), base=None)
     assert r["estado"] == "resuelto"
     assert r["cui"] == "2429909"
+
+
+def test_veto_fase_registro_expediente_no_respalda_ejecucion():
+    """Fix #61 (Caso Santa Anita, job 371fa5a1e704 exp 2:3): Un registro de InfoObras de
+    ELABORACION DEL EXPEDIENTE TECNICO no respalda una experiencia de ejecución o supervisión
+    de obra, aunque el RUC coincida. Se envía a revisión para ubicar la obra de ejecución."""
+    exp = {"proyecto": "SUPERVISION DE OBRA CREACION UNIDAD RENAL SANTA ANITA",
+           "cargo_ocupado": "JEFE DE SUPERVISION", "ruc_emisor": "20100000001"}
+    obra_et = {
+        "codUniqInv": "2345678", "codigoObra": 2345678,
+        "nombrObra": "ELABORACION DEL EXPEDIENTE TECNICO CREACION UNIDAD RENAL SANTA ANITA",
+        "nombrDepartamento": "LIMA", "rucEjecutor": "20100000001"
+    }
+    r = resolver(exp, _ConsultaFija([obra_et]), base=None)
+    assert r["estado"] == "revision"
+    assert r["cui"] is None
+    assert "ELABORACIÓN DEL EXPEDIENTE TÉCNICO" in r["decision"]
