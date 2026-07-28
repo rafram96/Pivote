@@ -81,8 +81,8 @@ def _prof(n: int, cargo: str, cumple: str | None = None, *, validos: str = "",
     return base
 
 
-def _espejo(profs: list[dict], avisos: list | None = None) -> dict:
-    return {"profesionales": profs, "observaciones_claude": avisos or []}
+def _espejo(profs: list[dict], avisos: list | None = None, postor: dict | None = None) -> dict:
+    return {"profesionales": profs, "observaciones_claude": avisos or [], "postor": postor or {}}
 
 
 # Roster de referencia. NO es el caso fácil: reproduce los tres estilos de
@@ -802,6 +802,7 @@ def _un_espejo_por_codigo() -> dict[str, list]:
             _espejo(_roster_corrido_en_requisitos(5))),
         "REQUISITO_DUDOSO": revisar_integridad(_espejo(dudoso)),
         "CARGO_CORREGIDO": revisar_integridad(_espejo(SANO, [_aviso("cargo_corregido")])),
+        "POSTOR_SIN_MONTOS": revisar_integridad(_espejo(SANO, postor={"experiencia_postor": [{"monto": None}]})),
         "NO_REVISABLE": revisar_integridad(None),
     }
 
@@ -989,3 +990,32 @@ def test_real_corrida_sana_ffbda008a346_con_un_hueco_si_lo_reporta():
     assert conf.veredicto == "revisar"
     assert _codigos(conf.hallazgos) == ["PROFESIONAL_SIN_EVALUAR"]
     assert conf.hallazgos[0].n_prof == 3
+
+
+def test_cobertura_postor_sin_montos():
+    """Alerta cuando la experiencia del postor tiene contratos registrados pero 0 montos extraídos."""
+    from validacion.integridad import cobertura_postor
+    espejo = {
+        "profesionales": [{"n_prof": 1, "cargo": "Jefe", "cumple": "CUMPLE", "experiencias": []}],
+        "postor": {
+            "experiencia_postor": [
+                {"n": 1, "cliente": "GORE", "monto": None},
+                {"n": 2, "cliente": "MUNI", "monto": 0},
+            ]
+        }
+    }
+    hallazgos = cobertura_postor(espejo)
+    assert len(hallazgos) == 1
+    assert hallazgos[0].codigo == "POSTOR_SIN_MONTOS"
+    assert "REQ 3.4" in hallazgos[0].mensaje
+
+
+def test_extraer_montos_prosa():
+    """Prueba el parser fallback de oferta económica sobre texto en prosa."""
+    from scripts.generar_excel import _extraer_montos_prosa
+    prosa = "La cuantía del proceso es S/ 1,500,000.00 con un límite inferior de 1,350,000.00 y una propuesta económica de S/ 1,420,000.00."
+    parsed = _extraer_montos_prosa(prosa)
+    assert parsed.get("cuantia") == 1500000.0
+    assert parsed.get("limite_inferior") == 1350000.0
+    assert parsed.get("propuesta") == 1420000.0
+

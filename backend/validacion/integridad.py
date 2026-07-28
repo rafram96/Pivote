@@ -97,6 +97,7 @@ CODIGOS = (
     "REQUISITO_DUDOSO",         # el nombre no calza, pero nadie reclama ese cargo
     "CORRIMIENTO_REQUISITOS",   # patrón: los requisitos se aplicaron corridos
     "CARGO_CORREGIDO",          # la propia skill tuvo que corregir cargos
+    "POSTOR_SIN_MONTOS",        # la experiencia del postor no tiene montos extraídos
     "NO_REVISABLE",             # no se pudo mirar (falla cerrado)
 )
 
@@ -897,6 +898,23 @@ MSG_NO_REVISABLE = (
 )
 
 
+def cobertura_postor(espejo: dict) -> list[Hallazgo]:
+    """Alerta si la experiencia del postor (Req. 3.4 Admisión) tiene contratos pero 0 montos extraídos."""
+    if not isinstance(espejo, dict):
+        return []
+    postor = espejo.get("postor") if isinstance(espejo.get("postor"), dict) else {}
+    exps = postor.get("experiencia_postor") if isinstance(postor.get("experiencia_postor"), list) else []
+    if not exps:
+        return []
+    montos_validos = sum(1 for e in exps if isinstance(e, dict) and e.get("monto") is not None and float(e.get("monto") or 0) > 0)
+    if montos_validos == 0 and len(exps) > 0:
+        return [Hallazgo(
+            "POSTOR_SIN_MONTOS", ALERTA,
+            f"EVALUACIÓN DE ADMISIÓN (REQ 3.4): Se registraron {len(exps)} experiencia(s) del postor pero ninguna (0/{len(exps)}) tiene monto cuantitativo extraído (posible propuesta multi-tomo). Requiere revisión manual.",
+        )]
+    return []
+
+
 def revisar_integridad(espejo: dict) -> list[Hallazgo]:
     """Todos los candados de integridad sobre un espejo, lo más grave primero."""
     if not _revisable(espejo):
@@ -908,6 +926,7 @@ def revisar_integridad(espejo: dict) -> list[Hallazgo]:
         + referencias_inexistentes(espejo)
         + requisitos_de_otro_cargo(espejo)
         + sospecha_declarada(espejo)
+        + cobertura_postor(espejo)
     )
     return sorted(hallazgos, key=lambda h: _ORDEN_SEV.get(h.severidad, 9))
 

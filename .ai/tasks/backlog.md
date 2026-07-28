@@ -7,6 +7,89 @@
 ## Técnico (listo para ejecutar)
 
 ---
+id: T-TAREA-ISSUE51
+tipo: tarea
+zona: orquestador/ (etapas_reales.py) + entregables/ (generar_excel.py, excel_final.py)
+agente_origen: desarrollador
+estado: completado (2026-07-27, commit 2677aad en fix/veredicto-dias-efectivos)
+depende_de: []
+---
+**Implementar Fix para Issue #51 (Falso CUMPLE por falta de conciliación determinista de días efectivos):**
+- **Solución Implementada**:
+  1. `_RE_MINIMO` ampliado para capturar años, meses y días (44/44 requisitos capturados en Soritor, Lircay-hosp, Lircay-superv). Comparación realizada en días exactos para evitar desbordes de redondeo.
+  2. Inyección persistente de `cumple_backend` en `regenerar_excel_final` y renderizado con celda roja en caso de contradicción en el Excel.
+  3. Cobertura baja de valorizaciones conectada a la regla legal de abstención (ADR-005) $\rightarrow$ emite `POR VERIFICAR` indicando la causa real en lugar de un falso `NO CUMPLE`.
+- **Verificación**: 619 tests pasados (5 tests nuevos), cero regresiones. BIM (P16) $\rightarrow$ `NO CUMPLE`; P6 $\rightarrow$ `POR VERIFICAR`.
+
+---
+
+id: T-TAREA-ISSUE57
+tipo: tarea
+zona: skill/ (prompts/) + entregables/ (excel_final.py)
+agente_origen: desarrollador
+estado: pendiente
+depende_de: []
+---
+**Seguimiento Discrepancias en Columna TOTAL (Issue #57):**
+- **Descripción**: Medir e identificar el mecanismo de no-determinismo en la suma de días por experiencia acumulada en la columna TOTAL (caso BIM: 1467 / 2387 / 1927).
+- **Detalles**: Desacoplar el cálculo aritmético de la suma total del prompt LLM y confiar en la suma determinista del backend/espejo.
+
+---
+
+id: T-TAREA-ISSUE52
+tipo: tarea
+zona: backend/ (scripts/generar_excel.py:283) + entregables/ + skill/
+agente_origen: desarrollador
+estado: aprobado
+depende_de: []
+---
+**Defecto 8 — Oferta Económica Incompleta en Celdas Finales (Issue #52):**
+- **Alcance Re-escopado**:
+  1. **Parser determinístico en Backend**: Implementar fallback en backend para extraer los 3 montos (`cuantía`, `límite_inferior`, `propuesta`) desde el texto en prosa de `DETALLE` cuando la skill los ubique allí.
+  2. **Candado de Ingesta Ruidoso**: Protestar ruidosamente si las 3 celdas resultan vacías tras el parsing, impidiendo la generación silenciosa.
+  3. **Inyección Garantizada**: Asegurar la escritura directa de las 3 celdas en `backend/scripts/generar_excel.py:283`.
+
+---
+
+id: T-TAREA-ISSUE53
+tipo: tarea
+zona: backend/ (validacion/) + skill/ (prompts/agent-propuesta-mapa.md)
+agente_origen: desarrollador
+estado: aprobado
+depende_de: []
+---
+**Defecto 9 — Experiencia del Postor No Evaluada Cuantitativamente (Issue #53):**
+- **Alcance Re-escopado (Dos Trenes)**:
+  1. **Tren Backend**: Guardrail 0/N en backend que emite alerta de primer nivel (ítem de revisión visible en panel/Excel) si los montos del postor vienen vacíos/0 en 0/N contratos (al tratarse del Req. 3.4 de Admisión).
+  2. **Tren Skill**: Reforzar la extracción de `monto` en `agent-propuesta-mapa` para propuestas multi-tomo (se empaqueta en la rebuild única de la skill).
+
+---
+
+id: T-TAREA-ISSUE54
+tipo: tarea
+zona: skill/ (prompts/agent-evaluador.md) + entregables/
+agente_origen: desarrollador
+estado: aprobado
+depende_de: []
+---
+**Defecto 10 — Inconsistencia / No-determinismo en Sustento Textual de Veredictos:**
+- **Detalles**: Hacer obligatorio el campo `fundamentacion` / `razon_literal` en el schema Zod y en las instrucciones del prompt. Coordinar con Issue #49 para modificar el prompt del evaluador una sola vez (podando aritmética redundante pero obligando la razón literal).
+
+---
+
+id: T-TAREA-ISSUE55
+tipo: tarea
+zona: entregables/ (backend/scripts/generar_excel.py:137)
+agente_origen: desarrollador
+estado: aprobado
+depende_de: []
+---
+**Defecto 11 — Jerga Técnica Filtrada en Celdas del Evaluador:**
+- **Ubicación exacta**: Extender la función existente `_sin_jerga` en `generar_excel.py:137`.
+- **Detalles**: Ampliar el vocabulario de `_sin_jerga` (que hoy solo limpia 1 término en PARTE 2) y aplicarlo también a las observaciones de la PARTE 4 para erradicar las 20 celdas con `funciones_similares=null` y `⟦crudo:…⟧`.
+
+---
+
 id: T-TAREA-ADR010
 tipo: tarea
 zona: otro (contrato espejo + skill + orquestador/)
@@ -420,6 +503,200 @@ depende_de: [T-SONDEO-B01, T-SONDEO-B02, T-SONDEO-B03, T-SONDEO-B04, T-SONDEO-B0
 ---
 **Completar y cerrar ADR-009 (sesión dedicada con el desarrollador) con la
 evidencia del sondeo B — NO crea ADR nuevo, actualiza el existente**: Contexto
+---
+id: T-SONDEO-B01
+tipo: sondeo
+zona: persistencia/
+agente_origen: agente-b
+estado: pendiente
+depende_de: []
+---
+**Comportamiento real de `RepositorioConRespaldo` si Postgres falla a mitad de escritura: divergencia silenciosa SIN cola de reparación, y borrados fantasma.**
+Investigado: `backend/orquestador/repositorio.py:235-305` y `backend/scripts/migrar_a_postgres.py`.
+Hallazgos: (1) toda escritura va primero al primario (archivos) y luego `_respaldar()` (repositorio.py:249-254) traga CUALQUIER excepción y solo loguea — no hay reintento, ni cola, ni marca de "PG desincronizado"; la única reparación es correr `migrar_a_postgres.py` A MANO. (2) `migrar_a_postgres.py` solo hace upserts: si un `eliminar(job_id)` ocurrió con PG caído, las filas del job quedan FANTASMA en PG para siempre (el re-sync no borra huérfanos), y `buscar_profesionales()` (repositorio_pg.py:197-221) las seguiría devolviendo en la búsqueda del panel. (3) No hay transaccionalidad entre primario y respaldo (por diseño). Relevancia ADR-009: hoy el "best-effort" es coherente porque PG es solo respaldo; si PG pasa a OBLIGATORIO, este contrato entero (tragar excepciones, leer siempre de archivos, re-sync manual sin borrado de huérfanos) deja de ser válido y hay que redefinirlo — no basta con quitar el try.
+
+---
+id: T-SONDEO-B02
+tipo: sondeo
+zona: persistencia/
+agente_origen: agente-b
+estado: pendiente
+depende_de: []
+---
+**Costo de latencia oculto del write-through con PG caído: cada escritura respaldada bloquea hasta el timeout del pool.**
+Investigado: `repositorio.py:249-254` + `repositorio_pg.py:84` (`ConnectionPool(dsn, min_size=1, max_size=4, open=True)`) + `orquestador/motor.py`.
+Hallazgo: `_respaldar` es SÍNCRONO en el hilo del pipeline; con PG caído, cada `self._pool.connection()` bloquea hasta el timeout del pool de psycopg_pool (default ~30 s) antes de lanzar la excepción que se traga. El motor hace checkpoint (guardar job) tras CADA etapa (`motor.py:270-274`) más guardados de enriquecimiento por etapa (`motor.py:116,129,177`) → un job de 8 etapas con PG caído puede sumar varios MINUTOS de espera muerta, y `resolver_revision` (un clic del evaluador) también la paga. "Best-effort" hoy significa "no falla", no "no cuesta". Pendiente de confirmar el timeout exacto configurado (no se pasa `timeout=` explícito). Relevancia ADR-009: evidencia REAL para el punto "Postgres obligatorio vs opcional" — el modo opcional actual ya degrada mal en caída parcial.
+
+---
+id: T-SONDEO-B03
+tipo: sondeo
+zona: orquestador/
+agente_origen: agente-b
+estado: pendiente
+depende_de: []
+---
+**Arranque del sistema: asimetría total entre base MEF (degrada con gracia) y Postgres (tumba el backend al arrancar aunque sea "opcional").**
+Investigado: `backend/api/app.py:53-57` y `repositorio_pg.py:81-86` vs `orquestador/etapas_reales.py:200-210`.
+Hallazgos: (1) con `PIVOTE_DB_URL` definida, `RepositorioPostgres.__init__` se ejecuta EN EL IMPORT de `app.py` (nivel módulo): abre el pool y ejecuta el DDL (`con.execute(_DDL)`) — si PG no responde en ese momento, la excepción sube y el backend NO ARRANCA, pese a que PG es formalmente un respaldo opcional. No hay try/except alrededor en app.py. (2) La base MEF, en cambio, es un singleton perezoso que se construye recién en la etapa RESOLUCION_CUI con try/except → base=None (`etapas_reales.py:206-210`): si falta o falla, el análisis sigue InfoObras-solo. Consecuencia adicional: el primer job tras un arranque paga los ~15-60 s de carga del índice DENTRO de la etapa (sin warm-up al boot). Relevancia ADR-009: alimenta directo el pendiente "qué pasa si Postgres no está disponible al arrancar" — hoy la respuesta empírica es "no arranca", que ya es de facto el comportamiento obligatorio que el ADR discute.
+
+---
+id: T-SONDEO-B04
+tipo: sondeo
+zona: persistencia/
+agente_origen: agente-b
+estado: pendiente
+depende_de: []
+---
+**Confirmado: el DDL real de `repositorio_pg.py` y `backend/db/schema.sql` siguen divergiendo — y son estructuralmente incompatibles, no solo distintos.**
+Investigado: `repositorio_pg.py:35-68` (_DDL, corre en cada arranque con PIVOTE_DB_URL) vs `backend/db/schema.sql` (164 líneas, no lo ejecuta nadie en el código).
+Diferencias exactas: DDL real = 3 tablas (`jobs` con columnas planas `concurso_id`/`estado` rellenadas desde Python; `documentos(clave,tipo,datos)` JSONB genérico que mezcla espejo/enriquecimiento/concurso/decisiones; `profesionales` con `*_norm` para LIKE). schema.sql = 4 tablas (`concursos`, `jobs`, `espejos`, `enriquecimientos` — NO existen `decisiones` ni `profesionales`), con columnas GENERATED (`estado`, `postor`…), FKs con ON DELETE CASCADE, funciones `fecha_segura`/`numero_seguro` y 2 vistas (`base_datos`, `analisis`) que referencian tablas (`espejos`, `enriquecimientos`) que el DDL real jamás crea → aplicar schema.sql sobre una BD real crearía un esquema paralelo muerto; sus vistas no funcionan contra las tablas reales. Nota: `architecture/backend.md` menciona "la vista SQL" como consumidor del contrato del resolver — esa vista (`base_datos`, schema.sql:86-140) hoy NO existe en ninguna BD que arranque el código. Ya hay un bullet viejo en este backlog ("unificar o marcar documental"); esta entrada aporta el detalle exacto. Relevancia ADR-009: el punto pendiente de revisión del esquema debería decidir el destino de schema.sql en el mismo acto.
+
+---
+id: T-SONDEO-B05
+tipo: sondeo
+zona: persistencia/
+agente_origen: agente-b
+estado: pendiente
+depende_de: []
+---
+**`guardar_espejo` en Postgres no es atómico (documento e índice de profesionales van en transacciones separadas) y el índice `profesionales` es una capacidad que SOLO existe en PG.**
+Investigado: `repositorio_pg.py:135-137` y `170-195`.
+Hallazgos: (1) `guardar_espejo` hace `_guardar_doc(...)` (una conexión/tx) y luego `_indexar_profesionales(...)` (OTRA conexión/tx con DELETE+INSERT): una caída entre ambas deja el espejo nuevo con índice viejo (o vacío) hasta el próximo re-guardado — hoy inocuo porque el panel puede caer al escaneo de archivos, pero deja de serlo si PG es la fuente. (2) `buscar_profesionales` (la búsqueda global del panel) solo existe en `RepositorioPostgres` — no está en el Protocol `Repositorio` (repositorio.py:41-55) ni tiene equivalente en `RepositorioArchivos`; es la ÚNICA lectura del sistema que va al respaldo en vez del primario, invirtiendo el principio "toda lectura va a archivos". Relevancia ADR-009: es el único consumidor real que ya necesita PG — evidencia útil para el Contexto del ADR (hoy vacío) sobre qué motiva de verdad la migración.
+
+---
+id: T-SONDEO-B06
+tipo: sondeo
+zona: orquestador/
+agente_origen: agente-b
+estado: pendiente
+depende_de: []
+---
+**Mapa de dependencia del orquestador sobre el índice MEF en memoria: UN solo punto de consumo, bien aislado tras inyección con default None.**
+Investigado: `etapas_reales.py` completo (grep de `base_mef`/`base=`).
+Hallazgos: el orquestador consume el índice MEF EXCLUSIVAMENTE en `EtapaResolucionCuiReal.correr` (`etapas_reales.py:200-248`): construye `base = base_mef.instancia()` una vez por corrida de etapa y lo pasa como argumento a `resolver_obras(..., base=base)` y `resolver_con_dedup(..., base=base)` (la lógica interna vive en resolucion/ — fuera de mi zona, no la desarrollo). Ninguna otra etapa (InfoObras, SUNAT, reglas, excel, persistencia) ni el motor tocan la base. El patrón "costura inyectable + default None" (memory/recurring_patterns.md) está respetado: si algún día `base` fuera un backend PG (ADR-009), el único cambio en el orquestador sería qué objeto se construye en esas ~8 líneas — el resto del pipeline es agnóstico. Único acoplamiento implícito: el costo de la primera carga (~15-60 s) se paga dentro de la etapa y se atribuye a su `duracion_ms`, sesgando el resumen de cuellos de botella del motor (`motor.py:204-214`) en el primer job tras cada arranque. Fuera de mi zona pero anotado: `verificar_cui` del MEF vivo (scraping/mef.py) se inyecta aparte vía `PIVOTE_VERIFICAR_MEF` y no depende del índice local.
+
+## Reconciliación del sondeo (fable, 2026-07-23)
+
+---
+id: T-SONDEO-F01
+tipo: sondeo
+zona: otro
+agente_origen: fable
+estado: pendiente
+depende_de: []
+---
+**Reconciliación A↔B: sin contradicciones entre agentes; UNA tensión doc↔código
+verificada y resuelta.** `database.md` y el comentario de `api/app.py:50-52`
+dicen «si la BD se cae, el análisis sigue»; B03 afirma que con PG caído el
+backend NO arranca. Verificado contra el código (app.py:53-57 construye
+`RepositorioPostgres` en el import; `repositorio_pg.py:84-86` abre pool
+`open=True` + DDL): AMBOS son ciertos en su ámbito — la frase del doc aplica a
+caídas DURANTE ejecución (write-through tragado); al ARRANQUE, PG caído tumba
+el proceso. Queda como verdad: «best-effort solo en runtime; el boot es
+fail-fast de facto». También verificado A01: cero callers del resolver legacy
+fuera de `infoobras.py`. Relación entre zonas detectada: A04 y B06 miran el
+mismo índice MEF desde lados opuestos (costo interno vs costura del
+orquestador) — ambos alimentan ADR-009; A03 (semántica de fallos en scraping)
+y B01/B02 (fallos de persistencia) son el mismo tema transversal
+«fallo silencioso vs señal explícita» en capas distintas.
+
+## Plan propuesto (fable, 2026-07-23) — TODO esperando aprobación del desarrollador
+
+---
+id: T-TAREA-001
+tipo: tarea
+zona: otro
+agente_origen: fable
+estado: esperando_aprobacion
+depende_de: [T-SONDEO-A02, T-SONDEO-A05, T-SONDEO-B04]
+---
+**Saneo documental de la zona backend** (solo prosa, cero código): reescribir
+o eliminar `backend/scraping/README.md` (hoy describe otro repo y da ALT-12
+por viva); corregir docstrings desfasados (`texto.py` cabecera, `cui.py`
+cabecera, `sunat.py:697`); corregir en `backend.md`/`contracts.md` la mención
+a «la vista SQL» como consumidor del contrato del resolver (la vista vive solo
+en el schema.sql aspiracional — no existe en ninguna BD real). 3 preguntas:
+es ejecución pura → tarea. Riesgo: nulo. Ejecutable de inmediato.
+
+---
+id: T-TAREA-002
+tipo: tarea
+zona: scraping/
+agente_origen: fable
+estado: esperando_aprobacion
+depende_de: [T-SONDEO-A01]
+---
+**Eliminar el resolver legacy muerto de `infoobras.py`** (~480 líneas,
+1347-1828: `buscar_obras_por_nombre`, `verificar_profesional_en_obra`,
+`buscar_obra_por_certificado` + helpers). Sin callers (verificado). 3
+preguntas: el porqué ya vive en ADR-002…005 (el ADR que impide reconstruir un
+resolver por nombre en scraping YA existe); borrar código muerto no es
+decisión nueva; git conserva la historia → tarea, no refactor ni ADR.
+Criterio: pytest verde + golden intacta (sin callers no debe moverse nada).
+⚠ Riesgo deploy: toca código que el deploy pausado va a shipear — ejecutar
+DESPUÉS del deploy validado, o aceptar re-validación.
+
+---
+id: T-TAREA-003
+tipo: tarea
+zona: resolucion/
+agente_origen: fable
+estado: esperando_aprobacion
+depende_de: [T-SONDEO-A04]
+---
+**Medir y abaratar `es_entidad_publica`**: primero medir su peso real con la
+traza de un job existente (no optimizar a ciegas); luego fix mínimo = caché
+por nombre normalizado en `BaseMef` + eliminar la doble llamada de
+`_clasificar_privada` (cui.py:922-924). NO tocar el umbral 90 (ADR-004). El
+índice invertido de entidades (alternativa b del hallazgo) se descarta por
+sobredimensionado salvo que la medición diga lo contrario. 3 preguntas:
+optimización sin cambio semántico → tarea. Criterio: golden idéntica
+(mal-resueltos y transiciones sin cambios) + pytest verde.
+⚠ Mismo riesgo deploy que T-TAREA-002.
+
+---
+id: T-REFACTOR-001
+tipo: refactor
+zona: scraping/
+agente_origen: fable
+estado: esperando_aprobacion
+depende_de: [T-SONDEO-A03]
+---
+**Unificar reintentos/backoff y semántica de fallo en scraping**: helper único
+`con_reintentos()` en `errores_red.py` (lineal/exponencial parametrizable,
+log SIEMPRE con `corto()`), y señal de fallo consistente (`PortalNoResponde`
+≠ vacío) en los tres módulos. Es refactor con ADR NUEVO (ADR-010) al
+ejecutarse: hubo alternativa real (status quo: cada portal su dialecto) y un
+agente nuevo repetiría el error vacío≠caído que ya costó el caso 6:1
+(recurring_patterns.md). Criterio: pytest + golden sin cambios + revisar que
+ningún caller dependa del dialecto viejo (`[]`/`None`). Post-deploy.
+
+---
+id: T-REFACTOR-002
+tipo: refactor
+zona: scraping/
+agente_origen: fable
+estado: esperando_aprobacion
+depende_de: [T-SONDEO-A06]
+---
+**Comparador único de nombres de empresa** (`mef.py::_nombres_coinciden` vs
+`sunat.py::score_match_empresa` → un solo módulo con UNA lista de sufijos), o
+decisión documentada de mantenerlos separados si los formatos de origen lo
+justifican. Refactor con ADR nuevo; PRE-requisito: mini-golden de pares
+nombre-declarado/nombre-fuente para probar que no se mueven veredictos
+`ok/no_verificable` existentes. ⚠ Puede cambiar veredictos VISIBLES al
+evaluador → estrictamente post-deploy y con evidencia.
+
+---
+id: T-REFACTOR-003
+tipo: refactor
+zona: persistencia/
+agente_origen: fable
+estado: esperando_aprobacion
+depende_de: [T-SONDEO-B01, T-SONDEO-B02, T-SONDEO-B03, T-SONDEO-B04, T-SONDEO-B05, T-SONDEO-B06]
+---
+**Completar y cerrar ADR-009 (sesión dedicada con el desarrollador) con la
+evidencia del sondeo B — NO crea ADR nuevo, actualiza el existente**: Contexto
 real (B05: `buscar_profesionales` es el ÚNICO consumidor que ya exige PG e
 invierte «toda lectura va a archivos»); redefinición del contrato best-effort
 si PG pasa a obligatorio (B01: sin cola de reparación, borrados fantasma en el
@@ -429,3 +706,29 @@ de arranque (B03: hoy fail-fast de facto — ver T-SONDEO-F01); destino de
 DDL real); plan de migración quirúrgico (B06: un solo punto de consumo,
 costura `base=` ya inyectable; decidir ahí warm-up del índice al boot).
 NADA se implementa antes de cerrar el ADR.
+
+---
+id: T-REFACTOR-004
+tipo: refactor
+zona: backend/ (api/, entregables/, scraping/, orquestador/)
+agente_origen: desarrollador
+estado: esperando_aprobacion
+depende_de: []
+---
+**Modularizar los archivos monolíticos del backend (plan v2, 2026-07-27 — reemplaza el alcance v1)**:
+Plan completo, reglas de corte y protocolo de verificación en
+`docs/backend/analisis_tamanio_y_modularizacion.md` (§3-§6). Revisado por
+fable el 2026-07-27 (v2.1: singletons de `api/` a `estado.py` por ciclo de
+import, fachadas de `scraping/` como `__init__.py` de paquete, re-exports
+faltantes de `excel_final`, detector de ciclos propio en vez de pydeps).
+- **Alcance — 7 PRs secuenciales (~8.25 d), un monolito por PR**:
+  0. Arnés de verificación: `tools/comparar_xlsx.py` (diff normalizado, ignora timestamps de openpyxl), `comparar_zip.py` (CRC por entrada), `ciclos_import.py` (AST) + líneas base.
+  1. `api/app.py` (988) → routers por recurso + `estado.py` (singletons); el trío `/descargar-cui` + `_correr_y_descargar` quedan en la fachada (R1).
+  2. `entregables/excel_final.py` (1,661) → paquete `excel/`: desarme REAL de `construir_hoja_profesional` (1,254 líneas, 23 closures sobre estado mutable) con `ContextoHoja` explícito. No es mudar la función de archivo. Incluye partir `test_entregables.py`.
+  3. `entregables/zip_infoobras.py` (872) → paquete; `descargar_cui` NO se muda de la fachada (los tests parchean sus 4 descargadores sobre el módulo).
+  4. `scraping/sunat.py` (1,136) → paquete con `__init__.py` como fachada (el nombre público es el del módulo).
+  5. `scraping/infoobras.py` (1,841) → paquete; `fetch_by_cui` vive en el `__init__.py`; los imports diferidos de `cui.py` NO se tocan.
+  6. `orquestador/etapas_reales.py` (1,366) → paquete `etapas/` con hogar para las ~350 líneas que no son etapas (`descargar_documentos_job` es público — lo llama `api/app.py:238`). Gate: no arranca con PRs abiertos sobre su zona (#52/#53/#54/#57). Incluye partir `test_etapas_reales.py`.
+- **FUERA de alcance**: `resolucion/cui.py` — núcleo de decisión con semántica en movimiento (circularidad del solape abierta). Reingresa como T-REFACTOR-005 cuando la golden lleve 2 semanas quieta (doc §6, condición de reingreso).
+- **Reglas inquebrantables (doc §3)**: R1 función parcheada y llamador en el mismo módulo — es la regla que decide dónde cae cada corte; R2 las fachadas re-exportan también los ~19 símbolos privados que consumen tests y `app.py`; R3 un PR = un monolito; R4 cero cambios de comportamiento (bugs hallados → backlog, PR aparte); R5 los tests monolíticos se parten en el mismo PR.
+- **Criterio de Aceptación (por PR, doc §4)**: V1 pytest verde con cero `skipped` nuevos + V2 diff normalizado de Excel/ZIP = 0 sobre jobs `ff44d2833590`/`371fa5a1e704` vía `tools/utils/regenerar_excel_final.py` (obligatorio en PRs 2-3) + V3 `golden_cui.py --con-base --solo-cache` con diff EXACTAMENTE cero (PRs 5-6; en refactor no aplica el criterio suave) + V4 ciclos de import sin subir.

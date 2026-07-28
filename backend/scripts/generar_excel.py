@@ -149,6 +149,53 @@ def _sin_jerga(v):
     return out
 
 
+def _extraer_montos_prosa(detalle: str) -> dict[str, float | None]:
+    """Fallback parser para extraer cuantía, límite inferior y propuesta de la prosa de detalle."""
+    if not detalle or not isinstance(detalle, str):
+        return {}
+    res = {}
+
+    def _to_float(v: str) -> float | None:
+        if not v:
+            return None
+        clean = re.sub(r'[^\d.,]', '', v).strip()
+        if not clean:
+            return None
+        if ',' in clean and '.' in clean:
+            clean = clean.replace(',', '') if clean.rfind('.') > clean.rfind(',') else clean.replace('.', '').replace(',', '.')
+        elif ',' in clean:
+            clean = clean.replace(',', '.')
+        try:
+            val = float(clean)
+            return val if val > 0 else None
+        except ValueError:
+            return None
+
+    m_cuantia = re.search(r'(?:cuant[ií]a|referencial|estimad[oa])\s*:?\s*(?:S/\.?)?\s*([\d.,]+)', detalle, re.I)
+    m_limite = re.search(r'(?:l[ií]mite|inferior|m[ií]nimo)\s*:?\s*(?:S/\.?)?\s*([\d.,]+)', detalle, re.I)
+    m_prop = re.search(r'(?:propuesta|ofertad[oa]|oferta)\s*:?\s*(?:S/\.?)?\s*([\d.,]+)', detalle, re.I)
+
+    if m_cuantia:
+        res["cuantia"] = _to_float(m_cuantia.group(1))
+    if m_limite:
+        res["limite_inferior"] = _to_float(m_limite.group(1))
+    if m_prop:
+        res["propuesta"] = _to_float(m_prop.group(1))
+
+    if len(res) < 3:
+        todos = re.findall(r'(?:S/\.?)?\s*([\d]{1,3}(?:[.,][\d]{3})*(?:[.,][\d]{2}))', detalle)
+        parsed = [_to_float(x) for x in todos if _to_float(x) is not None]
+        if len(parsed) >= 3:
+            if "cuantia" not in res or res["cuantia"] is None:
+                res["cuantia"] = parsed[0]
+            if "limite_inferior" not in res or res["limite_inferior"] is None:
+                res["limite_inferior"] = parsed[1]
+            if "propuesta" not in res or res["propuesta"] is None:
+                res["propuesta"] = parsed[2]
+    return res
+
+
+
 def fecha_excel(v):
     """ISO 'YYYY-MM-DD' → date real (NOTA 13: fechas en formato fecha, se
     muestran dd/mm/yy). Sentinels ('POR VERIFICAR…') y parciales quedan texto."""
@@ -280,8 +327,19 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
     b.blank()
     oe = p.get("oferta_economica", {})
     if oe:
+        cuantia = oe.get("cuantia")
+        limite_inf = oe.get("limite_inferior")
+        propuesta = oe.get("propuesta")
+        detalle = oe.get("detalle", "") or ""
+
+        if (cuantia is None or limite_inf is None or propuesta is None) and detalle:
+            parsed = _extraer_montos_prosa(detalle)
+            cuantia = cuantia if cuantia is not None else parsed.get("cuantia")
+            limite_inf = limite_inf if limite_inf is not None else parsed.get("limite_inferior")
+            propuesta = propuesta if propuesta is not None else parsed.get("propuesta")
+
         b.headers(["", "CUANTÍA", "LÍMITE INFERIOR", "PROPUESTA", "DETALLE"])
-        b.row(["Monto", oe.get("cuantia"), oe.get("limite_inferior"), oe.get("propuesta"), oe.get("detalle", "")],
+        b.row(["Monto", cuantia, limite_inf, propuesta, detalle],
               fmts={2: FMT_MONEY, 3: FMT_MONEY, 4: FMT_MONEY})
     b.blank()
 
