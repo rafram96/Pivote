@@ -1,8 +1,18 @@
 # Handoff — punto de continuación
 
-> Actualizado: **2026-07-27**. Si eres un agente nuevo: lee esto completo,
+> Actualizado: **2026-07-28**. Si eres un agente nuevo: lee esto completo,
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
+
+## Cierre del 2026-07-28 — Correcciones de Identidad en Lircay (#58, #59, #60, #61)
+
+Auditada la corrida de Lircay (job `371fa5a1e704`), se aplicaron 4 fixes en `fix/identidad-lircay`:
+1. **#60 (`excel_final.py`):** Se separó el rótulo del Excel entre "CUI del certificado" y "No consignado en el certificado — el sistema identificó el CUI X" para no confundir la inferencia del backend con un dato del documento.
+2. **#58 (`cui.py::resolver_con_dedup`):** La herencia por folio ahora exige coincidencia de emisor (score de empresa ≥ 70) para evitar que folios corridos por la skill hereden obras ajenas (rechaza Arcadia≠Picota).
+3. **#59 (`cui.py::_paso_codigo_citado`):** Se acotó la exención del CUI exacto para que caigan a `revision` los códigos citados cuya obra contradiga simultáneamente nombre, departamento y rubro (caso Navarro, P9-E3).
+4. **#61 (`cui.py`):** Se añadió veto de fase para que registros de InfoObras de "ELABORACIÓN DE EXPEDIENTE TÉCNICO" no respalden experiencias de ejecución/supervisión vía `ruc_match` (caso Santa Anita, P2-E3).
+
+Resultados: 627 tests pasados, 0 regresiones. Los 3 casos de Lircay (2:4, 9:3, 2:3) pasan ordenadamente a `revision`.
 
 ## Cierre del 2026-07-27 — FALSO CUMPLE corregido
 
