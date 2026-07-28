@@ -803,6 +803,9 @@ def _un_espejo_por_codigo() -> dict[str, list]:
         "REQUISITO_DUDOSO": revisar_integridad(_espejo(dudoso)),
         "CARGO_CORREGIDO": revisar_integridad(_espejo(SANO, [_aviso("cargo_corregido")])),
         "POSTOR_SIN_MONTOS": revisar_integridad(_espejo(SANO, postor={"experiencia_postor": [{"monto": None}]})),
+        "OFERTA_INCOMPLETA": revisar_integridad(_espejo(SANO, postor={
+            "oferta_economica": {"cuantia": 16670989.88, "limite_inferior": None,
+                                 "propuesta": None, "detalle": "ver folio 345"}})),
         "NO_REVISABLE": revisar_integridad(None),
     }
 

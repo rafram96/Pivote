@@ -70,6 +70,15 @@ su cuadro resumen. Para cada profesional:
   **literalmente** en la propuesta. NO calcules el límite inferior — eso lo fija
   `agent-bases`/`agent-evaluador` (90% de la cuantía).
 
+  > ⚠ **Los montos van como NÚMEROS en sus campos** (`cuantia`,
+  > `limite_inferior`, `propuesta`) — **nunca solo narrados en `detalle`**.
+  > En la auditoría del 27-jul, NINGUNA de 3 corridas dejó las 3 celdas
+  > completas, y en una los 3 montos estaban… en la prosa del `detalle` (#52).
+  > Sin esas celdas el Comité no puede aplicar la descalificación por precio
+  > ni el puntaje. `detalle` es para el contexto (folio, coincidencias,
+  > advertencias), no el único lugar donde vive un número. Lo que de verdad
+  > no aparezca en la propuesta: `null` — jamás un cálculo tuyo.
+
 ## 3 · Experiencia del postor (Parte 2) — ACOTAR, no transcribir
 Es el bloque grande y **manual** (req. 3.4; el backend no lo recomputa). Devuelve:
 - `experiencia_postor_folios`: el **rango de folios** de toda la sección, para que
@@ -92,6 +101,20 @@ Es el bloque grande y **manual** (req. 3.4; el backend no lo recomputa). Devuelv
 
 Si no hay cuadro-resumen y toca listar desde las constancias, hazlo **somero**
 (emisor + monto + folio de la 1ª página de cada una), no transcripción completa.
+
+> ⚠ **El `monto` es el dato de ADMISIÓN (req. 3.4) — recupéralo aunque cueste
+> un salto de tomo** (caso Lircay-hospitalario: 0/8 montos → el requisito quedó
+> «NO EVALUABLE» y el análisis salió sin responder si el postor podía competir, #53):
+> 1. Si el cuadro-resumen no trae el monto de un contrato, búscalo en la
+>    **primera página del contrato/constancia citada** (su folio) — que en
+>    propuestas multi-tomo suele estar **en OTRO tomo**: resuelve el folio
+>    contra el tomo correcto antes de rendirte.
+> 2. Con Camino A (índice OCR), un `grep` del N° de contrato o del emisor
+>    ubica la página en segundos — úsalo antes de declarar el monto perdido.
+> 3. Solo si tras 1-2 el monto no aparece: `monto: null` **y** una
+>    `observaciones_claude` severidad `warning`, tipo `postor_montos_incompletos`,
+>    con el conteo («montos hallados M de N contratos») — el backend emite la
+>    alerta de admisión con eso.
 
 ## 3b · Consorciados (de la Promesa de Consorcio — Anexo 04)
 Si el postor es consorcio, extrae de la promesa la lista `consorciados`:

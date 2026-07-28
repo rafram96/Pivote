@@ -98,6 +98,7 @@ CODIGOS = (
     "CORRIMIENTO_REQUISITOS",   # patrón: los requisitos se aplicaron corridos
     "CARGO_CORREGIDO",          # la propia skill tuvo que corregir cargos
     "POSTOR_SIN_MONTOS",        # la experiencia del postor no tiene montos extraídos
+    "OFERTA_INCOMPLETA",        # faltan celdas de la oferta económica (#52)
     "NO_REVISABLE",             # no se pudo mirar (falla cerrado)
 )
 
@@ -915,6 +916,36 @@ def cobertura_postor(espejo: dict) -> list[Hallazgo]:
     return []
 
 
+def oferta_incompleta(espejo: dict) -> list[Hallazgo]:
+    """#52 · Sin CUANTÍA + LÍMITE INFERIOR + PROPUESTA no se puede aplicar la
+    descalificación por precio ni el puntaje. Grita si falta cualquiera de las
+    3 celdas en el espejo — medido en la auditoría del 27-jul: NINGUNA de las
+    3 corridas dejó el bloque completo, y cada una falló en un lugar distinto.
+    (El Excel intenta rescatar los montos de la prosa del DETALLE, pero el
+    rescate es best-effort y se verifica a mano: la alerta no se apaga por él.)"""
+    if not isinstance(espejo, dict):
+        return []
+    postor = espejo.get("postor") if isinstance(espejo.get("postor"), dict) else {}
+    if not postor:            # espejo sin bloque postor (parcial/test): sin señal, sin ruido
+        return []
+    oe = postor.get("oferta_economica") \
+        if isinstance(postor.get("oferta_economica"), dict) else {}
+    faltan = [nombre for nombre, campo in
+              (("CUANTÍA", "cuantia"), ("LÍMITE INFERIOR", "limite_inferior"),
+               ("PROPUESTA", "propuesta"))
+              if oe.get(campo) is None]
+    if not faltan:
+        return []
+    pista = " (hay texto en DETALLE del que el Excel intenta rescatarlos — verificar)" \
+        if (oe.get("detalle") or "").strip() else ""
+    return [Hallazgo(
+        "OFERTA_INCOMPLETA", ALERTA,
+        f"OFERTA ECONÓMICA incompleta: falta(n) {', '.join(faltan)} en las celdas "
+        f"del análisis{pista}. Sin las 3 no hay descalificación por precio ni "
+        "puntaje — completar desde los folios de la oferta.",
+    )]
+
+
 def revisar_integridad(espejo: dict) -> list[Hallazgo]:
     """Todos los candados de integridad sobre un espejo, lo más grave primero."""
     if not _revisable(espejo):
@@ -927,6 +958,7 @@ def revisar_integridad(espejo: dict) -> list[Hallazgo]:
         + requisitos_de_otro_cargo(espejo)
         + sospecha_declarada(espejo)
         + cobertura_postor(espejo)
+        + oferta_incompleta(espejo)
     )
     return sorted(hallazgos, key=lambda h: _ORDEN_SEV.get(h.severidad, 9))
 
