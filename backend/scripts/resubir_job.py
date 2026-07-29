@@ -23,11 +23,21 @@ if len(sys.argv) < 2:
 job_id = sys.argv[1]
 url = (sys.argv[2] if len(sys.argv) > 2 else "http://127.0.0.1:8001").rstrip("/")
 base = os.path.join(os.path.dirname(__file__), "..", "datos_pivote")
-esp = os.path.join(base, f"{job_id}.espejo.json")
-xls = os.path.join(base, f"{job_id}.claude.xlsx")
-for p in (esp, xls):
-    if not os.path.exists(p):
-        sys.exit(f"no existe: {p}")
+
+
+def _hallar(nombre: str, ext: str) -> str:
+    """Layout vigente (`<job>/<nombre>.<ext>`, carpeta por job) con fallback al
+    viejo (`<job>.<nombre>.<ext>` plano) — mismo criterio que
+    tools/utils/regenerar_excel_final.py."""
+    for p in (os.path.join(base, job_id, f"{nombre}.{ext}"),
+              os.path.join(base, f"{job_id}.{nombre}.{ext}")):
+        if os.path.exists(p):
+            return p
+    sys.exit(f"no existe {nombre}.{ext} para el job {job_id} (ni layout carpeta ni plano)")
+
+
+esp = _hallar("espejo", "json")
+xls = _hallar("claude", "xlsx")
 
 cid = requests.post(f"{url}/api/pivote/concursos",
                     json={"nomenclatura": f"REPLAY {job_id}"}, timeout=30).json()["concurso_id"]
