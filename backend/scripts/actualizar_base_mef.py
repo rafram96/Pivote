@@ -3,7 +3,7 @@ Actualiza la base local MEF que alimenta el resolver de CUI.
 
 Construye una carga inmutable con:
   - inversiones.csv.gz: índice compacto para búsqueda difusa en RAM;
-  - inversiones.sqlite: ficha enriquecida para lookup exacto por CUI/SNIP;
+  - PostgreSQL `mef.investments`: ficha enriquecida por CUI/SNIP;
   - entidades_publicas.csv: catálogo normalizado;
   - metadata.json: trazabilidad, checksums y métricas.
 
@@ -21,7 +21,6 @@ import os
 import random
 import re
 import shutil
-import sqlite3
 import sys
 import time
 import unicodedata
@@ -55,9 +54,18 @@ MIN_BYTES_DESCARGA = 10 * 1024 * 1024
 
 _RE_SIGLA = re.compile(r"[-–]\s*([A-Z]{2,8})\s*$")
 
-_DDL = """
-CREATE TABLE inversiones (
-    identity_key TEXT PRIMARY KEY,
+_DDL_PG = """
+CREATE SCHEMA IF NOT EXISTS mef;
+CREATE TABLE IF NOT EXISTS mef.loads (
+    load_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL CHECK (status IN ('loading', 'validated', 'published', 'failed')),
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at TIMESTAMPTZ,
+    metadata JSONB
+);
+CREATE TABLE IF NOT EXISTS mef.investments (
+    load_id TEXT NOT NULL REFERENCES mef.loads(load_id) ON DELETE CASCADE,
+    identity_key TEXT NOT NULL,
     cui TEXT,
     snip TEXT,
     nombre TEXT NOT NULL,
@@ -77,8 +85,8 @@ CREATE TABLE inversiones (
     tipo_inversion TEXT,
     tipologia TEXT,
     modalidad TEXT,
-    monto_viable TEXT,
-    costo_actualizado TEXT,
+    monto_viable NUMERIC(18,2),
+    costo_actualizado NUMERIC(18,2),
     fecha_registro TEXT,
     fecha_viabilidad TEXT,
     expediente_tecnico TEXT,
@@ -87,21 +95,30 @@ CREATE TABLE inversiones (
     uei TEXT,
     uep TEXT,
     fuente TEXT NOT NULL,
-    fila_origen INTEGER NOT NULL
+    fila_origen INTEGER NOT NULL,
+    PRIMARY KEY (load_id, identity_key)
 );
-CREATE INDEX inversiones_cui_idx ON inversiones(cui) WHERE cui <> '';
-CREATE INDEX inversiones_snip_idx ON inversiones(snip) WHERE snip <> '';
-CREATE INDEX inversiones_entidad_idx ON inversiones(entidad_norm);
+CREATE INDEX IF NOT EXISTS mef_investments_cui_idx
+    ON mef.investments(load_id, cui) WHERE cui <> '';
+CREATE INDEX IF NOT EXISTS mef_investments_snip_idx
+    ON mef.investments(load_id, snip) WHERE snip <> '';
+CREATE INDEX IF NOT EXISTS mef_investments_entidad_idx
+    ON mef.investments(load_id, entidad_norm);
+CREATE TABLE IF NOT EXISTS mef.active_load (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+    load_id TEXT NOT NULL REFERENCES mef.loads(load_id),
+    published_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
 
-_SQL_INSERT = """
-INSERT OR IGNORE INTO inversiones (
-    identity_key, cui, snip, nombre, nombre_norm, estado_dataset, estado,
+_COPY_PG = """
+COPY mef.investments (
+    load_id, identity_key, cui, snip, nombre, nombre_norm, estado_dataset, estado,
     situacion, entidad, entidad_norm, ubigeo, dpto, prov, dist, nivel, sector,
     funcion, tipo_inversion, tipologia, modalidad, monto_viable,
     costo_actualizado, fecha_registro, fecha_viabilidad, expediente_tecnico,
     opmi, uf, uei, uep, fuente, fila_origen
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+) FROM STDIN
 """
 
 
@@ -123,16 +140,16 @@ def _valor(fila: dict, columna: str | None) -> str:
     return (fila.get(columna) or "").strip() if columna else ""
 
 
-def _decimal_texto(valor: str) -> str:
-    """Normaliza un decimal sin introducir errores binarios; vacío queda vacío."""
+def _decimal(valor: str) -> Decimal | None:
+    """Parsea un decimal sin introducir errores binarios; vacío queda NULL."""
     valor = (valor or "").strip()
     if not valor:
-        return ""
+        return None
     try:
         numero = Decimal(valor)
         if not numero.is_finite():
             raise InvalidOperation
-        return format(numero, "f")
+        return numero
     except InvalidOperation as exc:
         raise ValueError(f"monto no parseable: {valor!r}") from exc
 
@@ -186,6 +203,106 @@ def _bloqueo_exclusivo(dir_dest: Path):
                 fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
         finally:
             fh.close()
+
+
+class CargaPostgres:
+    """Carga una versión MEF por COPY y la publica mediante un puntero."""
+
+    def __init__(self, dsn: str, load_id: str):
+        self.load_id = load_id
+        self._dsn = dsn
+        self._con = None
+        self._cursor = None
+        self._copy = None
+        self._copy_cm = None
+        self._validada = False
+
+    def __enter__(self):
+        import psycopg
+
+        self._con = psycopg.connect(self._dsn, connect_timeout=10)
+        self._con.execute(_DDL_PG)
+        self._con.commit()
+        self._con.execute(
+            "INSERT INTO mef.loads(load_id, status) VALUES (%s, 'loading')",
+            (self.load_id,),
+        )
+        self._cursor = self._con.cursor()
+        self._copy_cm = self._cursor.copy(_COPY_PG)
+        self._copy = self._copy_cm.__enter__()
+        return self
+
+    def insertar(self, valores: tuple) -> None:
+        self._copy.write_row((self.load_id, *valores))
+
+    def validar(self, meta: dict) -> None:
+        from psycopg.types.json import Jsonb
+
+        self._copy_cm.__exit__(None, None, None)
+        self._copy = None
+        self._copy_cm = None
+        total = self._con.execute(
+            "SELECT count(*) FROM mef.investments WHERE load_id = %s",
+            (self.load_id,),
+        ).fetchone()[0]
+        esperado = int(meta["identidades"])
+        if total != esperado:
+            raise RuntimeError(
+                f"PostgreSQL contiene {total:,} identidades; se esperaban {esperado:,}")
+        self._con.execute(
+            """UPDATE mef.loads
+               SET status = 'validated', finished_at = now(), metadata = %s
+               WHERE load_id = %s""",
+            (Jsonb(meta), self.load_id),
+        )
+        self._con.commit()
+        self._validada = True
+
+    def publicar(self) -> None:
+        if not self._validada:
+            raise RuntimeError("la carga PostgreSQL no fue validada")
+        with self._con.transaction():
+            self._con.execute(
+                """INSERT INTO mef.active_load(singleton, load_id, published_at)
+                   VALUES (TRUE, %s, now())
+                   ON CONFLICT (singleton) DO UPDATE
+                   SET load_id = EXCLUDED.load_id, published_at = now()""",
+                (self.load_id,),
+            )
+            self._con.execute(
+                "UPDATE mef.loads SET status = 'published' WHERE load_id = %s",
+                (self.load_id,),
+            )
+
+    def purgar(self, retener: int) -> None:
+        self._con.execute(
+            """DELETE FROM mef.loads
+               WHERE load_id NOT IN (
+                   SELECT load_id FROM mef.loads
+                   WHERE status IN ('published', 'validated')
+                   ORDER BY finished_at DESC NULLS LAST
+                   LIMIT %s
+               )
+               AND load_id NOT IN (SELECT load_id FROM mef.active_load)""",
+            (max(1, retener),),
+        )
+        self._con.commit()
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            if self._copy_cm is not None:
+                self._copy_cm.__exit__(exc_type, exc, tb)
+        finally:
+            if self._con is not None:
+                if exc_type is not None:
+                    self._con.rollback()
+                if self._cursor is not None:
+                    self._cursor.close()
+                self._con.close()
+            self._copy = None
+            self._copy_cm = None
+            self._cursor = None
+            self._con = None
 
 
 def _descargar(
@@ -324,6 +441,7 @@ def _procesar(
     dir_csv: Path,
     dir_dest: Path,
     *,
+    pg,
     min_union: int = MIN_UNION,
     min_por_fuente: int = MIN_POR_FUENTE,
     retener_cargas: int = RETENER_CARGAS,
@@ -342,7 +460,6 @@ def _procesar(
 
     f_inv = staging / "inversiones.csv.gz"
     f_ent = staging / "entidades_publicas.csv"
-    f_db = staging / "inversiones.sqlite"
     f_meta = staging / "metadata.json"
     filas_por_fuente: dict[str, int] = {}
     cabeceras: dict[str, list[str]] = {}
@@ -353,11 +470,7 @@ def _procesar(
     duplicados = 0
     anterior = _metadata_activa(dir_dest)
 
-    db = sqlite3.connect(f_db)
     try:
-        db.executescript(_DDL)
-        db.execute("PRAGMA journal_mode=OFF")
-        db.execute("PRAGMA synchronous=OFF")
         with gzip.open(f_inv, "wt", encoding="utf-8", newline="") as gz:
             w = csv.writer(gz)
             w.writerow([
@@ -388,8 +501,10 @@ def _procesar(
                         identity_key = f"CUI:{cui}" if cui else f"SNIP:{snip}"
                         if identity_key in identidades:
                             duplicados += 1
+                            nueva_identidad = False
                         else:
                             identidades.add(identity_key)
+                            nueva_identidad = True
                         entidad = _valor(fila, cols["entidad"])
                         situacion = _valor(fila, cols["situacion"])
                         w.writerow([
@@ -400,31 +515,32 @@ def _procesar(
                             _valor(fila, cols["dist"]),
                             entidad,
                         ])
-                        db.execute(_SQL_INSERT, (
-                            identity_key, cui, snip, nombre, _norm(nombre), tag,
-                            _valor(fila, cols["estado"]), situacion,
-                            entidad, _norm(entidad),
-                            _valor(fila, cols["ubigeo"]),
-                            _valor(fila, cols["dpto"]),
-                            _valor(fila, cols["prov"]),
-                            _valor(fila, cols["dist"]),
-                            _valor(fila, cols["nivel"]),
-                            _valor(fila, cols["sector"]),
-                            _valor(fila, cols["funcion"]),
-                            _valor(fila, cols["tipo_inversion"]),
-                            _valor(fila, cols["tipologia"]),
-                            _valor(fila, cols["modalidad"]),
-                            _decimal_texto(_valor(fila, cols["monto_viable"])),
-                            _decimal_texto(_valor(fila, cols["costo_actualizado"])),
-                            _valor(fila, cols["fecha_registro"]),
-                            _valor(fila, cols["fecha_viabilidad"]),
-                            _valor(fila, cols["expediente_tecnico"]),
-                            _valor(fila, cols["opmi"]),
-                            _valor(fila, cols["uf"]),
-                            _valor(fila, cols["uei"]),
-                            _valor(fila, cols["uep"]),
-                            archivo, fila_origen,
-                        ))
+                        if nueva_identidad:
+                            pg.insertar((
+                                identity_key, cui, snip, nombre, _norm(nombre), tag,
+                                _valor(fila, cols["estado"]), situacion,
+                                entidad, _norm(entidad),
+                                _valor(fila, cols["ubigeo"]),
+                                _valor(fila, cols["dpto"]),
+                                _valor(fila, cols["prov"]),
+                                _valor(fila, cols["dist"]),
+                                _valor(fila, cols["nivel"]),
+                                _valor(fila, cols["sector"]),
+                                _valor(fila, cols["funcion"]),
+                                _valor(fila, cols["tipo_inversion"]),
+                                _valor(fila, cols["tipologia"]),
+                                _valor(fila, cols["modalidad"]),
+                                _decimal(_valor(fila, cols["monto_viable"])),
+                                _decimal(_valor(fila, cols["costo_actualizado"])),
+                                _valor(fila, cols["fecha_registro"]),
+                                _valor(fila, cols["fecha_viabilidad"]),
+                                _valor(fila, cols["expediente_tecnico"]),
+                                _valor(fila, cols["opmi"]),
+                                _valor(fila, cols["uf"]),
+                                _valor(fila, cols["uei"]),
+                                _valor(fila, cols["uep"]),
+                                archivo, fila_origen,
+                            ))
                         if cui:
                             cuis_distintos.add(cui)
                         for concepto in ("entidad", "opmi", "uf", "uei", "uep"):
@@ -445,20 +561,9 @@ def _procesar(
                     "columnas": len(r.fieldnames or []),
                 }
                 print(f"  {archivo}: {n:,} filas", flush=True)
-        db.commit()
-        db.execute("PRAGMA optimize")
-        resultado = db.execute("PRAGMA integrity_check").fetchone()
-        if not resultado or resultado[0] != "ok":
-            raise RuntimeError(f"SQLite integrity_check falló: {resultado}")
     except BaseException:
-        db.close()
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    finally:
-        try:
-            db.close()
-        except Exception:
-            pass
 
     total = sum(filas_por_fuente.values())
     cortas = [a for a, n in filas_por_fuente.items() if n < min_por_fuente]
@@ -487,6 +592,7 @@ def _procesar(
         "fuentes": fuentes_meta,
         "cabeceras": cabeceras,
         "urls": {a: BASE_URL + a for a, _ in FUENTES},
+        "postgres": {"schema": "mef", "tabla": "investments"},
         "artefactos": {},
     }
     try:
@@ -494,11 +600,16 @@ def _procesar(
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    for ruta in (f_inv, f_ent, f_db):
+    for ruta in (f_inv, f_ent):
         meta["artefactos"][ruta.name] = {
             "bytes": ruta.stat().st_size,
             "sha256": _sha256(ruta),
         }
+    try:
+        pg.validar(meta)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
     f_meta.write_text(json.dumps(meta, ensure_ascii=False, indent=2),
                       encoding="utf-8")
 
@@ -510,8 +621,10 @@ def _procesar(
         "publicado_en": datetime.now(timezone.utc).isoformat(),
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(manifest_tmp, dir_dest / "manifest.json")
+    pg.publicar()
 
     _purgar_cargas(cargas, activo=load_id, retener=retener_cargas)
+    pg.purgar(retener_cargas)
     return meta
 
 
@@ -538,6 +651,9 @@ def main() -> None:
     args = ap.parse_args()
 
     dir_dest = Path(args.destino or (data_dir() / "referencia" / "mef"))
+    dsn = (os.getenv("PIVOTE_DB_URL") or "").strip()
+    if not dsn:
+        raise SystemExit("falta PIVOTE_DB_URL: PostgreSQL es obligatorio para el ETL MEF")
     if args.desde_dir:
         dir_csv = Path(args.desde_dir)
         print(f"Procesando CSV locales de {dir_csv}")
@@ -546,8 +662,11 @@ def main() -> None:
         print(f"Descargando de {BASE_URL} a {dir_csv}")
         _descargar(dir_csv)
 
-    with _bloqueo_exclusivo(dir_dest):
-        meta = _procesar(dir_csv, dir_dest)
+    load_id = _load_id()
+    with _bloqueo_exclusivo(dir_dest), CargaPostgres(dsn, load_id) as pg:
+        meta = _procesar(
+            dir_csv, dir_dest, pg=pg, identificador=load_id,
+        )
     print(
         f"\nOK · carga {meta['load_id']} · {meta['filas_total']:,} filas · "
         f"{meta['cuis_distintos']:,} CUIs · {meta['entidades']:,} entidades"

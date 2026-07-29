@@ -7,7 +7,7 @@
 ## 1. Objetivo
 
 Actualizar semanalmente la base MEF que ya consume el resolver y enriquecer la
-ficha consultable por CUI/SNIP, sin introducir PostgreSQL como dependencia.
+ficha consultable por CUI/SNIP en PostgreSQL.
 
 ```text
 Tres CSV públicos
@@ -19,8 +19,8 @@ descarga + perfilado + gates
  carga inmutable con load_id
    ┌───────────┴───────────┐
    ▼                       ▼
-gzip compacto          SQLite enriquecida
-búsqueda por nombre    lookup CUI/SNIP
+gzip compacto          PostgreSQL `mef`
+búsqueda por nombre    lookup load_id + CUI/SNIP
    └───────────┬───────────┘
                ▼
             BaseMef
@@ -40,10 +40,10 @@ búsqueda por nombre    lookup CUI/SNIP
 
 La búsqueda ya validada no se reescribe.
 
-### Fichas SQLite
+### Fichas PostgreSQL
 
-`inversiones.sqlite` se consulta por CUI/SNIP exacto. Evita cargar en RAM campos
-que solo se necesitan después de identificar un candidato.
+`mef.investments` se consulta por `load_id` y CUI/SNIP exacto. Evita cargar en
+RAM campos que solo se necesitan después de identificar un candidato.
 
 Campos v1:
 
@@ -68,14 +68,17 @@ el resolver vigente los utilice, no como ampliación del ETL.
   cargas/
     <load_id>/
       inversiones.csv.gz
-      inversiones.sqlite
       entidades_publicas.csv
       metadata.json
 ```
 
 Los archivos se construyen en `cargas/.<load_id>.tmp`. Solo después de completar
-transformación, volumen, integridad SQLite y checksums se renombra el directorio
-y se reemplaza `manifest.json` mediante `os.replace`.
+transformación, volumen, carga PostgreSQL y checksums se renombra el directorio
+y se reemplaza `manifest.json` mediante `os.replace`. PostgreSQL usa:
+
+- `mef.loads`;
+- `mef.investments`;
+- `mef.active_load`.
 
 Se conservan inicialmente dos cargas válidas. Rollback consiste en volver a
 publicar el manifest de la anterior.
@@ -109,7 +112,7 @@ Antes de publicar:
 4. ninguna fila carece simultáneamente de CUI y SNIP;
 5. las filas sin nombre se conservan para lookup exacto y se contabilizan;
 6. montos seleccionados son decimales válidos;
-7. SQLite supera `PRAGMA integrity_check`;
+7. PostgreSQL contiene exactamente una fila por identidad canónica;
 8. se registran filas, identidades, duplicados, columnas y checksums;
 9. todos los artefactos pertenecen al mismo `load_id`.
 
@@ -120,9 +123,8 @@ variación de volumen, cabeceras y cobertura respecto de la carga anterior.
 
 - `buscar_candidatos(nombre)` carga/reutiliza el índice RAM y retorna las fichas
   enriquecidas de sus candidatos.
-- `existe_cui(codigo)` consulta primero SQLite y no carga el índice RAM.
-- si SQLite no existe, se mantiene compatibilidad con los tres artefactos
-  antiguos;
+- `existe_cui(codigo)` consulta primero PostgreSQL y no carga el índice RAM;
+- si PostgreSQL no responde, se mantiene fallback a la ficha mínima del gzip;
 - si cambia el `load_id`, la siguiente consulta de nombre recarga de forma
   sincronizada el índice;
 - si no existe ninguna base válida, el resolver conserva su degradación a
@@ -144,16 +146,19 @@ los domingos a las 03:00 un wrapper PowerShell que:
 Comando interno:
 
 ```powershell
-docker compose -f deploy/docker-compose.yml run --rm --no-deps backend `
+docker compose -f deploy/docker-compose.yml run --rm backend `
   python scripts/actualizar_base_mef.py
 ```
+
+El contenedor exige `PIVOTE_DB_URL` y arranca con el servicio `db`; el wrapper
+no usa `--no-deps`.
 
 ## 7. Fases
 
 ### F1 — núcleo serving-first
 
 - aliases corregidos;
-- SQLite enriquecida;
+- schema PostgreSQL `mef` y carga por `COPY`;
 - carga/manifest versionados;
 - compatibilidad y recarga de `BaseMef`;
 - tests offline.
@@ -180,7 +185,7 @@ ausencia nunca debe interpretarse como contradicción.
 
 ## 8. Fuera de alcance inmediato
 
-- PostgreSQL para las 95 columnas;
+- raw histórico de las 95 columnas;
 - historia semanal indefinida;
 - API analítica;
 - coordenadas;

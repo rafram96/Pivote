@@ -975,7 +975,7 @@ def salud():
         "desde": None,
         "load_id": estado_mef["load_id"],
         "edad_dias": estado_mef["edad_dias"],
-        "sqlite": estado_mef["sqlite"],
+        "postgres": estado_mef["postgres"],
     }
     # En modo NO-real (tests/esqueleto) no hay portales que sondear → operativo sin red.
     if os.getenv("PIVOTE_ETAPAS") != "real":

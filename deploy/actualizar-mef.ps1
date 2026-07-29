@@ -27,7 +27,7 @@ try {
     $log = Join-Path $LogDirectory "actualizar-mef-$stamp.log"
     Set-Location -LiteralPath $repoRoot
 
-    & docker compose -f $compose run --rm --no-deps backend `
+    & docker compose -f $compose run --rm backend `
         python scripts/actualizar_base_mef.py *> $log
     $code = $LASTEXITCODE
 

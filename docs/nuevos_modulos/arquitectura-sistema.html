@@ -337,7 +337,7 @@
         <p>Búsqueda SUSALUD por nombre, RUC o código sin captcha. Falta matching conservador e integración.</p>
         <span class="evidence">Despriorizado por el cliente frente a bases/contratos.</span></article>
       <article class="state-card"><header><h3>ETL MEF completo</h3><span class="status plan">Planificado</span></header>
-        <p>RAM para búsqueda por nombre + SQLite enriquecida por CUI, cargas versionadas, gates y tarea semanal Windows.</p>
+        <p>RAM para búsqueda por nombre + PostgreSQL enriquecido por CUI, cargas versionadas, gates y tarea semanal Windows.</p>
         <span class="evidence">Construido y suite verde; golden histórica perdida, reemplazada por diferencial offline. Falta activar la tarea.</span></article>
       <article class="state-card"><header><h3>Golden de CUI</h3><span class="status risk">Sin instrumento</span></header>
         <p>El corpus histórico de 277 verdades y su caché se perdieron. No debe presentarse como validación disponible hoy.</p>
@@ -368,7 +368,7 @@
         <div class="arch-box"><b>Identidad público‑primero</b><span>MEF local + InfoObras + CUI/RUC/ubicación</span></div>
         <div class="arch-box"><b>Fuentes oficiales</b><span>InfoObras · MEF · SUNAT · SEACE · RENIPRESS</span></div>
         <div class="arch-box"><b>Reglas y entregables</b><span>días efectivos · Excel · ZIP · revisión</span></div>
-        <div class="arch-box future"><b>ETL MEF serving-first</b><span>índice RAM · fichas SQLite · cron Windows</span></div>
+        <div class="arch-box future"><b>ETL MEF serving-first</b><span>índice RAM · fichas PostgreSQL · cron Windows</span></div>
       </div>
       <div class="arrow"></div>
       <div class="arch-col">
@@ -417,7 +417,7 @@
         <h3>Capa de datos MEF</h3>
         <div class="etl-step"><i>1</i><div><b>Ingesta desatendida</b><span>retry/backoff, logs y tarea semanal en Windows</span></div></div>
         <div class="etl-step"><i>2</i><div><b>Índice RAM</b><span>búsqueda difusa por nombre sin cambiar el algoritmo validado</span></div></div>
-        <div class="etl-step"><i>3</i><div><b>Fichas SQLite</b><span>lookup enriquecido por CUI/SNIP sin cargar todo en memoria</span></div></div>
+        <div class="etl-step"><i>3</i><div><b>Fichas PostgreSQL</b><span>lookup enriquecido por load_id + CUI/SNIP</span></div></div>
         <div class="etl-step"><i>4</i><div><b>Publicación versionada</b><span>load_id, gates, rollback y adopción sin reinicio</span></div></div>
         <div class="etl-step"><i>5</i><div><b>Resolver</b><span>nuevas señales solo después de pytest + golden</span></div></div>
       </article>
@@ -426,7 +426,7 @@
       <summary>Orden técnico confirmado del ETL</summary>
       <div>
         <ol>
-          <li>Corregir aliases y producir gzip + SQLite con el mismo load_id.</li>
+          <li>Corregir aliases y producir gzip + PostgreSQL con el mismo load_id.</li>
           <li>Publicar por manifest y conservar la carga anterior para rollback.</li>
           <li>Automatizar con el Programador de tareas de Windows y fallo visible.</li>
           <li>Validar los tres CSV reales, suite y golden antes de activar.</li>

@@ -28,18 +28,19 @@ Las issues de GitHub aún no se reescribieron.
 
 ### Decisión e implementación serving-first (continuación)
 
-El objetivo se acotó al consumidor real: el resolver. ADR-009 ahora decide
-**índice RAM para búsqueda difusa + SQLite para ficha enriquecida por CUI/SNIP**;
-PostgreSQL/raw histórico se difiere. Implementado en la rama: retry/backoff,
-aliases `COD_SNIP`/`NOM_*`, cargas inmutables, manifest atómico, retención de dos
-cargas, SQLite enriquecida, recarga sin reinicio y health de frescura.
+El objetivo se acotó al consumidor real: el resolver. Decisión final del
+desarrollador: **índice RAM para búsqueda difusa + PostgreSQL obligatorio para
+la ficha enriquecida por CUI/SNIP**. Raw histórico se difiere. Implementado:
+retry/backoff, aliases `COD_SNIP`/`NOM_*`, cargas inmutables, manifest atómico,
+retención de dos cargas, schema `mef`, carga por COPY, recarga sin reinicio y
+health de frescura.
 
-Validación real en `C:\tmp` (no base activa): 620,985 filas en **71–130 s**
-(dos corridas); gzip 32.5 MB, SQLite 632.4 MB, 14,665 entidades. Lookup CUI/SNIP existente o
-ausente: ~1.5–2.3 ms sin cargar RAM. Búsqueda Pichanaki: primera carga del índice
-18.2 s, 448.9 MB, devuelve fichas enriquecidas. Se encontró una fila activa sin
-nombre: se conserva por CUI y se registra, no bloquea la carga.
-Suite final: **685 passed, 24 skipped**.
+Validación real aislada (PostgreSQL 16 Docker, no base activa): 620,985 filas /
+620,984 identidades en **117.5 s**; gzip 32.5 MB; tabla+índices PG 719.3 MB;
+14,665 entidades. Lookup: primer pool 171 ms, siguientes 6–9 ms sin cargar RAM.
+Diferencial: 100 fichas + 20 rankings, cero cambios en contrato legacy. Se
+encontró una fila activa sin nombre: se conserva por CUI y se registra.
+Suite: **685 passed, 25 skipped** + integración PostgreSQL explícita aprobada.
 
 ## Reunión con el cliente 29-jul — lo que cambió (fuente: transcripción)
 

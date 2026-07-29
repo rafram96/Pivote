@@ -28,17 +28,16 @@ invoca un contenedor one-shot. Antes de implementar: EDA reproducible +
 importación PG desechable para medir capacidad y cerrar DDL. No se tocaron
 issues de GitHub ni código del producto.
 
-### Continuación — decisión SQLite e implementación
+### Continuación — decisión PostgreSQL e implementación
 
-El usuario confirmó que el uso inmediato es enriquecer el resolver. ADR-009 fue
-revisado: RAM queda para nombres y SQLite para ficha exacta CUI/SNIP; PG/raw se
-difiere. Implementados ETL versionado, aliases, retry, SQLite, recarga sin
-reinicio, health y scripts de tarea Windows. Corrida real aislada: 620,985 filas
-en 71–130 s, SQLite 632.4 MB, lookup ~1.5–2.3 ms, primera carga RAM
-18.2 s/448.9 MB. Diferencial: 100 fichas exactas + 20 rankings, cero diferencias
-en el contrato legacy.
-Suite completa: 685 passed, 24 skipped. La golden histórica sigue perdida; el
-diferencial anterior es la evidencia sustitutiva disponible. Falta commit.
+El usuario confirmó que el uso inmediato es enriquecer el resolver y corrigió
+que el destino **debe ser PostgreSQL**. ADR-009 final: RAM queda para nombres;
+schema PG `mef` para ficha exacta por `(load_id, CUI/SNIP)`. Implementados ETL
+versionado, aliases, retry, COPY, recarga sin reinicio, health y tarea Windows.
+Corrida real aislada en PG16: 620,985 filas/620,984 identidades en 117.5 s,
+tabla+índices 719.3 MB; lookup 6–9 ms tras abrir pool. Diferencial: 100 fichas
+exactas + 20 rankings, cero diferencias legacy. Suite: 685 passed, 25 skipped
+e integración PG real aprobada. Falta commit.
 
 ## Nota (2026-07-29, Codex) — arquitectura visual v3
 

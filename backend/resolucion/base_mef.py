@@ -2,8 +2,8 @@
 Base local de inversiones del MEF — consulta en memoria para el resolver de CUI.
 
 Carga los artefactos que produce `scripts/actualizar_base_mef.py`. Mantiene en
-RAM únicamente el índice de nombres y consulta `inversiones.sqlite` para obtener
-la ficha enriquecida por CUI/SNIP:
+RAM únicamente el índice de nombres y consulta PostgreSQL para obtener la ficha
+enriquecida por CUI/SNIP:
 
   buscar_candidatos(nombre)  → CUIs cuyo nombre de inversión se parece al dado
   existe_cui(codigo)         → ficha de un CUI o SNIP exacto
@@ -26,9 +26,9 @@ from __future__ import annotations
 import csv
 import gzip
 import json
+import os
 import re
 import sys
-import sqlite3
 import threading
 from array import array
 from pathlib import Path
@@ -80,8 +80,11 @@ def _tokens(nombre_norm: str) -> list[str]:
 class BaseMef:
     """Base de inversiones cargada en memoria (carga perezosa)."""
 
-    def __init__(self, dir_base: Path):
+    def __init__(self, dir_base: Path, dsn: str | None = None, consulta_pg=None):
         self._dir = Path(dir_base)
+        self._dsn = (dsn if dsn is not None else os.getenv("PIVOTE_DB_URL") or "").strip()
+        self._consulta_pg = consulta_pg
+        self._pool_pg = None
         self._cargada = False
         self._lock = threading.RLock()
         self._load_id_cargado: str | None = None
@@ -146,10 +149,6 @@ class BaseMef:
     def _f_meta(self) -> Path:
         return self._dir_activo() / "metadata.json"
 
-    @property
-    def _f_db(self) -> Path:
-        return self._dir_activo() / "inversiones.sqlite"
-
     def disponible(self) -> bool:
         """True si los 3 artefactos existen y son legibles."""
         try:
@@ -175,7 +174,7 @@ class BaseMef:
         disponible = self.disponible()
         edad = self.edad_dias()
         load_id = self._load_id_activo()
-        sqlite_ok = self._f_db.is_file()
+        postgres_ok = self._postgres_disponible(load_id)
         if not disponible:
             estado = "missing"
         elif edad is None:
@@ -188,7 +187,7 @@ class BaseMef:
             "estado": estado,
             "load_id": load_id,
             "edad_dias": edad,
-            "sqlite": sqlite_ok,
+            "postgres": postgres_ok,
         }
 
     # ── carga ────────────────────────────────────────────────────────────────
@@ -307,8 +306,9 @@ class BaseMef:
         if not c:
             return None
         with self._lock:
-            if self._f_db.is_file():
-                return self._ficha_sqlite(c)
+            consultado, ficha = self._ficha_postgres(c)
+            if consultado:
+                return ficha
             if not self._asegurar_cargada():
                 return None
             i = self._por_cui.get(c)
@@ -352,44 +352,88 @@ class BaseMef:
         if score is not None:
             d["score"] = score
         codigo = d["cui"] or d["snip"]
-        enriquecida = self._ficha_sqlite(codigo) if codigo else None
+        _, enriquecida = self._ficha_postgres(codigo) if codigo else (False, None)
         if enriquecida:
             d.update(enriquecida)
             if score is not None:
                 d["score"] = score
         return d
 
-    def _ficha_sqlite(self, codigo: str) -> Optional[dict]:
-        """Lookup exacto sin cargar el índice RAM. SQLite es opcional para
-        conservar compatibilidad con fixtures y despliegues anteriores."""
-        ruta = self._f_db
-        if not ruta.is_file():
-            return None
+    def _obtener_pool_pg(self):
+        if self._pool_pg is None:
+            from psycopg_pool import ConnectionPool
+            self._pool_pg = ConnectionPool(
+                self._dsn, min_size=0, max_size=4, open=True,
+                timeout=3, kwargs={"connect_timeout": 3},
+            )
+        return self._pool_pg
+
+    def _ficha_postgres(self, codigo: str) -> tuple[bool, Optional[dict]]:
+        """Devuelve (se_consultó, ficha). Si PG cae, permite fallback al gzip."""
+        load_id = self._load_id_activo()
+        if not load_id:
+            return (False, None)
+        if self._consulta_pg is not None:
+            return (True, self._consulta_pg(load_id, codigo))
+        if not self._dsn:
+            return (False, None)
         try:
-            uri = f"{ruta.resolve().as_uri()}?mode=ro"
-            with sqlite3.connect(uri, uri=True) as db:
-                db.row_factory = sqlite3.Row
-                fila = db.execute(
-                    "SELECT * FROM inversiones WHERE cui = ? AND cui <> '' LIMIT 1",
-                    (codigo,),
-                ).fetchone()
-                if fila is None:
-                    fila = db.execute(
-                        "SELECT * FROM inversiones "
-                        "WHERE snip = ? AND snip <> '' LIMIT 1",
-                        (codigo,),
+            from psycopg.rows import dict_row
+            with self._obtener_pool_pg().connection(timeout=3) as con:
+                with con.cursor(row_factory=dict_row) as cur:
+                    fila = cur.execute(
+                        """SELECT * FROM mef.investments
+                           WHERE load_id = %s AND cui = %s AND cui <> ''
+                           LIMIT 1""",
+                        (load_id, codigo),
                     ).fetchone()
+                    if fila is None:
+                        fila = cur.execute(
+                            """SELECT * FROM mef.investments
+                               WHERE load_id = %s AND snip = %s AND snip <> ''
+                               LIMIT 1""",
+                            (load_id, codigo),
+                        ).fetchone()
             if fila is None:
-                return None
-            d = dict(fila)
+                return (True, None)
+            d = fila
+            for campo in ("monto_viable", "costo_actualizado"):
+                if d.get(campo) is not None:
+                    d[campo] = format(d[campo], "f")
             d.pop("identity_key", None)
+            d.pop("load_id", None)
             d.pop("nombre_norm", None)
             d.pop("entidad_norm", None)
             d.pop("fuente", None)
             d.pop("fila_origen", None)
-            return d
-        except (OSError, sqlite3.Error):
-            return None
+            return (True, d)
+        except Exception:
+            return (False, None)
+
+    def _postgres_disponible(self, load_id: str | None) -> bool:
+        if not load_id:
+            return False
+        if self._consulta_pg is not None:
+            try:
+                self._consulta_pg(load_id, "__health__")
+                return True
+            except Exception:
+                return False
+        if not self._dsn:
+            return False
+        try:
+            with self._obtener_pool_pg().connection(timeout=3) as con:
+                return bool(con.execute(
+                    """SELECT EXISTS(
+                           SELECT 1
+                           FROM mef.loads l
+                           JOIN mef.active_load a ON a.load_id = l.load_id
+                           WHERE l.load_id = %s AND l.status = 'published'
+                       )""",
+                    (load_id,),
+                ).fetchone()[0])
+        except Exception:
+            return False
 
     def memoria_mb(self) -> float:
         """Estimación (MB) de la RAM de las estructuras cargadas. O(n); es un helper

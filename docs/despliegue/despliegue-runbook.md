@@ -191,7 +191,7 @@ administrador):
 La tarea corre los domingos a las 03:00, ignora un segundo arranque simultáneo y
 guarda logs en `%ProgramData%\InfoObras\logs`. No reinicia el backend: el
 resolver detecta el nuevo `load_id`. Confirmar en `/api/pivote/salud` que
-`base_mef` tenga estado operativo, `edad_dias <= 8` y `sqlite: true`.
+`base_mef` tenga estado operativo, `edad_dias <= 8` y `postgres: true`.
 
 ---
 

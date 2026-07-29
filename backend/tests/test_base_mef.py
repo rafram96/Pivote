@@ -41,7 +41,7 @@ def test_disponible_con_fixtures(base):
         "estado": "ok",
         "load_id": None,
         "edad_dias": 0,
-        "sqlite": False,
+        "postgres": False,
     }
 
 

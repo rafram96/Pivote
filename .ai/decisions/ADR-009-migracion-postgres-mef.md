@@ -1,92 +1,96 @@
-# ADR-009 · ETL MEF serving-first: índice RAM + fichas SQLite
+# ADR-009 · ETL MEF serving-first: índice RAM + PostgreSQL
 
-- Fecha: 2026-07-23; decisión revisada 2026-07-29
+- Fecha: 2026-07-23; decisión final 2026-07-29
 - Estado: **ACEPTADO**
 
 ## Contexto
 
-ADR-002 creó un archivo compacto y un índice RAM para buscar inversiones por
-nombre sin depender de la red. El resolver ya consume esa base para proponer
-candidatos, comprobar CUI/SNIP y reconocer entidades públicas.
+ADR-002 creó un archivo compacto y un índice RAM para que el resolver busque
+inversiones por nombre sin depender de la red. El objetivo del nuevo ETL es
+enriquecer ese resolver: una vez identificado un CUI/SNIP candidato, debe poder
+contrastar más datos oficiales.
 
-El objetivo inmediato no es explotar históricamente las 95 columnas del MEF:
-es aumentar la precisión del resolver con una ficha oficial más rica una vez
-que existe un CUI candidato. La RAM no es una restricción, pero tampoco conviene
-cargar en ella campos que solo se consultan por clave exacta.
-
-El EDA real del corte 2026-07-26 encontró 620,985 filas, 579,481 CUIs y una sola
-identidad duplicada. CUI, o SNIP cuando no existe CUI, permite un lookup local
-simple. PostgreSQL añadiría operación y dependencia sin aportar una ventaja
-material a este caso de uso inmediato.
+La RAM no es una restricción, pero cargar allí toda la ficha no aporta valor.
+PostgreSQL ya forma parte del despliegue on-prem y el desarrollador confirmó que
+es el destino obligatorio. El EDA real encontró 620,985 filas, 579,481 CUIs y
+una sola identidad duplicada.
 
 ## Decisión
 
 El ETL publica dos representaciones coordinadas:
 
-1. `inversiones.csv.gz`, cargado en RAM, conserva el índice invertido y la
-   búsqueda difusa por nombre.
-2. `inversiones.sqlite`, indexado por CUI y SNIP, conserva la ficha enriquecida
-   que se consulta después de identificar un candidato.
+1. `inversiones.csv.gz`, cargado en RAM, conserva la búsqueda difusa por nombre.
+2. `mef.investments` en PostgreSQL conserva la ficha enriquecida y se consulta
+   por `(load_id, CUI/SNIP)`.
 
-Ambos artefactos, el catálogo de entidades y la metadata pertenecen a un mismo
-`load_id`. Cada carga vive en un directorio inmutable y `manifest.json` cambia
-atómicamente el puntero a la versión activa. `BaseMef` detecta el cambio y
-recarga su índice sin reiniciar el backend.
+El schema independiente `mef` contiene:
 
-La ficha SQLite v1 incluye identidad, nombre, estado/situación, entidad,
-nivel/sector/función, tipo de inversión, tipología, modalidad, montos, fechas,
-expediente técnico y unidades OPMI/UF/UEI/UEP. Ubicación permanece en el
-artefacto compatible mientras el resolver actual la usa; las coordenadas no se
-incorporan.
+- `mef.loads`: estado y metadata de cada carga;
+- `mef.investments`: ficha canónica por identidad y carga;
+- `mef.active_load`: puntero operativo a la carga publicada.
 
-El Programador de tareas de Windows ejecutará semanalmente un contenedor
-one-shot del ETL. Descarga con retry/backoff, aplica gates y deja intacta la
-carga anterior ante cualquier fallo.
+Los artefactos de disco y PostgreSQL comparten `load_id`. El resolver toma el
+`load_id` del manifest de disco y lo incluye en la consulta SQL; así nunca mezcla
+el índice RAM de una versión con fichas de otra.
 
-PostgreSQL y la conservación íntegra de las 95 columnas quedan diferidos hasta
-que exista un consumidor de historia, consultas analíticas o concurrencia que
-lo justifique.
+Publicación:
+
+1. construir gzip, catálogo y metadata en staging;
+2. cargar PostgreSQL por `COPY` y reconciliar el total de identidades;
+3. marcar la carga `validated`;
+4. publicar el manifest mediante `os.replace`;
+5. actualizar `mef.active_load` en una transacción.
+
+PostgreSQL es obligatorio para ejecutar una nueva carga. Si cae durante una
+consulta del resolver, `BaseMef` degrada a la ficha mínima del gzip y el análisis
+puede continuar.
+
+La ficha v1 incluye identidad, nombre, estado/situación, entidad, ubicación
+compatible, nivel/sector/función, tipo de inversión, tipología, modalidad,
+montos, fechas, expediente técnico y OPMI/UF/UEI/UEP. Las coordenadas se
+excluyen.
 
 ## Consecuencias
 
 Positivas:
 
-- lookup por CUI/SNIP sin cargar la ficha completa en RAM;
-- no se introduce una nueva dependencia de servicio;
-- búsqueda por nombre conserva el comportamiento ya validado;
-- publicación, rollback y adopción de cargas son explícitos;
-- SQLite puede distribuirse y probarse como un único artefacto inmutable.
+- consulta enriquecida compartida entre procesos;
+- tipos e índices gobernados en PostgreSQL;
+- trazabilidad y rollback por carga;
+- la búsqueda RAM ya validada no se reescribe;
+- queda una base directa para API/panel futuros.
 
 Costos:
 
+- PostgreSQL pasa a ser requisito del cron, aunque no del resolver en ejecución;
+- filesystem y PG no comparten una transacción distribuida;
 - se mantienen dos representaciones derivadas;
-- el ETL debe reconciliarlas por `load_id` y conteos;
-- los cambios que usen nuevos campos para puntuar necesitan pytest + golden;
-- SQLite no resuelve por sí solo necesidades futuras de analítica histórica.
+- cada nueva señal de scoring exige pytest + golden.
 
-## Alternativas
+## Alternativas descartadas
 
 ### Todo en RAM
 
-Es rápido, pero aumenta carga inicial y memoria por proceso con campos que solo
-se consultan una vez conocido el CUI.
+Aumenta carga inicial y replica campos por proceso sin beneficiar el lookup
+exacto.
 
-### Solo SQLite
+### SQLite
 
-Simplifica artefactos, pero obligaría a rediseñar y volver a validar la búsqueda
-difusa que hoy funciona con el índice invertido RAM.
+Era técnicamente suficiente para una sola máquina, pero contradice la decisión
+de infraestructura del proyecto y no comparte naturalmente las fichas entre
+procesos/consumidores.
 
-### PostgreSQL
+### Reemplazar RAM por PostgreSQL
 
-Adecuado para API compleja, historia y múltiples consumidores. Se difiere
-porque el resolver local no necesita esas capacidades todavía.
+Obligaría a rediseñar la búsqueda difusa ya validada y haría al resolver
+dependiente de PG. No aporta una mejora demostrada.
 
 ## Regla para enriquecer el resolver
 
-El ETL transporta datos; no decide su efecto en el scoring. Cada nueva señal
-debe clasificar explícitamente coincidencia, contradicción y dato ausente.
-Campos incompletos como tipología, modalidad o unidades responsables nunca
-producen rechazo por ausencia. Todo cambio al resolver exige pytest y golden.
+El ETL transporta datos, no cambia el scoring. Cada campo nuevo debe definir
+coincidencia, contradicción y ausencia. Tipología, modalidad y unidades
+responsables nunca rechazan por estar vacías. Todo cambio al resolver exige
+pytest y golden.
 
 ## Referencias
 

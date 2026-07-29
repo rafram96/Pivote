@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import csv
 import json
-import sqlite3
+import os
 import sys
+import uuid
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -44,6 +45,33 @@ BASE = {
 }
 
 
+class PostgresFake:
+    def __init__(self):
+        self.filas = []
+        self.meta = None
+        self.publicada = False
+        self.retener = None
+
+    def insertar(self, valores):
+        self.filas.append(valores)
+
+    def validar(self, meta):
+        assert len(self.filas) == meta["identidades"]
+        self.meta = meta
+
+    def publicar(self):
+        self.publicada = True
+
+    def purgar(self, retener):
+        self.retener = retener
+
+
+def _ejecutar(entrada, salida, **kwargs):
+    pg = PostgresFake()
+    meta = _procesar(entrada, salida, pg=pg, **kwargs)
+    return meta, pg
+
+
 def _escribir(ruta: Path, fila: dict) -> None:
     with ruta.open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(fila))
@@ -70,9 +98,9 @@ def fuentes(tmp_path):
     return entrada, salida
 
 
-def test_publica_manifest_sqlite_y_ficha_enriquecida(fuentes):
+def test_publica_manifest_y_carga_postgres_enriquecida(fuentes):
     entrada, salida = fuentes
-    meta = _procesar(
+    meta, pg = _ejecutar(
         entrada, salida, min_union=3, min_por_fuente=1,
         identificador="carga-prueba",
     )
@@ -83,25 +111,18 @@ def test_publica_manifest_sqlite_y_ficha_enriquecida(fuentes):
     assert meta["filas_total"] == 3
     assert meta["identidades"] == 3
     assert (activa / "inversiones.csv.gz").is_file()
-    assert (activa / "inversiones.sqlite").is_file()
     assert (activa / "entidades_publicas.csv").is_file()
-
-    base = BaseMef(salida)
-    ficha = base.existe_cui("2000003")
-    assert ficha is not None
-    assert ficha["sector"] == "SALUD"
-    assert ficha["monto_viable"] == "123456.78"
-    assert ficha["opmi"] == "OPMI REGIONAL"
-    assert ficha["dpto"] == "PRUEBA"
-    # El lookup exacto SQLite no obliga a cargar el índice de nombres.
-    assert base._cargada is False
-    assert base.existe_cui("999999999") is None
-    assert base._cargada is False
+    assert pg.publicada is True
+    assert pg.retener == 2
+    fila = next(f for f in pg.filas if f[1] == "2000003")
+    assert fila[15] == "SALUD"  # sector
+    assert str(fila[20]) == "123456.78"  # monto viable
+    assert fila[25] == "OPMI REGIONAL"
 
 
 def test_aliases_nom_entran_al_catalogo(fuentes):
     entrada, salida = fuentes
-    _procesar(
+    _ejecutar(
         entrada, salida, min_union=3, min_por_fuente=1,
         identificador="aliases",
     )
@@ -115,14 +136,14 @@ def test_aliases_nom_entran_al_catalogo(fuentes):
 
 def test_gate_fallido_conserva_manifest_anterior(fuentes):
     entrada, salida = fuentes
-    _procesar(
+    _ejecutar(
         entrada, salida, min_union=3, min_por_fuente=1,
         identificador="buena",
     )
     anterior = (salida / "manifest.json").read_text(encoding="utf-8")
 
     with pytest.raises(ValueError, match="validación FALLIDA"):
-        _procesar(
+        _ejecutar(
             entrada, salida, min_union=99, min_por_fuente=1,
             identificador="mala",
         )
@@ -131,50 +152,69 @@ def test_gate_fallido_conserva_manifest_anterior(fuentes):
     assert not (salida / "cargas" / "mala").exists()
 
 
-def test_sqlite_tiene_integridad_e_indices(fuentes):
-    entrada, salida = fuentes
-    _procesar(
-        entrada, salida, min_union=3, min_por_fuente=1,
-        identificador="integridad",
-    )
-    db_path = salida / "cargas" / "integridad" / "inversiones.sqlite"
-    with sqlite3.connect(db_path) as db:
-        assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-        indices = {r[1] for r in db.execute("PRAGMA index_list(inversiones)")}
-    assert "inversiones_cui_idx" in indices
-    assert "inversiones_snip_idx" in indices
-
-
 def test_base_detecta_nueva_carga_sin_reiniciar(fuentes):
     entrada, salida = fuentes
-    _procesar(
+    _ejecutar(
         entrada, salida, min_union=3, min_por_fuente=1,
         identificador="20260729T010000Z-primera",
     )
     base = BaseMef(salida)
     primera = base.buscar_candidatos("HOSPITAL PROVINCIAL")
     assert primera
-    assert primera[0]["sector"] == "SALUD"
+    assert primera[0]["entidad"] == "GOBIERNO REGIONAL DE PRUEBA"
 
     for archivo, _ in FUENTES:
         ruta = entrada / archivo
         with ruta.open(encoding="utf-8-sig", newline="") as f:
             fila = next(csv.DictReader(f))
-        fila["SECTOR"] = "NUEVO SECTOR"
+        fila["ENTIDAD"] = "NUEVA ENTIDAD PUBLICA"
         _escribir(ruta, fila)
-    _procesar(
+    _ejecutar(
         entrada, salida, min_union=3, min_por_fuente=1,
         identificador="20260729T020000Z-segunda",
     )
 
     segunda = base.buscar_candidatos("HOSPITAL PROVINCIAL")
     assert segunda
-    assert segunda[0]["sector"] == "NUEVO SECTOR"
+    assert segunda[0]["entidad"] == "NUEVA ENTIDAD PUBLICA"
+
+
+def test_base_enriquece_desde_postgres_sin_cargar_ram(fuentes):
+    entrada, salida = fuentes
+    _ejecutar(
+        entrada, salida, min_union=3, min_por_fuente=1,
+        identificador="carga-pg",
+    )
+
+    def consulta(load_id, codigo):
+        assert load_id == "carga-pg"
+        if codigo == "__health__":
+            return None
+        if codigo != "2000001":
+            return None
+        return {
+            "cui": codigo,
+            "snip": "100001",
+            "nombre": "MEJORAMIENTO DEL HOSPITAL PROVINCIAL",
+            "estado_dataset": "ACTIVO",
+            "situacion": "EN EJECUCION",
+            "entidad": "GOBIERNO REGIONAL DE PRUEBA",
+            "sector": "SALUD",
+            "monto_viable": "123456.78",
+        }
+
+    base = BaseMef(salida, consulta_pg=consulta)
+    ficha = base.existe_cui("2000001")
+    assert ficha["sector"] == "SALUD"
+    assert ficha["monto_viable"] == "123456.78"
+    assert base._cargada is False
+    assert base.existe_cui("9999999") is None
+    assert base._cargada is False
 
 
 def test_drift_bloquea_caida_brusca_de_fuente(fuentes):
     entrada, salida = fuentes
-    _procesar(
+    _ejecutar(
         entrada, salida, min_union=3, min_por_fuente=1,
         identificador="20260729T010000Z-completa",
     )
@@ -185,7 +225,7 @@ def test_drift_bloquea_caida_brusca_de_fuente(fuentes):
         csv.DictWriter(f, fieldnames=campos).writeheader()
 
     with pytest.raises(ValueError, match="caída de volumen"):
-        _procesar(
+        _ejecutar(
             entrada, salida, min_union=0, min_por_fuente=0,
             identificador="20260729T020000Z-corta",
         )
@@ -233,3 +273,33 @@ def test_lock_impide_dos_actualizaciones_simultaneas(tmp_path):
         with pytest.raises(RuntimeError, match="ya existe"):
             with etl._bloqueo_exclusivo(tmp_path):
                 pytest.fail("el segundo lock no debía adquirirse")
+
+
+@pytest.mark.skipif(
+    not os.getenv("PIVOTE_TEST_PG_DSN"),
+    reason="requiere PostgreSQL de integración explícito",
+)
+def test_carga_postgres_real_y_publica_puntero(fuentes):
+    import psycopg
+
+    entrada, salida = fuentes
+    dsn = os.environ["PIVOTE_TEST_PG_DSN"]
+    load_id = f"pytest-{uuid.uuid4().hex}"
+    with etl.CargaPostgres(dsn, load_id) as pg:
+        meta = _procesar(
+            entrada, salida, pg=pg, min_union=3, min_por_fuente=1,
+            identificador=load_id,
+        )
+
+    with psycopg.connect(dsn) as con:
+        fila = con.execute(
+            """SELECT sector, monto_viable::text, opmi
+               FROM mef.investments WHERE load_id = %s AND cui = '2000003'""",
+            (load_id,),
+        ).fetchone()
+        activa = con.execute(
+            "SELECT load_id FROM mef.active_load WHERE singleton"
+        ).fetchone()[0]
+    assert meta["identidades"] == 3
+    assert fila == ("SALUD", "123456.78", "OPMI REGIONAL")
+    assert activa == load_id
