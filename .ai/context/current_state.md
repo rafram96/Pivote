@@ -1,6 +1,29 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-07-29** · rama de trabajo: `feat/seace-abierto`
+> Última actualización: **2026-07-29** · rama de trabajo: `plan/etl-mef-v2`
+
+## Replanificación ETL MEF v2 (29-jul)
+
+Rama hija `plan/etl-mef-v2`, sin implementación de producto. Se descartó usar la
+épica #12 como especificación: sus issues eran brainstorm. Se perfiló en
+streaming el corte real 2026-07-26 de los tres CSV: **620,985 filas, 640.7 MB,
+95 columnas, 579,481 CUIs**, 41,505 filas sin CUI pero ninguna sin CUI y SNIP,
+ningún CUI cruzado entre estados y un solo duplicado lógico.
+
+Documentos fuente:
+
+- `docs/backend/eda_datos_abiertos_mef.md`: EDA, cobertura, aliases, tipos,
+  anomalías y estimación de capacidad;
+- `docs/backend/modulo_etl_mef.md`: plan reescrito desde cero;
+- `ADR-009`: aceptado para planificación como capa PG que **convive** con el
+  índice RAM de ADR-002.
+
+Decisiones: tarea semanal del Programador de tareas de Windows → contenedor
+one-shot; `load_id` común; raw JSONB + canonical tipado + serving versionado;
+puntero de carga activa en vez de swap de tablas; carga completa activa +
+anterior hasta medir almacenamiento real. La Fase 0 (EDA reproducible, carga PG
+desechable y benchmark de capacidad) precede al DDL final y a la cotización.
+Las issues de GitHub aún no se reescribieron.
 
 ## Reunión con el cliente 29-jul — lo que cambió (fuente: transcripción)
 
@@ -135,7 +158,7 @@ siguen en el roadmap. Incluye matriz de estado real y arquitectura actual/futura
   **Nada de eso existe en el código** (`grep` → cero): el ETL produce
   `inversiones.csv.gz` + `os.replace` sobre un archivo. Se reescribió describiendo
   lo real y el Postgres quedó como *evolución prevista, no construida y fuera del
-  precio* — que es lo que ADR-009 tiene EN CONSTRUCCIÓN y el épico ETL (#12-#25).
+  precio* — ADR-009 seguía EN CONSTRUCCIÓN en ese corte; fue revisado el 29-jul.
 - **Cifras reales de la base MEF** (metadata del 26-jul): **620,985 filas →
   579,481 CUIs distintos** y **11,011 entidades**. Los docs decían 452,793 y 11,004.
 - **Documento nuevo `docs/nuevos_modulos/caminos-a-b-estado.html`**: los 4 caminos

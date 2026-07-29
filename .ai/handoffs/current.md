@@ -16,6 +16,18 @@ Detalle: [`2026-07-29_codex.md`](2026-07-29_codex.md).
 ⛔ No se hizo ni se debe inferir deploy/redeploy: Rafael lo realizará
 manualmente. F3 y F5 continúan pendientes.
 
+## Nota (2026-07-29, Codex) — ETL MEF replanificado desde datos reales
+
+Rama hija `plan/etl-mef-v2`. Se ejecutó EDA streaming sobre los tres CSV del
+corte 26-jul (620,985 filas, 640.7 MB, unión de 95 columnas) y se reescribió
+`docs/backend/modulo_etl_mef.md` desde cero; la épica #12 queda tratada como
+brainstorm, no especificación. `ADR-009` ahora decide convivencia: índice RAM
+vigente para el resolver + schema PostgreSQL `mef` para raw/canonical, cargas
+versionadas y trazabilidad. El cron será Programador de tareas de Windows que
+invoca un contenedor one-shot. Antes de implementar: EDA reproducible +
+importación PG desechable para medir capacidad y cerrar DDL. No se tocaron
+issues de GitHub ni código del producto.
+
 ## Nota (2026-07-29, Codex) — arquitectura visual v3
 
 Actualizado `docs/nuevos_modulos/arquitectura-sistema.html`: ahora reconstruye

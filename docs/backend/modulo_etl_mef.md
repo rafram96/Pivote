@@ -1,305 +1,366 @@
-# Módulo ETL del MEF — Planificación (Épica #12)
+# ETL de Datos Abiertos del MEF — plan de implementación
 
-> **Fecha**: 2026-07-28
-> **Épica**: [#12 Sistema ETL](https://github.com/rafram96/Pivote/issues/12)
-> **Naturaleza**: **módulo nuevo, completo y cotizable** — no es mantenimiento del resolver
-> **Rama de trabajo**: por definir (no arranca hasta cerrar ADR-009)
+> Estado: **plan técnico v2; implementación no iniciada**
+> Fecha: 2026-07-29
+> Rama de planificación: `plan/etl-mef-v2`
+> Evidencia: [`eda_datos_abiertos_mef.md`](eda_datos_abiertos_mef.md)
+> Nota de alcance: la épica #12 y sus issues fueron una lluvia de ideas inicial.
+> Este documento no las adopta como especificación.
 
----
+## 1. Resultado buscado
 
-## 1. Qué es este módulo, y qué NO es
+Un proceso semanal desatendido debe descargar los tres CSV públicos del Banco
+de Inversiones, conservar su contenido completo, construir una representación
+canónica consultable y publicar los artefactos compactos que ya consume el
+resolver.
 
-Este módulo construye una **capa de datos propia** sobre los Datos Abiertos del MEF:
-persistencia consultable, control de calidad, scheduling desatendido y API de
-búsqueda. Es un entregable nuevo con alcance, precio y plazo propios.
+El resultado válido de una ejecución es una **carga identificable, trazable y
+reversible**. Si descarga, transformación o validación fallan, continúa activa
+la última carga buena y el fallo queda visible.
 
-### Frontera con ADR-002 (importante — evita un debate falso)
+## 2. Decisiones de arquitectura
 
-[ADR-002](file:///C:/Users/Holbi/Documents/Freelance/proyectos/InfoObras/Pivote/.ai/decisions/ADR-002-base-local-mef.md)
-decidió lo **mínimo** para que el resolver de CUI tuviera candidatos sin red: un
-CSV compactado y un índice en memoria, sin Postgres. Esa decisión sigue siendo
-correcta **en su alcance** y no se reabre.
+1. **ADR-002 sigue vigente.** `inversiones.csv.gz` y el índice RAM continúan
+   siendo el camino primario del resolver. PostgreSQL no se vuelve requisito
+   para resolver un concurso.
+2. **El cron ejecuta el ETL.** En el servidor actual (Windows 11 + Docker
+   Desktop), el disparador será el Programador de tareas de Windows. No se
+   agregará un daemon de scheduling al backend.
+3. **PostgreSQL es la capa histórica y consultable**, dentro del clúster ya
+   previsto pero en un schema independiente `mef`. No comparte tablas con el
+   repositorio del orquestador.
+4. **Una ejecución genera un solo `load_id`** para fuentes, tablas,
+   artefactos, métricas y logs.
+5. **No se renombran tablas por carga.** Se insertan filas versionadas y una
+   transacción cambia el puntero de carga activa después de todos los gates.
+6. **Raw no transforma ni pierde información.** La fila completa se conserva
+   como JSONB. Canonical y serving solo proyectan campos tipados con un
+   consumidor concreto.
+7. **EDA es parte de cada carga.** Se detectan cambios de esquema, volumen,
+   cobertura, duplicados y calidad frente a la última carga publicada.
+8. **No se paraleliza la búsqueda por anticipación.** Primero se mide el
+   resolver secuencial; esta optimización no pertenece al ETL.
 
-Este módulo **no cae bajo ADR-002**: son alcances distintos, no posturas
-enfrentadas.
+## 3. Flujo de extremo a extremo
 
-| | ADR-002 (vigente, mínimo) | Módulo ETL (#12, nuevo) |
-|---|---|---|
-| Propósito | Que el resolver tenga candidatos sin red | Capa de datos del MEF consultable y mantenida |
-| Datos | 10 campos, lo justo para puntuar nombres | 16 campos calientes + los crudos (unión de 95) |
-| Persistencia | `inversiones.csv.gz` + índice en RAM | PostgreSQL (hot indexado + cold JSONB) |
-| Consulta | Interna del resolver | API REST + panel + resolver |
-| Operación | Manual (`python -m scripts.actualizar_base_mef`) | Cron semanal + metadata + gates |
-| Naturaleza | Infraestructura mínima del pivote | **Entregable cotizable** |
-
-**Consecuencia práctica**: lo construido bajo ADR-002 **no se tira** — se conserva
-como está y el módulo nuevo lo absorbe o convive con él (§3).
-
-### La motivación NO es la RAM
-
-Decisión del desarrollador (2026-07-28): **la RAM no es problema, hay de sobra**.
-Los ~370-400 MB del índice en memoria **no motivan** esta migración, y ningún
-documento debe argumentar desde ahí.
-
-La motivación es de **capacidad**, no de recursos: los 3 CSV traen 68 / 57 / 42
-columnas (**unión de 95 distintas**, verificado 28-jul) y la ingesta se queda con
-**10**. Las ~85 restantes se descartan en el momento de la ingesta y no son
-recuperables sin volver a descargar ~480 MB y reprocesar. El cold path JSONB (#18) existe para que ningún
-dato del MEF se pierda y todo quede consultable.
-
-> ⚠ **[ADR-009](file:///C:/Users/Holbi/Documents/Freelance/proyectos/InfoObras/Pivote/.ai/decisions/ADR-009-migracion-postgres-mef.md)
-> tiene la sección «Contexto» vacía y su decisión redactada como "migración por
-> recursos".** Debe reescribirse con este encuadre —módulo nuevo, motivación de
-> capacidad, PG confirmado por #18— antes de que la épica arranque. Es el único
-> bloqueante real.
-
----
-
-## 2. Inventario: qué YA está construido
-
-`backend/scripts/actualizar_base_mef.py` (226 líneas) es un ETL funcionando en
-producción. La épica, tal como estaba redactada, proponía construir de cero varias
-piezas que ya existen. Estado verificado issue por issue:
-
-| Issue | Pedido | Estado | Dónde está hoy |
-|---|---|---|---|
-| **#14** T-ETL-001 Ingesta streaming + reintentos | Chunks 1 MB, retry ×3 backoff | 🟡 **Parcial** | `_descargar()` — streaming 1 MB, `timeout=(30,600)`, guarda de tamaño mínimo (10 MB), escritura atómica por archivo. **Falta solo el retry con backoff** |
-| **#15** T-ETL-002 Modo offline | `--desde-dir` | ✅ **Hecho** | `main()` — flags `--desde-dir` y `--destino`, documentados en el docstring de uso |
-| **#17** T-ETL-003 Hot path 16 campos | 16 campos normalizados e indexados | 🟡 **Parcial (10 de 16)** | `_procesar()` extrae `cui, snip, nombre, estado_dataset, situacion, ubigeo, dpto, prov, dist, entidad`. **Faltan ~6** (monto, modalidad, tipología, función, fechas…) y la normalización persistida (`nombre_norm`/`entidad_norm` hoy se calcula al cargar, no se guarda) |
-| **#18** T-ETL-004 Cold path JSONB | Payload crudo íntegro | ❌ **No existe** | Se descartan ~85 de las 95 columnas de la unión. **Requiere PG (confirmado)** |
-| **#19** T-ETL-005 Catálogo entidades + siglas | Tabla 11k+ entidades | 🔴 **BUG confirmado** | Existe (`COLS_ENTIDAD` + `_RE_SIGLA` → `entidades_publicas.csv`) pero **pierde 12,102 entidades**: las 4 columnas de unidad se llaman `NOMBRE_*` en DETALLE y `NOM_*` en los otros dos → en el 76% de las filas solo se cosecha `ENTIDAD`. Medido 28-jul |
-| **#21** T-ETL-006 Gate ≥ 400k filas | Sanity check de volumen | ✅ **Hecho** | `MIN_UNION = 400_000` y `MIN_POR_FUENTE = 50_000`, validados **antes** de sobrescribir |
-| **#22** T-ETL-007 Swap atómico | Zero-downtime | ✅ **Hecho, con otra técnica** | `tmp + os.replace` de los 3 artefactos. El objetivo (nunca reemplazar la base buena por una mala) está cumplido. En PG se re-implementa como swap de tablas |
-| **#24** T-ETL-008 Cron + metadata | Refresco desatendido | 🟡 **Parcial** | `metadata.json` **hecho** (fecha, filas por fuente, total, CUIs distintos, entidades, URLs). **Falta el cron** |
-| **#25** T-ETL-009 Búsqueda paralela | N profesionales < 3 s | ❌ **No existe** | Hoy `base_mef.buscar_candidatos()` es secuencial. **Requiere medición previa** (§5) |
-
-**Resumen**: 3 tareas hechas, 3 parciales, 1 con bug confirmado (#19), 2 sin construir.
-Mantenerlas abiertas con el texto genérico anterior sugería 9 tareas de trabajo
-donde hay ~4.
-
----
-
-## 3. Qué se conserva, qué se extiende, qué se construye
-
-**Se conserva tal cual** (no se reescribe por gusto):
-- El contrato de fuentes: los 3 CSV y la unión obligatoria (el "Detalle" solo trae ACTIVAS).
-- Los gates de volumen y la filosofía de "base corta = base sospechosa".
-- La escritura atómica: si algo falla, la versión anterior queda intacta.
-- El catálogo de entidades y la extracción de siglas.
-- El modo offline (`--desde-dir`) — es lo que permite desarrollar sin red.
-
-**Se extiende**:
-- La extracción, de 10 a 16 campos calientes + el crudo íntegro (unión de 95).
-- El destino: además de los artefactos en disco, las tablas de PG.
-
-**Se construye de cero**:
-- Persistencia PG (hot indexado + cold JSONB) y el swap de tablas.
-- Cron semanal desatendido.
-- Búsqueda paralela — **si la medición la justifica** (§5).
-- API `GET /api/pivote/mef/buscar` (issue #27, independiente: se apoya en `base_mef.py` actual y no espera a PG).
-
-**Convivencia a decidir en ADR-009**: si el índice en memoria se mantiene como
-camino de lectura rápido con PG detrás, o si PG lo reemplaza. Como la RAM no es
-restricción, la convivencia es viable y probablemente preferible (degradación
-limpia si PG cae).
-
----
-
-## 4. Trampas ya descubiertas — respetarlas o se repiten
-
-Todas están documentadas en el código o en ADR-002. Ninguna aparecía en las issues
-originales, y cada una costó una corrida en descubrirse:
-
-1. **Celdas de hasta 10 MB.** Los CSV traen memorias descriptivas entrecomilladas
-   con saltos de línea embebidos → `csv.field_size_limit(10_000_000)`. Sin eso,
-   `csv` revienta con *"field larger than field limit"*.
-2. **Los 3 archivos NO comparten esquema** — 68 / 57 / 42 columnas, unión de **95
-   distintas** (extraído de los CSV reales, 2026-07-28). Variantes confirmadas:
-   `CODIGO_SNIP` ausente en DESACTIVADAS · `CTRL_CONCURR` (D,X) vs `CONTROL_CONCURR` (C)
-   · **`NOMBRE_OPMI/UF/UEI/UEP` (D) vs `NOM_OPMI/UF/UEI/UEP` (C,X)** — esta última
-   está causando la pérdida de 12,102 entidades HOY (#19). Toda columna se resuelve
-   por lista de candidatos (`_col()`), **nunca por nombre fijo**.
-3. **Encoding `utf-8-sig`**, no `utf-8` — los archivos traen BOM.
-4. **~41k filas son SNIP-only** (`CODIGO_UNICO` vacío): hay que indexar por SNIP
-   además de por CUI, o se pierden inversiones viejas.
-5. **El "Detalle de inversiones" solo trae ACTIVAS.** Unir los 3 CSV es
-   obligatorio, no una optimización.
-6. **La paralelización jamás va contra portales en vivo** — solo contra la base
-   local. Advertido en `database.md` y en las reglas del proyecto.
-
----
-
-## 5. Protocolo de medición (obligatorio para #25)
-
-**Decisión del desarrollador (2026-07-28)**: la búsqueda paralela **no se
-implementa a ciegas**. Exige tests de velocidad **de las dos versiones** —la actual
-secuencial y la paralela— sobre una **cantidad de prueba grande**.
-
-### Corpus de prueba
-
-Volumen realista, no un puñado de casos. Fuentes disponibles en el repo:
-- **1,042 experiencias reales** (el corpus contra el que se calibró el `_STOP` de `base_mef.py`).
-- **641 experiencias auditadas** (validación del resolver local).
-- **277 casos de la golden ancha** (`golden_cui_baseline.json`).
-
-Mínimo exigido: el corpus de 1,042. Un concurso real completo (17 profesionales ×
-N experiencias) como caso de extremo a extremo.
-
-### Métricas, en ambas versiones y en la misma máquina
-
-| Métrica | Por qué |
-|---|---|
-| Latencia por consulta: **p50 / p95 / máx** | La media esconde la cola, y la cola es la que duele |
-| **Wall-clock de un concurso completo** | Es la cifra que el usuario percibe |
-| Tiempo de carga inicial del índice | Hoy ~60 s perezosos; paralelizar no debe multiplicarlo |
-| RAM pico | No es restricción, pero se registra para no llevarse sorpresas |
-| **Consistencia de resultados** | La versión paralela debe devolver **exactamente** los mismos candidatos y el mismo orden que la secuencial |
-
-### Criterio de decisión
-
-- La medición de la **versión actual se toma primero** y se registra como línea base.
-- La versión paralela **solo se acepta** si mejora el wall-clock del concurso
-  completo por un margen que justifique la complejidad (asyncio + pool +
-  concurrencia), **y** devuelve resultados idénticos.
-- Si la secuencial ya cumple el objetivo (< 3 s por concurso), **#25 se cierra sin
-  implementar** y se registra la medición como evidencia. Ese es un resultado
-  válido y barato, no un fracaso.
-
-> Contexto que hace la medición imprescindible: ADR-002 registra ~0.2 s por
-> consulta en el índice actual. A ese ritmo, un concurso de 50 experiencias son
-> ~10 s secuenciales — puede que ya esté cerca del objetivo, o puede que no.
-> **Nadie lo ha medido.** Eso es precisamente lo que hay que resolver antes de
-> escribir una línea de `asyncio`.
-
----
-
-## 6. Orden de ejecución
-
-| Paso | Qué | Bloqueante |
-|---|---|---|
-| **0** | **Cerrar ADR-009** con el encuadre de §1 (módulo nuevo, motivación de capacidad, PG confirmado, convivencia con el índice en memoria) | ⛔ Bloquea todo lo de PG |
-| **1** | 🔴 **#19 — arreglar el catálogo de entidades** (12,102 perdidas; afecta el gate público/privado del resolver) | Ninguno — **lo más urgente de la épica** |
-| **1b** | Cerrar #15, #21, #22 documentando su implementación actual | Ninguno — higiene |
-| **2** | #14 (retry+backoff) y #24 (cron): huecos pequeños del ETL **que ya existe**, sin PG de por medio | Ninguno — hacerlos ya |
-| **3** | #25 fase de **medición** (la línea base secuencial no necesita nada nuevo) | Ninguno — hacerlo ya |
-| **4** | #17 (6 campos faltantes) + #18 (cold path) + #20/#22 (PG) | ADR-009 |
-| **5** | #25 fase de implementación — **solo si §5 la justifica** | Medición del paso 3 |
-| **⏸** | #23 (feature paralela+cron) queda como paraguas de #24/#25 | — |
-
-**#27 (API `GET /api/pivote/mef/buscar`) es independiente de toda la épica**: se
-apoya en `base_mef.py` tal como está hoy y puede avanzar en cualquier momento.
-
----
-
-## 7. Nota de cotización
-
-Este módulo es **cotizable como entregable aparte** — no entra en el contrato de
-3 hitos ni se cubre con la bolsa de horas. El desglose de §2 sirve directamente
-como base de la cotización: lo ya construido (4 tareas) no se cobra dos veces, y
-lo cotizable es el paso 2 en adelante de §6, con #18 y #20 (Postgres) como el
-grueso real del esfuerzo.
-
----
-
-## 8. Referencia: columnas reales de los 3 CSV (verificado 2026-07-28)
-
-Extraído de los archivos en `backend/datos_pivote/referencia/mef/tmp/`. **Esta tabla
-reemplaza cualquier lista copiada de un plan** — es la fuente para cerrar #17 y #18.
-
-| Archivo | Columnas | Filas (metadata 26-jul) |
-|---|---:|---:|
-| `DETALLE_INVERSIONES.csv` (ACTIVAS) | **68** | 149,179 |
-| `CIERRE_INVERSIONES.csv` (CERRADAS) | **57** | 117,281 |
-| `INVERSIONES_DESACTIVADAS.csv` | **42** | 354,525 |
-| **Unión de columnas distintas** | **95** | 620,985 |
-
-Presencia por archivo — `D` = Detalle, `C` = Cierre, `X` = Desactivadas:
-
-```
-DCX  NIVEL              DCX  SECTOR             DCX  ENTIDAD
-DCX  CODIGO_UNICO       DC-  CODIGO_SNIP        DCX  NOMBRE_INVERSION
-D--  NOMBRE_OPMI        D--  NOMBRE_UF          D--  NOMBRE_UEI
-D--  NOMBRE_UEP         DC-  SEC_EJEC           DCX  ESTADO
-DCX  SITUACION          DCX  MONTO_VIABLE       DCX  COSTO_ACTUALIZADO
-D-X  CTRL_CONCURR       DCX  MONTO_LAUDO        DCX  MONTO_FIANZA
-D--  ALTERNATIVA        DCX  FECHA_REGISTRO     DCX  FECHA_VIABILIDAD
-DCX  FUNCION            DCX  PROGRAMA           DC-  SUBPROGRAMA
-DCX  MARCO              DCX  TIPO_INVERSION     DCX  DES_MODALIDAD
-D--  REGISTRADO_PMI     D--  PMI_ANIO_1..4      DCX  EXPEDIENTE_TECNICO
-DCX  INFORME_CIERRE     DC-  TIENE_F9           DC-  FEC_REG_F9
-DC-  ETAPA_F9           DC-  PRIMER_DEVENGADO   DC-  ULTIMO_DEVENGADO
-D--  DEVEN_ACUMUL_ANIO_ANT   D--  DEV_ANIO_ACTUAL     D--  PIA_ANIO_ACTUAL
-D--  PIM_ANIO_ACTUAL    D--  CERTIF_ANIO_ACTUAL D--  COMPROM_ANUAL_ANIO_ACTUAL
-D--  SALDO_EJECUTAR     DC-  TIENE_F8           D--  ETAPA_F8
-DC-  TIENE_F12B         D--  TIENE_AVAN_FISICO  D--  AVANCE_FISICO
-D--  AVANCE_EJECUCION   D--  ULT_FEC_DECLA_ESTIM     DCX  DES_TIPOLOGIA
-D--  IND_IOARR_EMERG    DCX  DEPARTAMENTO       DCX  PROVINCIA
-DCX  DISTRITO           DCX  UBIGEO             DCX  LATITUD
-DCX  LONGITUD           D--  FEC_INI_EJECUCION  D--  FEC_FIN_EJECUCION
-D--  FEC_INI_EJEC_FISICA     D--  FEC_FIN_EJEC_FISICA
-D-X  NUM_HABITANTES_BENEF    D--  MONTO_ET_F8   DC-  ANIO_PROCESO
--C-  CONTROL_CONCURR    -CX  NOM_OPMI           -CX  NOM_UF
--CX  NOM_UEI            -CX  RESPONSABLE_UEI    -CX  NOM_UEP
--C-  FEC_CIERRE         -C-  DES_CIERRE         -C-  CULMINADA
--C-  INICIO_EJEC_FISICA -C-  CULMINA_EJEC_FISICA
--C-  FEC_INI_OPER       -C-  DEVEN_ACUMULADO
--C-  TOTAL_LIQUIDACION  -C-  FEC_LIQUIDACION
+```text
+Programador de tareas (domingo 03:00)
+                │
+                ▼
+        wrapper PowerShell
+   lock + log + código de salida
+                │
+                ▼
+   DESCARGA / --desde-dir (staging)
+   3 CSV + checksum + cabeceras
+                │
+                ▼
+      PERFILADO Y CONTRATO
+ esquema · volumen · nulls · tipos
+ aliases · duplicados · drift
+                │
+       falla ───┴───► conservar carga activa + alerta
+                ▼
+        TRANSFORMACIÓN ÚNICA
+       raw + canonical + serving
+          ┌─────┴─────┐
+          ▼           ▼
+ PostgreSQL `mef`   artefactos staging
+ raw/canonical      gzip + catálogo + metadata
+          └─────┬─────┘
+                ▼
+         GATES INTEGRADOS
+ mismos conteos · mismo load_id · smoke queries
+                │
+                ▼
+      PUBLICACIÓN DE LA CARGA
+ puntero PG + manifest/artefactos de disco
+                │
+                ▼
+   resolver RAM / API / operación y auditoría
 ```
 
-### Variantes de nombre — la fuente de la trampa
+PostgreSQL y el filesystem no permiten una transacción distribuida. Para
+reducir el intervalo de inconsistencia:
 
-| Concepto | DETALLE | CIERRE / DESACTIVADAS |
-|---|---|---|
-| SNIP | `CODIGO_SNIP` | ⚠ **ausente en DESACTIVADAS** |
-| Control concurrente | `CTRL_CONCURR` (D, X) | `CONTROL_CONCURR` (C) |
-| Unidades (OPMI/UF/UEI/UEP) | `NOMBRE_*` | `NOM_*` ← **causa la pérdida de 12,102 entidades, #19** |
+1. se construyen primero los archivos con nombres versionados;
+2. se cargan y validan las tablas con estado `validated`;
+3. se publica el manifest de disco mediante `os.replace`;
+4. una transacción corta cambia `mef.active_load`;
+5. el health check compara ambos `load_id`.
 
-### Los 10 campos que se extraen hoy
+El resolver lee la versión indicada por el manifest. Si PostgreSQL no está
+disponible, sigue funcionando con esa versión. Un desacuerdo de `load_id` no
+destruye datos: marca la carga como degradada y permite reanudar la publicación.
 
-`cui` ← `CODIGO_UNICO` · `snip` ← `CODIGO_SNIP` · `nombre` ← `NOMBRE_INVERSION` ·
-`estado_dataset` *(tag del script)* · `situacion` ← `SITUACION` · `ubigeo` ← `UBIGEO` ·
-`dpto` ← `DEPARTAMENTO` · `prov` ← `PROVINCIA` · `dist` ← `DISTRITO` · `entidad` ← `ENTIDAD`
+## 4. Capas y modelo de datos
 
-### Propuesta de los 6 faltantes (todos presentes en los 3 archivos)
+### 4.1 Source / staging
 
-| # | Columna | Alimenta |
-|---|---|---|
-| 11 | `DES_TIPOLOGIA` | Compuerta de rubro (ADR-013) y desempate de homónimos (#28) |
-| 12 | `FUNCION` | Rubro grueso (SALUD / EDUCACIÓN) |
-| 13 | `TIPO_INVERSION` | Proyecto vs IOARR → camino A/B de ADR-010 |
-| 14 | `COSTO_ACTUALIZADO` | Corrobora el monto del certificado |
-| 15 | `FECHA_VIABILIDAD` | Ventana temporal |
-| 16 | `DES_MODALIDAD` | Modalidad de ejecución |
+Directorio no versionado por `load_id`, con los tres CSV originales:
 
-Alternativas también en los 3: `NIVEL`, `SECTOR`, `ESTADO`, `MONTO_VIABLE`,
-`FECHA_REGISTRO`, `LATITUD`/`LONGITUD`, `EXPEDIENTE_TECNICO`.
+- `DETALLE_INVERSIONES.csv`;
+- `CIERRE_INVERSIONES.csv`;
+- `INVERSIONES_DESACTIVADAS.csv`;
+- `manifest.json`: URL, tamaño, SHA-256, cabeceras, fecha y resultado HTTP.
 
-⚠ **Trampa al elegir**: `FEC_INI_EJECUCION`, `FEC_FIN_EJECUCION`, `AVANCE_FISICO` y
-todo el bloque presupuestal existen **solo en DETALLE** → darían null en el 76% de
-las filas. Si se quieren, entran por el cold path (#18), no por el hot path.
+Los archivos se descargan en streaming, con timeout, tres intentos y backoff
+exponencial con jitter. `--desde-dir` recorre exactamente el mismo pipeline sin
+red.
 
----
+### 4.2 Raw / cold en PostgreSQL
 
-## 9. Estado de las issues tras aplicar «documento primero» (2026-07-28)
+```text
+mef.loads
+  load_id uuid PK, started_at, finished_at, status,
+  previous_load_id, producer_version, error_summary
 
-Decisión del desarrollador: las issues se crean **cuando el trabajo está listo para
-ejecutar**, no como descomposición de un plan. Catorce issues para ~4 tareas reales
-no informaban.
+mef.source_files
+  load_id FK, source, sha256, bytes, row_count,
+  headers jsonb, profile jsonb, PRIMARY KEY(load_id, source)
 
-**Abiertas — trabajo ejecutable hoy, sin depender de ADR-009:**
+mef.raw_rows
+  load_id FK, source, source_row, identity_key,
+  payload jsonb, payload_hash,
+  PRIMARY KEY(load_id, source, source_row)
+```
 
-| Issue | Qué |
+`raw_rows` conserva incluso la repetición observada. No se crea un índice GIN
+general sobre todo el JSONB: su costo debe justificarse con consultas reales.
+Los primeros índices son `load_id`, `identity_key` y, si el benchmark lo exige,
+índices de expresión específicos.
+
+### 4.3 Canonical / hot
+
+`mef.investments` contiene una fila por identidad y por carga:
+
+```text
+load_id, identity_key, source, source_row,
+cui, snip, nombre, nombre_norm,
+estado_dataset, estado, situacion,
+entidad, entidad_norm,
+nivel, sector, funcion, tipo_inversion, tipologia, modalidad,
+ubigeo, departamento, provincia, distrito,
+monto_viable numeric(18,2), costo_actualizado numeric(18,2),
+fecha_registro date, fecha_viabilidad date,
+expediente_tecnico,
+opmi, uf, uei, uep
+```
+
+Reglas:
+
+- `identity_key = CUI:<cui>`; si falta CUI, `SNIP:<snip>`;
+- aliases `CODIGO_SNIP`/`COD_SNIP` y `NOMBRE_*`/`NOM_*` se resuelven por
+  contrato de fuente;
+- strings vacíos pasan a `NULL`; el original permanece en raw;
+- montos se parsean como decimal, nunca `float`;
+- tipología, modalidad y unidades responsables son opcionales;
+- coordenadas no forman parte del hot v1 por su calidad observada;
+- toda selección entre duplicados es determinista y deja `source_row`.
+
+Índices v1:
+
+- `(load_id, cui)` y `(load_id, snip)`;
+- `(load_id, identity_key)` único;
+- `pg_trgm` sobre `nombre_norm` y `entidad_norm`;
+- índices B-tree solo para filtros que tenga la API v1.
+
+No se agrega FTS en español hasta comparar su relevancia contra trigramas con
+consultas reales.
+
+### 4.4 Serving / gold
+
+- `inversiones.<load_id>.csv.gz`: contrato compatible con `base_mef.py`;
+- `entidades_publicas.<load_id>.csv`;
+- `metadata.<load_id>.json`: perfil y resultado de gates;
+- `manifest.json`: puntero atómico a la versión activa.
+
+El catálogo incorpora `ENTIDAD`, `NOMBRE_*` y `NOM_*`. El formato actual sin
+versionar se mantiene durante una transición y luego se retira cuando todos
+los lectores usen el manifest.
+
+## 5. Contrato de fuentes y EDA recurrente
+
+Cada fuente tiene un contrato explícito de:
+
+- aliases aceptados;
+- columnas requeridas para identidad y nombre;
+- columnas opcionales conocidas;
+- parsers de tipos;
+- umbrales de volumen y cobertura.
+
+Tratamiento de drift:
+
+| Cambio | Comportamiento |
 |---|---|
-| **#19** 🔴 | BUG: el catálogo pierde 12,102 entidades (`NOMBRE_*` vs `NOM_*`) |
-| **#14** | Retry con backoff en la descarga (~15 líneas) |
-| **#24** | Cron semanal + que el fallo deje de ser silencioso |
-| **#25** | Fase de medición: línea base secuencial |
-| **#12** | Épica — índice que apunta a este documento |
+| Falta identidad o nombre | Bloquea la publicación |
+| Desaparece una columna hot | Bloquea; no publica una base degradada |
+| Aparece una columna | Preserva en raw y emite aviso |
+| Cambia un alias conocido | Bloquea y muestra diff de cabeceras |
+| Baja volumen/cobertura fuera de tolerancia | Bloquea y compara con carga previa |
+| Aparecen duplicados | Conserva raw; canonical aplica regla y reporta tasa |
+| Falla un parseo hot | Bloquea si supera tolerancia; conserva valor raw |
 
-**Cerradas — su contenido vive en este documento:**
+Los umbrales iniciales se derivan del corte 2026-07-26, pero la implementación
+debe expresarlos como configuración y registrar el valor observado. No basta un
+único gate global de 400 mil filas.
 
-| Issue | Motivo del cierre |
-|---|---|
-| #15, #21, #22 | Ya implementadas (§2) |
-| #17, #18 | Planificación gated por ADR-009 → §8 tiene la referencia completa; se recrean cuando el ADR cierre |
-| #13, #16, #20, #23 | Features sin información propia: eran un nivel de jerarquía sobre 2 tareas cada una |
+## 6. Gates de publicación
+
+Una carga solo pasa a `published` si cumple:
+
+1. existen las tres fuentes y sus checksums;
+2. cabeceras requeridas y aliases válidos por fuente;
+3. mínimos absolutos y variación relativa de filas contra la carga anterior;
+4. ninguna fila sin CUI y SNIP simultáneamente;
+5. unicidad y tasa de duplicados dentro de tolerancia;
+6. parseo de fechas y montos dentro de tolerancia;
+7. conteo del catálogo y cobertura de entidad dentro de tolerancia;
+8. los conteos raw, canonical y artefactos son reconciliables;
+9. PostgreSQL y archivos contienen el mismo `load_id`;
+10. smoke tests por CUI, SNIP y nombre producen resultados esperados;
+11. el artefacto puede cargarse mediante `BaseMEF` y supera sus tests de
+    regresión.
+
+Todo gate produce una métrica estructurada, no solo texto de consola.
+
+## 7. Cron y operación
+
+### Disparador
+
+El Programador de tareas ejecuta semanalmente un wrapper PowerShell versionado.
+El wrapper:
+
+- cambia al directorio del despliegue;
+- adquiere un lock exclusivo para impedir dos cargas simultáneas;
+- invoca un contenedor one-shot del ETL con las variables necesarias;
+- escribe stdout/stderr en un log rotado;
+- devuelve código distinto de cero ante cualquier fallo;
+- libera el lock incluso si la ejecución falla.
+
+La tarea usa una cuenta de servicio con permiso mínimo sobre Docker, staging,
+artefactos y secretos. No se guardan credenciales en el XML ni en el repo.
+
+### Observabilidad mínima
+
+`GET /health` debe exponer, sin datos sensibles:
+
+- `mef_load_id`;
+- fecha de última carga buena;
+- edad de la base;
+- estado `ok`, `stale`, `failed` o `mismatch`;
+- último error resumido;
+- versión cargada por el índice RAM y versión activa en PostgreSQL.
+
+Se considera `stale` al superar ocho días sin una publicación válida. El
+Programador de tareas registra el código de salida y se configura una acción de
+notificación disponible en el entorno; el mecanismo concreto se cierra con la
+operación del servidor.
+
+### Recuperación
+
+- un reintento reutiliza staging si los checksums coinciden;
+- la carga anterior nunca se sobrescribe;
+- rollback = cambiar el manifest y `active_load` al `load_id` anterior;
+- las cargas fallidas conservan metadata y diagnóstico, no necesariamente el
+  payload completo;
+- un comando `--reanudar <load_id>` completa una publicación interrumpida.
+
+## 8. Retención y capacidad
+
+El EDA proyecta ~1.02 GB de JSON compacto por carga antes del overhead de
+PostgreSQL. Política inicial:
+
+- payload completo de la carga activa y la anterior;
+- artefactos de serving de ambas;
+- metadata, checksums, perfiles y errores para todas las cargas;
+- staging fallido por 14 días;
+- VACUUM/backup medidos antes de ampliar historia.
+
+Una importación desechable en PostgreSQL debe medir tamaño real de tabla, TOAST,
+índices, tiempo de carga, consulta, backup y restore. Esa evidencia fija la
+política definitiva; no se promete una retención semanal indefinida.
+
+## 9. API y consumidores
+
+La API v1 propuesta es `GET /api/pivote/mef/buscar`, con búsqueda por CUI, SNIP
+o nombre y filtros acotados. Debe depender de una interfaz de lectura, no de
+SQL embebido en el endpoint.
+
+- El resolver conserva `BaseMEF`/RAM para no cambiar sus resultados ni su
+  degradación.
+- La API y futuros paneles pueden leer PostgreSQL.
+- Ambos caminos declaran el `load_id` usado.
+- Cualquier cambio al resolver se trabaja aparte y cumple pytest + golden.
+
+## 10. Fases ejecutables y criterios de salida
+
+### Fase 0 — contrato y benchmark de capacidad
+
+- versionar el perfil EDA reproducible;
+- completar semántica de campos pendientes;
+- importar una carga en PostgreSQL desechable;
+- medir almacenamiento y consultas;
+- congelar DDL y umbrales.
+
+**Salida:** ADR-009 aceptado, DDL revisado y presupuesto de capacidad medido.
+
+### Fase 1 — robustecer el ETL de archivos
+
+- corregir aliases del catálogo;
+- agregar retry/backoff;
+- introducir `load_id`, artefactos versionados y manifest;
+- implementar perfilado/gates comparativos;
+- tests unitarios e integración offline.
+
+**Salida:** una ejecución `--desde-dir` publica o revierte de forma determinista.
+
+### Fase 2 — persistencia PostgreSQL
+
+- migraciones del schema `mef`;
+- carga streaming/batch de raw y canonical;
+- índices mínimos y consultas de smoke;
+- publicación por puntero y retención.
+
+**Salida:** una carga real cumple reconciliación y rollback RAM/PG.
+
+### Fase 3 — automatización operativa
+
+- wrapper PowerShell y contenedor one-shot;
+- tarea semanal documentada;
+- lock, logs, health/staleness y reanudación;
+- simulación de caída en descarga, PG y publicación.
+
+**Salida:** dos ejecuciones programadas controladas, incluida una falla
+inyectada que conserva la base anterior y deja alarma visible.
+
+### Fase 4 — API y adopción
+
+- endpoint y contrato;
+- paginación, límites y pruebas;
+- panel/consumidores solo cuando exista necesidad validada.
+
+**Salida:** API trazable por `load_id`, sin alterar resultados del resolver.
+
+## 11. Trabajo fuera de este plan
+
+- paralelizar profesionales o portales;
+- cambiar scoring o reglas de resolución CUI;
+- usar coordenadas como señal sin saneamiento comprobado;
+- guardar datos de clientes;
+- construir analítica o BI sin consultas acordadas;
+- convertir PostgreSQL en dependencia obligatoria del resolver.
+
+## 12. Relación con las issues existentes
+
+Las issues actuales sirven como inventario histórico, no como desglose final.
+Antes de implementar:
+
+1. la épica #12 debe enlazar este plan y el EDA;
+2. se cierran o reescriben tareas cuya premisa cambió;
+3. se crean tickets por las fases anteriores, con criterios de salida y
+   evidencia requerida;
+4. #25 (paralelización) permanece separado y condicionado a benchmark.
+
+No se estima ni cotiza la implementación desde los títulos de las issues
+anteriores; se estima desde este diseño una vez completada la Fase 0.

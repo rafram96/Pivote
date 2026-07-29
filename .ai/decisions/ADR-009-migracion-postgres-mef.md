@@ -1,73 +1,124 @@
-# ADR-009 · Migración del índice MEF de memoria a PostgreSQL
+# ADR-009 · Capa PostgreSQL del ETL MEF y convivencia con el índice RAM
 
-- Fecha: 2026-07-23 (iniciado) · Estado: **EN CONSTRUCCIÓN — no implementar todavía**
-- Se completará con el desarrollador en sesión dedicada; hasta entonces rige
-  ADR-002 (índice en memoria, sin PG obligatorio).
+- Fecha: 2026-07-23; revisado 2026-07-29
+- Estado: **ACEPTADO PARA PLANIFICACIÓN**
+- Alcance: arquitectura del módulo ETL; no autoriza todavía su implementación
 
 ## Contexto
 
-> **Encuadre corregido por el desarrollador (2026-07-28)** — reemplaza la
-> premisa original de este ADR. Detalle en `docs/backend/modulo_etl_mef.md` §1.
+ADR-002 resolvió una necesidad concreta: construir semanalmente un archivo
+compacto e índice RAM para que el resolver de CUI tenga candidatos locales y
+pueda degradar a InfoObras si la base no está disponible.
 
-1. **La RAM NO es la motivación.** Hay memoria de sobra; los ~370-402 MB del
-   índice en memoria **no motivan nada** y ningún argumento debe partir de ahí.
-2. **La motivación es de CAPACIDAD**: hoy la ingesta descarta ~58 de los 68
-   campos del MEF y lo descartado no es recuperable sin re-descargar ~480 MB y
-   reprocesar. El cold path JSONB (issue #18) existe para que ningún dato se
-   pierda. **PG queda CONFIRMADO como necesario** para eso.
-3. **Esto NO es una migración del alcance de ADR-002, es un MÓDULO NUEVO,
-   completo y COTIZABLE** (épica #12). ADR-002 cubre lo *mínimo* para que el
-   resolver tenga candidatos sin red, y **sigue vigente en su alcance: no se
-   reabre ni se supersede**. Son alcances distintos, no posturas enfrentadas —
-   lo construido bajo ADR-002 se conserva y el módulo nuevo lo absorbe o
-   convive con él.
+El perfilado real de los tres CSV del corte 2026-07-26 encontró 620,985 filas,
+640.7 MB y 95 columnas distintas. El proceso existente publica 10 campos y
+descarta el resto. Preservar, consultar y auditar el corpus completo es un
+módulo nuevo; no es una corrección de consumo de memoria ni una sustitución
+necesaria del resolver.
 
-*Pendiente de documentar en sesión dedicada*: la decisión de convivencia (ver
-abajo) y las consecuencias.
+La épica #12 y sus issues se redactaron como brainstorm. Las decisiones de este
+ADR se apoyan en el EDA y el código real, no en aquel desglose.
 
 ## Decisión
 
-Se construye la capa de persistencia PG del módulo ETL (#12).
+1. Se añade PostgreSQL como capa raw/canonical consultable del ETL MEF, en un
+   schema independiente `mef` del clúster previsto.
+2. El índice RAM y sus artefactos continúan como camino primario del resolver.
+   PostgreSQL no es dependencia de arranque ni de resolución.
+3. El ETL produce ambas representaciones en una misma ejecución, con un
+   `load_id` común.
+4. Las cargas son inmutables y versionadas. Un puntero identifica la activa;
+   no se hace swap mediante renombrado de tablas.
+5. La fila completa se conserva en raw JSONB. Canonical solo contiene campos
+   tipados con consumidor y calidad comprobada.
+6. La ejecución semanal la dispara un cron operativo: en el despliegue actual,
+   el Programador de tareas de Windows invoca un contenedor one-shot mediante
+   un wrapper PowerShell.
+7. La indisponibilidad de PostgreSQL no interrumpe el resolver. Sí hace fallar
+   una nueva carga completa y deja activa la versión anterior.
+8. Retención inicial: carga completa activa y anterior; metadata permanente.
+   Se amplía solo después de medir una carga real, backup y restauración.
 
-⚠ **PENDIENTE — no dar por decidido**: si Postgres pasa a dependencia
-**obligatoria** del backend, o si convive con el índice en memoria como camino
-de lectura rápido. **Como la RAM no es restricción, la convivencia es viable y
-probablemente preferible**: preserva la degradación limpia a «InfoObras-solo»
-que hoy existe cuando falta la base. La redacción original de este ADR daba por
-sentada la obligatoriedad apoyándose en la premisa de recursos, que era falsa.
+ADR-002 permanece vigente y no es supersedido.
 
-## Puntos pendientes de definir antes de implementar
+## Modelo
 
-- [ ] Revisión y ajuste del esquema pg_trgm + FTS propuesto en
-      `architecture/database.md` (indicación del desarrollador: el esquema
-      actual debe revisarse/ajustarse, NO adoptarse tal cual).
-- [ ] Qué pasa si Postgres no está disponible al arrancar: hoy el sistema
-      degrada con gracia a «InfoObras-solo» si falta la base MEF; al ser
-      obligatorio, definir el nuevo comportamiento de arranque.
-- [ ] Plan de migración del índice existente: `actualizar_base_mef.py` hoy
-      escribe a CSV/disco — definir si migra directo o hay convivencia
-      temporal (memoria + PG).
-- [ ] Relación con el deploy en curso: ¿parte del mismo deploy protegido de
-      la Fase 1 (`InfoObras/.ai/tasks/active.md`, regla ADR-007) o fase de
-      infraestructura POSTERIOR y separada?
-- [ ] Qué pasa con la sección «Recomendaciones» de `database.md`: tiempos
-      proyectados sin medir, y la paralelización que contradice
-      `memory/recurring_patterns.md` (ya advertido inline en el saneo del
-      2026-07-23 — solo sería válida contra la BD local, jamás contra
-      portales en vivo).
+- `mef.loads`: ciclo de vida, versión y diagnóstico de cada ejecución.
+- `mef.source_files`: checksums, esquema y perfil por CSV.
+- `mef.raw_rows`: fila íntegra JSONB, sin deduplicar.
+- `mef.investments`: proyección canónica por identidad y carga.
+- `mef.active_load`: único puntero a la carga publicada.
+- Serving en disco: gzip, catálogo, metadata y manifest versionados.
 
-## Opciones consideradas
+Identidad canónica: CUI cuando existe; SNIP en caso contrario. Raw conserva
+`(load_id, source, source_row)` para no ocultar duplicados.
 
-*Pendiente de documentar cuando se evalúe*: mantener índice en memoria vs
-Postgres vs convivencia temporal de ambos.
+## Publicación y fallo
+
+Filesystem y PostgreSQL no comparten transacción. El pipeline construye
+artefactos versionados, carga y valida PostgreSQL, publica el manifest mediante
+reemplazo atómico y finalmente actualiza el puntero PG en una transacción
+corta. Ambos exponen el `load_id`; un desacuerdo es visible y reanudable.
+
+Una ejecución fallida no toca la carga activa. El resolver conserva su
+degradación actual si no puede cargar artefactos. El health check diferencia
+base sana, vencida, última carga fallida y desacuerdo de versiones.
+
+## Alternativas descartadas
+
+### Reemplazar RAM por PostgreSQL
+
+No aporta valor al resolver actual, introduce una dependencia de arranque y
+elimina una degradación ya probada. La RAM no es una restricción.
+
+### Solo archivos, sin PostgreSQL
+
+Satisface al resolver, pero no permite consultar ni gobernar de forma práctica
+las 95 columnas, cargas históricas, perfiles y trazabilidad.
+
+### Una tabla nueva y rename por semana
+
+Complica referencias, permisos y recuperación. Las cargas versionadas con un
+puntero hacen explícita la historia y permiten rollback sin DDL operativo.
+
+### Guardar únicamente el último snapshot
+
+Impide comparar drift y rollback. Se mantienen dos cargas completas hasta
+obtener mediciones reales de capacidad.
+
+### Scheduler dentro del backend
+
+Añade procesos y coordinación innecesarios al servicio web. El servidor ya
+tiene un programador operativo adecuado y Docker para ejecutar el job aislado.
 
 ## Consecuencias
 
-*Pendiente de documentar una vez cerrada la decisión.*
+Positivas:
+
+- se preserva el corpus completo sin alterar el resolver;
+- cada respuesta puede rastrearse a una carga;
+- drift, rollback y fallos quedan operables;
+- raw admite nuevas necesidades sin volver a descargar un corte perdido.
+
+Costos:
+
+- una carga podría superar ampliamente 1 GB en PostgreSQL contando TOAST e
+  índices;
+- hay que operar retención, backups, locks y monitoreo;
+- la publicación entre disco y PG es coordinada, no estrictamente atómica;
+- schema hot e índices requieren benchmark antes de congelarse.
+
+## Validación previa a implementación
+
+- EDA reproducible y contrato por fuente;
+- importación desechable de una carga completa en PostgreSQL;
+- medición de tabla, TOAST, índices, carga, consultas, backup y restore;
+- prueba de rollback y desacuerdo de `load_id`;
+- revisión del DDL final.
 
 ## Referencias
 
-- Propuesta original: `architecture/database.md`, sección «PROPUESTA NO
-  IMPLEMENTADA — esquema PostgreSQL (pg_trgm + FTS)».
-- **ADR-002** (base local MEF, sin PG) — la decisión que este ADR
-  reemplazaría al cerrarse (se supersede, no se edita).
+- `docs/backend/eda_datos_abiertos_mef.md`
+- `docs/backend/modulo_etl_mef.md`
+- `.ai/decisions/ADR-002-base-local-mef.md`
+- `.ai/architecture/database.md`

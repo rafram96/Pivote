@@ -338,7 +338,7 @@
         <span class="evidence">Despriorizado por el cliente frente a bases/contratos.</span></article>
       <article class="state-card"><header><h3>ETL MEF completo</h3><span class="status plan">Planificado</span></header>
         <p>Hot/cold PostgreSQL, cron, control de calidad, API y búsqueda medida. Es un módulo nuevo, no el índice mínimo actual.</p>
-        <span class="evidence">ADR‑009 bloquea la parte PostgreSQL.</span></article>
+        <span class="evidence">ADR‑009 aceptado para planificación; falta benchmark de capacidad y DDL final.</span></article>
       <article class="state-card"><header><h3>Golden de CUI</h3><span class="status risk">Sin instrumento</span></header>
         <p>El corpus histórico de 277 verdades y su caché se perdieron. No debe presentarse como validación disponible hoy.</p>
         <span class="evidence">Cambios del resolver: solo abstención pura hasta reconstruir golden v4.</span></article>
@@ -388,7 +388,7 @@
           <tr><td>SEACE F5</td><td>Candado de identidad CUI ↔ proceso antes de afirmar que el documento corresponde.</td><td>Golden dirigida y reglas conservadoras.</td></tr>
           <tr><td>RENIPRESS</td><td>Existencia registral del establecimiento de salud con homónimos visibles.</td><td>Clasificación sectorial y privada unificada.</td></tr>
           <tr><td>API MEF</td><td>Búsqueda directa sin red para soporte, panel y herramientas internas.</td><td>Puede usar la base mínima actual.</td></tr>
-          <tr><td>ETL MEF completo</td><td>Conserva 95 campos, automatiza refresco y habilita consultas auditables.</td><td>ADR‑009 para PostgreSQL.</td></tr>
+          <tr><td>ETL MEF completo</td><td>Conserva 95 campos, automatiza refresco y habilita consultas auditables.</td><td>EDA reproducible, benchmark de capacidad y DDL final.</td></tr>
           <tr><td>Panel</td><td>Render de SEACE, SUNAT histórico, RENIPRESS y nuevas advertencias.</td><td>Contratos backend correspondientes.</td></tr>
         </table>
       </div>
@@ -415,10 +415,10 @@
       <article class="etl-panel future">
         <span class="status plan">Evolución</span>
         <h3>Capa de datos MEF</h3>
-        <div class="etl-step"><i>1</i><div><b>Ingesta desatendida</b><span>retry/backoff, alertas y cron semanal</span></div></div>
-        <div class="etl-step"><i>2</i><div><b>Hot path</b><span>16 campos normalizados e indexados para resolver y API</span></div></div>
-        <div class="etl-step"><i>3</i><div><b>Cold path</b><span>unión completa de 95 columnas conservada como JSONB</span></div></div>
-        <div class="etl-step"><i>4</i><div><b>PostgreSQL zero‑downtime</b><span>staging, sanity checks y swap atómico de tablas</span></div></div>
+        <div class="etl-step"><i>1</i><div><b>Ingesta desatendida</b><span>retry/backoff, alertas y tarea semanal en Windows</span></div></div>
+        <div class="etl-step"><i>2</i><div><b>Capa canónica</b><span>campos tipados elegidos por consumidor y calidad real</span></div></div>
+        <div class="etl-step"><i>3</i><div><b>Raw completo</b><span>las 95 columnas conservadas como JSONB, sin ocultar duplicados</span></div></div>
+        <div class="etl-step"><i>4</i><div><b>Publicación versionada</b><span>un load_id común, gates y puntero de carga activa; sin swap de tablas</span></div></div>
         <div class="etl-step"><i>5</i><div><b>Servicios</b><span>API de búsqueda, auditoría histórica y paralelización solo si la medición la justifica</span></div></div>
       </article>
     </div>
@@ -426,11 +426,11 @@
       <summary>Orden técnico confirmado del ETL</summary>
       <div>
         <ol>
-          <li>Cerrar ADR‑009 con motivación de capacidad y convivencia preferente con el índice en memoria.</li>
-          <li>Corregir el catálogo de entidades; afecta directamente el gate público/privado.</li>
-          <li>Añadir retry/backoff y cron con fallo visible.</li>
-          <li>Medir la búsqueda secuencial antes de diseñar paralelización.</li>
-          <li>Construir seis campos calientes faltantes, cold JSONB y persistencia PostgreSQL.</li>
+          <li>Reproducir el EDA y medir una carga PostgreSQL desechable.</li>
+          <li>Corregir aliases, añadir retry/backoff, load_id y gates comparativos.</li>
+          <li>Construir raw JSONB, capa canónica y artefactos versionados.</li>
+          <li>Automatizar con el Programador de tareas de Windows y fallo visible.</li>
+          <li>Medir la búsqueda secuencial antes de considerar paralelización.</li>
           <li>Paralelizar solo si reduce materialmente el tiempo y conserva exactamente el orden de candidatos.</li>
         </ol>
       </div>

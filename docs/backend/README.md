@@ -42,8 +42,9 @@ Leyenda de estado: ✅ probado · 📐 diseñado/decidido · 🔨 por construir 
 
 El componente **2 · Resolución de CUI** se apoya en una **base local del MEF** (el
 Banco de Inversiones) para no depender solo de la búsqueda por substring de
-InfoObras. Es un espejo consolidado de las inversiones públicas (~490k filas, 452k
-CUIs distintos) que vive en `<PIVOTE_DATA_DIR>/referencia/mef/` como tres
+InfoObras. Es un espejo consolidado de las inversiones públicas (corte 2026-07-26:
+620,985 filas, 579,481 CUIs distintos) que vive en
+`<PIVOTE_DATA_DIR>/referencia/mef/` como tres
 artefactos: `inversiones.csv.gz`, `entidades_publicas.csv` y `metadata.json`.
 
 **Para qué sirve** (tres usos, todos en `resolucion/base_mef.py`):
@@ -62,11 +63,11 @@ python backend/scripts/actualizar_base_mef.py                 # descarga desde e
 python backend/scripts/actualizar_base_mef.py --desde-dir DIR # usa CSV locales (sin red)
 ```
 La escritura es **atómica** (tmp + `os.replace`) y valida el volumen: si la descarga
-falla o queda corta, la versión anterior queda intacta. Refresco recomendado en el
-**host** (no en el contenedor) vía crontab semanal, p. ej. domingos 03:00:
-```
-0 3 * * 0  cd /ruta/backend && python scripts/actualizar_base_mef.py
-```
+falla o queda corta, la versión anterior queda intacta. Hoy el refresco es manual.
+El ETL planificado usará el **Programador de tareas de Windows** para disparar
+semanalmente un contenedor one-shot; no se debe copiar un `crontab` Linux al
+servidor Windows. Diseño y controles en
+[`modulo_etl_mef.md`](modulo_etl_mef.md).
 
 **RAM / carga**: ~370 MB residentes, **carga perezosa ~60 s** en el primer uso (se
 comparte como singleton por proceso — ver `base_mef.instancia()`). Diseño de memoria
