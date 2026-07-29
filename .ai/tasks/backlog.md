@@ -43,6 +43,32 @@ necesite Claude Code + MCP.
 6. **Fallback en TRES niveles, el local queda vivo**: OCR remoto (server) →
    Tesseract local (Camino A actual) → visión (Camino B). Server caído o skill
    fuera de la LAN del ing. no puede romper la corrida.
+6b. **Fallback HÍBRIDO POR PÁGINA vía confianza de Tesseract (idea de Rafael,
+   28-jul — PROBADO empíricamente ese día):**
+   - Tesseract SÍ reporta confianza: salida TSV con `conf` **por palabra**
+     (0-100; -1 en filas estructurales). `tesseract img out -l spa txt tsv`
+     produce texto Y confianzas **en UNA sola pasada** (cero costo extra —
+     verificado con el binario v5.5 local sobre la pág. 48 real de divino:
+     113 palabras, conf media ponderada 91.2).
+   - Agregación por página: **media ponderada por longitud de palabra** (la
+     media simple la sesgan los fragmentos de 1-2 chars que el OCR alucina en
+     sellos y firmas). Guardar además `n_palabras`: una página con conf alta
+     pero 3 palabras es una página vacía/separadora (caso p82 de las bases de
+     divino), no una página confiable.
+   - Salida: junto a los `pNNNN.txt`, un **`confianzas.json`**
+     `{pagina: {conf, n_palabras}}` — viaja en el mismo zip del server.
+   - La skill marca las páginas bajo umbral y **solo ESAS** las lee Claude por
+     visión (`Read` rasteriza PDFs — confirmado 28-jul): híbrido ~95%
+     Tesseract gratis + ~5% visión donde de verdad hace falta. El umbral es
+     CALIBRABLE con datos reales (los `_ocr_*` de divino ya existen para medir
+     la distribución antes de fijarlo; arrancar explorando ~60-70).
+   - ⚠ Límite honesto del mecanismo: la confianza atrapa páginas ILEGIBLES,
+     no errores puntuales seguros de sí mismos (un `6`→`8` en un folio puede
+     venir con conf alta). Para dígitos críticos (folios, montos, CUIs) la
+     defensa siguen siendo los candados aguas abajo, no el umbral.
+   - Este matiz **no depende del server**: aplica igual al Camino A local de
+     hoy (`ocr_propuesta.py` puede emitir `confianzas.json` ya mismo — es el
+     sub-pedazo de esta tarea que se puede adelantar barato y solo).
 7. **Constraint respetado**: Tesseract en el server es 100% on-prem (la regla
    prohíbe APIs cloud, no software local) y los PDFs van al server del propio
    cliente, que ya recibe el ZIP de certificados.
