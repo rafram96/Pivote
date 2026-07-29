@@ -690,7 +690,30 @@ function consolidar(WS) {
 
   // ── postor: SE LEE del mapa (roster.postor), no se hardcodea ─────────────────
   const P = roster.postor || {};
-  const oe = pick((ev.postor_eval || {}).oferta_economica, P.oferta_economica) || {};
+  // OFERTA ECONÓMICA: merge POR CAMPO con dueño por dato, jamás pick del objeto
+  // entero. La versión anterior (`pick(ev.oferta, mapa.oferta)`) dejaba que el
+  // objeto del evaluador —que suele venir con los números en null y solo prosa—
+  // PISARA completo al del mapa, que sí traía la propuesta: en urgente1
+  // (e7c0fff6afb1) el mapa trajo propuesta=15,003,890.90 y el espejo salió con
+  // las 3 celdas vacías (disparó OFERTA_INCOMPLETA — el candado atrapó la fuga).
+  // Dueños: `propuesta` = el MAPA (Anexo 6 de la propuesta, dato del documento);
+  // `cuantia`/`limite_inferior` = las BASES (metadata_concurso — es dato del
+  // concurso, no de la propuesta); el evaluador solo es respaldo y su prosa va
+  // al `detalle`. Un null NUNCA pisa un valor.
+  const oeEv = (ev.postor_eval || {}).oferta_economica || {};
+  const oeMapa = P.oferta_economica || {};
+  const mc = bases.metadata_concurso || {};
+  const detalles = [pick(oeEv.detalle), pick(oeMapa.detalle)].filter(Boolean);
+  const oe = {
+    cuantia: pick(numify(mc.cuantia), numify(oeEv.cuantia), numify(oeMapa.cuantia)),
+    limite_inferior: pick(numify(mc.limite_inferior), numify(oeEv.limite_inferior),
+                          numify(oeMapa.limite_inferior)),
+    propuesta: pick(numify(oeMapa.propuesta), numify(oeEv.propuesta)),
+    detalle: detalles.length > 1 && detalles[0] !== detalles[1]
+      ? detalles.join(" · ") : (detalles[0] || null),
+    es_inferior: pick(oeEv.es_inferior, oeMapa.es_inferior),
+    es_superior: pick(oeEv.es_superior, oeMapa.es_superior),
+  };
 
   const formularios = Array.isArray(P.formularios) ? P.formularios.map((f) => ({
     anexo: pick(f.anexo, "—"),
@@ -761,14 +784,7 @@ function consolidar(WS) {
     postor: {
       detalle: pick(P.detalle),
       formularios,
-      oferta_economica: {
-        cuantia: numify(oe.cuantia),
-        limite_inferior: numify(oe.limite_inferior),
-        propuesta: numify(oe.propuesta),
-        detalle: pick(oe.detalle),
-        es_inferior: pick(oe.es_inferior),
-        es_superior: pick(oe.es_superior),
-      },
+      oferta_economica: oe,   // ya mergeada por campo arriba (dueño por dato)
       experiencia_postor,
       experiencia_postor_total: pick((ev.postor_eval || {}).experiencia_postor_total, P.experiencia_postor_total, {}),
       postor_cumple: pick((ev.postor_eval || {}).postor_cumple),

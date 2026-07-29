@@ -424,6 +424,42 @@ test("e2e · evaluación sana: ningún aviso crítico en el espejo", () => {
   fs.rmSync(ws, { recursive: true, force: true });
 });
 
+test("e2e · oferta: merge POR CAMPO — el evaluador con nulls no pisa al mapa (fuga urgente1)", () => {
+  // Reproduce la fuga del job e7c0fff6afb1: el mapa trajo propuesta=15,003,890.90
+  // (Anexo 6), el evaluador devolvió su bloque con números en null y solo prosa,
+  // y el `pick` de OBJETO entero dejaba las 3 celdas del espejo vacías. La
+  // cuantía/límite además viven en bases.metadata_concurso y nunca se cableaban.
+  const ws = taller(SANA);
+  const patch = (rel, fn) => {
+    const p = path.join(ws, rel);
+    const o = JSON.parse(fs.readFileSync(p, "utf-8"));
+    fn(o);
+    fs.writeFileSync(p, JSON.stringify(o), "utf-8");
+  };
+  patch("bases.json", (b) => {
+    b.metadata_concurso.cuantia = 16670989.88;
+    b.metadata_concurso.limite_inferior = 15003890.90;
+  });
+  patch("roster_bundles.json", (r) => {
+    r.postor.oferta_economica = { cuantia: null, limite_inferior: null,
+                                  propuesta: 15003890.90, detalle: "Anexo N°6 (folio 30)" };
+  });
+  patch("evaluacion.json", (e) => {
+    e.postor_eval = Object.assign({}, e.postor_eval, {
+      oferta_economica: { cuantia: null, limite_inferior: null, propuesta: null,
+                          detalle: "Coincidencia exacta al céntimo con el límite" },
+    });
+  });
+  const espejo = main(ws);
+  const oe = espejo.postor.oferta_economica;
+  assert.strictEqual(oe.propuesta, 15003890.90, "la propuesta del MAPA no puede perderse");
+  assert.strictEqual(oe.cuantia, 16670989.88, "la cuantía viene de las BASES");
+  assert.strictEqual(oe.limite_inferior, 15003890.90);
+  assert.match(oe.detalle, /Coincidencia/);   // la prosa del evaluador se conserva…
+  assert.match(oe.detalle, /Anexo/);          // …y la del mapa también
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
 // ── 8 · el gate: si nadie consume los críticos, el candado es decoración ─────
 // Se corre el CLI DE VERDAD (proceso aparte, offline) porque lo que se está
 // probando es justamente el contrato con quien lo invoca: primera línea, última
