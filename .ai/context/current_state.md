@@ -2,7 +2,7 @@
 
 > Última actualización: **2026-07-29** · rama de trabajo: `feat/seace-abierto`
 
-## ReniPress: primer corte integrable (29-jul, rama `rafram96/renipress-product`)
+## ReniPress integrado al orquestador (29-jul, `demo`)
 
 El usuario reactivó ReniPress con una meta más amplia que la sonda original:
 convertirla progresivamente en producto integrable. Primer corte construido
@@ -14,12 +14,19 @@ sobre `demo` vigente:
 - `GET /api/pivote/renipress`: contrato HTTP reusable; `200` para fuente sana
   (con o sin resultados) y `503` para caída de SUSALUD.
 - `tools/renipress.py`: CLI de diagnóstico sobre el mismo módulo.
-- Validación: consulta real `00008215`, 29 pruebas focalizadas y suite completa
-  **696 passed, 31 skipped**.
-
-Todavía no conecta RENIPRESS al orquestador ni emite un veredicto sobre
-experiencias privadas. Próximo corte: política de coincidencia/abstención con
-casos reales auditados y luego adaptación a la etapa correspondiente.
+- `EtapaRenipressReal` es ahora la rama 3c del pipeline y corre en paralelo con
+  InfoObras y SUNAT después de resolver el CUI. Consulta toda experiencia cuyo
+  proyecto declara rubro salud, pública o privada, con caché por término.
+- El contrato completo queda en
+  `enriquecimiento["n_prof:n_exp"]["renipress"]`; la etapa aparece en el
+  progreso del API y participa en checkpoints/reanudación.
+- `encontrado` y `sin_resultados` son evidencia informativa.
+  `portal_no_disponible` produce `ERROR_PARCIAL`, nunca “no existe”.
+- No cambia veredictos ni crea revisión humana: la política de coincidencia
+  automática sigue pendiente de un corpus auditado de homónimos, bajas y
+  ausencias.
+- Validación: **90 pruebas focalizadas** y suite completa
+  **704 passed, 25 skipped**.
 
 ## Validación de CUI citado con ETL MEF (#69, 29-jul)
 

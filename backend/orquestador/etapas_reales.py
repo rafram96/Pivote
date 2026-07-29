@@ -5,11 +5,12 @@ Cada etapa envuelve un módulo ya probado offline (validacion/, resolucion/,
 scraping/, reglas/, entregables/) y respeta el contrato de etapa: no lanza por
 item, acumula observaciones/ItemRevision, idempotente, respeta `solo_items`.
 
-Las dependencias de red (InfoObras, SUNAT) son INYECTABLES: los tests pasan
-fakes; en producción se usan los clientes en vivo con throttling.
+Las dependencias de red (InfoObras, SUNAT, RENIPRESS) son INYECTABLES: los
+tests pasan fakes; en producción se usan los clientes en vivo con throttling.
 
 El `ctx.enriquecimiento` (persistido por el motor) acumula por experiencia:
-  "n:m" → {cui, via, obra, paralizaciones[(iso,iso)], codigo_infoobras, sunat{}}
+  "n:m" → {cui, via, obra, paralizaciones[(iso,iso)], codigo_infoobras,
+            sunat{}, renipress{}}
 y por profesional: "prof:n" → {dias_brutos, dias_paralizados, dias_traslape,
   dias_efectivos, anios_efectivos, minimo_anios?, cumple_backend?}
 """
@@ -29,6 +30,7 @@ from validacion import (a_observaciones, anotar_cargo_nucleo,
                         verificar_espejo)
 from resolucion import (ConsultaInfoObras, resolver_con_dedup, resolver_obras,
                         rubros_mixtos)
+from resolucion.cui import establecimiento, rubros_de
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
 from entregables import desempaquetar_enriquecimiento, generar_excel_final, mapear_certificados
 from .etapas import Contexto, EtapaIngesta, EtapaStub
@@ -1246,6 +1248,96 @@ class EtapaSunatReal:
                     _met(total, ok, rev, err), obs)
 
 
+# ── 3c · RENIPRESS (existencia auxiliar de establecimientos de salud) ───────
+
+class EtapaRenipressReal:
+    """Consulta RENIPRESS sin convertir el resultado en un veredicto.
+
+    Solo procesa experiencias cuyo proyecto declara rubro salud. Tanto una
+    respuesta vacía como una coincidencia ambigua se conservan para el
+    evaluador; una caída del portal jamás se interpreta como inexistencia.
+    """
+
+    nombre = E.RENIPRESS
+
+    def __init__(self, consultor: Optional[Callable] = None):
+        self._consultor = consultor
+
+    def _consultar(self, termino: str):
+        if self._consultor:
+            return self._consultor(termino)
+        from scraping.renipress import buscar_renipress
+        return buscar_renipress(termino)
+
+    def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
+        experiencias = [
+            (e, clave)
+            for e, clave in ctx.items_experiencia()
+            if "salud" in rubros_de(str(e.get("proyecto") or ""))
+        ]
+        cache: dict[str, dict] = {}
+        ok = err = 0
+        obs: list[pipeline.Observacion] = []
+
+        for idx, (e, (np_, ne)) in enumerate(experiencias, 1):
+            proyecto = str(e.get("proyecto") or "").strip()
+            termino = establecimiento(proyecto).strip() or proyecto
+            ctx.reportar(
+                self.nombre,
+                idx,
+                len(experiencias),
+                f"Consultando el establecimiento {idx} de {len(experiencias)}"
+                + (f" — {_recorte(termino)}" if termino else ""),
+            )
+            if len(termino) < 2:
+                continue
+
+            clave_cache = termino.casefold()
+            if clave_cache not in cache:
+                try:
+                    resultado = self._consultar(termino)
+                    cache[clave_cache] = resultado.to_dict()
+                except Exception as ex:  # noqa: BLE001 — fuente auxiliar best-effort
+                    logger.warning("RENIPRESS %r: %r", termino, ex)
+                    cache[clave_cache] = {
+                        "estado": "portal_no_disponible",
+                        "termino": termino,
+                        "tipo_consulta": "texto",
+                        "solo_activos": True,
+                        "establecimientos": [],
+                        "total": 0,
+                        "intentos": 1,
+                        "detalle_error": "la consulta RENIPRESS falló",
+                        "ambiguo": False,
+                    }
+
+            datos = cache[clave_cache]
+            enr = ctx.enriquecimiento.setdefault(_clave(np_, ne), {})
+            enr["renipress"] = datos
+            if datos.get("estado") == "portal_no_disponible":
+                err += 1
+                obs.append(pipeline.Observacion(
+                    codigo="RENIPRESS",
+                    severidad=pipeline.Severidad.ADVERTENCIA,
+                    mensaje=(
+                        f"RENIPRESS no respondió al consultar «{termino}»; "
+                        "la existencia del establecimiento queda sin verificar"
+                    ),
+                    origen=self.nombre,
+                    referencia=f"prof={np_} exp={ne}",
+                ))
+            else:
+                ok += 1
+
+        estado = EE.ERROR_PARCIAL if err else EE.OK
+        return _res(
+            self.nombre,
+            estado,
+            _met(len(experiencias), ok, err=err),
+            obs,
+        )
+
+
 # ── 4 · Cálculo de días efectivos (Paso 5 + mínimo de las bases) ─────────────
 
 # El mínimo exigido se escribe en AÑOS, MESES o DÍAS según las bases; el regex
@@ -1513,8 +1605,9 @@ class EtapaExcelReal:
 
 def etapas_reales(dir_datos: Path, *, consulta_cui=None, fetcher_infoobras=None,
                   consultor_sunat=None, buscador_sunat=None, extras_sunat=None,
-                  descargar=None, verificador_mef=None, consulta_ocds=None):
-    """Las 8 etapas de la demo. Los parámetros inyectables son para tests;
+                  consultor_renipress=None, descargar=None, verificador_mef=None,
+                  consulta_ocds=None):
+    """Las 9 etapas de la demo. Los parámetros inyectables son para tests;
     en producción quedan los clientes en vivo."""
     return [
         EtapaIngesta(),
@@ -1525,6 +1618,7 @@ def etapas_reales(dir_datos: Path, *, consulta_cui=None, fetcher_infoobras=None,
                            consulta_ocds=consulta_ocds),
         EtapaSunatReal(consultor=consultor_sunat, buscador=buscador_sunat,
                        extras=extras_sunat),
+        EtapaRenipressReal(consultor=consultor_renipress),
         EtapaReglasReal(),
         EtapaExcelReal(Path(dir_datos)),
         EtapaStub(E.PERSISTENCIA),

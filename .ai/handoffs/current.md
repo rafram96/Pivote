@@ -4,15 +4,15 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
-## Nota (2026-07-29, Codex) — ReniPress inicia transición a producto integrable
+## Nota (2026-07-29, Codex) — ReniPress integrado al orquestador
 
-Rama `rafram96/renipress-product`, rebasada sobre `demo`. La sonda monolítica
-se convirtió en cliente reusable (`scraping/renipress.py`), API
-`GET /api/pivote/renipress` y CLI consumidor del mismo contrato. La caída de
-SUSALUD es HTTP 503/`portal_no_disponible`; una búsqueda sana vacía permanece
-HTTP 200/`sin_resultados`. Validación: consulta real `00008215`, 29 pruebas
-focalizadas y suite completa **696 passed, 31 skipped**. Falta política de
-matching con casos reales y cableado al orquestador; no produce veredictos aún.
+El cliente/API de `rafram96/renipress-product` se integró a `demo`.
+`EtapaRenipressReal` corre como rama 3c junto a InfoObras y SUNAT, solo para
+proyectos de salud, y persiste el contrato bajo `renipress` por experiencia.
+Una caída queda como `ERROR_PARCIAL`; no se confunde con una búsqueda vacía.
+Es evidencia auxiliar para salud pública y privada: no cambia veredictos ni
+crea revisiones. Matching automático pendiente hasta contar con corpus
+auditado. Validación: **90 focalizadas; 704 passed, 25 skipped** en suite.
 Detalle: [`2026-07-29_codex.md`](2026-07-29_codex.md).
 
 ## Nota (2026-07-29, Codex) — #69: CUI citado validado contra función MEF

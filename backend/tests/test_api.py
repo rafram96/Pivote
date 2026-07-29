@@ -65,12 +65,14 @@ def test_flujo_completo_de_la_demo(cliente):
     assert r.status_code == 201
     job_id = r.json()["job_id"]
 
-    # 3 · job procesado: 8 pasos OK (esqueleto), estado completado
+    # 3 · job procesado: todas las etapas OK (esqueleto), estado completado
     r = cliente.get(f"/api/pivote/jobs/{job_id}")
     assert r.status_code == 200
     job = r.json()
     assert job["estado"] == "completado"
-    assert len(job["etapas"]) == 8
+    assert len(job["etapas"]) == len(__import__(
+        "schemas.pipeline", fromlist=["Etapa"]
+    ).Etapa.orden())
     assert job["origen"] == "dropzone"
 
     # 4 · el concurso lista el job
@@ -197,7 +199,7 @@ def test_descargar_cui_no_resuelto_marca_error_y_zip_409(cliente, monkeypatch):
 # ── Progreso del análisis (barra del panel) ──────────────────────────────────
 
 def test_progreso_endpoint_job_terminado(cliente):
-    """Al terminar el pipeline (esqueleto), /progreso muestra 100% y las 8 etapas OK."""
+    """Al terminar el pipeline, /progreso muestra 100% y todas las etapas OK."""
     cid = cliente.post("/api/pivote/concursos",
                        json={"nomenclatura": "CP-PROG/2026"}).json()["concurso_id"]
     job_id = _subir(cliente, cid).json()["job_id"]
@@ -241,7 +243,10 @@ def test_armar_progreso_fusiona_vivo_y_checkpoint(cliente):
         assert et["infoobras"]["items_total"] == 9
         assert et["infoobras"]["texto"] == "Verificando la obra 4 de 9"   # texto fino en vivo
         assert et["sunat"]["estado"] == "pendiente"
-        assert prog["pct"] == round(100 / 8, 1)   # 1 de 8 etapas completa
+        total = len(__import__(
+            "schemas.pipeline", fromlist=["Etapa"]
+        ).Etapa.orden())
+        assert prog["pct"] == round(100 / total, 1)
     finally:
         modulo.REGISTRO.limpiar("jx")
 

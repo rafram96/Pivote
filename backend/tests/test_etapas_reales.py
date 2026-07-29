@@ -13,9 +13,15 @@ import openpyxl
 import pytest
 
 from orquestador import Motor, RepositorioMemoria
-from orquestador.etapas_reales import etapas_reales
+from orquestador.etapas import Contexto
+from orquestador.etapas_reales import EtapaRenipressReal, etapas_reales
+from schemas import pipeline
 from schemas.cargo import etiqueta_hoja
 from schemas.pipeline import Etapa, EstadoEtapa, JobEstado
+from scraping.renipress import (
+    EstablecimientoRENIPRESS,
+    ResultadoRENIPRESS,
+)
 
 # ── espejo sintético: 2 profesionales, 3 experiencias ────────────────────────
 # prof 1 exp 1: CUI en el campo → determinístico
@@ -146,6 +152,15 @@ SIN_EXTRAS_SUNAT = lambda ruc: ([], None)  # noqa: E731
 def _seace_sin_red_por_defecto(monkeypatch):
     """Toda esta suite es offline; cada test F2 que necesite procesos los inyecta."""
     monkeypatch.setattr("scraping.seace_abierto.procesos_por_cui", lambda cui: [])
+    monkeypatch.setattr(
+        "scraping.renipress.buscar_renipress",
+        lambda termino: ResultadoRENIPRESS(
+            estado="sin_resultados",
+            termino=termino,
+            tipo_consulta="texto",
+            solo_activos=True,
+        ),
+    )
 
 
 def hacer_motor(tmp_path):
@@ -155,6 +170,75 @@ def hacer_motor(tmp_path):
         consultor_sunat=consultor_fake, buscador_sunat=lambda n: [],
         descargar=lambda *a, **k: None)
     return Motor(etapas, repo), repo
+
+
+def test_renipress_enriquece_solo_salud_y_no_crea_revision():
+    espejo = {
+        "profesionales": [{
+            "n_prof": 1,
+            "experiencias": [
+                {"n": 1, "proyecto": "Hospital Regional Santa Rosa"},
+                {"n": 2, "proyecto": "Carretera vecinal Santa Rosa"},
+            ],
+        }],
+    }
+    job = pipeline.Job(job_id="reni-1", analisis_id="test")
+    ctx = Contexto(job=job, espejo=espejo, enriquecimiento={})
+    llamadas = []
+
+    def consultar(termino):
+        llamadas.append(termino)
+        return ResultadoRENIPRESS(
+            estado="encontrado",
+            termino=termino,
+            tipo_consulta="texto",
+            solo_activos=True,
+            establecimientos=[
+                EstablecimientoRENIPRESS(
+                    codigo_unico="00008215",
+                    nombre_razon_social="SANTA ROSA",
+                    coincidencia_exacta=True,
+                ),
+            ],
+            total=1,
+        )
+
+    resultado = EtapaRenipressReal(consultor=consultar).correr(ctx)
+
+    assert resultado.estado == EstadoEtapa.OK
+    assert resultado.metrica.items_total == 1
+    assert llamadas == ["Hospital Regional Santa Rosa"]
+    assert ctx.enriquecimiento["1:1"]["renipress"]["estado"] == "encontrado"
+    assert "1:2" not in ctx.enriquecimiento
+    assert job.items_revision == []
+
+
+def test_renipress_portal_caido_es_error_parcial_sin_inventar_ausencia():
+    espejo = {
+        "profesionales": [{
+            "n_prof": 1,
+            "experiencias": [{"n": 1, "proyecto": "Clínica San Gabriel"}],
+        }],
+    }
+    job = pipeline.Job(job_id="reni-2", analisis_id="test")
+    ctx = Contexto(job=job, espejo=espejo, enriquecimiento={})
+    caido = ResultadoRENIPRESS(
+        estado="portal_no_disponible",
+        termino="San Gabriel",
+        tipo_consulta="texto",
+        solo_activos=True,
+        detalle_error="timeout",
+    )
+
+    resultado = EtapaRenipressReal(consultor=lambda _: caido).correr(ctx)
+
+    assert resultado.estado == EstadoEtapa.ERROR_PARCIAL
+    assert resultado.metrica.items_error == 1
+    assert ctx.enriquecimiento["1:1"]["renipress"]["estado"] == (
+        "portal_no_disponible"
+    )
+    assert resultado.observaciones[0].codigo == "RENIPRESS"
+    assert job.items_revision == []
 
 
 def test_seace_f2_selecciona_por_tipo_y_cachea_por_cui(tmp_path):

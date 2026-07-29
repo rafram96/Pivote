@@ -77,7 +77,7 @@ se enriquecen con lo de arriba.
 Concurso (nomenclatura, entidad, fecha)
    ├── Bases (referencia)
    ├── Análisis = 1 postor = 1 job   ← dropzone crea esto
-   │      ├── 8 etapas (checkpoints)
+   │      ├── 9 etapas (checkpoints)
    │      ├── items_revision (cola humana)
    │      └── Excel final + espejo enriquecido
    └── Cuadro comparativo (todos los postores del concurso)
@@ -112,7 +112,7 @@ Concurso (nomenclatura, entidad, fecha)
 | | |
 |---|---|
 | **Propósito** | Ver el pipeline avanzar sin ansiedad (jobs tardan minutos por throttling de portales). |
-| **Muestra** | Las 8 etapas (`Etapa.orden()`) con su `EstadoEtapa` y `MetricaEtapa` (items ok/revisión/error, reintentos, duración). `ERROR_PARCIAL` se presenta como "3 de 41 fallaron, el resto siguió" — **no** como job roto. Banner de salud de portales si hay diagnóstico (`captcha_real` / `estructura_desconocida` de los scrapers). |
+| **Muestra** | Las 9 etapas (`Etapa.orden()`) con su `EstadoEtapa` y `MetricaEtapa` (items ok/revisión/error, reintentos, duración). `ERROR_PARCIAL` se presenta como "3 de 41 fallaron, el resto siguió" — **no** como job roto. Banner de salud de portales si hay diagnóstico (`captcha_real` / `estructura_desconocida` de los scrapers). |
 | **Datos** | `GET /api/jobs/{id}` (estado completo: `Job`) + `WS /ws/jobs/{id}` (`ProgresoJob`: estado, etapa_actual, pct, mensaje). |
 | **Acciones** | Cancelar · re-run (existe hoy, se mantiene) · ir a revisión (si `pendientes_humano > 0`). |
 | **Hecho cuando** | Manuel puede cerrar la pestaña y volver: el job siguió y el estado es fiel (checkpoints). |

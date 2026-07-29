@@ -11,7 +11,7 @@ Volátil por diseño: si el proceso muere, el job reanuda por checkpoints y este
 progreso se reconstruye solo cuando la etapa vuelve a correr. NUNCA es la fuente
 de verdad (esa es el checkpoint) — solo un espejo de "qué está pasando ahora".
 
-Concurrencia: INFOOBRAS ∥ SUNAT corren a la vez, así que el registro es
+Concurrencia: INFOOBRAS ∥ SUNAT ∥ RENIPRESS corren a la vez, así que el registro es
 `{job_id: {etapa: EtapaViva}}` — dos entradas simultáneas por job, nunca una
 sola. Thread-safe con un lock (igual patrón de proceso único que `_SALUD_CACHE`
 en la API).

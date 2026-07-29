@@ -65,7 +65,7 @@ def hacer_motor(registro, *, overrides=None, repo=None, notificaciones=None):
 
 # ── Flujo feliz ───────────────────────────────────────────────────────────────
 
-def test_flujo_feliz_completa_las_8_etapas_en_orden():
+def test_flujo_feliz_completa_las_9_etapas_en_orden():
     registro, notas = [], []
     motor, repo = hacer_motor(registro, notificaciones=notas)
     job = motor.crear_job(ESPEJO_MIN)
@@ -78,7 +78,8 @@ def test_flujo_feliz_completa_las_8_etapas_en_orden():
     nombres = [n for n, _ in registro]
     assert nombres.index(Etapa.RESOLUCION_CUI) < nombres.index(Etapa.INFOOBRAS)
     assert nombres.index(Etapa.SUNAT) < nombres.index(Etapa.REGLAS)
-    assert {Etapa.INFOOBRAS, Etapa.SUNAT} <= set(nombres)
+    assert nombres.index(Etapa.RENIPRESS) < nombres.index(Etapa.REGLAS)
+    assert {Etapa.INFOOBRAS, Etapa.SUNAT, Etapa.RENIPRESS} <= set(nombres)
     # progreso: la última notificación llega al 100%
     assert notas[-1].pct == 100.0
     # checkpoint persistido
@@ -158,7 +159,10 @@ def test_reanudacion_salta_las_etapas_ya_ok():
     assert Etapa.INGESTA not in corridas
     assert Etapa.INFOOBRAS not in corridas
     # sí corrió la fallida y lo que faltaba aguas abajo
-    assert {Etapa.SUNAT, Etapa.REGLAS, Etapa.EXCEL, Etapa.PERSISTENCIA} <= corridas
+    assert {
+        Etapa.SUNAT, Etapa.REGLAS, Etapa.EXCEL, Etapa.PERSISTENCIA
+    } <= corridas
+    assert Etapa.RENIPRESS not in corridas
 
 
 # ── Human-in-the-loop ─────────────────────────────────────────────────────────
@@ -192,7 +196,7 @@ def test_resolver_revision_redispara_solo_esa_experiencia_aguas_abajo():
 
     # corrió desde RESOLUCION_CUI hasta el final, acotado al item
     assert [n for n, _ in registro] == [
-        Etapa.RESOLUCION_CUI, Etapa.INFOOBRAS, Etapa.SUNAT,
+        Etapa.RESOLUCION_CUI, Etapa.INFOOBRAS, Etapa.SUNAT, Etapa.RENIPRESS,
         Etapa.REGLAS, Etapa.EXCEL, Etapa.PERSISTENCIA]
     assert all(items == {(1, 2)} for _, items in registro)
     # el item quedó resuelto y el job completo

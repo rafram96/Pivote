@@ -5,8 +5,8 @@ Implementa las garantías de docs/backend/orquestador.md §4:
   - Checkpoint tras cada etapa → el job es REANUDABLE (correr() salta las OK).
   - Una etapa que falla por items NO tumba el job (ERROR_PARCIAL y sigue);
     solo ErrorEstructural (o excepción no controlada) → JobEstado.ERROR.
-  - INFOOBRAS ∥ SUNAT corren en paralelo (ambas dependen de RESOLUCION_CUI;
-    REGLAS espera a las dos).
+  - INFOOBRAS ∥ SUNAT ∥ RENIPRESS corren en paralelo (dependen de
+    RESOLUCION_CUI; REGLAS espera a las tres).
   - Human-in-the-loop: resolver_revision() re-ejecuta SOLO esa experiencia
     desde la etapa del item hacia abajo (solo_items), sin tocar el resto.
   - Progreso: notifica ProgresoJob tras cada etapa (callback inyectable —
@@ -27,8 +27,12 @@ from .repositorio import Repositorio
 
 logger = logging.getLogger(__name__)
 
-# Las dos ramas que corren en paralelo tras RESOLUCION_CUI.
-_RAMA_PARALELA = (pipeline.Etapa.INFOOBRAS, pipeline.Etapa.SUNAT)
+# Las tres ramas que corren en paralelo tras RESOLUCION_CUI.
+_RAMA_PARALELA = (
+    pipeline.Etapa.INFOOBRAS,
+    pipeline.Etapa.SUNAT,
+    pipeline.Etapa.RENIPRESS,
+)
 
 Notificador = Callable[[pipeline.ProgresoJob], None]
 # Progreso fino por ítem: (job_id, etapa, item_actual, items_total, descripcion).
@@ -104,7 +108,7 @@ class Motor:
             nombre = orden[i]
 
             if nombre == _RAMA_PARALELA[0]:
-                # INFOOBRAS ∥ SUNAT — solo las que no estén ya OK (reanudación)
+                # INFOOBRAS ∥ SUNAT ∥ RENIPRESS — solo las que no estén ya OK.
                 pendientes = [e for e in _RAMA_PARALELA if not self._etapa_ok(job, e)]
                 if pendientes:
                     with ThreadPoolExecutor(max_workers=len(pendientes)) as pool:
@@ -204,10 +208,14 @@ class Motor:
 
     def _log_resumen(self, job: pipeline.Job) -> None:
         """Línea de resumen para detectar cuellos de botella: duración por etapa +
-        descargas/reintentos de InfoObras. (infoobras∥sunat van en paralelo, así que
-        el 'wall' descuenta el solape de la más corta de las dos.)"""
+        descargas/reintentos de InfoObras. Las tres fuentes públicas van en
+        paralelo, así que el wall descuenta sus solapes."""
         durs = {r.etapa.value: (r.metrica.duracion_ms or 0) for r in job.etapas}
-        wall = sum(durs.values()) - min(durs.get("infoobras", 0), durs.get("sunat", 0))
+        paralelas = [
+            durs.get(etapa.value, 0)
+            for etapa in _RAMA_PARALELA
+        ]
+        wall = sum(durs.values()) - (sum(paralelas) - max(paralelas, default=0))
         partes = " · ".join(f"{k} {v / 1000:.0f}s"
                             for k, v in sorted(durs.items(), key=lambda x: -x[1]) if v >= 1000)
         logger.info("RESUMEN job %s · %s · wall≈%.0fs · %s · descargas: diferidas (ver línea DESCARGAS)",

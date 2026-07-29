@@ -1,6 +1,6 @@
 # Orquestador del pipeline — diseño
 
-> **Qué resuelve**: los 8 componentes del backend ([mapa](README.md)) no se llaman
+> **Qué resuelve**: los componentes del backend ([mapa](README.md)) no se llaman
 > en cascada a mano. Un **orquestador** los secuencia como un pipeline con estado,
 > para tener todo *controlado*: reanudable si algo muere, reintenta lo transitorio,
 > no se cuelga por un item que falla, y deja al humano solo lo irreducible.
@@ -15,13 +15,13 @@ El pipeline tiene propiedades incómodas que obligan a una capa de control:
 
 | Propiedad | Implicación |
 |---|---|
-| Toca **portales externos** (SUNAT/InfoObras) que fallan transitoriamente | hace falta **retry con backoff** y no recolear lo ya hecho |
+| Toca **portales externos** (SUNAT/InfoObras/RENIPRESS) que fallan transitoriamente | hace falta **retry con backoff** y no recolectar lo ya hecho |
 | Procesa **N experiencias** (decenas por propuesta) | **fan-out** por experiencia, con **límite de concurrencia** por fuente |
 | Algunas experiencias **no resuelven solas** (CUI a revisión, emisor sin RUC) | **human-in-the-loop**: no bloquear el job, entregar lo demás |
 | Un análisis puede tardar y el proceso **puede morir** | **checkpoint por etapa** → reanudable |
 | El panel muestra avance | **eventos de progreso** (websocket) por etapa/lote |
 
-El orquestador es el **plano de control**; los 8 componentes son el **plano de datos**.
+El orquestador es el **plano de control**; los componentes son el **plano de datos**.
 
 ## 2 · Máquina de estados del job
 
@@ -70,8 +70,9 @@ Reglas del contrato:
 
 ```
 INGESTA → VALIDACIÓN → RESOLUCIÓN_CUI ─┬─► INFOOBRAS ─┐
-                                       └─► SUNAT ──────┴─► REGLAS → EXCEL → PERSISTENCIA
-                                       └────────────── fan-out por experiencia ──────────┘
+                                       ├─► SUNAT ─────┼─► REGLAS → EXCEL → PERSISTENCIA
+                                       └─► RENIPRESS ─┘
+                                       └──────── fan-out por experiencia ────────────────┘
    ▲ checkpoint tras cada etapa   ▲ retry+backoff por request   ▲ semáforo por fuente
 ```
 
@@ -82,8 +83,9 @@ INGESTA → VALIDACIÓN → RESOLUCIÓN_CUI ─┬─► INFOOBRAS ─┐
 - **Fan-out con límite por fuente**: las experiencias se resuelven/cruzan en paralelo,
   pero un **semáforo** acota requests concurrentes por portal (ej. máx 4 a InfoObras)
   para no saturarlo ni gatillar bloqueos.
-- **InfoObras ∥ SUNAT**: las dos ramas de la etapa de cruce son independientes
-  (CUI vs RUC) → corren en paralelo; REGLAS las espera (necesita las paralizaciones).
+- **InfoObras ∥ SUNAT ∥ RENIPRESS**: las tres ramas de cruce son independientes
+  (CUI, RUC y establecimiento de salud) y corren en paralelo; REGLAS espera a
+  las tres. RENIPRESS es informativo y no altera veredictos.
 - **Progreso**: tras cada etapa/lote se emite `ProgresoJob` por websocket.
 
 ## 5 · Human-in-the-loop (el bucle de control)
@@ -129,6 +131,7 @@ RESOLUCIÓN_CUI → item sin candidato fiable → ItemRevision{ motivo, candidat
 | Resolución de CUI (comp. 2) | `enriquecimiento.ResolucionObra` (+ `Candidato`, vías, decisiones) |
 | InfoObras (comp. 3a) | `enriquecimiento.InfoObrasResultado` (+ `Paralizacion`) |
 | SUNAT (comp. 3b) | `enriquecimiento.SunatResultado` (+ `Representante`) |
+| RENIPRESS (comp. 3c) | contrato serializado bajo `renipress` por experiencia |
 | Reglas / Paso 5 (comp. 4) | `enriquecimiento.ReglasResultado` (+ `DiasEfectivos`) |
 | Bloque `_backend` tipado (filled) | `enriquecimiento.EnriquecimientoExperiencia` |
 

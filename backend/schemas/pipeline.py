@@ -1,8 +1,9 @@
 """
 Pydantic v2 — Capa de control: el orquestador del pipeline backend.
 
-El orquestador secuencia las 8 etapas (ingesta → validación → resolución CUI →
-InfoObras ∥ SUNAT → reglas → Excel → persistencia) como una **máquina de estados**
+El orquestador secuencia las 9 etapas (ingesta → validación → resolución CUI →
+InfoObras ∥ SUNAT ∥ RENIPRESS → reglas → Excel → persistencia) como una
+**máquina de estados**
 con checkpoint por etapa, reintentos y human-in-the-loop. Diseño en
 `docs/backend/orquestador.md`.
 
@@ -39,6 +40,7 @@ class Etapa(str, Enum):
     RESOLUCION_CUI = "resolucion_cui" # 2 · cada experiencia → CUI de obra
     INFOOBRAS = "infoobras"           # 3a · vía CUI: paralizaciones, códigos, ZIP
     SUNAT = "sunat"                   # 3b · vía RUC: ALT04, ALT12, vinculación
+    RENIPRESS = "renipress"           # 3c · existencia auxiliar para experiencias de salud
     REGLAS = "reglas"                 # 4 · Paso 5 días efectivos, ALT03 25 años
     EXCEL = "excel"                   # 5 · regenera el Excel final enriquecido
     PERSISTENCIA = "persistencia"     # 6 · PostgreSQL + notifica panel
@@ -46,7 +48,7 @@ class Etapa(str, Enum):
     @classmethod
     def orden(cls) -> list["Etapa"]:
         return [cls.INGESTA, cls.VALIDACION, cls.RESOLUCION_CUI, cls.INFOOBRAS,
-                cls.SUNAT, cls.REGLAS, cls.EXCEL, cls.PERSISTENCIA]
+                cls.SUNAT, cls.RENIPRESS, cls.REGLAS, cls.EXCEL, cls.PERSISTENCIA]
 
 
 # ── Máquina de estados del job ───────────────────────────────────────────────

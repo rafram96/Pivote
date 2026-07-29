@@ -88,6 +88,7 @@ else:
 ETAPA_FUENTE = {
     pipeline.Etapa.SUNAT: "SUNAT",
     pipeline.Etapa.INFOOBRAS: "InfoObras",
+    pipeline.Etapa.RENIPRESS: "RENIPRESS",
     pipeline.Etapa.VALIDACION: "revisión de consistencia",
     pipeline.Etapa.REGLAS: "cálculo de días efectivos",
 }
@@ -101,6 +102,7 @@ ETAPA_TEXTO = {
     pipeline.Etapa.RESOLUCION_CUI: "Identificación de las obras",
     pipeline.Etapa.INFOOBRAS: "Verificación en el registro de obras públicas",
     pipeline.Etapa.SUNAT: "Verificación de los emisores",
+    pipeline.Etapa.RENIPRESS: "Consulta del registro de establecimientos de salud",
     pipeline.Etapa.REGLAS: "Cálculo de días efectivos",
     pipeline.Etapa.EXCEL: "Armado del Excel de evaluación",
     pipeline.Etapa.PERSISTENCIA: "Guardado del análisis",
@@ -426,8 +428,8 @@ def armar_progreso(job: pipeline.Job) -> dict:
     """Todo lo que la barra del panel necesita en UN request: pct grueso por
     etapas + texto/contador fino de la(s) etapa(s) en curso + avance de descargas.
     Fusiona el checkpoint persistido (fuente de verdad del estado) con el
-    RegistroProgreso en memoria (el 'qué está pasando ahora'). INFOOBRAS ∥ SUNAT
-    pueden aparecer ambas 'en_curso' a la vez — es correcto, corren en paralelo."""
+    RegistroProgreso en memoria (el 'qué está pasando ahora'). INFOOBRAS, SUNAT
+    y RENIPRESS pueden aparecer 'en_curso' a la vez: corren en paralelo."""
     orden = pipeline.Etapa.orden()
     _OK = (pipeline.EstadoEtapa.OK, pipeline.EstadoEtapa.OK_CON_REVISION,
            pipeline.EstadoEtapa.ERROR_PARCIAL)

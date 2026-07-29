@@ -1,17 +1,37 @@
 # RENIPRESS — contrato de integración
 
-## Alcance del primer corte
+## Alcance integrado
 
 El cliente RENIPRESS consulta el buscador público de SUSALUD por nombre, razón
 social, código único o RUC. Es una fuente auxiliar de existencia para
-establecimientos de salud; este corte no decide por sí solo si una experiencia
-profesional cumple.
+establecimientos de salud. El orquestador lo consulta para toda experiencia
+cuyo nombre de proyecto declara rubro salud, pública o privada. Es evidencia
+auxiliar: no decide por sí solo si una experiencia profesional cumple.
 
 Código reusable:
 
 - `backend/scraping/renipress.py`
 - `GET /api/pivote/renipress`
 - `tools/renipress.py` (diagnóstico manual)
+
+## Orquestador
+
+`EtapaRenipressReal` corre en paralelo con InfoObras y SUNAT después de resolver
+el CUI. Extrae del nombre del proyecto el término más específico disponible,
+consulta una sola vez cada término repetido dentro del job y persiste el
+contrato completo en:
+
+```text
+enriquecimiento["n_prof:n_exp"]["renipress"]
+```
+
+- Los proyectos que no son de salud no se consultan.
+- `encontrado`, incluida su ambigüedad, y `sin_resultados` se conservan sin
+  crear revisiones ni cambiar veredictos.
+- `portal_no_disponible` produce `ERROR_PARCIAL` y una observación; nunca se
+  transforma en ausencia del establecimiento.
+- El matching automático queda pendiente de un corpus auditado de homónimos,
+  bajas y búsquedas sin resultado.
 
 ## Endpoint
 
