@@ -368,6 +368,14 @@ def construir_hoja_profesional(
         # emparejada es la del certificado. Sin él, un CUI mal resuelto (un hospital
         # de otra región) pasa inadvertido detrás de un código y un monto correctos.
         kv("Nombre de la obra", fx.get("obra_nombre") or "— (InfoObras no devolvió el nombre)")
+        # #63: un CUI puede tener varios registros de obra (plan de contingencia,
+        # obra principal, saldos, ET) — cuando los hay, la ficha lo DECLARA para
+        # que el evaluador sepa que se eligió uno entre varios (caso LaFora: el
+        # ing. llegó a esa verdad por Datos Generales del portal; se la damos aquí).
+        if (fx.get("registros_cui") or 0) > 1:
+            kv("Registros bajo este CUI",
+               f"{fx['registros_cui']} obras relacionadas — se usó la de la fase "
+               "del certificado (ver nombre arriba)")
         kv("Código InfoObras", fx.get("codigo_infoobras") or "—")
         kv("CUI", fx.get("cui") or "—")
         kv("Estado de obra", fx.get("estado") or "—")
@@ -1635,7 +1643,9 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                                  "modificaciones_plazo": enr.get("modificaciones_plazo") or [],
                                  "representante_obra": enr.get("representante_obra"),
                                  "aprobacion_expediente": enr.get("aprobacion_expediente"),
-                                 "verificacion_expediente": enr.get("verificacion_expediente")}
+                                 "verificacion_expediente": enr.get("verificacion_expediente"),
+                                 # #63: N registros de obra bajo el mismo CUI
+                                 "registros_cui": enr.get("registros_cui")}
         # cert multi-obra: la lista de sub-obras verificadas viaja en `fichas` para
         # que el render la muestre (sin cambiar la firma de generar_excel_final).
         if enr.get("sub_obras"):

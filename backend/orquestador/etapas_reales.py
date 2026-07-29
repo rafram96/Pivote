@@ -352,7 +352,12 @@ class EtapaResolucionCuiReal:
                 # pueda corregir sin re-correr.
                 ctx.enriquecimiento[k] = {"cui": r["cui"], "via": r["via"], "obra": r["obra"],
                                           "candidatos": r.get("candidatos") or [],
-                                          "decision": r.get("decision")}
+                                          "decision": r.get("decision"),
+                                          # #63: el CUI tiene N registros de obra
+                                          # (contingencia/principal/saldo…) — la
+                                          # ficha del Excel lo declara
+                                          **({"registros_cui": r["registros_cui"]}
+                                             if r.get("registros_cui") else {})}
                 ok += 1
                 if r["via"] == "PROBABLE":
                     obs.append(pipeline.Observacion(

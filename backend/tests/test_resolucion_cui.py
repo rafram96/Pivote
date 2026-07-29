@@ -801,3 +801,115 @@ def test_veto_fase_registro_expediente_no_respalda_ejecucion():
     assert r["estado"] == "revision"
     assert r["cui"] is None
     assert "ELABORACIÓN DEL EXPEDIENTE TÉCNICO" in r["decision"]
+
+
+# ── #63 · checkpoint de fase para CUI multi-registro (caso LaFora) ───────────
+# Un CUI = una INVERSION con varios registros de obra (contingencia, principal,
+# saldo, ET). Los nombres comparten la cola completa (el nombre del proyecto):
+# el fuzzy da ~90+ a TODOS y es ciego a la fase. La fase es vocabulario CERRADO.
+
+from resolucion.cui import _checkpoint_fase, fase_de  # noqa: E402
+
+_LAFORA_TAIL = ("DEL PROYECTO: MEJORAMIENTO Y AMPLIACION DE LOS SERVICIOS DE "
+                "SALUD DEL HOSPITAL DE APOYO TOMAS LAFORA, GUADALUPE DEL "
+                "DISTRITO DE GUADALUPE - PROVINCIA DE PACASMAYO - DEPARTAMENTO "
+                "DE LA LIBERTAD")
+_OBRA_PRINCIPAL = {"codUniqInv": "2427376", "codigoObra": 538135,
+                   "nombrObra": "EJECUCION DE LA OBRA PRINCIPAL " + _LAFORA_TAIL,
+                   "nombrDepartamento": "LA LIBERTAD", "fechaIniObra": None,
+                   "rucEjecutor": "", "rucSupervisor": ""}
+_OBRA_CONTINGENCIA = {"codUniqInv": "2427376", "codigoObra": 500434,
+                      "nombrObra": "PLAN DE CONTINGENCIA " + _LAFORA_TAIL,
+                      "nombrDepartamento": "LA LIBERTAD", "fechaIniObra": None,
+                      "rucEjecutor": "", "rucSupervisor": ""}
+_EXP_LAFORA = {
+    "proyecto": "EJECUCIÓN DE LA OBRA PLAN DE CONTINGENCIA DEL PROYECTO "
+                "MEJORAMIENTO Y AMPLIACIÓN DE LOS SERVICIOS DE SALUD HOSPITAL "
+                "DE APOYO TOMAS LAFORA GUADALUPE, DEL DISTRITO DE GUADALUPE, "
+                "PROVINCIA DE PACASMAYO, DEPARTAMENTO DE LA LIBERTAD",
+    "cui": "2427376", "fecha_inicial": "2024-11-11", "fecha_final": "2025-09-16"}
+
+
+def test_fase_de_vocabulario_cerrado():
+    assert fase_de("PLAN DE CONTINGENCIA DEL PROYECTO X") == "CONTINGENCIA"
+    assert fase_de("EJECUCION DE LA OBRA PRINCIPAL DEL PROYECTO X") == "PRINCIPAL"
+    assert fase_de("Desagregado N° 01 del Saldo de Obra: X") == "SALDO"
+    assert fase_de("ELABORACION DE EXPEDIENTE TECNICO A NIVEL DE X") == "EXPEDIENTE"
+    assert fase_de("MEJORAMIENTO DEL HOSPITAL REGIONAL DE TACNA") is None
+    assert fase_de(None) is None
+
+
+def test_lafora_swap_al_registro_de_contingencia():
+    # el caso real: el cert dice PLAN DE CONTINGENCIA, el CUI trae 2 registros
+    # y la seleccion ciega tomaba la OBRA PRINCIPAL (inicio 03/12 vs 11/11)
+    r = resolver(dict(_EXP_LAFORA),
+                 _FakeConCodigo([_OBRA_PRINCIPAL, _OBRA_CONTINGENCIA]))
+    assert r["estado"] == "resuelto", r
+    assert r["obra"]["obra_id"] == 500434, "debe usar el registro de CONTINGENCIA"
+    assert "CONTINGENCIA" in r["obra"]["nombre_obra"]
+    assert r.get("registros_cui") == 2 or "2 registros" in str(r.get("decision"))
+
+
+def test_anti_fuzzy_el_marcador_decide_no_el_score():
+    # los dos nombres comparten ~90% del texto (la cola del proyecto): cualquier
+    # score de similitud los empata; decide el vocabulario de fase
+    from resolucion.cui import _sim
+    parecido = _sim(norm(_OBRA_PRINCIPAL["nombrObra"]),
+                    norm(_OBRA_CONTINGENCIA["nombrObra"]))
+    assert parecido >= 80, f"la trampa exige nombres casi identicos (sim={parecido})"
+    r = resolver(dict(_EXP_LAFORA),
+                 _FakeConCodigo([_OBRA_PRINCIPAL, _OBRA_CONTINGENCIA]))
+    assert r["obra"]["obra_id"] == 500434
+
+
+def test_contradiccion_sin_hermano_visible_cae_a_revision():
+    # el CUI solo muestra la OBRA PRINCIPAL y el cert es de CONTINGENCIA:
+    # jamas tomar otra fase en silencio — revision con los registros visibles
+    r = resolver(dict(_EXP_LAFORA), _FakeConCodigo([_OBRA_PRINCIPAL]))
+    assert r["estado"] == "revision", r
+    assert "CONTINGENCIA" in r["decision"]
+    assert r["candidatos"] and "PRINCIPAL" in r["candidatos"][0]["nombre_obra"]
+
+
+def test_cert_sin_fase_no_opina_regresion_cajabamba():
+    # Cajabamba: cert sin marcador + registro "Desagregado del Saldo" CORRECTO.
+    # Sin fase declarada en el cert, el checkpoint no toca nada.
+    obra = _obra("2107890", 33732,
+                 "DESAGREGADO N° 01 DEL SALDO DE OBRA: CONSTRUCCION E "
+                 "IMPLEMENTACION DEL HOSPITAL II-1 DE CAJABAMBA", "CAJAMARCA")
+    exp = {"proyecto": "Construcción e Implementación del Hospital II-1 de Cajabamba",
+           "fecha_inicial": "2014-01-21"}
+    r = resolver(exp, _FakeConsulta([obra]))
+    assert r["estado"] == "resuelto", r
+    assert r["obra"]["obra_id"] == 33732
+
+
+def test_checkpoint_portal_caido_no_degrada():
+    class _Cae:
+        def por_codigo(self, c):
+            from resolucion.cui import PortalNoResponde
+            raise PortalNoResponde()
+        def buscar(self, n):
+            return []
+    r0 = {"estado": "resuelto", "cui": "2427376", "via": "CUI_TEXTO",
+          "decision": "x", "candidatos": [],
+          "obra": {"cui": "2427376", "nombre_obra": "EJECUCION DE LA OBRA PRINCIPAL X",
+                   "departamento": "LA LIBERTAD", "obra_id": 538135}}
+    r = _checkpoint_fase(dict(r0), dict(_EXP_LAFORA), _Cae())
+    assert r["estado"] == "resuelto" and r["obra"]["obra_id"] == 538135
+
+
+def test_checkpoint_swap_unitario_desde_la_obra_equivocada():
+    # deterministico: el resultado YA trae la OBRA PRINCIPAL y el checkpoint
+    # debe swapear al hermano de CONTINGENCIA (mismo CUI, otro registro)
+    r0 = {"estado": "resuelto", "cui": "2427376", "via": "CUI_TEXTO",
+          "decision": "código CUI verificado contra la obra", "candidatos": [],
+          "obra": {"cui": "2427376",
+                   "nombre_obra": _OBRA_PRINCIPAL["nombrObra"],
+                   "departamento": "LA LIBERTAD", "obra_id": 538135}}
+    r = _checkpoint_fase(dict(r0), dict(_EXP_LAFORA),
+                         _FakeConCodigo([_OBRA_PRINCIPAL, _OBRA_CONTINGENCIA]))
+    assert r["estado"] == "resuelto"
+    assert r["obra"]["obra_id"] == 500434
+    assert r["registros_cui"] == 2
+    assert "fase del certificado" in r["decision"]
