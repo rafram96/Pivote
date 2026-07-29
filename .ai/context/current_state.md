@@ -1,6 +1,15 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-07-29** · rama de trabajo: `plan/etl-mef-v2`
+> Última actualización: **2026-07-29** · rama de trabajo: `feat/seace-abierto`
+
+## Validación de CUI citado con ETL MEF (#69, 29-jul)
+
+El resolver consume ahora `funcion` y nombre oficial de la ficha PostgreSQL
+para contrastar un CUI citado en Paso 0. Una contradicción positiva de rubro
+degrada a revisión; la ausencia de clasificación no veta. Caso real validado:
+Hospital Abancay II + CUI 2105743 → ficha de redes eléctricas, función
+`ENERGÍA` → revisión. No se relajó el candado de candidatos solo-MEF porque la
+golden v4 aún no existe.
 
 ## Replanificación ETL MEF v2 (29-jul)
 

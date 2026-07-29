@@ -90,3 +90,76 @@ def test_cui_citado_exacto_sigue_siendo_autoritativo():
     # nombre difiera (el cert suele citar un componente del proyecto integral)
     r = resolver({**EXP_CHINCHINGA, "cui": "2376130"}, ConsultaCongelada())
     assert r["estado"] == "resuelto" and r["cui"] == "2376130"
+
+
+class _BaseFicha:
+    def __init__(self, ficha):
+        self.ficha = ficha
+
+    def disponible(self):
+        return True
+
+    def existe_cui(self, codigo):
+        return self.ficha if str(codigo) == str(self.ficha.get("cui")) else None
+
+
+def test_cui_citado_con_funcion_mef_contradictoria_cae_a_revision():
+    """#69 · Hospital Abancay II no puede resolver al CUI eléctrico citado."""
+    exp = {
+        "proyecto": "CONSTRUCCION DE OBRA DEL NUEVO HOSPITAL ABANCAY II APURIMAC",
+        "cui": "2105743",
+    }
+    obra = {
+        "codUniqInv": "2105743",
+        "codigoObra": 2105743,
+        "nombrObra": "CONSTRUCCION DE REDES ELECTRICAS EN ABANCAY",
+        "nombrDepartamento": "APURIMAC",
+    }
+    ficha = {
+        "cui": "2105743",
+        "nombre": ("CONSTRUCCION DE REDES ELECTRICAS PARA NUEVE LOCALIDADES DE "
+                   "QUISAPATA DEL DISTRITO DE ABANCAY"),
+        "funcion": "ENERGÍA",
+        "dpto": "APURIMAC",
+    }
+
+    r = resolver(exp, ConsultaCongeladaAbancay(obra), base=_BaseFicha(ficha))
+
+    assert r["estado"] == "revision"
+    assert r["cui"] is None
+    assert "función oficial: ENERGÍA" in r["decision"]
+    assert r["candidatos"][0]["cui"] == "2105743"
+
+
+def test_cui_citado_con_funcion_mef_compatible_conserva_paso_cero():
+    """La nueva compuerta no degrada un CUI cuya función confirma el rubro."""
+    exp = {"proyecto": "MEJORAMIENTO DEL HOSPITAL BOCANEGRA CALLAO",
+           "cui": "2173445"}
+    obra = {
+        "codUniqInv": "2173445",
+        "codigoObra": 2173445,
+        "nombrObra": "MEJORAMIENTO DEL CENTRO DE SALUD BOCANEGRA",
+        "nombrDepartamento": "CALLAO",
+    }
+    ficha = {
+        "cui": "2173445",
+        "nombre": "MEJORAMIENTO DEL CENTRO DE SALUD BOCANEGRA",
+        "funcion": "SALUD",
+        "dpto": "CALLAO",
+    }
+
+    r = resolver(exp, ConsultaCongeladaAbancay(obra), base=_BaseFicha(ficha))
+
+    assert r["estado"] == "resuelto"
+    assert r["cui"] == "2173445"
+
+
+class ConsultaCongeladaAbancay:
+    def __init__(self, obra):
+        self.obra = obra
+
+    def por_codigo(self, codigo):
+        return [self.obra] if str(codigo) == str(self.obra["codUniqInv"]) else []
+
+    def buscar(self, nombre):
+        return []

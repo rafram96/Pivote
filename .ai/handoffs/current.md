@@ -4,6 +4,20 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
+## Nota (2026-07-29, Codex) — #69: CUI citado validado contra función MEF
+
+Sobre `feat/seace-abierto`, el Paso 0 ahora consulta la ficha enriquecida del
+ETL aunque InfoObras encuentre el CUI exacto. Si certificado y ficha declaran
+rubros positivos incompatibles, se abstiene y manda a revisión. Validación real:
+CUI 2105743 (Hospital Abancay II) → función MEF `ENERGÍA` → revisión. Suite:
+**687 passed, 25 skipped**. PostgreSQL local `pg-pivote-issue69` queda encendido
+en `127.0.0.1:54329`, volumen `pivote_issue69_pgdata`, carga
+`20260729T200354Z-790dc78d`.
+
+La promoción solo-MEF de Bocanegra NO se implementó: relajaría el candado F7
+(revisión→resuelto) y está prohibida sin golden v4. La parte de abstención del
+error real sí queda resuelta; mantener #69 abierta o dividirla antes de cerrar.
+
 ## Nota (2026-07-29, Codex) — T-004 F2 lista para PR
 
 F2 quedó cableada localmente en `feat/seace-abierto`: selección por tipo en la

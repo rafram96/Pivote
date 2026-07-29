@@ -301,7 +301,8 @@ _RUBROS: dict[str, re.Pattern] = {
     "vial": re.compile(r"\b(CARRETERA|CAMINO(S)?|TRANSITABILIDAD|VECINAL(ES)?|"
                        r"PUENTE(S)?|PAVIMENT\w*|PISTAS|VEREDAS|TROCHA|VIAL)\b"),
     "riego": re.compile(r"\b(RIEGO|IRRIGACION|REPRESA)\b"),
-    "electrico": re.compile(r"\b(ELECTRIFICACION|REDES (PRIMARIAS|SECUNDARIAS))\b"),
+    "electrico": re.compile(r"\b(ENERGIA|ELECTRIFICACION|"
+                            r"REDES (ELECTRICAS|PRIMARIAS|SECUNDARIAS))\b"),
 }
 
 
@@ -340,6 +341,21 @@ def _rubro_contradice(rub_cert: set[str], texto_obra: str) -> bool:
         return False
     rub_obra = rubros_de(texto_obra)
     return bool(rub_obra) and not (rub_cert & rub_obra)
+
+
+def _rubros_ficha_mef(ficha: Optional[dict]) -> set[str]:
+    """Rubro oficial de una inversión según su ficha enriquecida.
+
+    La función del MEF es la señal principal (p. ej. ``ENERGÍA`` o ``SALUD``);
+    el nombre y la tipología completan cortes antiguos donde esa columna puede
+    venir vacía. El sector no se usa: suele describir el nivel de gobierno
+    (``GOBIERNOS REGIONALES``), no el servicio de la inversión.
+    """
+    if not ficha:
+        return set()
+    texto = " ".join(str(ficha.get(c) or "")
+                     for c in ("funcion", "nombre", "tipologia"))
+    return rubros_de(texto)
 
 
 # ── UBIGEO del certificado: provincia/distrito (veto de ubicación, F8) ────────
@@ -1087,6 +1103,15 @@ def _paso_codigo_citado(exp: dict, consulta: Consulta, base=None) -> Optional[di
     codigo = cui_campo if 4 <= len(cui_campo) <= 8 else (mcod.group(1) if mcod else None)
     if not codigo:
         return None
+    ficha_citada = None
+    if base and base.disponible():
+        ficha_citada = base.existe_cui(codigo)
+        if ficha_citada:
+            # Se conserva desde el inicio: además del diagnóstico cuando InfoObras
+            # no tiene el CUI, permite contrastar su función oficial aun cuando sí
+            # existe un registro determinístico en el portal.
+            exp["_ficha_mef_citado"] = ficha_citada
+            exp.setdefault("_fichas_mef", {}).setdefault(codigo, ficha_citada)
     try:
         obras = consulta.por_codigo(codigo)
     except PortalNoResponde:
@@ -1099,13 +1124,9 @@ def _paso_codigo_citado(exp: dict, consulta: Consulta, base=None) -> Optional[di
         # NO se resuelve por ello (InfoObras es la fuente del cruce), pero el nombre
         # oficial del MEF se guarda como PISTA para el motivo de revisión y como
         # ficha para el scoring por nombre (más abajo). Solo con base disponible.
-        if base and base.disponible():
-            ficha = base.existe_cui(codigo)
-            if ficha:
-                _traza().ev("cui_citado_solo_en_mef", cui=codigo,
-                            nombre=ficha.get("nombre"))
-                exp["_ficha_mef_citado"] = ficha
-                exp.setdefault("_fichas_mef", {}).setdefault(codigo, ficha)
+        if ficha_citada:
+            _traza().ev("cui_citado_solo_en_mef", cui=codigo,
+                        nombre=ficha_citada.get("nombre"))
         return None
     # un CUI puede traer varias obras: preferir la finalizada que cubre
     # el periodo del certificado (de ahí salen los hitos correctos)
@@ -1147,6 +1168,37 @@ def _paso_codigo_citado(exp: dict, consulta: Consulta, base=None) -> Optional[di
     contra_dep = bool(deptos_cert) and bool(dep_obra) and dep_obra not in deptos_cert
     contra_rubro = _rubro_contradice(rubros_de(proyecto), o.get("nombrObra") or "")
     sin_afinidad = bool(toks) and n_hit == 0
+    rubros_cert = rubros_de(proyecto)
+    rubros_oficiales = _rubros_ficha_mef(ficha_citada)
+    # #69 · Un CUI escrito en el certificado sigue siendo evidencia fuerte, pero
+    # no puede imponerse a una contradicción POSITIVA de la función oficial MEF.
+    # Es una compuerta de abstención: exige rubro declarado en ambos lados y nunca
+    # infiere contradicción por ausencia. Nombre/ubicación no la anulan porque dos
+    # inversiones distintas pueden compartir topónimo y departamento (Hospital
+    # Abancay II vs redes eléctricas de Abancay, CUI 2105743).
+    if cui_exacto and rubros_cert and rubros_oficiales \
+            and not (rubros_cert & rubros_oficiales):
+        funcion = str((ficha_citada or {}).get("funcion") or "").strip()
+        nombre_mef = str((ficha_citada or {}).get("nombre") or
+                         o.get("nombrObra") or "").strip()
+        _traza().ev("cui_citado_contradice_funcion_mef", codigo=codigo,
+                    rubros_cert=sorted(rubros_cert),
+                    rubros_mef=sorted(rubros_oficiales), funcion=funcion)
+        detalle = f" (función oficial: {funcion})" if funcion else ""
+        return {"estado": "revision", "cui": None, "via": "CUI_TEXTO",
+                "decision": (
+                    f"el CUI {codigo} citado corresponde en el MEF a "
+                    f"«{nombre_mef[:90]}»{detalle}, cuyo rubro contradice al "
+                    "proyecto declarado — confirmar la obra o pegar el CUI correcto"
+                ),
+                "candidatos": [{
+                    "cui": str((ficha_citada or {}).get("cui") or cui_out),
+                    "nombre_obra": nombre_mef,
+                    "departamento": ((ficha_citada or {}).get("dpto")
+                                     or o.get("nombrDepartamento")),
+                    "score": 50,
+                }],
+                "obra": None}
     if cui_exacto and not nombre_ok and sin_afinidad and contra_dep and contra_rubro:
         solo_snip = codigo != re.sub(r"\D", "", str(o.get("codUniqInv") or ""))
         _traza().ev("cui_citado_contradice_todo", codigo=codigo,
