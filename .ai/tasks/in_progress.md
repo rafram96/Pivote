@@ -7,7 +7,9 @@
   descarga diferida independiente de InfoObras, PDF/ZIP/RAR con extensión
   real, notas honestas, ZIP y Excel. **677 passed, 24 skipped**. Prueba viva
   CUI 2279396: contrato OK; Bases RAR con HTTP 403 del host, registrada como
-  error de fuente. Sin deploy/redeploy por instrucción expresa de Rafael.
+  error de fuente. Reintentado después del commit `d77d054`: mismo 403; con
+  cabeceras de navegador/sesión previa el host agotó timeout, sin dejar
+  parciales. Sin deploy/redeploy por instrucción expresa de Rafael.
 
 - **✅ #63 CERRADA CON VALIDACIÓN VIVA (29-jul 09:19)**: re-corrida
   `8a4b468ac700` (resubir de urgente1; `resubir_job.py` arreglado al layout

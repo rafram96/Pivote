@@ -46,6 +46,10 @@
   PDF (1.45 MB); las Bases Integradas elegidas están publicadas como **RAR** y
   su host devolvió HTTP 403. El código conserva PDF/ZIP/RAR con su extensión
   real y, ante 403/HTML, deja `*_ERROR.txt` en vez de fingir un PDF válido.
+  Reintento posterior al commit `d77d054`: mismo HTTP 403; simular navegador
+  (`User-Agent`, `Referer` y sesión previa) terminó en timeout. No se creó un
+  RAR parcial. Es una restricción/intermitencia del host de archivos, no una
+  selección incorrecta del proceso.
 - **Documentación de operación y contingencia**:
   - `docs/uso-manual-seace-abierto.md` — receta operable HOY por certificado
     (preparar caché, elegir tipo, descargar los documentos con los nombres del
