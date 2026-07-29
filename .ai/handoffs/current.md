@@ -18,6 +18,12 @@ La promoción solo-MEF de Bocanegra NO se implementó: relajaría el candado F7
 (revisión→resuelto) y está prohibida sin golden v4. La parte de abstención del
 error real sí queda resuelta; mantener #69 abierta o dividirla antes de cerrar.
 
+Continuación: un CUI descartado ya no termina Paso 0. Se conserva como alerta y
+el resolver continúa por nombre/RUC/ubicación/MEF. Aunque la alternativa pase
+las compuertas, el resultado final queda en revisión con los candidatos y
+`cui_citado_descartado`; el Excel no recibe el CUI falso ni un reemplazo sin
+confirmación. Suite posterior: **688 passed, 25 skipped**.
+
 ## Nota (2026-07-29, Codex) — T-004 F2 lista para PR
 
 F2 quedó cableada localmente en `feat/seace-abierto`: selección por tipo en la

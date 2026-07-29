@@ -11,6 +11,11 @@ Hospital Abancay II + CUI 2105743 → ficha de redes eléctricas, función
 `ENERGÍA` → revisión. No se relajó el candado de candidatos solo-MEF porque la
 golden v4 aún no existe.
 
+Paso 0 tampoco corta ya el flujo al detectar esa contradicción: descarta el
+código como ancla, busca nuevamente por el resto de datos y conserva los
+candidatos encontrados. El resultado permanece en revisión hasta confirmación
+humana; recién entonces puede viajar al Excel un CUI sustituto.
+
 ## Replanificación ETL MEF v2 (29-jul)
 
 Rama hija `plan/etl-mef-v2`. La primera revisión fue documental; luego se

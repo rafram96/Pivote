@@ -102,6 +102,12 @@ class _BaseFicha:
     def existe_cui(self, codigo):
         return self.ficha if str(codigo) == str(self.ficha.get("cui")) else None
 
+    def buscar_candidatos(self, nombre, topn=10):
+        return []
+
+    def es_entidad_publica(self, nombre):
+        return (True, 100.0)
+
 
 def test_cui_citado_con_funcion_mef_contradictoria_cae_a_revision():
     """#69 · Hospital Abancay II no puede resolver al CUI eléctrico citado."""
@@ -128,7 +134,8 @@ def test_cui_citado_con_funcion_mef_contradictoria_cae_a_revision():
     assert r["estado"] == "revision"
     assert r["cui"] is None
     assert "función oficial: ENERGÍA" in r["decision"]
-    assert r["candidatos"][0]["cui"] == "2105743"
+    assert r["candidatos"] == []
+    assert r["cui_citado_descartado"] == "2105743"
 
 
 def test_cui_citado_con_funcion_mef_compatible_conserva_paso_cero():
@@ -155,11 +162,53 @@ def test_cui_citado_con_funcion_mef_compatible_conserva_paso_cero():
 
 
 class ConsultaCongeladaAbancay:
-    def __init__(self, obra):
+    def __init__(self, obra, alternativas=None):
         self.obra = obra
+        self.alternativas = alternativas or []
+        self.busquedas = []
 
     def por_codigo(self, codigo):
-        return [self.obra] if str(codigo) == str(self.obra["codUniqInv"]) else []
+        if str(codigo) == str(self.obra["codUniqInv"]):
+            return [self.obra]
+        return [o for o in self.alternativas
+                if str(codigo) == str(o.get("codUniqInv"))]
 
     def buscar(self, nombre):
-        return []
+        self.busquedas.append(nombre)
+        return list(self.alternativas)
+
+
+def test_cui_descartado_continua_busqueda_y_no_emite_reemplazo_automatico():
+    """#69 · descartar Paso 0 reinicia la resolución antes del veredicto."""
+    exp = {
+        "proyecto": "CONSTRUCCION DEL HOSPITAL ALFA EN ABANCAY APURIMAC",
+        "cui": "2105743",
+    }
+    electrica = {
+        "codUniqInv": "2105743",
+        "codigoObra": 2105743,
+        "nombrObra": "CONSTRUCCION DE REDES ELECTRICAS EN ABANCAY",
+        "nombrDepartamento": "APURIMAC",
+    }
+    hospital = {
+        "codUniqInv": "2999999",
+        "codigoObra": 2999999,
+        "nombrObra": "CONSTRUCCION DEL HOSPITAL ALFA EN ABANCAY APURIMAC",
+        "nombrDepartamento": "APURIMAC",
+    }
+    ficha = {
+        "cui": "2105743",
+        "nombre": "CONSTRUCCION DE REDES ELECTRICAS EN ABANCAY",
+        "funcion": "ENERGÍA",
+        "dpto": "APURIMAC",
+    }
+    consulta = ConsultaCongeladaAbancay(electrica, [hospital])
+
+    r = resolver(exp, consulta, base=_BaseFicha(ficha))
+
+    assert consulta.busquedas, "debió buscar por nombre después de descartar el CUI"
+    assert r["estado"] == "revision"
+    assert r["cui"] is None
+    assert r["via"] == "CUI_DESCARTADO"
+    assert r["cui_citado_descartado"] == "2105743"
+    assert any(c["cui"] == "2999999" for c in r["candidatos"])

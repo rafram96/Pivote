@@ -1089,7 +1089,51 @@ def _resolver(exp: dict, consulta: Consulta, base=None) -> dict:
     # caso del homónimo viejo cae ahora a revisión por cobertura <50% aguas abajo
     # (clamp de valorizaciones, intacto): ruido seguro, nunca un falso CUMPLE.
     best = ranked[0] if ranked else None
-    return _compuertas(best, ranked, vetados, exp, base)
+    resultado = _compuertas(best, ranked, vetados, exp, base)
+    return _revision_tras_cui_descartado(resultado, exp)
+
+
+def _revision_tras_cui_descartado(resultado: dict, exp: dict) -> dict:
+    """Conserva el resultado de la búsqueda alternativa sin emitir un CUI nuevo.
+
+    Cuando Paso 0 demuestra que el código citado pertenece a otra obra, el dato
+    deja de ser una ancla válida y la resolución continúa por nombre/RUC/ubicación.
+    Sin golden v4 no promovemos automáticamente el reemplazo: mostramos lo hallado
+    y exigimos confirmación humana antes de que el Excel reciba un CUI distinto al
+    escrito en el certificado.
+    """
+    descarte = exp.get("_cui_citado_descartado")
+    if not descarte:
+        return resultado
+
+    candidatos = list(resultado.get("candidatos") or [])
+    obra = resultado.get("obra") or {}
+    if obra.get("cui") and not any(
+            str(c.get("cui")) == str(obra["cui"]) for c in candidatos):
+        candidatos.insert(0, {
+            "cui": obra["cui"],
+            "nombre_obra": obra.get("nombre_obra") or "",
+            "departamento": obra.get("departamento"),
+            "score": 100,
+        })
+
+    codigo = descarte["codigo"]
+    motivo = descarte["motivo"]
+    if candidatos:
+        cierre = ("se buscaron alternativas por los demás datos y se hallaron "
+                  "candidatos; confirmar el correcto antes de emitir el veredicto")
+    else:
+        cierre = ("se buscaron alternativas por los demás datos, pero no se halló "
+                  "una obra suficientemente fiable; verificar el proceso o contrato")
+    return {
+        "estado": "revision",
+        "cui": None,
+        "via": "CUI_DESCARTADO",
+        "decision": f"el CUI {codigo} citado fue descartado: {motivo}; {cierre}",
+        "candidatos": candidatos[:4],
+        "obra": None,
+        "cui_citado_descartado": codigo,
+    }
 
 
 def _paso_codigo_citado(exp: dict, consulta: Consulta, base=None) -> Optional[dict]:
@@ -1185,38 +1229,29 @@ def _paso_codigo_citado(exp: dict, consulta: Consulta, base=None) -> Optional[di
                     rubros_cert=sorted(rubros_cert),
                     rubros_mef=sorted(rubros_oficiales), funcion=funcion)
         detalle = f" (función oficial: {funcion})" if funcion else ""
-        return {"estado": "revision", "cui": None, "via": "CUI_TEXTO",
-                "decision": (
-                    f"el CUI {codigo} citado corresponde en el MEF a "
-                    f"«{nombre_mef[:90]}»{detalle}, cuyo rubro contradice al "
-                    "proyecto declarado — confirmar la obra o pegar el CUI correcto"
-                ),
-                "candidatos": [{
-                    "cui": str((ficha_citada or {}).get("cui") or cui_out),
-                    "nombre_obra": nombre_mef,
-                    "departamento": ((ficha_citada or {}).get("dpto")
-                                     or o.get("nombrDepartamento")),
-                    "score": 50,
-                }],
-                "obra": None}
+        exp["_cui_citado_descartado"] = {
+            "codigo": codigo,
+            "motivo": (
+                f"corresponde en el MEF a «{nombre_mef[:90]}»{detalle}, cuyo "
+                "rubro contradice al proyecto declarado"
+            ),
+        }
+        return None
     if cui_exacto and not nombre_ok and sin_afinidad and contra_dep and contra_rubro:
         solo_snip = codigo != re.sub(r"\D", "", str(o.get("codUniqInv") or ""))
         _traza().ev("cui_citado_contradice_todo", codigo=codigo,
                     solo_snip=solo_snip, obra=(o.get("nombrObra") or "")[:80])
         extra = " (el código calzó contra el SNIP de esa obra)" if solo_snip else ""
-        return {"estado": "revision", "cui": None, "via": "CUI_TEXTO",
-                "decision": _con_pista_mef(exp,
-                    f"el código {codigo} del certificado apunta en InfoObras a "
-                    f"«{(o.get('nombrObra') or '')[:70]}» "
-                    f"({o.get('nombrDepartamento') or 'dpto. desconocido'}), que "
-                    "contradice el nombre, el departamento y el rubro del "
-                    f"certificado a la vez{extra} — confirmar la obra o pegar el "
-                    "CUI correcto"),
-                "candidatos": [{"cui": cui_out,
-                                "nombre_obra": (o.get("nombrObra") or ""),
-                                "departamento": o.get("nombrDepartamento"),
-                                "score": 50}],
-                "obra": None}
+        exp["_cui_citado_descartado"] = {
+            "codigo": codigo,
+            "motivo": (
+                f"apunta en InfoObras a «{(o.get('nombrObra') or '')[:70]}» "
+                f"({o.get('nombrDepartamento') or 'dpto. desconocido'}), que "
+                "contradice el nombre, el departamento y el rubro del "
+                f"certificado a la vez{extra}"
+            ),
+        }
+        return None
     # F8 · DECISIÓN sobre el CUI citado (caso 2:27, COAR Cusco → CUI Pasco): NO se
     # degrada por contradicción de ubicación. Un CUI escrito en el certificado y
     # hallado EXACTO en InfoObras es un código único nacional → autoritativo, aunque
