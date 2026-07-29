@@ -59,6 +59,15 @@
 - Falta: **F3** (fechas→T-005) y F5 (candado). Deploy/redeploy queda
   expresamente fuera de esta entrega y a cargo manual de Rafael.
 
+## Arquitectura visual v3 (29-jul)
+
+`docs/nuevos_modulos/arquitectura-sistema.html` fue rehecho como vista integral
+para Manuel y Rafael. Parte del flujo horizontal de `para RAFAEL-V2.xlsx` y
+explicita público-primero, SUNAT transversal y RENIPRESS como evidencia auxiliar
+para toda experiencia de salud. Se corrigió el estado del ETL: hoy existe la
+base mínima manual de 10 campos; cron, hot/cold PostgreSQL, API y paralelización
+siguen en el roadmap. Incluye matriz de estado real y arquitectura actual/futura.
+
 ## Lo del 2026-07-28 (resumen — detalle en `handoffs/2026-07-28_claude.md`)
 
 - **9 issues resueltas en la rama** `fix/identidad-lircay`: #58/#59/#60/#61

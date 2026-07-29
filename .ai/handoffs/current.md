@@ -16,6 +16,14 @@ Detalle: [`2026-07-29_codex.md`](2026-07-29_codex.md).
 ⛔ No se hizo ni se debe inferir deploy/redeploy: Rafael lo realizará
 manualmente. F3 y F5 continúan pendientes.
 
+## Nota (2026-07-29, Codex) — arquitectura visual v3
+
+Actualizado `docs/nuevos_modulos/arquitectura-sistema.html`: ahora reconstruye
+el Excel horizontal `para RAFAEL-V2.xlsx` como flujo público-primero, muestra
+SUNAT en ambas ramas y RENIPRESS para todo salud como evidencia auxiliar (nunca
+INCUMPLE automático). Añade estado real por componente, arquitectura completa y
+separa la base MEF mínima existente del ETL PostgreSQL futuro.
+
 ## Nota (2026-07-29, tarde) — T-004 F1 construida + manual de operación
 
 Rama `feat/seace-abierto` (`70c78e8`). El módulo `scraping/seace_abierto.py` ya
