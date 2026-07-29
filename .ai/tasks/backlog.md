@@ -69,6 +69,19 @@ necesite Claude Code + MCP.
    - Este matiz **no depende del server**: aplica igual al Camino A local de
      hoy (`ocr_propuesta.py` puede emitir `confianzas.json` ya mismo — es el
      sub-pedazo de esta tarea que se puede adelantar barato y solo).
+6c. **Escalada a visión POR DATO CRÍTICO (idea de Rafael, 28-jul — complementa
+   6b, y es más precisa):** el umbral por página atrapa páginas ilegibles
+   completas, pero el caso real medido es otro — la página se lee bien y UN
+   dato crítico no (urgente1: la fecha final del cert de Tingo María salió
+   ilegible del OCR → celdas L86-N87 vacías + total abstención; y el dígito
+   final del CUI de Navarro dio 2198310 y 2198316 en dos corridas). Regla:
+   **antes de escribir `POR VERIFICAR` en un dato crítico (fechas, folio,
+   monto, CUI), el agente DEBE leer ESA página como imagen** (visión) — solo
+   esa. Costo: 1 imagen por dato dudoso (~decenas de tokens) vs un `POR
+   VERIFICAR` que cuesta revisión humana. Implementación barata YA HECHA en
+   el prompt de agent-propuesta-profesional (28-jul, rama
+   fix/mapa-postor-montos); la versión sistemática (lista de datos dudosos →
+   pasada de visión dirigida) va con esta tarea.
 7. **Constraint respetado**: Tesseract en el server es 100% on-prem (la regla
    prohíbe APIs cloud, no software local) y los PDFs van al server del propio
    cliente, que ya recibe el ZIP de certificados.

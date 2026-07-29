@@ -53,6 +53,17 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
 4. **Fechas**: ISO `YYYY-MM-DD`. Si el documento solo consigna mes/año →
    `"YYYY-MM (anotación literal)"`. Si es ilegible/no consta tras reintentar
    (NOTA 12) → `"POR VERIFICAR (motivo)"`. Nada fuera de esas tres formas.
+
+   > ⚠ **«Reintentar» INCLUYE mirar la página como IMAGEN.** Con Camino A tu
+   > insumo es texto de Tesseract, y Tesseract falla en datos puntuales que el
+   > ojo sí lee (caso real: la fecha final del cert de Tingo María salió
+   > ilegible del OCR y las celdas de días quedaron vacías hasta el total; el
+   > dígito final de un CUI dio dos lecturas distintas en dos corridas). Antes
+   > de escribir `POR VERIFICAR` en un **dato crítico** — fechas, folio,
+   > monto, CUI — lee **esa página** del PDF (el `Read` la rasteriza) y decide
+   > con la imagen. Solo esa página: es un dato dudoso por ~decenas de tokens,
+   > contra un `POR VERIFICAR` que cuesta revisión humana. Si NI la imagen lo
+   > resuelve, entonces sí `POR VERIFICAR` — esa abstención ya es de verdad.
 5. **Identificadores para el cruce oficial (backend)** — campos dedicados:
    - **`proyecto`: ACCIÓN + OBJETO + UBICACIÓN, con las palabras del certificado.**
      El backend busca esa obra en el registro público **con ese texto**, así que el
