@@ -229,6 +229,29 @@ depende_de: []
 - Exponer endpoint `GET /api/pivote/mef/buscar` con parámetros `q`, `dpto`, `prov`, `dist`, `entidad`, `limite` para consulta instantánea (<200 ms) sin red sobre los 452k CUIs de `base_mef.py`.
 - Crear script CLI `python -m scripts.buscar_mef` para consultas de desarrollo/soporte.
 - Degradación limpia si la base MEF local no está cargada en la máquina. (Registrado en GitHub Issue #27).
+
+---
+id: T-TAREA-RESOLVER004
+tipo: tarea
+zona: resolucion/ (cui.py)
+agente_origen: desarrollador
+estado: completado
+depende_de: []
+---
+**Validación y recuperación tras CUI citado contradictorio (Paso 0).**
+- El CUI citado se contrasta con nombre y función oficial de la ficha MEF.
+- Una contradicción positiva descarta el código como ancla y reinicia la búsqueda
+  por nombre, RUC, entidad, ubicación y candidatos MEF.
+- El resultado conserva la alerta y los candidatos, pero queda en `REVISIÓN`
+  hasta confirmación humana; nunca sustituye automáticamente el CUI del
+  certificado sin golden v4.
+- La investigación del Hospital II Abancay confirmó una obra EsSalud/UNOPS real,
+  pero no un CUI/SNIP para su construcción. El `2105743` provenía solamente de
+  la redacción de la issue y no tiene respaldo en el certificado recibido.
+- No se relajó el candado F7 para Bocanegra: la carga real contiene más de una
+  inversión con esos topónimos y la golden v4 todavía no existe.
+- Implementado en `f648cc3` + `5360985`; suite: 688 passed, 25 skipped.
+
 - [ ] **EPIC #12: Sistema ETL del MEF** (Registrado en GitHub Project #1 `InfoObras Development`):
   - [ ] **[Feature #13] Ingesta y Extracción de Datos Abiertos del MEF**
     - [ ] `T-ETL-001` (#14): Ingesta streaming con reintentos y tolerancia a fallos (3 CSVs MEF).
