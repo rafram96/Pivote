@@ -111,7 +111,33 @@ subagentes = nº de profesionales del mapa.
 > Si hay muchísimos profesionales, lánzalos por lotes; ninguno debe quedar sin
 > procesar (NOTA 1: no omitir profesionales).
 
-### Paso 3 — `agent-evaluador` (depende de 1 y 2)
+### Paso 2.5 — Rescate determinístico de los montos del postor (solo Camino A)
+
+Si hiciste OCR (existe `_ocr_propuesta/`), corre **antes del evaluador**:
+
+```bash
+node scripts/montos_postor.js <carpeta_analisis> --escribir
+```
+
+Barre los folios que el mapa acotó para cada contrato del postor y recupera el
+**monto contractual** desde el texto OCR, sin que ningún agente abra las páginas
+(el ACOTAR del Paso 1 sigue intacto y el costo es cero). Es determinístico y deja
+**procedencia** de cada monto (página, etiqueta, línea literal).
+
+Por qué existe: `agent-propuesta-mapa` devolvía `monto: null` aun teniendo el dato
+en el OCR, y sin montos el **requisito 3.4 es de ADMISIÓN** y queda «NO
+DETERMINADO» — el análisis entrega los profesionales sin decir si el postor puede
+competir (#62, bloquea #53).
+
+Lo que el script NO hace, a propósito: elegir por magnitud (en una supervisión, el
+monto de la obra supervisada es 10-40× el del contrato y **no acredita**), aceptar
+montos de una página cuyo emisor no calza con el del contrato, o rellenar cuando
+hay ambigüedad — ahí deja `null` con los candidatos a la vista. Revisa su informe:
+los `⚠ SIN MONTO` van al evaluador como dato faltante, igual que hoy.
+
+> Camino B (sin OCR): el script sale con aviso y no aplica — el mapa es la única vía.
+
+### Paso 3 — `agent-evaluador` (depende de 1, 2 y 2.5)
 Cuando bases + mapa + **todos** los profesionales estén listos, lanza
 `agent-evaluador` (`prompts/agent-evaluador.md`) pasándole esas salidas (sin PDFs).
 Devuelve la evaluación: cumple/no-cumple por profesional, DÍAS/MESES/AÑOS por

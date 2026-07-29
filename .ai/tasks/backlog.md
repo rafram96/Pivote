@@ -7,6 +7,97 @@
 ## Técnico (listo para ejecutar)
 
 ---
+id: T-TAREA-OCR-REMOTO
+tipo: tarea
+zona: api/ + deploy/ (Dockerfile) + skill/ (scripts/)
+agente_origen: desarrollador
+estado: pendiente
+depende_de: []
+---
+**OCR como servicio del backend: la skill manda el PDF por LAN y el server
+devuelve los `pNNNN.txt` (idea de Rafael, 2026-07-28 — COTIZABLE, no arranca
+sin conversación comercial).**
+
+Hoy el Camino A exige Tesseract instalado en el Windows del cliente (con el
+PATH bien puesto — fricción medida incluso en la laptop de Rafael el 28-jul).
+La idea: mover el OCR al server on-prem para que la máquina del ing. solo
+necesite Claude Code + MCP.
+
+**Diseño acordado (matices que NO perder):**
+1. **NUNCA "imágenes por MCP" en sentido literal**: los argumentos de una tool
+   call pasan por el modelo (el modelo es la tubería — mismo motivo del límite
+   de `subir_analisis`). El transporte es el patrón `subir_carpeta.js`: la tool
+   recibe una RUTA y un cliente postea **multipart desde disco**.
+2. **Se manda el PDF tal cual, no páginas renderizadas**: las páginas escaneadas
+   YA son JPEGs embebidos; el server los extrae con `pdfimages -j` en segundos.
+   700 PNGs renderizados pesarían más que el PDF original.
+3. **Job ASÍNCRONO con progreso, jamás request síncrono** — la lección de #42
+   (ECONNRESET): 700 páginas de OCR dentro de un request muere. Reusar el
+   patrón job de `descargar-cui`: `POST /api/pivote/ocr` (multipart) →
+   `{ocr_id}` → poll → `GET /ocr/{id}/resultado` (zip de `pNNNN.txt`).
+4. **Server side**: `apt-get install tesseract-ocr tesseract-ocr-spa` en el
+   Dockerfile (más fácil que instalar Tesseract en Windows) + N workers en
+   paralelo + disco temporal con limpieza.
+5. **Tope de subida nuevo** (`PIVOTE_MAX_MB_PDF`, ~600) — ojo que
+   `_leer_limitado` acumula EN RAM; ver nota en `deploy/docker-compose.yml`.
+6. **Fallback en TRES niveles, el local queda vivo**: OCR remoto (server) →
+   Tesseract local (Camino A actual) → visión (Camino B). Server caído o skill
+   fuera de la LAN del ing. no puede romper la corrida.
+6b. **Fallback HÍBRIDO POR PÁGINA vía confianza de Tesseract (idea de Rafael,
+   28-jul — PROBADO empíricamente ese día):**
+   - Tesseract SÍ reporta confianza: salida TSV con `conf` **por palabra**
+     (0-100; -1 en filas estructurales). `tesseract img out -l spa txt tsv`
+     produce texto Y confianzas **en UNA sola pasada** (cero costo extra —
+     verificado con el binario v5.5 local sobre la pág. 48 real de divino:
+     113 palabras, conf media ponderada 91.2).
+   - Agregación por página: **media ponderada por longitud de palabra** (la
+     media simple la sesgan los fragmentos de 1-2 chars que el OCR alucina en
+     sellos y firmas). Guardar además `n_palabras`: una página con conf alta
+     pero 3 palabras es una página vacía/separadora (caso p82 de las bases de
+     divino), no una página confiable.
+   - Salida: junto a los `pNNNN.txt`, un **`confianzas.json`**
+     `{pagina: {conf, n_palabras}}` — viaja en el mismo zip del server.
+   - La skill marca las páginas bajo umbral y **solo ESAS** las lee Claude por
+     visión (`Read` rasteriza PDFs — confirmado 28-jul): híbrido ~95%
+     Tesseract gratis + ~5% visión donde de verdad hace falta. El umbral es
+     CALIBRABLE con datos reales (los `_ocr_*` de divino ya existen para medir
+     la distribución antes de fijarlo; arrancar explorando ~60-70).
+   - ⚠ Límite honesto del mecanismo: la confianza atrapa páginas ILEGIBLES,
+     no errores puntuales seguros de sí mismos (un `6`→`8` en un folio puede
+     venir con conf alta). Para dígitos críticos (folios, montos, CUIs) la
+     defensa siguen siendo los candados aguas abajo, no el umbral.
+   - Este matiz **no depende del server**: aplica igual al Camino A local de
+     hoy (`ocr_propuesta.py` puede emitir `confianzas.json` ya mismo — es el
+     sub-pedazo de esta tarea que se puede adelantar barato y solo).
+6c. **Escalada a visión POR DATO CRÍTICO (idea de Rafael, 28-jul — complementa
+   6b, y es más precisa):** el umbral por página atrapa páginas ilegibles
+   completas, pero el caso real medido es otro — la página se lee bien y UN
+   dato crítico no (urgente1: la fecha final del cert de Tingo María salió
+   ilegible del OCR → celdas L86-N87 vacías + total abstención; y el dígito
+   final del CUI de Navarro dio 2198310 y 2198316 en dos corridas). Regla:
+   **antes de escribir `POR VERIFICAR` en un dato crítico (fechas, folio,
+   monto, CUI), el agente DEBE leer ESA página como imagen** (visión) — solo
+   esa. Costo: 1 imagen por dato dudoso (~decenas de tokens) vs un `POR
+   VERIFICAR` que cuesta revisión humana. Implementación barata YA HECHA en
+   el prompt de agent-propuesta-profesional (28-jul, rama
+   fix/mapa-postor-montos); la versión sistemática (lista de datos dudosos →
+   pasada de visión dirigida) va con esta tarea.
+7. **Constraint respetado**: Tesseract en el server es 100% on-prem (la regla
+   prohíbe APIs cloud, no software local) y los PDFs van al server del propio
+   cliente, que ya recibe el ZIP de certificados.
+
+**Beneficio real**: setup CERO para Manuel (el OCR viaja con el deploy) +
+paraleliza sin freír su máquina + LAN (350 MB = un par de minutos). La
+velocidad es secundaria: la laptop de Rafael hizo 410 págs "en una pasada".
+
+**Estimación**: ~1-1.5 días (endpoint+job+Dockerfile+cliente+fallback+docs).
+
+**Gates antes de priorizar**: (a) preguntar qué máquina tiene Manuel — si es
+decente, el argumento queda solo en el setup; (b) va DESPUÉS de la cola
+crítica (#62/#53, redeploy, validación urgente1); (c) entra a la conversación
+comercial V2 como módulo con nombre propio (canal cotización, no garantía).
+
+---
 id: T-TAREA-ISSUE51
 tipo: tarea
 zona: orquestador/ (etapas_reales.py) + entregables/ (generar_excel.py, excel_final.py)
