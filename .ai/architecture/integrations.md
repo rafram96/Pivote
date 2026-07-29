@@ -9,7 +9,7 @@
 | **SUNAT** | antigüedad del emisor (ALT-04); representantes legales e información histórica del emisor —condición HABIDO en el tiempo— (informativos, sin regla automática) | scraping con reintentos, sin captcha real: `consPorRuc` + `getRepLeg` + `getinfHis` encadenadas; una consulta por RUC por job. OJO: `getinfHis` declara ISO-8859-1 y manda UTF-8 | ✔ producción |
 | **SEACE buscador** | bases integradas + contrato firmado | ⛔ reCAPTCHA v3 → NO-GO por requests puro | fallback navegador (T-004) |
 | **CONOSCE / API OCDS (OECE)** | vía alterna sin captcha a bases/contrato/fechas por CUI (`records?projectID=`); cobertura medida 86% (2018+) | datasets Excel anuales + API JSON | sonda ✔ GO (`tools/conosce.py`, `tools/ocds.py`); integración = T-004 |
-| **RENIPRESS (SUSALUD)** | ¿existe el establecimiento de salud? (privadas de salud) | WS DataTables sin captcha; combos con default "0" (vacío = 0 filas silencioso) | sonda ✔ GO; integración = T-006 |
+| **RENIPRESS (SUSALUD)** | ¿existe el establecimiento de salud? (privadas de salud) | Cliente en `scraping/renipress.py` sobre WS DataTables sin captcha; contrato explícito `encontrado / sin_resultados / portal_no_disponible`; API `GET /api/pivote/renipress` | cliente + API integrable construidos; falta orquestación T-006 |
 
 Regla transversal: **nunca inventar** un CUI/documento/número; lo no publicado
 se declara pendiente y cae a «Por confirmar».

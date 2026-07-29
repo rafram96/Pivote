@@ -286,6 +286,69 @@ def test_buscar_profesionales_query_corta_o_sin_match(cliente):
                        params={"q": "zzz-nadie-zzz"}).json() == []
 
 
+# ── RENIPRESS integrable ────────────────────────────────────────────────────
+
+def test_renipress_expone_resultado_sano(cliente, monkeypatch):
+    import api.app as modulo
+    from scraping.renipress import EstablecimientoRENIPRESS, ResultadoRENIPRESS
+
+    resultado = ResultadoRENIPRESS(
+        estado="encontrado",
+        termino="00008215",
+        tipo_consulta="codigo",
+        solo_activos=True,
+        establecimientos=[
+            EstablecimientoRENIPRESS(
+                codigo_unico="00008215",
+                nombre_razon_social="MEDICENTRO SAN ISIDRO",
+                coincidencia_exacta=True,
+            )
+        ],
+        total=1,
+    )
+    monkeypatch.setattr(modulo, "buscar_renipress", lambda *a, **k: resultado)
+
+    r = cliente.get("/api/pivote/renipress", params={"q": "00008215"})
+
+    assert r.status_code == 200
+    assert r.json()["estado"] == "encontrado"
+    assert r.json()["ambiguo"] is False
+    assert r.json()["establecimientos"][0]["codigo_unico"] == "00008215"
+
+
+def test_renipress_portal_caido_es_503(cliente, monkeypatch):
+    import api.app as modulo
+    from scraping.renipress import ResultadoRENIPRESS
+
+    resultado = ResultadoRENIPRESS(
+        estado="portal_no_disponible",
+        termino="CLINICA",
+        tipo_consulta="texto",
+        solo_activos=True,
+        detalle_error="timeout",
+    )
+    monkeypatch.setattr(modulo, "buscar_renipress", lambda *a, **k: resultado)
+
+    r = cliente.get("/api/pivote/renipress", params={"q": "CLINICA"})
+
+    assert r.status_code == 503
+    assert r.json()["estado"] == "portal_no_disponible"
+
+
+def test_renipress_valida_parametros_sin_tocar_la_red(cliente, monkeypatch):
+    import api.app as modulo
+
+    def no_llamar(*args, **kwargs):
+        raise AssertionError("no debía consultar RENIPRESS")
+
+    monkeypatch.setattr(modulo, "buscar_renipress", no_llamar)
+
+    assert cliente.get("/api/pivote/renipress", params={"q": "x"}).status_code == 400
+    assert cliente.get(
+        "/api/pivote/renipress", params={"q": "CLINICA", "limite": 501}
+    ).status_code == 400
+
+
 # ── Reanudación al arrancar (vía repo, no glob de archivos) ──────────────────
 
 def test_startup_reanuda_job_en_proceso(tmp_path, monkeypatch):

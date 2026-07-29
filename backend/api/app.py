@@ -42,6 +42,7 @@ from orquestador.progreso import REGISTRO
 from schemas import pipeline
 from schemas.espejo import JsonEspejo
 from schemas.nombres import nombre_descarga
+from scraping.renipress import buscar_renipress
 
 # Carpeta de datos: definible en el .env de la raíz (PIVOTE_DATA_DIR). Rutas
 # relativas quedan ancladas a backend/ — no al CWD (ver backend/config.py).
@@ -652,6 +653,30 @@ def buscar_profesionales(q: str = ""):
             })
     out.sort(key=lambda x: (_sin_tildes(str(x["nombre"] or "")), str(x["job_id"])))
     return out[:50]                 # tope de cortesía; con 2+ letras alcanza y sobra
+
+
+# ── Consulta RENIPRESS ───────────────────────────────────────────────────────
+
+@app.get("/api/pivote/renipress")
+def consultar_renipress(q: str = "", solo_activos: bool = True, limite: int = 50):
+    """Consulta RENIPRESS con un contrato apto para integraciones.
+
+    HTTP 200 + `sin_resultados` significa que la fuente respondió sin filas.
+    HTTP 503 + `portal_no_disponible` conserva la incertidumbre cuando SUSALUD
+    falla; un integrador no debe interpretar ambos escenarios de igual manera.
+    """
+    q = (q or "").strip()
+    if len(q) < 2 or len(q) > 120:
+        raise HTTPException(400, "q debe tener entre 2 y 120 caracteres")
+    if not 1 <= limite <= 500:
+        raise HTTPException(400, "limite debe estar entre 1 y 500")
+    resultado = buscar_renipress(
+        q, solo_activos=solo_activos, max_filas=limite
+    )
+    contenido = resultado.to_dict()
+    if resultado.estado == "portal_no_disponible":
+        return JSONResponse(status_code=503, content=contenido)
+    return contenido
 
 
 # ── Vistas derivadas (extracción + resumen) ──────────────────────────────────

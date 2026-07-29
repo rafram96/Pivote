@@ -2,6 +2,25 @@
 
 > Última actualización: **2026-07-29** · rama de trabajo: `feat/seace-abierto`
 
+## ReniPress: primer corte integrable (29-jul, rama `rafram96/renipress-product`)
+
+El usuario reactivó ReniPress con una meta más amplia que la sonda original:
+convertirla progresivamente en producto integrable. Primer corte construido
+sobre `demo` vigente:
+
+- `backend/scraping/renipress.py`: cliente inyectable y modelos estables, con
+  configuración por entorno, reintentos y distinción entre búsqueda válida sin
+  filas y portal no disponible.
+- `GET /api/pivote/renipress`: contrato HTTP reusable; `200` para fuente sana
+  (con o sin resultados) y `503` para caída de SUSALUD.
+- `tools/renipress.py`: CLI de diagnóstico sobre el mismo módulo.
+- Validación: consulta real `00008215`, 29 pruebas focalizadas y suite completa
+  **696 passed, 31 skipped**.
+
+Todavía no conecta RENIPRESS al orquestador ni emite un veredicto sobre
+experiencias privadas. Próximo corte: política de coincidencia/abstención con
+casos reales auditados y luego adaptación a la etapa correspondiente.
+
 ## Validación de CUI citado con ETL MEF (#69, 29-jul)
 
 El resolver consume ahora `funcion` y nombre oficial de la ficha PostgreSQL
