@@ -279,3 +279,95 @@ presentación viven en `docs/comercial/` (fuera del repo), no aquí.
 vivo 18-21 jul) · `docs/nuevos_modulos/resolucion-cui-datos-abiertos.html`
 (evidencia y cascada) · `backend/scraping/mef.py` (patrón de módulo hermano) ·
 `backend/entregables/zip_infoobras.py` (patrón de ZIP y estados honestos).*
+
+---
+
+# ANEXO · Estado de implementación y guía de cableado
+
+> Escrito el 29-jul para poder **continuar a mano** sin esta conversación.
+> Uso manual del módulo (producir PDFs HOY sin cablear nada):
+> **`docs/uso-manual-seace-abierto.md`**.
+
+## A1 · Hecho — F1 (rama `feat/seace-abierto`, commit `70c78e8`)
+
+| Pieza | Dónde | Estado |
+|---|---|---|
+| Módulo (CONOSCE cache + OCDS + selección) | `backend/scraping/seace_abierto.py` | ✔ 18 tests offline, suite 664 verde |
+| Prueba en vivo | CUI 2279396 (Pichanaki): 5 procesos, clasificación correcta, bases+contrato descargables | ✔ 29-jul |
+| Hallazgo 1 | Dos procesos del mismo tipo sin vigencias (2017/2022) → desempate determinista por recencia + flag `ambiguo` | ✔ endurecido con test |
+| Hallazgo 2 | El sufijo del ocid **no siempre es numérico** (`2022-41-52`) → el cruce con CONOSCE puede no aplicar; las fechas salen igual de OCDS (`dateSigned`) | anotado |
+
+API del módulo (lo que consume el cableado):
+
+```python
+CacheConosce(dir?).actualizar(datasets, anios?, session?)   # RED, una vez
+CacheConosce(dir?).contrato(codigoconvocatoria) -> [dict]   # OFFLINE
+procesos_por_cui(cui, session?) -> list | [] | None         # [] = dato, None = portal caído
+tipo_esperado(es_expediente: bool, texto_experiencia) -> "expediente|supervision|ejecucion"
+seleccionar_proceso(procesos, tipo, periodo?) ->
+    {"elegido", "seleccion", "ambiguo"?, "motivo", "candidatos"}
+doc_bases_integradas(comp) / doc_contrato_firmado(comp) -> dict | None
+descargar_pdf(url, destino, session?) -> bool               # streaming, %PDF, atómico
+codigo_convocatoria(comp) -> str | None
+```
+
+## A2 · Pendiente — F2: cablear al pipeline (guía paso a paso)
+
+**Regla de arquitectura a respetar**: en `EtapaInfoObrasReal` las descargas de
+documentos están **DIFERIDAS** — la etapa solo persiste ids/urls y los PDFs los
+baja `descargar_documentos_job` después del pipeline (comentario en
+`etapas_reales.py:~597`; así el Excel sale en ~1 min sin esperar GB). Los PDFs
+SEACE deben seguir el mismo patrón.
+
+1. **Selección (barato, dentro de `EtapaInfoObrasReal`)** — para cada
+   experiencia pública con CUI resuelto:
+   - insumos ya disponibles en la etapa: `_es_exped` (clasificador + modo
+     forzado, `etapas_reales.py:~492`), periodo del certificado, y la clave de
+     enriquecimiento `_clave(np_, ne)`;
+   - llamar `procesos_por_cui` → `tipo_esperado` → `seleccionar_proceso`;
+   - persistir en `ctx.enriquecimiento["n:m"]["seace"]` el dict del §7 del
+     diseño (ocid, tipo, seleccion, ambiguo, motivo, urls de los 2 docs,
+     `dateSigned`, codigoconvocatoria);
+   - `None` (portal caído) → `{"estado": "fuente_no_disponible"}` + Observación
+     ADVERTENCIA — jamás tumbar el job;
+   - **inyectabilidad**: agregar un parámetro `consulta_ocds=None` a la
+     factory `etapas_reales(...)` (`etapas_reales.py:1355`), mismo patrón que
+     `consulta_cui`/`fetcher_infoobras`, para que los tests no toquen red.
+2. **Descarga (diferida, en `descargar_documentos_job`,
+   `etapas_reales.py:746`)** — junto a los documentos InfoObras: por cada
+   experiencia con `enr["seace"]`, `descargar_pdf` de los 2 documentos a la
+   carpeta de descargas de esa experiencia con los nombres
+   `SEACE_01_BASES_INTEGRADAS.pdf` / `SEACE_02_CONTRATO_FIRMADO.pdf`; si un doc
+   no está → escribir `SEACE_*_NO_DISPONIBLE.txt` con el motivo (patrón
+   `SIN_DOCUMENTOS.txt` de `zip_infoobras.py`).
+3. **ZIP** — `construir_zip_infoobras(espejo, descargas, salida, enriquecimiento)`
+   (`zip_infoobras.py:735`) arma Proyecto → Profesional → Experiencia desde el
+   dict `descargas {(n_prof, n_exp): Path}`: si los PDFs SEACE quedan en la
+   misma carpeta por experiencia del paso 2, entran solos. **Verificar al
+   implementar** que el recolector de archivos de la carpeta no filtre por
+   prefijo.
+4. **Excel** — bloque junto a «OBRA EN INFOOBRAS» (`excel_final.py`): estado de
+   los 2 documentos («✔ descargados al ZIP» / «No disponible en datos abiertos
+   (proceso anterior a 2018)») + fecha de firma; `ambiguo=True` → texto «Por
+   confirmar» amarillo. Terminología sin jerga (nada de OCDS/API).
+5. **Tests** — extender `test_etapas_reales.py` con un `consulta_ocds` fake
+   (patrón `_SessionFake` de `test_seace_abierto.py`): caso feliz, portal
+   caído, CUI sin procesos, sin proceso del tipo, y `ambiguo`.
+
+## A3 · Pendiente — F3 (fechas a T-005) y F5 (candado)
+
+- **F3**: las fechas ya viajan en `enr["seace"]` desde F2; lo que falta es que
+  el motor de reglas las consuma (2 reglas nuevas: inicio ≥ firma · término ≤
+  aprobación del ET) — eso ES T-005, alcance aparte.
+- **F5 (candado cascada)**: portar `test_confirmacion_cascada.py` de la sonda;
+  niveles RUC → nombre consorcio → miembros (dataset `consorcios` de CONOSCE,
+  agregarlo a `actualizar(datasets=…)`). Solo observación INFO/OK — jamás
+  cambia veredictos (asimetría del §6).
+
+## A4 · Preparación del server (cuando esto se despliegue)
+
+- Correr una vez `CacheConosce().actualizar()` en el server (o copiar la
+  carpeta `referencia/conosce/` ya descargada — ~9 Excel, decenas de MB).
+- Cron mensual opcional para refrescar el año corriente (mismo patrón que la
+  base MEF semanal).
+- El server del cliente tiene IP Perú → sin problema de geobloqueo.

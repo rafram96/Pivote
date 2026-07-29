@@ -28,6 +28,27 @@
 - ⚠ **Comercial**: NO se habló de precios ni adelantos — el cliente trata los
   extras como pendientes del flujograma. Manejo en `docs/comercial/`.
 
+## T-004 en construcción (29-jul, rama `feat/seace-abierto`)
+
+- **F1 HECHA** (`70c78e8`): `backend/scraping/seace_abierto.py` — cache CONOSCE
+  (una vez, atómica, tolerante a fallos), cliente OCDS ([] = dato / None =
+  portal caído), y `seleccionar_proceso` con el requisito N°1 del cliente:
+  **jamás cruzar de tipo**; desempate por vigencia solo dentro del tipo; con
+  varios candidatos sin fechas → el más reciente + flag `ambiguo`. 18 tests
+  offline; suite 664 verde. Probado EN VIVO con el CUI 2279396 (Pichanaki):
+  5 procesos, clasificación correcta, bases+contrato descargables.
+- **Documentación completa para continuar a mano** (pedido de Rafael):
+  - `docs/uso-manual-seace-abierto.md` — receta operable HOY por certificado
+    (preparar caché, elegir tipo, descargar los 2 PDFs con los nombres del
+    entregable, tabla de decisiones y problemas conocidos);
+  - `docs/plan-integracion-bases-contrato.md` **ANEXO** — estado de
+    implementación + guía de cableado F2 paso a paso (selección en
+    `EtapaInfoObrasReal` con descarga DIFERIDA en `descargar_documentos_job`,
+    inyectable `consulta_ocds`, ZIP, Excel, tests) + F3/F5 + preparación del
+    server.
+- Falta: **F2** (cablear al pipeline — guía en el anexo), F3 (fechas→T-005),
+  F5 (candado). El módulo ya es usable a mano sin F2.
+
 ## Lo del 2026-07-28 (resumen — detalle en `handoffs/2026-07-28_claude.md`)
 
 - **9 issues resueltas en la rama** `fix/identidad-lircay`: #58/#59/#60/#61

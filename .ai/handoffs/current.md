@@ -4,6 +4,15 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
+## Nota (2026-07-29, tarde) — T-004 F1 construida + manual de operación
+
+Rama `feat/seace-abierto` (`70c78e8`). El módulo `scraping/seace_abierto.py` ya
+selecciona el proceso correcto por tipo (requisito N°1) y descarga bases y
+contrato — **usable a mano desde hoy** con `docs/uso-manual-seace-abierto.md`.
+El cableado F2 tiene guía paso a paso en el ANEXO de
+`docs/plan-integracion-bases-contrato.md`. Detalle en
+`context/current_state.md` («T-004 en construcción»).
+
 ## Nota (2026-07-29) — reunión con el cliente: T-004 es LA prioridad
 
 Detalle en `context/current_state.md` (bloque «Reunión 29-jul»). En una línea:
