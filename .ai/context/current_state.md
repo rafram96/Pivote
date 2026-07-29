@@ -20,6 +20,11 @@
   `docs/backend/modulo_etl_mef.md`.
 - **Corrida viva de divino_nino EN CURSO** (Tesseract local = Camino A activo
   por primera vez). Al terminar: validar el tren + push/PR + redeploy.
+- **DECISIÓN CERRADA (Rafael): la skill corre en Claude CODE — Cowork queda
+  DESCARTADO como runtime.** Consecuencias: cambios de skill se despliegan con
+  el merge (sin rebuild de plugin, sin "trenes de release"); `plugin/` +
+  `build.ps1` quedan deprecados como referencia histórica; el setup de Manuel
+  es Claude Code + MCP local (`.mcp.json`), no Cowork/Desktop.
 
 ## Lo del 2026-07-27 (documentación, entorno, alcance y un fix de veredicto)
 
