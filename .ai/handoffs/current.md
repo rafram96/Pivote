@@ -1,8 +1,17 @@
 # Handoff — punto de continuación
 
-> Actualizado: **2026-07-28**. Si eres un agente nuevo: lee esto completo,
+> Actualizado: **2026-07-29**. Si eres un agente nuevo: lee esto completo,
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
+
+## Nota (2026-07-29) — reunión con el cliente: T-004 es LA prioridad
+
+Detalle en `context/current_state.md` (bloque «Reunión 29-jul»). En una línea:
+el cliente está bajando bases y contratos **a mano** y no revisará más Excels
+hasta ver precisión — **construir T-004 primero** (diseño v2 listo en
+`docs/plan-integracion-bases-contrato.md`, con la segmentación por tipo de
+proceso como requisito N°1 y los documentos al ZIP antes que el candado).
+Pedido nuevo chico: #65 (marcar supuestos con color). RENIPRESS despriorizado.
 
 ## Cierre del 2026-07-28 — Correcciones de Identidad en Lircay (#58, #59, #60, #61)
 

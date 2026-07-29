@@ -1,6 +1,32 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-07-28** · rama de trabajo: **`fix/identidad-lircay`** (sobre `demo`, sin push)
+> Última actualización: **2026-07-29** · rama de trabajo: `demo`
+
+## Reunión con el cliente 29-jul — lo que cambió (fuente: transcripción)
+
+- **El cliente está haciendo A MANO lo de bases+contratos**, certificado por
+  certificado, con un prompt propio en su Claude (busca el contrato, lo abre,
+  verifica el cargo del especialista, guarda por proyecto). Lo pidió «hace
+  semanas». **T-004 pasa a prioridad máxima**; diseño listo en
+  `docs/plan-integracion-bases-contrato.md` (v2, ajustado con la transcripción).
+- **Confianza erosionada**: dijo que **no revisará más Excels** hasta que los
+  resultados sean precisos — él ya trabaja su propio Excel; **lo que consume es
+  el ZIP** de documentos. «Lo que no puede fallar es que me busque otro proyecto
+  y me dé otro» (= exactamente #46/#51, ya corregidos, pero él aún no lo ha
+  visto reflejado). Los documentos van primero; el candado, en segunda entrega.
+- **Requisito N°1 de T-004, en sus palabras**: segmentar por tipo de proceso —
+  un hospital puede tener hasta 4 juegos de bases (preinversión / expediente /
+  supervisión / ejecución) con el MISMO CUI; solo valen las bases INTEGRADAS.
+- **Pedido nuevo**: marcar con color los datos SUPUESTOS del Excel →
+  [#65](https://github.com/rafram96/Pivote/issues/65).
+- **RENIPRESS despriorizado por él mismo** («ya olvidémonos», para no atrasar
+  bases+contratos). Capturas de pantalla: pedidas y descartadas (aceptó).
+  Firmante/representante legal: reconfirmó que NO va (ADR-008 se sostiene).
+- **Web HK**: no la ha revisado (su red corporativa bloquea la página; por
+  teléfono sí carga). Se le reenvía el link por WhatsApp. Rafael regaló el
+  tiempo desplegado (~2 meses). El cobro queda pendiente de su revisión.
+- ⚠ **Comercial**: NO se habló de precios ni adelantos — el cliente trata los
+  extras como pendientes del flujograma. Manejo en `docs/comercial/`.
 
 ## Lo del 2026-07-28 (resumen — detalle en `handoffs/2026-07-28_claude.md`)
 
