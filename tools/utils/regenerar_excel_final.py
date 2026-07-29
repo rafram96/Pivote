@@ -59,8 +59,15 @@ for k, enr in enrich.items():
 salida = (Path(sys.argv[3]) if len(sys.argv) > 3
           else dir_datos / job_id / "muestra.xlsx")
 salida.parent.mkdir(parents=True, exist_ok=True)
-generar_excel_final(espejo, salida, paral, cuis, fichas, revisiones, sunat)
+# Los CERTIFICADOS también: sin este mapeo el Excel regenerado sale SIN las
+# ~100 imágenes embebidas (certs + TDR + Factor por profesional) que el job
+# original sí traía — se detectó regenerando urgente1 (28-jul): el archivo
+# quedaba "corregido" pero mudo de evidencia. EtapaExcelReal siempre las pasa;
+# este script las omitía.
+from entregables import mapear_certificados  # noqa: E402
+certs = mapear_certificados(dir_datos, job_id)
+generar_excel_final(espejo, salida, paral, cuis, fichas, revisiones, sunat, certs)
 print(f"Excel regenerado: {salida}")
 print(f"  cuadros SUNAT: {len(sunat)} · fichas (obra): {len(fichas)} · "
-      f"en revisión: {len(revisiones)} · profesionales: "
-      f"{len(espejo.get('profesionales', []))}")
+      f"en revisión: {len(revisiones)} · certificados: {len(certs)} · "
+      f"profesionales: {len(espejo.get('profesionales', []))}")
