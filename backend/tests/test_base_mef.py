@@ -37,6 +37,12 @@ def base(tmp_path) -> BaseMef:
 def test_disponible_con_fixtures(base):
     assert base.disponible() is True
     assert base.edad_dias() == 0
+    assert base.estado_operativo() == {
+        "estado": "ok",
+        "load_id": None,
+        "edad_dias": 0,
+        "sqlite": False,
+    }
 
 
 def test_sin_archivos_es_inerte(tmp_path):
@@ -46,6 +52,7 @@ def test_sin_archivos_es_inerte(tmp_path):
     assert b.buscar_candidatos("cualquier cosa") == []
     assert b.existe_cui("2376130") is None
     assert b.es_entidad_publica("INEN") == (False, 0.0)
+    assert b.estado_operativo()["estado"] == "missing"
 
 
 # ── búsqueda por nombre ──────────────────────────────────────────────────────

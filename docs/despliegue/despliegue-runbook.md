@@ -172,6 +172,27 @@ docker run --rm -v infoobras-pivote_datos_pivote:/d -v ${PWD}:/b alpine `
   tar czf "/b/backup-datos-$(Get-Date -Format yyyy-MM-dd).tgz" -C /d .
 ```
 
+### Actualización semanal de la base MEF
+
+Después del primer despliegue de la versión ETL, validar manualmente:
+
+```powershell
+Set-Location D:\proyectos\InfoObras\Pivote
+.\deploy\actualizar-mef.ps1
+```
+
+Si termina correctamente, registrar la tarea semanal (PowerShell como
+administrador):
+
+```powershell
+.\deploy\registrar-tarea-mef.ps1
+```
+
+La tarea corre los domingos a las 03:00, ignora un segundo arranque simultáneo y
+guarda logs en `%ProgramData%\InfoObras\logs`. No reinicia el backend: el
+resolver detecta el nuevo `load_id`. Confirmar en `/api/pivote/salud` que
+`base_mef` tenga estado operativo, `edad_dias <= 8` y `sqlite: true`.
+
 ---
 
 ## 11 · Troubleshooting (Windows/LAN)

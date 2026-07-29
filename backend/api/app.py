@@ -965,11 +965,24 @@ _SALUD_TTL = 60.0  # el panel sondea cada ~30s; cacheamos para no golpear los po
 
 @app.get("/api/pivote/salud")
 def salud():
+    from resolucion.base_mef import instancia as _base_mef
+
+    estado_mef = _base_mef().estado_operativo()
+    salud_mef = {
+        "portal": "base_mef",
+        "ok": estado_mef["estado"] == "ok",
+        "diagnostico": None if estado_mef["estado"] == "ok" else estado_mef["estado"],
+        "desde": None,
+        "load_id": estado_mef["load_id"],
+        "edad_dias": estado_mef["edad_dias"],
+        "sqlite": estado_mef["sqlite"],
+    }
     # En modo NO-real (tests/esqueleto) no hay portales que sondear → operativo sin red.
     if os.getenv("PIVOTE_ETAPAS") != "real":
         return [
             {"portal": "sunat", "ok": True, "diagnostico": None, "desde": None},
             {"portal": "infoobras", "ok": True, "diagnostico": None, "desde": None},
+            salud_mef,
         ]
     import time
     ahora = time.time()
@@ -978,7 +991,7 @@ def salud():
     from scraping.infoobras import sondear as _sondear_infoobras
     from scraping.sunat import sondear as _sondear_sunat
     desde = datetime.now(timezone.utc).isoformat()
-    out = []
+    out = [salud_mef]
     for portal, fn in (("sunat", _sondear_sunat), ("infoobras", _sondear_infoobras)):
         try:
             ok, diag = fn()

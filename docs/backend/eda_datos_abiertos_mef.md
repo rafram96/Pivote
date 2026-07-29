@@ -152,10 +152,10 @@ Serializar una muestra de 1,000 filas por fuente como JSON compacto produjo:
 | Desactivadas | 1,145 bytes | 1,252 bytes |
 
 Proyección del payload JSON completo de una carga: **~1.02 GB**, antes del
-overhead de PostgreSQL, TOAST e índices. El plan de capacidad debe medir una
-carga real en PostgreSQL antes de fijar retención histórica.
+overhead de PostgreSQL, TOAST e índices. Este cold path quedó diferido: el
+objetivo inmediato es el resolver mediante gzip + SQLite.
 
-Recomendación inicial:
+Si más adelante se implementa historia completa:
 
 - conservar carga completa activa + anterior para rollback;
 - conservar metadata, checksums y métricas de todas las cargas;
@@ -170,10 +170,10 @@ Recomendación inicial:
    nueva es aviso; la desaparición de una requerida bloquea publicación.
 3. La capa raw conserva todas las filas y columnas. La capa canónica tipa solo
    campos con consumidor y calidad conocida.
-4. El índice RAM sigue siendo el camino primario del resolver; PostgreSQL añade
-   conservación, consulta y operación, no reemplaza esa degradación segura.
+4. El índice RAM sigue siendo el camino de búsqueda por nombre; una SQLite
+   local resuelve la ficha enriquecida por CUI/SNIP sin inflar la RAM.
 5. El cron debe ejecutar el pipeline completo, emitir un `load_id` común para
-   archivos y PostgreSQL y dejar fallo visible.
+   todos los artefactos y dejar fallo visible.
 6. La búsqueda paralela no forma parte del diseño hasta medir la versión
    secuencial con el corpus grande disponible.
 
@@ -184,6 +184,6 @@ Recomendación inicial:
 - Inventario de consultas de negocio: resolver, API, panel, cronología y
   reportes; cada columna hot debe tener al menos un consumidor.
 - Tasa de coordenadas válidas y posibilidad de corregir escalas, sin adivinar.
-- Tamaño, tiempo de carga e índices con una importación PostgreSQL desechable.
+- Tamaño, tiempo de construcción e índices con la SQLite completa.
 - Benchmark del índice RAM sobre un concurso completo y el corpus de 1,042
   experiencias.

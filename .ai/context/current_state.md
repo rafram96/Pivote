@@ -4,7 +4,8 @@
 
 ## Replanificación ETL MEF v2 (29-jul)
 
-Rama hija `plan/etl-mef-v2`, sin implementación de producto. Se descartó usar la
+Rama hija `plan/etl-mef-v2`. La primera revisión fue documental; luego se
+implementó el diseño serving-first descrito abajo. Se descartó usar la
 épica #12 como especificación: sus issues eran brainstorm. Se perfiló en
 streaming el corte real 2026-07-26 de los tres CSV: **620,985 filas, 640.7 MB,
 95 columnas, 579,481 CUIs**, 41,505 filas sin CUI pero ninguna sin CUI y SNIP,
@@ -24,6 +25,21 @@ puntero de carga activa en vez de swap de tablas; carga completa activa +
 anterior hasta medir almacenamiento real. La Fase 0 (EDA reproducible, carga PG
 desechable y benchmark de capacidad) precede al DDL final y a la cotización.
 Las issues de GitHub aún no se reescribieron.
+
+### Decisión e implementación serving-first (continuación)
+
+El objetivo se acotó al consumidor real: el resolver. ADR-009 ahora decide
+**índice RAM para búsqueda difusa + SQLite para ficha enriquecida por CUI/SNIP**;
+PostgreSQL/raw histórico se difiere. Implementado en la rama: retry/backoff,
+aliases `COD_SNIP`/`NOM_*`, cargas inmutables, manifest atómico, retención de dos
+cargas, SQLite enriquecida, recarga sin reinicio y health de frescura.
+
+Validación real en `C:\tmp` (no base activa): 620,985 filas en **71–130 s**
+(dos corridas); gzip 32.5 MB, SQLite 632.4 MB, 14,665 entidades. Lookup CUI/SNIP existente o
+ausente: ~1.5–2.3 ms sin cargar RAM. Búsqueda Pichanaki: primera carga del índice
+18.2 s, 448.9 MB, devuelve fichas enriquecidas. Se encontró una fila activa sin
+nombre: se conserva por CUI y se registra, no bloquea la carga.
+Suite final: **685 passed, 24 skipped**.
 
 ## Reunión con el cliente 29-jul — lo que cambió (fuente: transcripción)
 

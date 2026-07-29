@@ -44,8 +44,9 @@ El componente **2 · Resolución de CUI** se apoya en una **base local del MEF**
 Banco de Inversiones) para no depender solo de la búsqueda por substring de
 InfoObras. Es un espejo consolidado de las inversiones públicas (corte 2026-07-26:
 620,985 filas, 579,481 CUIs distintos) que vive en
-`<PIVOTE_DATA_DIR>/referencia/mef/` como tres
-artefactos: `inversiones.csv.gz`, `entidades_publicas.csv` y `metadata.json`.
+`<PIVOTE_DATA_DIR>/referencia/mef/`. El manifest apunta a una carga inmutable
+con `inversiones.csv.gz`, `inversiones.sqlite`, `entidades_publicas.csv` y
+`metadata.json`.
 
 **Para qué sirve** (tres usos, todos en `resolucion/base_mef.py`):
 - `buscar_candidatos(nombre)` — índice invertido token→filas + `rapidfuzz`: propone
@@ -62,11 +63,11 @@ artefactos: `inversiones.csv.gz`, `entidades_publicas.csv` y `metadata.json`.
 python backend/scripts/actualizar_base_mef.py                 # descarga desde el MEF
 python backend/scripts/actualizar_base_mef.py --desde-dir DIR # usa CSV locales (sin red)
 ```
-La escritura es **atómica** (tmp + `os.replace`) y valida el volumen: si la descarga
-falla o queda corta, la versión anterior queda intacta. Hoy el refresco es manual.
-El ETL planificado usará el **Programador de tareas de Windows** para disparar
-semanalmente un contenedor one-shot; no se debe copiar un `crontab` Linux al
-servidor Windows. Diseño y controles en
+La publicación es **atómica por manifest** y valida fuentes, volumen, identidad,
+montos e integridad SQLite: si algo falla, la versión anterior queda activa.
+El **Programador de tareas de Windows** dispara semanalmente un contenedor
+one-shot mediante `deploy/actualizar-mef.ps1`; se registra con
+`deploy/registrar-tarea-mef.ps1`. Diseño y controles en
 [`modulo_etl_mef.md`](modulo_etl_mef.md).
 
 **RAM / carga**: ~370 MB residentes, **carga perezosa ~60 s** en el primer uso (se

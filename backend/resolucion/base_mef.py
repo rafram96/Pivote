@@ -1,8 +1,9 @@
 """
 Base local de inversiones del MEF — consulta en memoria para el resolver de CUI.
 
-Carga los artefactos que produce `scripts/actualizar_base_mef.py`
-(`inversiones.csv.gz`, `entidades_publicas.csv`, `metadata.json`) y ofrece:
+Carga los artefactos que produce `scripts/actualizar_base_mef.py`. Mantiene en
+RAM únicamente el índice de nombres y consulta `inversiones.sqlite` para obtener
+la ficha enriquecida por CUI/SNIP:
 
   buscar_candidatos(nombre)  → CUIs cuyo nombre de inversión se parece al dado
   existe_cui(codigo)         → ficha de un CUI o SNIP exacto
@@ -27,6 +28,7 @@ import gzip
 import json
 import re
 import sys
+import sqlite3
 import threading
 from array import array
 from pathlib import Path
@@ -81,7 +83,8 @@ class BaseMef:
     def __init__(self, dir_base: Path):
         self._dir = Path(dir_base)
         self._cargada = False
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._load_id_cargado: str | None = None
         # columnas paralelas
         self._cui: list[str] = []
         self._snip: list[str] = []
@@ -105,17 +108,47 @@ class BaseMef:
 
     # ── archivos ─────────────────────────────────────────────────────────────
 
+    def _dir_activo(self) -> Path:
+        """Resuelve el manifest versionado; fixtures/instalaciones antiguas caen
+        de forma compatible a los archivos fijos del directorio base."""
+        manifest = self._dir / "manifest.json"
+        if not manifest.is_file():
+            return self._dir
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            load_id = str(data["load_id"])
+            ruta = str(data["ruta"]).replace("\\", "/")
+            esperada = f"cargas/{load_id}"
+            if ruta != esperada or not re.fullmatch(r"[A-Za-z0-9_-]+", load_id):
+                return self._dir
+            activa = self._dir / "cargas" / load_id
+            return activa if activa.is_dir() else self._dir
+        except (OSError, KeyError, TypeError, json.JSONDecodeError):
+            return self._dir
+
+    def _load_id_activo(self) -> str | None:
+        try:
+            meta = json.loads((self._dir_activo() / "metadata.json").read_text(
+                encoding="utf-8"))
+            return str(meta.get("load_id") or "") or None
+        except (OSError, json.JSONDecodeError):
+            return None
+
     @property
     def _f_inv(self) -> Path:
-        return self._dir / "inversiones.csv.gz"
+        return self._dir_activo() / "inversiones.csv.gz"
 
     @property
     def _f_ent(self) -> Path:
-        return self._dir / "entidades_publicas.csv"
+        return self._dir_activo() / "entidades_publicas.csv"
 
     @property
     def _f_meta(self) -> Path:
-        return self._dir / "metadata.json"
+        return self._dir_activo() / "metadata.json"
+
+    @property
+    def _f_db(self) -> Path:
+        return self._dir_activo() / "inversiones.sqlite"
 
     def disponible(self) -> bool:
         """True si los 3 artefactos existen y son legibles."""
@@ -137,19 +170,62 @@ class BaseMef:
         except (OSError, ValueError, json.JSONDecodeError):
             return None
 
+    def estado_operativo(self, max_edad_dias: int = 8) -> dict:
+        """Resumen seguro para health/operación; no carga el índice RAM."""
+        disponible = self.disponible()
+        edad = self.edad_dias()
+        load_id = self._load_id_activo()
+        sqlite_ok = self._f_db.is_file()
+        if not disponible:
+            estado = "missing"
+        elif edad is None:
+            estado = "invalid"
+        elif edad > max_edad_dias:
+            estado = "stale"
+        else:
+            estado = "ok"
+        return {
+            "estado": estado,
+            "load_id": load_id,
+            "edad_dias": edad,
+            "sqlite": sqlite_ok,
+        }
+
     # ── carga ────────────────────────────────────────────────────────────────
 
     def _asegurar_cargada(self) -> bool:
-        if self._cargada:
-            return True
         if not self.disponible():
             return False
         with self._lock:
-            if self._cargada:
+            load_id = self._load_id_activo()
+            if self._cargada and load_id == self._load_id_cargado:
                 return True
+            if self._cargada:
+                self._vaciar()
             self._cargar()
+            self._load_id_cargado = load_id
             self._cargada = True
         return True
+
+    def _vaciar(self) -> None:
+        self._cui.clear()
+        self._snip.clear()
+        self._nombre.clear()
+        self._nombre_norm.clear()
+        self._estado.clear()
+        self._situacion.clear()
+        self._ubigeo.clear()
+        self._dpto.clear()
+        self._prov.clear()
+        self._dist.clear()
+        self._entidad.clear()
+        self._por_cui.clear()
+        self._por_snip.clear()
+        self._tok_index.clear()
+        self._entidades.clear()
+        self._siglas.clear()
+        self._meta.clear()
+        self._cargada = False
 
     def _cargar(self) -> None:
         intern = sys.intern
@@ -198,62 +274,65 @@ class BaseMef:
     # ── consultas ────────────────────────────────────────────────────────────
 
     def buscar_candidatos(self, nombre: str, topn: int = 10) -> list[dict]:
-        if not self._asegurar_cargada():
-            return []
-        q = _limpiar(nombre)
-        if not q:
-            return []
-        # tokens de la consulta ordenados por RAREZA (posteo más corto primero)
-        toks = sorted(set(_tokens(q)),
-                      key=lambda t: len(self._tok_index.get(t, ())) or 10 ** 9)
-        cand: set[int] = set()
-        for t in toks[:6]:
-            post = self._tok_index.get(t)
-            if not post or len(post) > _MAX_POSTEO_TOKEN:
-                continue
-            cand.update(post)
-            if len(cand) > _MAX_CANDIDATOS:
-                break
-        if not cand:
-            return []
-        scored = []
-        for i in cand:
-            sc = fuzz.token_set_ratio(q, self._nombre_norm[i])
-            if sc >= _SCORE_MIN:
-                scored.append((sc, i))
-        # orden determinístico: score desc, desempate por CUI (y por índice)
-        scored.sort(key=lambda x: (-x[0], self._cui[x[1]] or "~", x[1]))
-        return [self._ficha(i, round(float(sc), 1)) for sc, i in scored[:topn]]
+        with self._lock:
+            if not self._asegurar_cargada():
+                return []
+            q = _limpiar(nombre)
+            if not q:
+                return []
+            # tokens de la consulta ordenados por RAREZA
+            toks = sorted(set(_tokens(q)),
+                          key=lambda t: len(self._tok_index.get(t, ())) or 10 ** 9)
+            cand: set[int] = set()
+            for t in toks[:6]:
+                post = self._tok_index.get(t)
+                if not post or len(post) > _MAX_POSTEO_TOKEN:
+                    continue
+                cand.update(post)
+                if len(cand) > _MAX_CANDIDATOS:
+                    break
+            if not cand:
+                return []
+            scored = []
+            for i in cand:
+                sc = fuzz.token_set_ratio(q, self._nombre_norm[i])
+                if sc >= _SCORE_MIN:
+                    scored.append((sc, i))
+            scored.sort(key=lambda x: (-x[0], self._cui[x[1]] or "~", x[1]))
+            return [self._ficha(i, round(float(sc), 1))
+                    for sc, i in scored[:topn]]
 
     def existe_cui(self, codigo: str) -> Optional[dict]:
-        if not self._asegurar_cargada():
-            return None
         c = str(codigo or "").strip()
         if not c:
             return None
-        i = self._por_cui.get(c)
-        if i is None:
-            i = self._por_snip.get(c)
-        return self._ficha(i) if i is not None else None
+        with self._lock:
+            if self._f_db.is_file():
+                return self._ficha_sqlite(c)
+            if not self._asegurar_cargada():
+                return None
+            i = self._por_cui.get(c)
+            if i is None:
+                i = self._por_snip.get(c)
+            return self._ficha(i) if i is not None else None
 
     def es_entidad_publica(self, nombre: str) -> tuple[bool, float]:
-        if not self._asegurar_cargada():
-            return (False, 0.0)
-        q = norm(nombre)
-        if not q:
-            return (False, 0.0)
-        if q in self._siglas:
-            return (True, 100.0)
-        mejor = 0.0
-        for ent in self._entidades:
-            s = fuzz.token_set_ratio(q, ent)
-            if s > mejor:
-                mejor = s
-                if mejor >= 100:
-                    break
-        # 90 es umbral DURO: "ORDEN DE SAN AGUSTIN" matchea ~82 con municipalidades
-        # de San Agustín y NO debe pasar como entidad pública.
-        return (mejor >= 90, round(float(mejor), 1))
+        with self._lock:
+            if not self._asegurar_cargada():
+                return (False, 0.0)
+            q = norm(nombre)
+            if not q:
+                return (False, 0.0)
+            if q in self._siglas:
+                return (True, 100.0)
+            mejor = 0.0
+            for ent in self._entidades:
+                s = fuzz.token_set_ratio(q, ent)
+                if s > mejor:
+                    mejor = s
+                    if mejor >= 100:
+                        break
+            return (mejor >= 90, round(float(mejor), 1))
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -272,7 +351,45 @@ class BaseMef:
         }
         if score is not None:
             d["score"] = score
+        codigo = d["cui"] or d["snip"]
+        enriquecida = self._ficha_sqlite(codigo) if codigo else None
+        if enriquecida:
+            d.update(enriquecida)
+            if score is not None:
+                d["score"] = score
         return d
+
+    def _ficha_sqlite(self, codigo: str) -> Optional[dict]:
+        """Lookup exacto sin cargar el índice RAM. SQLite es opcional para
+        conservar compatibilidad con fixtures y despliegues anteriores."""
+        ruta = self._f_db
+        if not ruta.is_file():
+            return None
+        try:
+            uri = f"{ruta.resolve().as_uri()}?mode=ro"
+            with sqlite3.connect(uri, uri=True) as db:
+                db.row_factory = sqlite3.Row
+                fila = db.execute(
+                    "SELECT * FROM inversiones WHERE cui = ? AND cui <> '' LIMIT 1",
+                    (codigo,),
+                ).fetchone()
+                if fila is None:
+                    fila = db.execute(
+                        "SELECT * FROM inversiones "
+                        "WHERE snip = ? AND snip <> '' LIMIT 1",
+                        (codigo,),
+                    ).fetchone()
+            if fila is None:
+                return None
+            d = dict(fila)
+            d.pop("identity_key", None)
+            d.pop("nombre_norm", None)
+            d.pop("entidad_norm", None)
+            d.pop("fuente", None)
+            d.pop("fila_origen", None)
+            return d
+        except (OSError, sqlite3.Error):
+            return None
 
     def memoria_mb(self) -> float:
         """Estimación (MB) de la RAM de las estructuras cargadas. O(n); es un helper
