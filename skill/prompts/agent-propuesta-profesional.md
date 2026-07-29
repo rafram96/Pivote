@@ -242,7 +242,7 @@ Rellena este **esqueleto** con los valores reales (mismas claves, mismos tipos):
       "cui": "2354781",
       "tipo_documento": "Constancia", "nombre_emisor": "ING. ...", "cargo_emisor": "Gerente de Obras",
       "fecha_inicial": "2019-03-01", "fecha_final": "2020-06-30", "fecha_emision": "2020-07-10",
-      "folio": 1160, "paginas_pdf": [1160, 1161],
+      "folio": 1160, "paginas_pdf": [1160, 1161], "folio_verificado": true,
       "cargo_ocupado": "Supervisor de Instalaciones Sanitarias",
       "funciones_similares": null,
       "cert_antes_culminar": "NO", "incluye_covid": "SÍ", "traslape": "NO",
