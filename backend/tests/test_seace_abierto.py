@@ -14,8 +14,8 @@ import pytest
 from scraping.seace_abierto import (
     TIPO_EJECUCION, TIPO_EXPEDIENTE, TIPO_PREINVERSION, TIPO_SUPERVISION,
     CacheConosce, clasificar_proceso, codigo_convocatoria,
-    doc_bases_integradas, doc_contrato_firmado, procesos_por_cui,
-    seleccionar_proceso, tipo_esperado,
+    descargar_archivo, doc_bases_integradas, doc_contrato_firmado,
+    extension_documento, procesos_por_cui, seleccionar_proceso, tipo_esperado,
 )
 
 
@@ -127,6 +127,49 @@ def test_sin_integradas_devuelve_none_no_las_administrativas():
 def test_codigo_convocatoria_sale_del_ocid():
     assert codigo_convocatoria({"ocid": "ocds-dgv273-seacev3-1207427"}) == "1207427"
     assert codigo_convocatoria({"ocid": ""}) is None
+
+
+def test_bases_conservan_formato_real():
+    assert extension_documento({"format": "rar"}) == ".rar"
+    assert extension_documento({"format": "application/zip"}) == ".zip"
+    assert extension_documento({"format": "application/pdf"}) == ".pdf"
+
+
+class _RespArchivo:
+    status_code = 200
+
+    def __init__(self, contenido):
+        self.contenido = contenido
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def iter_content(self, _tam):
+        yield self.contenido
+
+
+class _SessionArchivo:
+    def __init__(self, contenido):
+        self.contenido = contenido
+        self.headers = {}
+
+    def get(self, *_args, **_kwargs):
+        return _RespArchivo(self.contenido)
+
+
+@pytest.mark.parametrize(("nombre", "magia"), [
+    ("bases.pdf", b"%PDF-1.4"),
+    ("bases.zip", b"PK\x03\x04demo"),
+    ("bases.rar", b"Rar!\x1a\x07\x01demo"),
+])
+def test_descarga_archivo_valida_pdf_zip_y_rar(tmp_path, nombre, magia):
+    destino = tmp_path / nombre
+    assert descargar_archivo("https://estado/doc", destino,
+                             session=_SessionArchivo(magia)) is True
+    assert destino.read_bytes() == magia
 
 
 # ── OCDS por red: fakes (nunca red real en tests) ────────────────────────────

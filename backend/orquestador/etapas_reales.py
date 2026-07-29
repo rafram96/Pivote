@@ -411,13 +411,17 @@ class EtapaInfoObrasReal:
     def __init__(self, fetcher: Optional[Callable] = None,
                  dir_descargas: Optional[Path] = None,
                  descargar: Optional[Callable] = None,
-                 verificador_mef: Optional[Callable] = None):
+                 verificador_mef: Optional[Callable] = None,
+                 consulta_ocds: Optional[Callable] = None):
         self._fetcher = fetcher
         self.dir_descargas = dir_descargas
         self._descargar = descargar
         # Verificación de expedientes contra el MEF (módulo T-003). Inyectable en
         # tests; en producción usa scraping.mef.verificar_cui (best-effort, red).
         self._verificar_mef = verificador_mef
+        # T-004: procesos y documentos SEACE por CUI. Inyectable para que la
+        # suite sea offline; en producción se usa el cliente OCDS best-effort.
+        self._consulta_ocds = consulta_ocds
         # Sin definir → SIN LÍMITE (descarga TODOS los documentos necesarios).
         # 0 = ninguna (solo transporte). N>0 = tope (solo para acotar pruebas).
         _raw = os.getenv("PIVOTE_MAX_DESCARGAS")
@@ -456,6 +460,12 @@ class EtapaInfoObrasReal:
             from scraping.errores_red import corto
             logger.debug("verificación MEF CUI %s: %s", cui, corto(e))
             return None
+
+    def _procesos_seace(self, cui: str):
+        if self._consulta_ocds is not None:
+            return self._consulta_ocds(cui)
+        from scraping.seace_abierto import procesos_por_cui
+        return procesos_por_cui(cui)
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
         obs: list[pipeline.Observacion] = []
@@ -735,6 +745,107 @@ class EtapaInfoObrasReal:
                                 for s in enr["sub_obras"]]
             ctx.enriquecimiento[_clave(np_, ne)] = enr
 
+        # T-004 F2: localizar las Bases Integradas y el contrato del proceso que
+        # corresponde a CADA experiencia. Esto es independiente de que InfoObras
+        # haya devuelto obra_id: SEACE se consulta por CUI y jamás cruza de tipo.
+        from resolucion.cui import es_expediente_exp
+        from scraping.seace_abierto import (
+            codigo_convocatoria, doc_bases_integradas, doc_contrato_firmado,
+            seleccionar_proceso, tipo_esperado,
+        )
+        cache_seace: dict[str, object] = {}
+        for _e, (np_, ne) in ctx.items_experiencia():
+            k = _clave(np_, ne)
+            enr = ctx.enriquecimiento.get(k) or {}
+            cui = str(enr.get("cui") or "").strip()
+            if not cui or str(enr.get("via") or "").upper() == "PRIVADA":
+                continue
+            if cui not in cache_seace:
+                try:
+                    cache_seace[cui] = self._procesos_seace(cui)
+                except Exception as ex:  # noqa: BLE001 — fuente estatal best-effort
+                    logger.warning("SEACE abierto CUI %s: %r", cui, ex)
+                    cache_seace[cui] = None
+            procesos = cache_seace[cui]
+            if procesos is None:
+                enr["seace"] = {
+                    "estado": "fuente_no_disponible", "cui": cui,
+                    "motivo": "la fuente de datos abiertos no respondió; reintentar",
+                }
+                obs.append(pipeline.Observacion(
+                    codigo="SEACE", severidad=pipeline.Severidad.ADVERTENCIA,
+                    mensaje=f"datos abiertos del proceso CUI {cui} no disponibles "
+                            f"temporalmente — el análisis continúa",
+                    origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+                ctx.enriquecimiento[k] = enr
+                continue
+            if not procesos:
+                enr["seace"] = {
+                    "estado": "sin_procesos", "cui": cui,
+                    "motivo": "el CUI no figura en los datos abiertos disponibles (cobertura 2018+)",
+                }
+                ctx.enriquecimiento[k] = enr
+                continue
+
+            texto = " ".join(str(_e.get(c) or "") for c in
+                             ("proyecto", "objeto", "cargo_ocupado", "descripcion"))
+            es_exped = self.forzar_expedientes or es_expediente_exp(_e)
+            tipo = tipo_esperado(es_exped, texto)
+            ini, fin = _fecha_iso(_e.get("fecha_inicial")), _fecha_iso(_e.get("fecha_final"))
+            seleccion = seleccionar_proceso(
+                procesos, tipo, periodo=(ini, fin) if ini and fin else None)
+            elegido = seleccion.get("elegido")
+            if elegido is None:
+                enr["seace"] = {
+                    "estado": "sin_tipo", "cui": cui, "proceso_objeto": tipo,
+                    "seleccion": None, "motivo": seleccion.get("motivo"),
+                    "candidatos": seleccion.get("candidatos") or [],
+                }
+                ctx.enriquecimiento[k] = enr
+                continue
+
+            contratos = elegido.get("contracts") or []
+            contrato = contratos[0] if contratos else {}
+            periodo = contrato.get("period") or {}
+            bases, firmado = doc_bases_integradas(elegido), doc_contrato_firmado(elegido)
+            seace = {
+                "estado": "seleccionado",
+                "cui": cui,
+                "codigoconvocatoria": codigo_convocatoria(elegido),
+                "ocid": elegido.get("ocid"),
+                "proceso_objeto": tipo,
+                "seleccion": seleccion.get("seleccion"),
+                "ambiguo": bool(seleccion.get("ambiguo")),
+                "motivo": seleccion.get("motivo"),
+                "fecha_suscripcion": str(contrato.get("dateSigned") or "")[:10] or None,
+                "vigencia": [
+                    str(periodo.get("startDate") or "")[:10] or None,
+                    str(periodo.get("endDate") or "")[:10] or None,
+                ],
+                "docs": {
+                    "bases": {
+                        "estado": "disponible" if bases else "no_disponible",
+                        "url": (bases or {}).get("url"),
+                        "titulo": (bases or {}).get("title"),
+                        "formato": (bases or {}).get("format"),
+                    },
+                    "contrato": {
+                        "estado": "disponible" if firmado else "no_disponible",
+                        "url": (firmado or {}).get("url"),
+                        "titulo": (firmado or {}).get("title"),
+                        "formato": (firmado or {}).get("format"),
+                    },
+                },
+            }
+            enr["seace"] = seace
+            if seace["ambiguo"]:
+                obs.append(pipeline.Observacion(
+                    codigo="SEACE", severidad=pipeline.Severidad.ADVERTENCIA,
+                    mensaje=f"hay varios procesos de {tipo} para el CUI {cui}; "
+                            f"se eligió el más reciente y debe confirmarse en el ZIP",
+                    origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+            ctx.enriquecimiento[k] = enr
+
         total = sum(1 for _ in ctx.items_experiencia())
         # Las métricas de descarga (archivos/bytes/reintentos) las RELLENA la
         # descarga diferida (post-pipeline) sobre esta misma etapa — aquí van en 0.
@@ -744,16 +855,17 @@ class EtapaInfoObrasReal:
 
 
 def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
-                             max_descargas=None, descargar=None, reportar=None):
-    """Descarga DIFERIDA de los documentos InfoObras de TODAS las experiencias del
-    job a {job}.descargas/P{n}_E{m}, usando el `obra_id` YA persistido en el
-    enriquecimiento (sin re-fetch al portal). Idempotente: salta las carpetas que
-    ya tienen archivos (skip-existing → re-runs rápidos y reentrada segura).
+                             max_descargas=None, descargar=None, reportar=None,
+                             descargar_seace=None):
+    """Descarga DIFERIDA de InfoObras y SEACE a {job}.descargas/P{n}_E{m}.
+    Cada fuente tiene su propia marca idempotente: una experiencia puede traer
+    documentos SEACE aunque no tenga `obra_id`, y completar una fuente no salta
+    la otra.
     Devuelve {descargas, bytes, reintentos} medidos del folder + el scraper.
 
     `reportar(procesadas, total, nombre_obra)` (opcional): avance para la barra del
-    panel — se llama al empezar cada obra descargable. Un reintento NO reinicia el
-    contador; las obras sin `obra_id` no cuentan en `total`."""
+    panel — se llama al empezar cada experiencia descargable. Un reintento NO
+    reinicia el contador."""
     from entregables.zip_infoobras import (
         descargar_documentos_obra_por_hito, descargar_informes_control,
         descargar_datos_cierre, descargar_aprobacion_expediente,
@@ -768,10 +880,53 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
         o = enr.get("obra") if isinstance(enr.get("obra"), dict) else None
         return (o or {}).get("obra_id")
 
-    # total descargable = experiencias con obra_id resuelto (las que la barra cuenta)
+    def _seace(np_, ne):
+        enr = enriquecimiento.get(_clave(np_, ne)) or {}
+        return enr.get("seace") if isinstance(enr.get("seace"), dict) else None
+
+    def _nota_atomica(ruta: Path, texto: str) -> None:
+        ruta.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ruta.with_name(ruta.name + ".part")
+        tmp.write_text(texto, encoding="utf-8")
+        os.replace(tmp, ruta)
+
+    def _bajar_seace(datos: dict, destino: Path) -> None:
+        docs = datos.get("docs") or {}
+        estado_general = datos.get("estado")
+        for clave_doc, nombre in (
+            ("bases", "SEACE_01_BASES_INTEGRADAS"),
+            ("contrato", "SEACE_02_CONTRATO_FIRMADO"),
+        ):
+            doc = docs.get(clave_doc) or {}
+            from scraping.seace_abierto import extension_documento
+            archivo = destino / f"{nombre}{extension_documento(doc)}"
+            nota_no = destino / f"{nombre}_NO_DISPONIBLE.txt"
+            nota_err = destino / f"{nombre}_ERROR.txt"
+            if estado_general != "seleccionado" or not doc.get("url"):
+                nota_err.unlink(missing_ok=True)
+                motivo = datos.get("motivo") or "documento no publicado en datos abiertos"
+                sufijo = "ERROR" if estado_general == "fuente_no_disponible" else "NO_DISPONIBLE"
+                ruta = destino / f"{nombre}_{sufijo}.txt"
+                _nota_atomica(ruta, f"{motivo}\n")
+                continue
+            nota_no.unlink(missing_ok=True)
+            nota_err.unlink(missing_ok=True)
+            if descargar_seace is not None:
+                ok_archivo = bool(descargar_seace(doc["url"], archivo))
+            else:
+                from scraping.seace_abierto import descargar_archivo
+                ok_archivo = descargar_archivo(doc["url"], archivo)
+            if not ok_archivo:
+                _nota_atomica(
+                    nota_err,
+                    "La descarga falló o la fuente no devolvió un PDF/ZIP/RAR válido. "
+                    "Reintentar más tarde.\n")
+
+    # total descargable = unión de InfoObras y SEACE (una cuenta por experiencia)
     total_desc = sum(1 for prof in espejo.get("profesionales", [])
                      for e in (prof.get("experiencias", []) or [])
-                     if _obra_id(prof.get("n_prof"), e.get("n")))
+                     if (_obra_id(prof.get("n_prof"), e.get("n"))
+                         or _seace(prof.get("n_prof"), e.get("n"))))
     procesadas = 0
     for prof in espejo.get("profesionales", []):
         np_ = prof.get("n_prof")
@@ -780,65 +935,69 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
             enr = enriquecimiento.get(_clave(np_, ne)) or {}
             obra = enr.get("obra") if isinstance(enr.get("obra"), dict) else None
             obra_id = (obra or {}).get("obra_id")
-            if not obra_id:
-                saltados += 1            # NA / sin CUI resuelto → no descargable
+            seace = _seace(np_, ne)
+            if not obra_id and not seace:
+                saltados += 1
                 continue
             if max_descargas is not None and bajadas >= max_descargas:
                 break
             procesadas += 1
             if reportar is not None:
                 nombre_obra = (enr.get("obra_nombre") or (obra or {}).get("nombre")
-                               or f"obra {obra_id}")
+                               or e.get("proyecto") or f"obra {obra_id}")
                 reportar(procesadas, total_desc, _recorte(nombre_obra))
             destino = base / f"P{np_}_E{ne}"
-            ok = base / f"P{np_}_E{ne}.ok"          # marca de descarga COMPLETA (no .part)
-            if ok.exists():
-                continue  # ya descargado COMPLETO → idempotencia / re-runs rápidos.
-                # (una carpeta a medio bajar NO tiene .ok → se vuelve a intentar)
+            ok = base / f"P{np_}_E{ne}.ok"
+            ok_seace = base / f"P{np_}_E{ne}.seace.ok"
+            hizo_trabajo = False
             try:
-                if descargar is not None:           # inyección de tests
-                    descargar(obra_id, destino)
-                else:
-                    descargar_documentos_obra_por_hito(obra_id, destino)
-                    cert_ini = _fecha_iso(e.get("fecha_inicial"))
-                    cert_fin = _fecha_iso(e.get("fecha_final"))
-                    try:
-                        descargar_informes_control(obra_id, destino,
-                                                   fecha_ini=cert_ini, fecha_fin=cert_fin)
-                    except Exception as ex:  # noqa: BLE001
-                        logger.debug("informes control obra %s: %s", obra_id, corto(ex))
-                    try:
-                        descargar_datos_cierre(obra_id, destino)
-                    except Exception as ex:  # noqa: BLE001
-                        logger.debug("datos de cierre obra %s: %s", obra_id, corto(ex))
-                    # Experiencia de expediente aceptada por su aprobación → bajar
-                    # el documento del hito "Aprobación del proyecto" (Mapa/Sumario).
-                    _aprob = enr.get("aprobacion_expediente")
-                    if _aprob:
+                if obra_id and not ok.exists():
+                    hizo_trabajo = True
+                    if descargar is not None:       # inyección de tests
+                        descargar(obra_id, destino)
+                    else:
+                        descargar_documentos_obra_por_hito(obra_id, destino)
+                        cert_ini = _fecha_iso(e.get("fecha_inicial"))
+                        cert_fin = _fecha_iso(e.get("fecha_final"))
                         try:
-                            descargar_aprobacion_expediente(_aprob, destino)
+                            descargar_informes_control(obra_id, destino,
+                                                       fecha_ini=cert_ini, fecha_fin=cert_fin)
                         except Exception as ex:  # noqa: BLE001
-                            logger.debug("aprobación expediente obra %s: %s", obra_id, corto(ex))
-                    # Expediente verificado contra el MEF (T-003) → bajar el contrato y
-                    # la resolución de aprobación (re-consulta fresca por el token).
-                    _vmef = enr.get("verificacion_expediente")
-                    if _vmef and _vmef.get("cui_confirmado"):
+                            logger.debug("informes control obra %s: %s", obra_id, corto(ex))
                         try:
-                            from scraping.mef import descargar_documentos_expediente
-                            descargar_documentos_expediente(
-                                _vmef["cui_confirmado"], destino / "Verificación MEF",
-                                codsnip=_vmef.get("cod_snip") or "")
+                            descargar_datos_cierre(obra_id, destino)
                         except Exception as ex:  # noqa: BLE001
-                            logger.debug("verificación MEF obra %s: %s", obra_id, corto(ex))
-                base.mkdir(parents=True, exist_ok=True)
-                ok.write_text("ok", encoding="utf-8")   # recién aquí: descarga COMPLETA
-                bajadas += 1
+                            logger.debug("datos de cierre obra %s: %s", obra_id, corto(ex))
+                        _aprob = enr.get("aprobacion_expediente")
+                        if _aprob:
+                            try:
+                                descargar_aprobacion_expediente(_aprob, destino)
+                            except Exception as ex:  # noqa: BLE001
+                                logger.debug("aprobación expediente obra %s: %s", obra_id, corto(ex))
+                        _vmef = enr.get("verificacion_expediente")
+                        if _vmef and _vmef.get("cui_confirmado"):
+                            try:
+                                from scraping.mef import descargar_documentos_expediente
+                                descargar_documentos_expediente(
+                                    _vmef["cui_confirmado"], destino / "Verificación MEF",
+                                    codsnip=_vmef.get("cod_snip") or "")
+                            except Exception as ex:  # noqa: BLE001
+                                logger.debug("verificación MEF obra %s: %s", obra_id, corto(ex))
+                    base.mkdir(parents=True, exist_ok=True)
+                    ok.write_text("ok", encoding="utf-8")
+                if seace and not ok_seace.exists():
+                    hizo_trabajo = True
+                    _bajar_seace(seace, destino)
+                    base.mkdir(parents=True, exist_ok=True)
+                    ok_seace.write_text("ok", encoding="utf-8")
+                if hizo_trabajo:
+                    bajadas += 1
             except Exception as ex:  # noqa: BLE001
-                logger.warning("InfoObras ✗ obra %s (P%sE%s): %s", obra_id, np_, ne, corto(ex))
+                logger.warning("Descargas ✗ P%sE%s: %s", np_, ne, corto(ex))
     if saltados:
-        logger.info("descargas job %s: %d experiencia(s) sin obra_id (no descargables)",
+        logger.info("descargas job %s: %d experiencia(s) sin fuentes descargables",
                     job_id, saltados)
-    logger.info("InfoObras descargas job %s — %s", job_id, resumen_descargas())
+    logger.info("Documentos del job %s — %s", job_id, resumen_descargas())
     n_files = n_bytes = 0
     if base.is_dir():
         for p in base.rglob("*"):
@@ -1354,7 +1513,7 @@ class EtapaExcelReal:
 
 def etapas_reales(dir_datos: Path, *, consulta_cui=None, fetcher_infoobras=None,
                   consultor_sunat=None, buscador_sunat=None, extras_sunat=None,
-                  descargar=None, verificador_mef=None):
+                  descargar=None, verificador_mef=None, consulta_ocds=None):
     """Las 8 etapas de la demo. Los parámetros inyectables son para tests;
     en producción quedan los clientes en vivo."""
     return [
@@ -1362,7 +1521,8 @@ def etapas_reales(dir_datos: Path, *, consulta_cui=None, fetcher_infoobras=None,
         EtapaValidacionReal(Path(dir_datos)),
         EtapaResolucionCuiReal(consulta=consulta_cui),
         EtapaInfoObrasReal(fetcher=fetcher_infoobras, dir_descargas=Path(dir_datos),
-                           descargar=descargar, verificador_mef=verificador_mef),
+                           descargar=descargar, verificador_mef=verificador_mef,
+                           consulta_ocds=consulta_ocds),
         EtapaSunatReal(consultor=consultor_sunat, buscador=buscador_sunat,
                        extras=extras_sunat),
         EtapaReglasReal(),

@@ -192,11 +192,14 @@ experiencia con prefijo propio):
 
 ```
 <Experiencia>/
-  SEACE_01_BASES_INTEGRADAS.pdf
+  SEACE_01_BASES_INTEGRADAS.pdf|zip|rar
   SEACE_02_CONTRATO_FIRMADO.pdf
-  (o) SEACE_NO_DISPONIBLE.txt   ← motivo: pre-2018 / proceso no hallado /
-                                   fuente caída — mismo patrón SIN_DOCUMENTOS.txt
+  (o) SEACE_*_NO_DISPONIBLE.txt / SEACE_*_ERROR.txt
 ```
+
+La extensión no se inventa: en OCDS las Bases Integradas reales aparecen como
+PDF, ZIP o RAR. Cada descarga se valida por su firma binaria; HTML/JSON/403
+produce una nota de error, nunca un archivo falso con extensión `.pdf`.
 
 **Al Excel** (hoja del profesional, bloque de la obra — aditivo):
 - «Contrato del proceso: firmado el {fecha_suscripcion} · vigencia {ini}–{fin}»
@@ -307,11 +310,19 @@ tipo_esperado(es_expediente: bool, texto_experiencia) -> "expediente|supervision
 seleccionar_proceso(procesos, tipo, periodo?) ->
     {"elegido", "seleccion", "ambiguo"?, "motivo", "candidatos"}
 doc_bases_integradas(comp) / doc_contrato_firmado(comp) -> dict | None
-descargar_pdf(url, destino, session?) -> bool               # streaming, %PDF, atómico
+descargar_archivo(url, destino, session?) -> bool           # streaming, PDF/ZIP/RAR, atómico
 codigo_convocatoria(comp) -> str | None
 ```
 
-## A2 · Pendiente — F2: cablear al pipeline (guía paso a paso)
+## A2 · Hecho — F2: cableado al pipeline (29-jul, Codex)
+
+Implementado en `feat/seace-abierto`: selección cacheada por CUI en
+`EtapaInfoObrasReal`, dependencia `consulta_ocds` inyectable, descarga diferida
+con marca `.seace.ok` separada, soporte PDF/ZIP/RAR, notas honestas, inclusión
+automática en el ZIP y bloque aditivo en el Excel. Suite completa:
+**677 passed, 24 skipped**.
+
+La guía de abajo queda como mapa de la implementación vigente:
 
 **Regla de arquitectura a respetar**: en `EtapaInfoObrasReal` las descargas de
 documentos están **DIFERIDAS** — la etapa solo persiste ids/urls y los PDFs los
@@ -335,9 +346,10 @@ SEACE deben seguir el mismo patrón.
      `consulta_cui`/`fetcher_infoobras`, para que los tests no toquen red.
 2. **Descarga (diferida, en `descargar_documentos_job`,
    `etapas_reales.py:746`)** — junto a los documentos InfoObras: por cada
-   experiencia con `enr["seace"]`, `descargar_pdf` de los 2 documentos a la
+   experiencia con `enr["seace"]`, `descargar_archivo` para los documentos a la
    carpeta de descargas de esa experiencia con los nombres
-   `SEACE_01_BASES_INTEGRADAS.pdf` / `SEACE_02_CONTRATO_FIRMADO.pdf`; si un doc
+   `SEACE_01_BASES_INTEGRADAS.{pdf|zip|rar}` /
+   `SEACE_02_CONTRATO_FIRMADO.pdf`; si un doc
    no está → escribir `SEACE_*_NO_DISPONIBLE.txt` con el motivo (patrón
    `SIN_DOCUMENTOS.txt` de `zip_infoobras.py`).
 3. **ZIP** — `construir_zip_infoobras(espejo, descargas, salida, enriquecimiento)`

@@ -509,6 +509,61 @@ def construir_hoja_profesional(
                 rr += 1
         return rr - 1
 
+    def render_seace(top: int, datos: dict) -> int:
+        """Disponibilidad de Bases Integradas y contrato para ESTA experiencia.
+        Solo informa y sustenta el ZIP; nunca convierte una ausencia en incumplimiento."""
+        rr = top
+        ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+        c = ws.cell(rr, 6, "DOCUMENTOS DEL PROCESO (SEACE)")
+        c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
+        rr += 1
+
+        estado = datos.get("estado")
+        if estado != "seleccionado":
+            textos = {
+                "fuente_no_disponible": "Por confirmar — la fuente no respondió; reintentar.",
+                "sin_procesos": "No disponible en datos abiertos (cobertura desde 2018).",
+                "sin_tipo": "No se encontró un proceso del tipo correspondiente a la experiencia.",
+            }
+            texto = textos.get(estado, datos.get("motivo") or "Por confirmar.")
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+            c = ws.cell(rr, 6, texto)
+            c.font, c.fill, c.border, c.alignment = F_CELL, FILL_VALOR, BORDER, AL_WRAP
+            ws.row_dimensions[rr].height = max(15, (-(-len(texto) // 70)) * 13 + 2)
+            return rr
+
+        etiquetas = {
+            "expediente": "Expediente técnico",
+            "supervision": "Supervisión",
+            "ejecucion": "Ejecución de obra",
+        }
+        tipo = etiquetas.get(datos.get("proceso_objeto"), datos.get("proceso_objeto") or "—")
+        filas = [("Tipo de proceso", tipo)]
+        docs = datos.get("docs") or {}
+        for clave, etiqueta in (("bases", "Bases Integradas"), ("contrato", "Contrato firmado")):
+            disponible = (docs.get(clave) or {}).get("estado") == "disponible"
+            filas.append((etiqueta, "Identificado para incluir en el ZIP"
+                          if disponible else "No disponible en datos abiertos"))
+        if datos.get("fecha_suscripcion"):
+            filas.append(("Fecha de firma", datos["fecha_suscripcion"]))
+        for etiqueta, valor in filas:
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=7)
+            cl = ws.cell(rr, 6, etiqueta)
+            cl.font, cl.border, cl.alignment = F_BOLD, BORDER, AL_WRAP
+            ws.merge_cells(start_row=rr, start_column=8, end_row=rr, end_column=11)
+            cv = ws.cell(rr, 8, valor)
+            cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
+            rr += 1
+        if datos.get("ambiguo"):
+            texto = ("Por confirmar — hay varios procesos del mismo tipo; se eligió "
+                     "el más reciente. Verificar la carátula de los documentos del ZIP.")
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+            c = ws.cell(rr, 6, texto)
+            c.font, c.fill, c.border, c.alignment = F_CELL, FILL_VALOR, BORDER, AL_WRAP
+            ws.row_dimensions[rr].height = max(15, (-(-len(texto) // 70)) * 13 + 2)
+            rr += 1
+        return rr - 1
+
     def render_revision(top: int, motivo: str, accion: Optional[str] = None) -> int:
         """Bloque para una experiencia que NO se cruzó: explica por qué quedó en
         revisión humana, en vez de dejar la columna de la obra vacía. El marcador
@@ -1397,16 +1452,25 @@ def construir_hoja_profesional(
                    else render_aviso_revision(r_top, motivo_rev, accion_rev) + 1)
             r_right = render_multi_obra(top, fx["sub_obras"], fx.get("multi_rubro"))
             r = max(r, r_right + 1)
-        elif fx:
+        elif fx and any(fx.get(k) for k in
+                        ("codigo_infoobras", "obra_nombre", "estado", "valorizaciones",
+                         "verificacion_expediente", "aprobacion_expediente")):
             top = (r_top if not motivo_rev
                    else render_aviso_revision(r_top, motivo_rev, accion_rev) + 1)
             r_right = render_obra(top, fx, ini, fin)
+            if fx.get("seace"):
+                r_right = render_seace(r_right + 1, fx["seace"])
             r = max(r, r_right + 1)
             # el bloque de la experiencia SE PINTA SIEMPRE completo (es la
             # evidencia de ESA experiencia, en la franja pegada a su cuadro de
             # hitos); solo se registra para que una SubExperiencia posterior con
             # exactamente el mismo contenido pueda apuntar aquí.
             _registrar_obra(fx, ini, fin, f"Experiencia {n_exp}", r_top)
+        elif fx and fx.get("seace"):
+            top = (r_top if not motivo_rev
+                   else render_aviso_revision(r_top, motivo_rev, accion_rev) + 1)
+            r_right = render_seace(top, fx["seace"])
+            r = max(r, r_right + 1)
         elif motivo_rev:
             r_right = render_revision(r_top, motivo_rev, accion_rev)
             r = max(r, r_right + 1)
@@ -1630,7 +1694,7 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
             sunat[(np_, ne)] = enr["sunat"]
         if (enr.get("obra_ficha") or enr.get("valorizaciones")
                 or enr.get("representante_obra") or enr.get("aprobacion_expediente")
-                or enr.get("verificacion_expediente")):
+                or enr.get("verificacion_expediente") or enr.get("seace")):
             # `obra_ficha` NO trae el nombre (solo código/CUI/estado/monto/fechas);
             # el nombre viaja suelto en `obra_nombre` (o en `obra.nombre_obra`) y sin
             # esta línea nunca llegaba al Excel — el evaluador no podía ver con qué
@@ -1644,6 +1708,7 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                                  "representante_obra": enr.get("representante_obra"),
                                  "aprobacion_expediente": enr.get("aprobacion_expediente"),
                                  "verificacion_expediente": enr.get("verificacion_expediente"),
+                                 "seace": enr.get("seace"),
                                  # #63: N registros de obra bajo el mismo CUI
                                  "registros_cui": enr.get("registros_cui")}
         # cert multi-obra: la lista de sub-obras verificadas viaja en `fichas` para

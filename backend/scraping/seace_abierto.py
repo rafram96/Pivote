@@ -9,7 +9,7 @@ Dos fuentes oficiales, complementarias (sondas 18-21 jul, `tools/fuentes_estado/
            `conosce.osce.gob.pe` es intermitente (caído en vivo el 27-jul), así
            que NINGUNA consulta por experiencia depende de él.
   OCDS     API del OECE: procesos de un CUI (`records?projectID=`) con sus
-           documentos (Bases Integradas, contrato firmado) en PDF directo.
+           documentos (Bases Integradas en PDF/ZIP/RAR, contrato firmado).
            Única llamada en vivo por experiencia; best-effort.
 
 El requisito N°1 del cliente (reunión 29-jul) es la SEGMENTACIÓN: un mismo CUI
@@ -297,9 +297,21 @@ def doc_contrato_firmado(comp: dict) -> Optional[dict]:
     return None
 
 
-def descargar_pdf(url: str, destino, session: Optional[requests.Session] = None,
-                  timeout: float = 120.0) -> bool:
-    """Streaming + rename atómico. True solo si lo bajado ES un PDF."""
+def extension_documento(doc: Optional[dict]) -> str:
+    """Extensión honesta del documento OCDS. Las Bases Integradas reales pueden
+    publicarse como PDF, ZIP o RAR; nunca se les fuerza extensión `.pdf`."""
+    formato = _minusculas((doc or {}).get("format"))
+    url = _minusculas((doc or {}).get("url"))
+    if "rar" in formato or url.endswith(".rar"):
+        return ".rar"
+    if "zip" in formato or url.endswith(".zip"):
+        return ".zip"
+    return ".pdf"
+
+
+def descargar_archivo(url: str, destino, session: Optional[requests.Session] = None,
+                      timeout: float = 120.0) -> bool:
+    """Streaming + rename atómico; rechaza HTML/JSON y valida PDF/ZIP/RAR por magia."""
     s = crear_session(session)
     destino = Path(destino)
     destino.parent.mkdir(parents=True, exist_ok=True)
@@ -314,9 +326,15 @@ def descargar_pdf(url: str, destino, session: Optional[requests.Session] = None,
                     primeros = b""
                     for chunk in r.iter_content(1 << 16):
                         if not primeros:
-                            primeros = chunk[:4]
+                            primeros = chunk[:8]
                         f.write(chunk)
-            if primeros != b"%PDF":
+            ext = destino.suffix.lower()
+            valido = (
+                (ext == ".pdf" and primeros.startswith(b"%PDF"))
+                or (ext == ".zip" and primeros.startswith(b"PK\x03\x04"))
+                or (ext == ".rar" and primeros.startswith(b"Rar!\x1a\x07"))
+            )
+            if not valido:
                 tmp.unlink(missing_ok=True)
                 return False
             os.replace(tmp, destino)
@@ -328,6 +346,13 @@ def descargar_pdf(url: str, destino, session: Optional[requests.Session] = None,
                 return False
             time.sleep(_BACKOFF * (intento + 1))
     return False
+
+
+def descargar_pdf(url: str, destino, session: Optional[requests.Session] = None,
+                  timeout: float = 120.0) -> bool:
+    """Compatibilidad para contratos y demás documentos que deben ser PDF."""
+    return descargar_archivo(url, Path(destino).with_suffix(".pdf"),
+                             session=session, timeout=timeout)
 
 
 # ══ 3 · Clasificación y selección del proceso (PURO — el requisito N°1) ══════

@@ -1,8 +1,9 @@
-# Manual — bajar Bases Integradas y Contratos A MANO con `seace_abierto`
+# Manual de contingencia — bajar Bases Integradas y Contratos A MANO
 
-> **Para quién**: Rafael, operando manualmente mientras el cableado al pipeline
-> (F2) no existe. Con esto se produce HOY lo que Manuel pidió en la reunión del
-> 29-jul: los PDFs correctos, por experiencia, en carpetas listas para el ZIP.
+> **Para quién**: Rafael, como contingencia si necesita operar fuera del
+> pipeline. F2 ya está cableada localmente; este flujo manual se conserva para
+> diagnóstico o rescate. Produce los documentos por experiencia en carpetas
+> listas para el ZIP.
 >
 > **Qué hay detrás**: `backend/scraping/seace_abierto.py` (F1, commit `70c78e8`,
 > rama `feat/seace-abierto`) · diseño completo en
@@ -56,8 +57,8 @@ from datetime import date
 from pathlib import Path
 from scraping.seace_abierto import (
     procesos_por_cui, seleccionar_proceso, clasificar_proceso,
-    doc_bases_integradas, doc_contrato_firmado, descargar_pdf,
-    codigo_convocatoria, CacheConosce,
+    doc_bases_integradas, doc_contrato_firmado, descargar_archivo,
+    extension_documento, codigo_convocatoria, CacheConosce,
 )
 
 # ── EDITAR ESTOS 4 VALORES ──────────────────────────────────────────────
@@ -98,7 +99,8 @@ for etiqueta, doc in (("SEACE_01_BASES_INTEGRADAS", doc_bases_integradas(comp)),
             encoding="utf-8")
         print(f"  {etiqueta}: no publicado (queda la nota)")
         continue
-    ok = descargar_pdf(doc["url"], DESTINO / f"{etiqueta}.pdf")
+    destino = DESTINO / f"{etiqueta}{extension_documento(doc)}"
+    ok = descargar_archivo(doc["url"], destino)
     print(f"  {etiqueta}: {'OK' if ok else 'FALLÓ (reintentar luego)'}")
 
 # fechas del contrato para los cruces (T-005) — vía CONOSCE offline si cruza
@@ -136,7 +138,7 @@ mejor una nota de «No disponible» que el documento equivocado.
 | `elegido = None` | hay procesos, pero ninguno del tipo buscado | «El proceso de {tipo} no está en datos abiertos»; el motivo lista qué SÍ había |
 | `ambiguo = True` | varios procesos del tipo, sin fechas que desempaten | se eligió el más reciente — **abrir el PDF y verificar** contra el certificado antes de entregar |
 | `doc_bases_integradas → None` | el proceso existe pero no publicó las Integradas | nota «no publicado»; NO sustituir por las Administrativas (son la versión previa) |
-| `descargar_pdf → False` | la descarga falló o no era un PDF | reintentar; si persiste, anotar y seguir |
+| `descargar_archivo → False` | la descarga falló o no coincidió con su formato PDF/ZIP/RAR | reintentar; si persiste, anotar y seguir |
 
 ## 4 · Armar la entrega para Manuel
 
@@ -146,7 +148,7 @@ descargas de la receta:
 ```
 <Proyecto o Profesional>/
   <Experiencia N>/
-    SEACE_01_BASES_INTEGRADAS.pdf
+    SEACE_01_BASES_INTEGRADAS.pdf|zip|rar
     SEACE_02_CONTRATO_FIRMADO.pdf     (o las notas _NO_DISPONIBLE.txt)
 ```
 
@@ -164,7 +166,7 @@ descargas de la receta:
 | `records` responde lento/timeout | portal OCDS cargado | el módulo ya reintenta 3× con backoff; si devuelve None, esperar |
 | CUI real pero `[]` | proceso pre-2018 (seacev3 arranca 2018) | «No disponible» honesto; el buscador SEACE con captcha queda como plan B manual |
 | `codigo_convocatoria` con guiones (ej. `2022-41-52`) | el sufijo del ocid no siempre es numérico (visto en vivo) | el cruce CONOSCE puede no encontrar ese código; las fechas salen igual del propio OCDS (`dateSigned`) |
-| Descarga no es `%PDF` | Alfresco devolvió HTML de error | `descargar_pdf` ya lo detecta y devuelve False; reintentar |
+| Descarga no coincide con PDF/ZIP/RAR | Alfresco devolvió HTML/JSON de error | `descargar_archivo` lo detecta y devuelve False; reintentar |
 | Corres fuera de Perú | geobloqueo de oece/conosce | solo desde IP Perú (el server del cliente lo es) |
 
 ## 6 · Verificación rápida de que todo sigue vivo

@@ -142,6 +142,12 @@ def consultor_fake(ruc):
 SIN_EXTRAS_SUNAT = lambda ruc: ([], None)  # noqa: E731
 
 
+@pytest.fixture(autouse=True)
+def _seace_sin_red_por_defecto(monkeypatch):
+    """Toda esta suite es offline; cada test F2 que necesite procesos los inyecta."""
+    monkeypatch.setattr("scraping.seace_abierto.procesos_por_cui", lambda cui: [])
+
+
 def hacer_motor(tmp_path):
     repo = RepositorioMemoria()
     etapas = etapas_reales(
@@ -149,6 +155,71 @@ def hacer_motor(tmp_path):
         consultor_sunat=consultor_fake, buscador_sunat=lambda n: [],
         descargar=lambda *a, **k: None)
     return Motor(etapas, repo), repo
+
+
+def test_seace_f2_selecciona_por_tipo_y_cachea_por_cui(tmp_path):
+    llamadas = []
+
+    def consulta_ocds(cui):
+        llamadas.append(cui)
+        return [{
+            "ocid": f"ocds-dgv273-seacev3-{cui}",
+            "tender": {
+                "title": "Servicio de supervisión de la ejecución de la obra",
+                "documents": [{
+                    "documentType": "biddingDocuments",
+                    "title": "Bases Integradas",
+                    "url": "https://estado/bases.pdf",
+                }],
+            },
+            "contracts": [{
+                "dateSigned": "2021-04-01",
+                "period": {"startDate": "2021-05-01", "endDate": "2023-05-31"},
+                "documents": [{
+                    "documentType": "contractSigned",
+                    "title": "Contrato firmado",
+                    "url": "https://estado/contrato.pdf",
+                }],
+            }],
+        }]
+
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(
+        tmp_path, consulta_cui=ConsultaFake(), fetcher_infoobras=fetcher_fake,
+        consultor_sunat=consultor_fake, buscador_sunat=lambda n: [],
+        extras_sunat=SIN_EXTRAS_SUNAT, descargar=lambda *a, **k: None,
+        consulta_ocds=consulta_ocds), repo)
+    job = motor.crear_job(ESPEJO)
+    motor.correr(job.job_id)
+
+    enr = repo.cargar_enriquecimiento(job.job_id)
+    s = enr["1:1"]["seace"]
+    assert s["estado"] == "seleccionado"
+    assert s["proceso_objeto"] == "supervision"
+    assert s["docs"]["bases"]["estado"] == "disponible"
+    assert s["docs"]["contrato"]["estado"] == "disponible"
+    assert s["fecha_suscripcion"] == "2021-04-01"
+    assert len(llamadas) == len(set(llamadas)), "un CUI no debe consultarse dos veces"
+
+
+@pytest.mark.parametrize(("respuesta", "estado"), [
+    (None, "fuente_no_disponible"),
+    ([], "sin_procesos"),
+    ([{
+        "ocid": "ocds-dgv273-seacev3-1",
+        "tender": {"title": "Ejecución de la obra", "documents": []},
+    }], "sin_tipo"),
+])
+def test_seace_f2_distingue_fuente_ausencia_y_tipo(tmp_path, respuesta, estado):
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(
+        tmp_path, consulta_cui=ConsultaFake(), fetcher_infoobras=fetcher_fake,
+        consultor_sunat=lambda r: None, buscador_sunat=lambda n: [],
+        extras_sunat=SIN_EXTRAS_SUNAT, descargar=lambda *a, **k: None,
+        consulta_ocds=lambda cui: respuesta), repo)
+    job = motor.crear_job(ESPEJO)
+    motor.correr(job.job_id)
+    assert repo.cargar_enriquecimiento(job.job_id)["1:1"]["seace"]["estado"] == estado
 
 
 # ── el flujo integrado ────────────────────────────────────────────────────────

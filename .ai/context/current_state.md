@@ -1,6 +1,6 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-07-29** · rama de trabajo: `demo`
+> Última actualización: **2026-07-29** · rama de trabajo: `feat/seace-abierto`
 
 ## Reunión con el cliente 29-jul — lo que cambió (fuente: transcripción)
 
@@ -35,19 +35,25 @@
   portal caído), y `seleccionar_proceso` con el requisito N°1 del cliente:
   **jamás cruzar de tipo**; desempate por vigencia solo dentro del tipo; con
   varios candidatos sin fechas → el más reciente + flag `ambiguo`. 18 tests
-  offline; suite 664 verde. Probado EN VIVO con el CUI 2279396 (Pichanaki):
-  5 procesos, clasificación correcta, bases+contrato descargables.
-- **Documentación completa para continuar a mano** (pedido de Rafael):
+  offline. Probado EN VIVO con el CUI 2279396 (Pichanaki): 5 procesos y
+  clasificación correcta.
+- **F2 HECHA, lista para PR** (Codex, 29-jul): selección integrada en
+  `EtapaInfoObrasReal`, descarga diferida independiente de `obra_id`, marcas
+  idempotentes separadas InfoObras/SEACE, archivos/notas dentro de cada
+  experiencia del ZIP y bloque informativo en el Excel. No cambia veredictos
+  ni el contrato espejo. Suite completa: **677 passed, 24 skipped**.
+- **Hallazgo de validación viva F2 (CUI 2279396)**: el contrato descargó como
+  PDF (1.45 MB); las Bases Integradas elegidas están publicadas como **RAR** y
+  su host devolvió HTTP 403. El código conserva PDF/ZIP/RAR con su extensión
+  real y, ante 403/HTML, deja `*_ERROR.txt` en vez de fingir un PDF válido.
+- **Documentación de operación y contingencia**:
   - `docs/uso-manual-seace-abierto.md` — receta operable HOY por certificado
-    (preparar caché, elegir tipo, descargar los 2 PDFs con los nombres del
+    (preparar caché, elegir tipo, descargar los documentos con los nombres del
     entregable, tabla de decisiones y problemas conocidos);
-  - `docs/plan-integracion-bases-contrato.md` **ANEXO** — estado de
-    implementación + guía de cableado F2 paso a paso (selección en
-    `EtapaInfoObrasReal` con descarga DIFERIDA en `descargar_documentos_job`,
-    inyectable `consulta_ocds`, ZIP, Excel, tests) + F3/F5 + preparación del
-    server.
-- Falta: **F2** (cablear al pipeline — guía en el anexo), F3 (fechas→T-005),
-  F5 (candado). El módulo ya es usable a mano sin F2.
+  - `docs/plan-integracion-bases-contrato.md` **ANEXO** — implementación F2,
+    contratos internos y pendientes F3/F5.
+- Falta: **F3** (fechas→T-005) y F5 (candado). Deploy/redeploy queda
+  expresamente fuera de esta entrega y a cargo manual de Rafael.
 
 ## Lo del 2026-07-28 (resumen — detalle en `handoffs/2026-07-28_claude.md`)
 

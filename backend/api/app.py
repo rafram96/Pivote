@@ -590,11 +590,12 @@ def resolver_revision(job_id: str, tareas: BackgroundTasks, body: dict):
             job = motor.resolver_revision(job_id, n_prof, n_exp, body)
         except ValueError as e:
             raise HTTPException(404, str(e))
-        # La obra del item pudo cambiar al re-resolver → invalida SUS PDFs (carpeta
-        # + marca .ok) para re-bajarlos frescos; los demás se saltan por su .ok.
+        # La obra/CUI del item pudo cambiar al re-resolver → invalida SUS PDFs y
+        # las marcas de AMBAS fuentes para re-bajarlos frescos.
         base = _dir_job(job_id) / "descargas"
         shutil.rmtree(base / f"P{n_prof}_E{n_exp}", ignore_errors=True)
         (base / f"P{n_prof}_E{n_exp}.ok").unlink(missing_ok=True)
+        (base / f"P{n_prof}_E{n_exp}.seace.ok").unlink(missing_ok=True)
         job.descargas_estado = "pendiente"
         repo.guardar(job)
     tareas.add_task(_asegurar_descargas, job_id)   # re-baja en background (fuera del lock)

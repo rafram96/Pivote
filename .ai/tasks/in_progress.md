@@ -2,6 +2,59 @@
 
 *(Actualizar al iniciar cualquier trabajo; mover a completed.md al cerrar.)*
 
+- **✅ T-004 F2 LISTA PARA PR (29-jul, Codex)**: cableado local completo en
+  `feat/seace-abierto` — selección estricta por tipo, enriquecimiento `seace`,
+  descarga diferida independiente de InfoObras, PDF/ZIP/RAR con extensión
+  real, notas honestas, ZIP y Excel. **677 passed, 24 skipped**. Prueba viva
+  CUI 2279396: contrato OK; Bases RAR con HTTP 403 del host, registrada como
+  error de fuente. Sin deploy/redeploy por instrucción expresa de Rafael.
+
+- **✅ #63 CERRADA CON VALIDACIÓN VIVA (29-jul 09:19)**: re-corrida
+  `8a4b468ac700` (resubir de urgente1; `resubir_job.py` arreglado al layout
+  carpeta) → 13:1 = **PLAN DE CONTINGENCIA, inicio 11/11/2024** (la fecha que
+  esperaba el ing.), `registros_cui: 2` visible en la ficha, y el checkpoint
+  atrapó un **2º caso de fase (SALDO)** en la misma corrida. Cola 23→21
+  (lista en `experiencias_por_confirmar.xlsx` del job, enviada a Rafael).
+  ⚠ `resubir` NO envía certs → se copiaron del job viejo (idénticos, mismo
+  espejo) y se regeneró `final.xlsx` (182 imágenes). Descargas del ZIP en
+  curso al cierre de esta nota (monitor de fondo activo).
+- **(histórico) 🔧 #63 IMPLEMENTADA (29-jul): checkpoint de fase para CUI multi-registro**
+  (merge `0395942` en `demo`, pusheado). Caso LaFora del feedback del ing.:
+  cert «PLAN DE CONTINGENCIA» resuelto contra la OBRA PRINCIPAL → fecha/
+  valorizaciones/paralizaciones de la obra equivocada (sus O1 y O2). Diseño:
+  checkpoint ÚNICO en `resolver()` con vocabulario cerrado de fases
+  (fuzzy es ciego: los registros comparten la cola del nombre) + SWAP al
+  hermano del CUI + revisión con registros listados + `registros_cui` visible
+  en la ficha. Gate: 647 tests + replay 224 exps (único efecto = LaFora;
+  delta 14:1 verificado preexistente con línea base). **Abierta hasta
+  validación viva**: 13:1 de `e7c0fff6afb1` debe dar 500434 / 11/11/2024.
+- **Feedback ing. 29-jul** (`docs/feedback/2026-07-29_bisbal_auditoria_ing.md`):
+  audita el ENTREGABLE VIEJO (27-jul) — entregarle el paquete nuevo es la
+  acción #1. O1/O2 → causa raíz #63 (ya implementada). Pendientes de decisión:
+  P1 (evidencia visual — opción recomendada: embeber el ACTA de suspensión ya
+  descargada, ~1 d) y P2 (fila PLAZO REAL verde, ~0.5 d, destrabada por #63).
+  P3 ya existía. `final.xlsx` con 182 imágenes enviado a Rafael; swap sobre
+  el job pendiente de que cierre el Excel bloqueado.
+
+- **✅ CICLO CERRADO (28-jul noche): #47/#53/#62 CERRADAS con validación en
+  vivo** (corrida urgente1, job `e7c0fff6afb1` — el postor de los reclamos de
+  Manuel). Merge `440c361` a `demo` (pusheado): rescate montos_postor (Paso
+  2.5), oferta por campo en el consolidador, escalada a visión por dato
+  crítico. Evidencia clave: folio_verificado **62/62 real** (foliación negra
+  única 549-552, 4/4 vs páginas físicas), postor 8/8 montos → 3.4 = SÍ,
+  y los candados #59/#61 dispararon EN VIVO (2:1 veto fase ET · 9:3 código
+  2198310→trocha demovido — verdad conocida: **2198318**). El espejo del job
+  se reemplazó por el re-consolidado (backup `espejo.pre-fix-oferta.json`) y
+  `final.xlsx` se regeneró SIN re-scrapear: oferta completa
+  16,670,989.88 / 15,003,890.90 / 15,003,890.90.
+- **Hallazgos nuevos SIN issue aún**: (a) `funciones_similares` 62/62 null en
+  urgente1 → la 2ª puerta del candado #31 quedó inerte (¿certs sin funciones
+  o agente no las busca?); (b) celdas de abstención en blanco sin rótulo
+  (escribir "POR VERIFICAR" en celda — familia #55); (c) exención ruc_match
+  (golden ancha) sigue sin issue. Cola visible: #54, #55, #57, #19, #42.
+- **SIGUIENTE ACCIÓN GRANDE: redeploy del server del cliente** — `demo` acumula
+  TODO el ciclo (#45-#62) y Manuel sigue viendo el código del 26-jul.
+
 - **✅ #52, #53 y #47 COMPLETADAS (28-jul noche, rama `fix/identidad-lircay`)**:
   - `15d2170` — #52: parser de rescate REESCRITO conservador (el de `87ad1bf`
     capturaba 90.0 del «90% de la cuantía» como límite — probado contra la

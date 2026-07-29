@@ -4,6 +4,18 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
+## Nota (2026-07-29, Codex) — T-004 F2 lista para PR
+
+F2 quedó cableada localmente en `feat/seace-abierto`: selección por tipo en la
+etapa InfoObras, descarga diferida SEACE aun sin `obra_id`, marcas separadas,
+ZIP y bloque Excel. Suite: **677 passed, 24 skipped**. Validación viva local
+con CUI 2279396: contrato PDF correcto; Bases Integradas publicadas como RAR
+pero el host devolvió HTTP 403, degradado honestamente a nota de error.
+Detalle: [`2026-07-29_codex.md`](2026-07-29_codex.md).
+
+⛔ No se hizo ni se debe inferir deploy/redeploy: Rafael lo realizará
+manualmente. F3 y F5 continúan pendientes.
+
 ## Nota (2026-07-29, tarde) — T-004 F1 construida + manual de operación
 
 Rama `feat/seace-abierto` (`70c78e8`). El módulo `scraping/seace_abierto.py` ya
