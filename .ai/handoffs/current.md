@@ -37,7 +37,8 @@ versionado, aliases, retry, COPY, recarga sin reinicio, health y tarea Windows.
 Corrida real aislada en PG16: 620,985 filas/620,984 identidades en 117.5 s,
 tabla+índices 719.3 MB; lookup 6–9 ms tras abrir pool. Diferencial: 100 fichas
 exactas + 20 rankings, cero diferencias legacy. Suite: 685 passed, 25 skipped
-e integración PG real aprobada. Falta commit.
+e integración PG real aprobada. Implementación cerrada en `a404aa9`; queda
+integrarla por fast-forward en `feat/seace-abierto`.
 
 ## Nota (2026-07-29, Codex) — arquitectura visual v3
 
