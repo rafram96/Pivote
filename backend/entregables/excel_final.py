@@ -1274,14 +1274,25 @@ def construir_hoja_profesional(
         periodo_io = ("— (obra no ubicada en InfoObras)" if not io_ini else
                       f"{io_ini.strftime('%d/%m/%Y')} – "
                       f"{io_fin.strftime('%d/%m/%Y') if io_fin else '(sin fin)'}")
+        cui_cert = e.get("cui")
+        if cui_cert and cui and str(cui_cert).strip() != str(cui).strip():
+            # ambos existen y difieren: el del documento manda, el del sistema se
+            # muestra al lado — nunca uno disfrazado del otro (#60)
+            cui_text = f"{cui_cert} · el sistema identificó el CUI {cui} — verificar"
+        elif cui_cert:
+            cui_text = str(cui_cert)
+        elif cui:
+            cui_text = f"No consignado en el certificado — el sistema identificó el CUI {cui}"
+        else:
+            cui_text = "No consignado en el certificado"
+
         for label, value in [("ENTIDAD / EMPRESA QUE EMITE", e.get("entidad_emisora")),
                              ("TIPO DE DOCUMENTO", e.get("tipo_documento")),
                              ("PROYECTO U OBRA", e.get("proyecto")),
                              ("PERIODO (certificado)", periodo),
                              ("PERIODO (InfoObras)", periodo_io),
                              ("CARGO QUE OCUPÓ", e.get("cargo_ocupado")),
-                             ("CÓDIGO (CUI/SNIP)",
-                              str(cui) if cui else "No consignado en el certificado")]:
+                             ("CÓDIGO (CUI/SNIP)", cui_text)]:
             cl = ws.cell(r, 1, label); cl.font, cl.fill, cl.border = F_BOLD, FILL_RECAP, BORDER
             cl.alignment = Alignment(vertical="top", wrap_text=True)
             ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=4)
@@ -1405,8 +1416,16 @@ def construir_hoja_profesional(
 
         # imagen del certificado presentado (Fase 2): la skill recortó sus folios a
         # un PDF chico (principal primero); aquí se renderiza y embebe.
+        # #47 · si la skill NO pudo confirmar que la página citada muestre al
+        # emisor (folio_verificado=False), NO se embebe: una imagen equivocada es
+        # el sustento que audita el Comité — peor que ninguna. None = legado.
         cert_pdf = certificados.get((n_prof, n_exp))
-        if cert_pdf:
+        if e.get("folio_verificado") is False:
+            banda(f"⚠ DOCUMENTO NO EMBEBIDO — no se pudo confirmar que el folio "
+                  f"{e.get('folio') or '—'} corresponda al emisor de esta "
+                  "experiencia (posible folio corrido) — verificar en la propuesta",
+                  F_AVISO, FILL_AVISO)
+        elif cert_pdf:
             embeber_cert(cert_pdf)
 
         separador()   # 2 filas amarillas (A:Z) cerrando la experiencia

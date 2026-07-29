@@ -2,6 +2,54 @@
 
 *(Actualizar al iniciar cualquier trabajo; mover a completed.md al cerrar.)*
 
+- **✅ #52, #53 y #47 COMPLETADAS (28-jul noche, rama `fix/identidad-lircay`)**:
+  - `15d2170` — #52: parser de rescate REESCRITO conservador (el de `87ad1bf`
+    capturaba 90.0 del «90% de la cuantía» como límite — probado contra la
+    prosa real de Lircay), bloque de oferta SIEMPRE visible con avisos en
+    hoja, candado `OFERTA_INCOMPLETA` en integridad. #53: prompt del mapa
+    con búsqueda de montos multi-tomo + observación `postor_montos_incompletos`
+    (guardrail backend ya estaba).
+  - `7b13ead` — #47: verificación folio↔emisor EN LA SKILL (prompt), campo
+    aditivo `folio_verificado` en las 3 copias del contrato (zod + Pydantic +
+    whitelist del consolidador — sin esto se perdía en silencio), y el Excel
+    NO embebe con `false` (banda «DOCUMENTO NO EMBEBIDO»).
+  - Suite: **637 passed** · consolidador JS 35/0 · paridad por construcción.
+  - ⚠ Hallazgo menor: `tools/validacion/test_contrato.py` tiene rutas stale
+    (`fixtures/trujillo` → `fixtures/antiguo/trujillo`) — preexistente.
+  - Cierre real de #47/#52/#53: merge + **prueba viva** (la verificación de
+    folios y los montos multi-tomo solo se ejercitan con una corrida real de
+    la skill).
+
+- **🔧 #58-#61 IMPLEMENTADAS (28-jul PM) en rama `fix/identidad-lircay`**
+  (commits `936e7c0` #58 · `5810d38` #59 · `ee17b7c` #61 · `02b5cca`+`c164d30`
+  #60; también `87ad1bf` adelantó #52/#53). Suite completa: **627 passed,
+  24 skipped** (los skips son los dumps SUNAT gitignored, preexistentes).
+  Los 3 casos reales reproducidos como tests unitarios (2:4 no hereda, 9:3
+  demovido con las 3 señales, 2:3 veto de fase; regresiones COAR y
+  Pichanaki/Fortaleza verdes). ⚠ **GOLDEN IMPOSIBLE — corpus PERDIDO
+  irremediablemente (confirmado por el desarrollador 2026-07-28)**:
+  `auditoria_cui_v3.xlsx` (las ~277 verdades humanas), la caché y la
+  baseline no existen en ninguna máquina. **Gate reemplazado para este
+  merge**: los fixes son de ABSTENCIÓN PURA (solo `resuelto→revisión`,
+  jamás al revés → "correcto→incorrecto" es estructuralmente imposible) +
+  regresiones dirigidas verdes + **replay post-deploy con `resubir_job.py`**
+  sobre los jobs reales del server (Lircay ×2, Soritor, Huachocolpa)
+  comparando resoluciones antes/después. Ver la nota de la pérdida en
+  `handoffs/current.md` y el plan de reconstrucción (corpus v4).
+- **🧪 RECONSTRUCCIÓN EJECUTADA (28-jul tarde, commit `050677c`)**:
+  (1) `scripts/replay_enriquecimiento.py` — replay offline por snapshot,
+  corrido sobre 152 experiencias de los 3 jobs locales: los 3 casos de
+  Manuel cambian EXACTO como dicen las issues (2:3→revisión fase #61,
+  2:4→no hereda #58, 9:3→demovido #59); el resto de deltas son ruido de
+  snapshot documentado (guards de empate sin campos completos del portal).
+  (2) Semilla `datos_pivote/auditoria_cui_v4.xlsx` — 5 verdades verificadas
+  (certs físicos Tomo II + base MEF). Hallazgo: el cert de 9:3 cita 2198316
+  con TYPO de 1 dígito — la verdad es **2198318** (C.S. Yanahuanca, PASCO,
+  ACTIVO); 2:4 no tiene registro en Invierte.pe (fondo contravalor
+  Perú-Japón). (3) `scripts/exportar_verdades_panel.py` — cosechador para
+  el server: cada revisión resuelta en el panel → fila de verdad v4.
+  **Siguiente**: correrlo en el server (ahí están los jobs con revisiones
+  resueltas) y regenerar caché+baseline cuando el corpus tenga volumen.
 - **Auditoría Lircay del ing. (28-jul PM) — diagnóstico CERRADO, 4 issues
   nuevas (#58-#61)**. El job es `371fa5a1e704` (postor A, Consorcio
   Supervisión Hospital Lircay = "bisbal"); su Excel es del server con código

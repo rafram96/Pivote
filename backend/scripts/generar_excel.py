@@ -149,50 +149,70 @@ def _sin_jerga(v):
     return out
 
 
+# Un MONTO tiene forma de monto: miles agrupados ("16,670,989.88" / "16.670.989,88")
+# o ≥6 dígitos corridos. NUNCA un número suelto como "90" — en la prosa real de
+# Lircay, «el límite inferior calculado (90% de la cuantía S/16,670,989.88)»
+# hacía que el parser viejo capturara 90.0 como límite inferior (#52).
+_RE_MONTO_FORMA = (r"(?:S/\.?\s*)?"
+                   r"(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?"      # 16,670,989.88
+                   r"|\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?"      # 16.670.989,88
+                   r"|\d{6,}(?:[.,]\d{1,2})?)")              # 16670989.88
+
+
+def _monto_a_float(v: str) -> float | None:
+    if not v:
+        return None
+    clean = re.sub(r"[^\d.,]", "", str(v)).strip()
+    if not clean:
+        return None
+    if "," in clean and "." in clean:
+        clean = (clean.replace(",", "") if clean.rfind(".") > clean.rfind(",")
+                 else clean.replace(".", "").replace(",", "."))
+    elif "," in clean:
+        # coma como decimal SOLO si parece decimal (≤2 dígitos al final)
+        clean = clean.replace(",", ".") if re.fullmatch(r"\d+,\d{1,2}", clean) \
+            else clean.replace(",", "")
+    try:
+        val = float(clean)
+        return val if val > 0 else None
+    except ValueError:
+        return None
+
+
 def _extraer_montos_prosa(detalle: str) -> dict[str, float | None]:
-    """Fallback parser para extraer cuantía, límite inferior y propuesta de la prosa de detalle."""
+    """Fallback CONSERVADOR (#52): recupera cuantía / límite inferior / propuesta
+    de la prosa del DETALLE cuando la skill los dejó ahí en vez de en las celdas.
+
+    Reglas — cada una nace de un fallo real:
+      · solo montos CON FORMA de monto (nunca "90" del "90% de la cuantía");
+      · cada palabra clave busca en una VENTANA corta hacia adelante (la prosa
+        mete palabras entre la clave y el número: «la oferta del postor (S/…»);
+      · coherencia: si el "límite inferior" capturó el mismo número que la
+        cuantía, es que la ventana pescó el monto equivocado → se descarta;
+      · lo que no se encuentra queda None — el candado de integridad lo grita
+        (OFERTA_INCOMPLETA); JAMÁS asignación posicional a ciegas ("los
+        primeros 3 números del texto"), que es un mal-dato silencioso."""
     if not detalle or not isinstance(detalle, str):
         return {}
-    res = {}
 
-    def _to_float(v: str) -> float | None:
-        if not v:
-            return None
-        clean = re.sub(r'[^\d.,]', '', v).strip()
-        if not clean:
-            return None
-        if ',' in clean and '.' in clean:
-            clean = clean.replace(',', '') if clean.rfind('.') > clean.rfind(',') else clean.replace('.', '').replace(',', '.')
-        elif ',' in clean:
-            clean = clean.replace(',', '.')
-        try:
-            val = float(clean)
-            return val if val > 0 else None
-        except ValueError:
-            return None
+    def _ventana(claves: list[str]) -> float | None:
+        for kw in claves:
+            m = re.search(kw + r"[^0-9]{0,80}?" + _RE_MONTO_FORMA, detalle,
+                          re.I | re.S)
+            if m:
+                return _monto_a_float(m.group(1))
+        return None
 
-    m_cuantia = re.search(r'(?:cuant[ií]a|referencial|estimad[oa])\s*:?\s*(?:S/\.?)?\s*([\d.,]+)', detalle, re.I)
-    m_limite = re.search(r'(?:l[ií]mite|inferior|m[ií]nimo)\s*:?\s*(?:S/\.?)?\s*([\d.,]+)', detalle, re.I)
-    m_prop = re.search(r'(?:propuesta|ofertad[oa]|oferta)\s*:?\s*(?:S/\.?)?\s*([\d.,]+)', detalle, re.I)
-
-    if m_cuantia:
-        res["cuantia"] = _to_float(m_cuantia.group(1))
-    if m_limite:
-        res["limite_inferior"] = _to_float(m_limite.group(1))
-    if m_prop:
-        res["propuesta"] = _to_float(m_prop.group(1))
-
-    if len(res) < 3:
-        todos = re.findall(r'(?:S/\.?)?\s*([\d]{1,3}(?:[.,][\d]{3})*(?:[.,][\d]{2}))', detalle)
-        parsed = [_to_float(x) for x in todos if _to_float(x) is not None]
-        if len(parsed) >= 3:
-            if "cuantia" not in res or res["cuantia"] is None:
-                res["cuantia"] = parsed[0]
-            if "limite_inferior" not in res or res["limite_inferior"] is None:
-                res["limite_inferior"] = parsed[1]
-            if "propuesta" not in res or res["propuesta"] is None:
-                res["propuesta"] = parsed[2]
-    return res
+    cuantia = _ventana([r"cuant[ií]a", r"valor\s+referencial", r"valor\s+estimad[oa]"])
+    limite = _ventana([r"l[ií]mite\s+inferior", r"piso\s+legal"])
+    propuesta = _ventana([r"propuesta\s+econ[oó]mica", r"oferta\s+del\s+postor",
+                          r"propuesta", r"oferta", r"ofertad[oa]"])
+    if limite is not None and cuantia is not None and limite == cuantia:
+        limite = None            # la ventana del límite pescó la cuantía
+    if propuesta is not None and cuantia is not None and propuesta == cuantia \
+            and limite != propuesta:
+        propuesta = None         # ídem: "oferta" pescó el referencial
+    return {"cuantia": cuantia, "limite_inferior": limite, "propuesta": propuesta}
 
 
 
@@ -325,22 +345,39 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
     for f in p.get("formularios", []):
         b.row([f.get("anexo", ""), f.get("documento") or f.get("descripcion", ""), f.get("observacion", ""), f.get("folio", "")])
     b.blank()
-    oe = p.get("oferta_economica", {})
-    if oe:
-        cuantia = oe.get("cuantia")
-        limite_inf = oe.get("limite_inferior")
-        propuesta = oe.get("propuesta")
-        detalle = oe.get("detalle", "") or ""
+    # ── OFERTA ECONÓMICA (#52): el bloque se pinta SIEMPRE — un bloque ausente
+    # era invisible y sin las 3 celdas no hay descalificación por precio ni
+    # puntaje. Lo que falte tras el rescate de la prosa queda VISIBLE y ruidoso.
+    oe = p.get("oferta_economica") or {}
+    cuantia = oe.get("cuantia")
+    limite_inf = oe.get("limite_inferior")
+    propuesta = oe.get("propuesta")
+    detalle = oe.get("detalle", "") or ""
 
-        if (cuantia is None or limite_inf is None or propuesta is None) and detalle:
-            parsed = _extraer_montos_prosa(detalle)
-            cuantia = cuantia if cuantia is not None else parsed.get("cuantia")
-            limite_inf = limite_inf if limite_inf is not None else parsed.get("limite_inferior")
-            propuesta = propuesta if propuesta is not None else parsed.get("propuesta")
+    rescatados = []
+    if (cuantia is None or limite_inf is None or propuesta is None) and detalle:
+        parsed = _extraer_montos_prosa(detalle)
+        if cuantia is None and parsed.get("cuantia") is not None:
+            cuantia, _ = parsed["cuantia"], rescatados.append("cuantía")
+        if limite_inf is None and parsed.get("limite_inferior") is not None:
+            limite_inf, _ = parsed["limite_inferior"], rescatados.append("límite inferior")
+        if propuesta is None and parsed.get("propuesta") is not None:
+            propuesta, _ = parsed["propuesta"], rescatados.append("propuesta")
 
-        b.headers(["", "CUANTÍA", "LÍMITE INFERIOR", "PROPUESTA", "DETALLE"])
-        b.row(["Monto", cuantia, limite_inf, propuesta, detalle],
-              fmts={2: FMT_MONEY, 3: FMT_MONEY, 4: FMT_MONEY})
+    b.headers(["", "CUANTÍA", "LÍMITE INFERIOR", "PROPUESTA", "DETALLE"])
+    b.row(["Monto", cuantia, limite_inf, propuesta, detalle],
+          fmts={2: FMT_MONEY, 3: FMT_MONEY, 4: FMT_MONEY})
+    faltan = [n for n, v in (("CUANTÍA", cuantia), ("LÍMITE INFERIOR", limite_inf),
+                             ("PROPUESTA", propuesta)) if v is None]
+    if faltan:
+        b.row(["", f"⚠ OFERTA INCOMPLETA: falta(n) {', '.join(faltan)} — sin las 3 "
+                   "celdas no se puede aplicar la descalificación por precio ni el "
+                   "puntaje. Verificar los folios de la oferta.", "", "", ""],
+              bold=True)
+    if rescatados:
+        b.row(["", f"⚠ {', '.join(rescatados).capitalize()} recuperado(s) del texto "
+                   "del DETALLE (no venían en sus celdas) — verificar contra el "
+                   "folio.", "", "", ""], bold=True)
     b.blank()
 
     # ── PARTE 2 ──

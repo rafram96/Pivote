@@ -1191,3 +1191,51 @@ def test_generar_excel_parte_1_documento_o_descripcion(tmp_path):
     assert "Documento Vigente" in texto
     assert "Descripcion Trujillo" in texto
 
+
+def test_excel_cui_rotulo_distingue_certificado_vs_sistema(tmp_path):
+    """Fix #60: El rótulo CÓDIGO (CUI/SNIP) distingue si el CUI vino en el certificado
+    o fue identificado por el sistema."""
+    espejo = {
+        "_meta": {"analisis_id": "test", "concurso": "C", "postor": "P"},
+        "postor": {"formularios": []},
+        "profesionales": [{
+            "n_prof": 1, "cargo": "JEFE DE SUPERVISIÓN", "nombre": "JUAN PEREZ",
+            "experiencias": [
+                {"n": 1, "proyecto": "OBRA 1", "cui": "111111"},
+                {"n": 2, "proyecto": "OBRA 2", "cui": None}
+            ]
+        }],
+        "resumen_evaluacion": {"factores": []}
+    }
+    cuis = {(1, 2): "222222"}
+    salida = tmp_path / "rotulo.xlsx"
+    generar_excel_final(espejo, salida, cuis=cuis)
+    wb = openpyxl.load_workbook(salida)
+    ws = next(s for s in wb.worksheets if s.title.startswith("P1"))
+    celdas = [str(c.value) for r in ws.iter_rows() for c in r if c.value]
+
+    assert "111111" in celdas
+    assert "No consignado en el certificado — el sistema identificó el CUI 222222" in celdas
+
+
+
+
+def test_folio_no_verificado_no_embebe_y_avisa(tmp_path):
+    """#47: si la skill no pudo confirmar que la pagina citada muestre al emisor
+    (folio_verificado=False), el certificado NO se embebe y el aviso queda
+    visible — una imagen equivocada es el sustento que audita el Comite."""
+    import copy
+    espejo = copy.deepcopy(_ESPEJO_1EXP)
+    espejo["profesionales"][0]["experiencias"][0]["folio_verificado"] = False
+    espejo["profesionales"][0]["experiencias"][0]["folio"] = "358"
+    salida = generar_excel_final(espejo, tmp_path / "f47.xlsx")
+    t = _texto(_hoja_de(salida, 1, "JEFE"))
+    assert "DOCUMENTO NO EMBEBIDO" in t and "358" in t
+
+
+def test_folio_verificado_true_no_cambia_nada(tmp_path):
+    import copy
+    espejo = copy.deepcopy(_ESPEJO_1EXP)
+    espejo["profesionales"][0]["experiencias"][0]["folio_verificado"] = True
+    salida = generar_excel_final(espejo, tmp_path / "f47b.xlsx")
+    assert "DOCUMENTO NO EMBEBIDO" not in _texto(_hoja_de(salida, 1, "JEFE"))

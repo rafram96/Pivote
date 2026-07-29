@@ -1,8 +1,18 @@
 # Handoff — punto de continuación
 
-> Actualizado: **2026-07-27**. Si eres un agente nuevo: lee esto completo,
+> Actualizado: **2026-07-28**. Si eres un agente nuevo: lee esto completo,
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
+
+## Cierre del 2026-07-28 — Correcciones de Identidad en Lircay (#58, #59, #60, #61)
+
+Auditada la corrida de Lircay (job `371fa5a1e704`), se aplicaron 4 fixes en `fix/identidad-lircay`:
+1. **#60 (`excel_final.py`):** Se separó el rótulo del Excel entre "CUI del certificado" y "No consignado en el certificado — el sistema identificó el CUI X" para no confundir la inferencia del backend con un dato del documento.
+2. **#58 (`cui.py::resolver_con_dedup`):** La herencia por folio ahora exige coincidencia de emisor (score de empresa ≥ 70) para evitar que folios corridos por la skill hereden obras ajenas (rechaza Arcadia≠Picota).
+3. **#59 (`cui.py::_paso_codigo_citado`):** Se acotó la exención del CUI exacto para que caigan a `revision` los códigos citados cuya obra contradiga simultáneamente nombre, departamento y rubro (caso Navarro, P9-E3).
+4. **#61 (`cui.py`):** Se añadió veto de fase para que registros de InfoObras de "ELABORACIÓN DE EXPEDIENTE TÉCNICO" no respalden experiencias de ejecución/supervisión vía `ruc_match` (caso Santa Anita, P2-E3).
+
+Resultados: 627 tests pasados, 0 regresiones. Los 3 casos de Lircay (2:4, 9:3, 2:3) pasan ordenadamente a `revision`.
 
 ## Cierre del 2026-07-27 — FALSO CUMPLE corregido
 
@@ -254,7 +264,22 @@ resolver apoyándose en la ausencia de información es adivinar.
 
 ## Regla de oro antes de tocar el resolver
 
-Cualquier cambio se valida así, en este orden:
+> ⚠ **NOTA (2026-07-28) — EL CORPUS DE LA GOLDEN SE PERDIÓ IRREMEDIABLEMENTE**
+> (confirmado por el desarrollador): `auditoria_cui_v3.xlsx` (~277 verdades
+> humanas), `_golden_cui_cache.json` y `golden_cui_baseline.json` no existen
+> en ninguna máquina. **El ciclo de abajo NO se puede ejecutar** hasta
+> reconstruir el corpus (plan v4: exportar las revisiones resueltas en el
+> panel del server —cada CUI pegado por el evaluador es una verdad humana—
+> + capturar los reclamos de auditoría del ing. como filas de verdad; luego
+> regenerar caché y baseline). MIENTRAS TANTO: solo se aceptan cambios del
+> resolver de **ABSTENCIÓN PURA** (resuelto→revisión, nunca al revés) con
+> regresiones unitarias dirigidas + replay de jobs reales del server con
+> `scripts/resubir_job.py` (antes/después). Aflojar vetos o recalibrar
+> umbrales queda PROHIBIDO hasta que la golden v4 exista — es exactamente
+> lo que ADR-005 no permite hacer sin instrumento.
+
+Cualquier cambio se valida así, en este orden (ciclo HISTÓRICO, hoy sin
+instrumento — ver nota):
 `pytest backend/tests -q` (offline) → `golden_cui.py --con-base --solo-cache`
 → comparar contra `golden_cui_baseline.json`. Criterio: mal-resueltos nunca
 suben, cero correcto→incorrecto. Nunca relajar compuertas para "ganar" casos

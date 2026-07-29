@@ -193,6 +193,10 @@ class ExperienciaProf(_Model):
     # páginas FÍSICAS del PDF de la constancia (1-indexadas, principal 1ª); el folio
     # impreso ≠ página NO siempre → con esto el recorte toma la hoja correcta.
     paginas_pdf: Optional[list[int]] = None
+    # #47 · ¿la skill confirmó que la página citada MUESTRA al emisor?
+    # true = confirmado (o corregido mirando vecinas); false = no confirmable →
+    # el Excel NO embebe la imagen; None = espejo legado (comportamiento actual).
+    folio_verificado: Optional[bool] = None
     dias: Optional[float] = Field(default=None, ge=0)
     meses: Optional[float] = Field(default=None, ge=0)
     anios: Optional[float] = Field(default=None, ge=0)

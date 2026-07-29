@@ -7,9 +7,10 @@ from __future__ import annotations
 import itertools
 
 from resolucion.cui import (
-    _es_experiencia_expediente, _es_experiencia_privada, _exp_derivada,
-    _muni_contradice, _puntuar, _sin_prefijo, norm, resolver, resolver_obras,
-    rubros_mixtos, tokens_distintivos, ubicacion, ubigeo_cert)
+    _es_experiencia_expediente, _es_experiencia_privada, _es_registro_expediente,
+    _exp_derivada, _muni_contradice, _puntuar, _sin_prefijo, norm, resolver,
+    resolver_con_dedup, resolver_obras, rubros_mixtos, tokens_distintivos,
+    ubicacion, ubigeo_cert)
 
 
 def test_ubicacion_no_confunde_ica_dentro_de_huancavelica():
@@ -710,3 +711,93 @@ def test_candado_de_nombre_tambien_actua_sin_base_mef():
     exp = {"proyecto": "HOSPITAL DE ESSALUD", "fecha_inicial": "2012-10-26"}
     r = resolver(exp, _ConsultaFija([_OBRA_GENERICA]), base=None)
     assert r["estado"] == "revision" and r["cui"] is None, r
+
+
+def test_dedup_requiere_coincidencia_de_emisor_rechaza_diferente():
+    """Fix #58: DEDUP por folio exige que el emisor coincida. Si dos experiencias
+    comparten folio pero tienen emisores distintos (ej. Arcadia vs Picota por folio 84),
+    la segunda NO hereda el CUI de la primera."""
+    from resolucion.cui import resolver_con_dedup
+    obra = {"codUniqInv": "222222", "codigoObra": 222, "nombrObra": "OBRA SANTA ANITA"}
+    exp1 = {"proyecto": "OBRA SANTA ANITA", "folio": "84",
+            "entidad_emisora": "MUNICIPALIDAD DISTRITAL DE SANTA ANITA", "cui": "222222"}
+    exp2 = {"proyecto": "OBRA PICOTA INEXISTENTE EN INFOOBRAS", "folio": "84",
+            "entidad_emisora": "MUNICIPALIDAD PROVINCIAL DE PICOTA"}
+
+    exps = [(exp1, (1, 1)), (exp2, (1, 2))]
+    res = dict(resolver_con_dedup(exps, _ConsultaFija([obra]), base=None))
+
+    assert res[(1, 1)]["estado"] == "resuelto"
+    assert res[(1, 1)]["cui"] == "222222"
+    # Exp 2 NO hereda de Exp 1 porque el emisor es distinto
+    assert res[(1, 2)]["estado"] == "revision"
+    assert res[(1, 2)].get("via") != "DEDUP"
+
+
+def test_dedup_requiere_coincidencia_de_emisor_acepta_mismo():
+    """Fix #58: DEDUP por folio sí hereda cuando el emisor es la misma entidad
+    (caso legítimo de 2° periodo del mismo certificado)."""
+    from resolucion.cui import resolver_con_dedup
+    obra = {"codUniqInv": "222222", "codigoObra": 222, "nombrObra": "OBRA SANTA ANITA"}
+    exp1 = {"proyecto": "OBRA SANTA ANITA PERIODO 1", "folio": "84",
+            "entidad_emisora": "MUNICIPALIDAD DISTRITAL DE SANTA ANITA S.A.C.", "cui": "222222"}
+    exp2 = {"proyecto": "PERIODO 2 - CONTINUACION DE SERVICIO", "folio": "84",
+            "entidad_emisora": "MUNICIPALIDAD DISTRITAL DE SANTA ANITA"}
+
+    exps = [(exp1, (1, 1)), (exp2, (1, 2))]
+    res = dict(resolver_con_dedup(exps, _ConsultaFija([obra]), base=None))
+
+    assert res[(1, 1)]["estado"] == "resuelto"
+    assert res[(1, 2)]["estado"] == "resuelto"
+    assert res[(1, 2)]["via"] == "DEDUP"
+    assert res[(1, 2)]["cui"] == "222222"
+
+
+def test_cui_citado_que_contradice_nombre_depto_y_rubro_cae_a_revision():
+    """Fix #59 (Caso Navarro, P9-E3): Un CUI citado que en InfoObras apunta a una obra que
+    contradice NOMBRE (0 tokens en común), DEPARTAMENTO y RUBRO simultáneamente cae a revisión."""
+    # Certificado dice Salud en Pasco: "C.S. Yanahuanca"
+    exp = {"proyecto": "CENTRO DE SALUD YANAHUANCA - PASCO", "cui": "49922",
+           "ubicacion": "Distrito de Yanahuanca, Provincia de Daniel Alcides Carrión, Departamento de Pasco"}
+    # El CUI 49922 en InfoObras resulta ser veredas en Ferreñafe (Lambayeque)
+    obra_veredas = {
+        "codUniqInv": "49922", "codigoObra": 49922,
+        "nombrObra": "CONSTRUCCION DE VEREDAS Y SARDINELES EN FERREÑAFE",
+        "nombrDepartamento": "LAMBAYEQUE"
+    }
+    r = resolver(exp, _ConsultaFija([obra_veredas]), base=None)
+    assert r["estado"] == "revision"
+    assert r["cui"] is None
+    assert "contradice el nombre, el departamento y el rubro" in r["decision"]
+
+
+def test_cui_citado_coar_no_se_demota_por_ubigeo():
+    """Regresión #59 (Caso COAR): Si el CUI citado coincide y mantiene afinidad de nombre
+    o rubro, se resuelve aunque el departamento difiera (obras multiregionales COAR)."""
+    exp = {"proyecto": "MEJORAMIENTO DEL SERVICIO EDUCATIVO COAR CUSCO", "cui": "2429909",
+           "ubicacion": "Departamento de Cusco"}
+    obra_coar = {
+        "codUniqInv": "2429909", "codigoObra": 2429909,
+        "nombrObra": "CREACION DEL SERVICIO EDUCATIVO ESPECIALIZADO COAR EN PASCO",
+        "nombrDepartamento": "PASCO"
+    }
+    r = resolver(exp, _ConsultaFija([obra_coar]), base=None)
+    assert r["estado"] == "resuelto"
+    assert r["cui"] == "2429909"
+
+
+def test_veto_fase_registro_expediente_no_respalda_ejecucion():
+    """Fix #61 (Caso Santa Anita, job 371fa5a1e704 exp 2:3): Un registro de InfoObras de
+    ELABORACION DEL EXPEDIENTE TECNICO no respalda una experiencia de ejecución o supervisión
+    de obra, aunque el RUC coincida. Se envía a revisión para ubicar la obra de ejecución."""
+    exp = {"proyecto": "SUPERVISION DE OBRA CREACION UNIDAD RENAL SANTA ANITA",
+           "cargo_ocupado": "JEFE DE SUPERVISION", "ruc_emisor": "20100000001"}
+    obra_et = {
+        "codUniqInv": "2345678", "codigoObra": 2345678,
+        "nombrObra": "ELABORACION DEL EXPEDIENTE TECNICO CREACION UNIDAD RENAL SANTA ANITA",
+        "nombrDepartamento": "LIMA", "rucEjecutor": "20100000001"
+    }
+    r = resolver(exp, _ConsultaFija([obra_et]), base=None)
+    assert r["estado"] == "revision"
+    assert r["cui"] is None
+    assert "ELABORACIÓN DEL EXPEDIENTE TÉCNICO" in r["decision"]
