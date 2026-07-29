@@ -19,6 +19,14 @@ services:
     environment:
       PIVOTE_ETAPAS: ${PIVOTE_ETAPAS:-real}        # real = cruces SUNAT/InfoObras
       PIVOTE_MAX_DESCARGAS: ${PIVOTE_MAX_DESCARGAS:-}  # vacío = baja TODO; N = tope solo en pruebas
+      # Topes de subida (MB). El upload se acumula EN RAM (api/_leer_limitado):
+      # 600 de certs × 2 análisis concurrentes ≈ 1.2 GB pico — OK en este server.
+      # OJO: el tope del ZIP DESCOMPRIMIDO (800 MB) y el de entradas (5000) están
+      # fijos en api/app.py; con JPEGs escaneados el ratio es ~1:1, así que 600
+      # comprimido cabe. Si algún día se sube de ~750, tocar también ese fijo.
+      PIVOTE_MAX_MB_CERTS: ${PIVOTE_MAX_MB_CERTS:-600}
+      PIVOTE_MAX_MB_ESPEJO: ${PIVOTE_MAX_MB_ESPEJO:-30}
+      PIVOTE_MAX_MB_EXCEL: ${PIVOTE_MAX_MB_EXCEL:-60}
       PIVOTE_DATA_DIR: /datos
       # Persistencia PostgreSQL (jobs/espejos/decisiones + índice de profesionales).
       # Los binarios (xlsx/zip/pdf) siguen en el volumen datos_pivote.

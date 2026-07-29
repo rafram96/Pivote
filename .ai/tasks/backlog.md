@@ -7,6 +7,58 @@
 ## Técnico (listo para ejecutar)
 
 ---
+id: T-TAREA-OCR-REMOTO
+tipo: tarea
+zona: api/ + deploy/ (Dockerfile) + skill/ (scripts/)
+agente_origen: desarrollador
+estado: pendiente
+depende_de: []
+---
+**OCR como servicio del backend: la skill manda el PDF por LAN y el server
+devuelve los `pNNNN.txt` (idea de Rafael, 2026-07-28 — COTIZABLE, no arranca
+sin conversación comercial).**
+
+Hoy el Camino A exige Tesseract instalado en el Windows del cliente (con el
+PATH bien puesto — fricción medida incluso en la laptop de Rafael el 28-jul).
+La idea: mover el OCR al server on-prem para que la máquina del ing. solo
+necesite Claude Code + MCP.
+
+**Diseño acordado (matices que NO perder):**
+1. **NUNCA "imágenes por MCP" en sentido literal**: los argumentos de una tool
+   call pasan por el modelo (el modelo es la tubería — mismo motivo del límite
+   de `subir_analisis`). El transporte es el patrón `subir_carpeta.js`: la tool
+   recibe una RUTA y un cliente postea **multipart desde disco**.
+2. **Se manda el PDF tal cual, no páginas renderizadas**: las páginas escaneadas
+   YA son JPEGs embebidos; el server los extrae con `pdfimages -j` en segundos.
+   700 PNGs renderizados pesarían más que el PDF original.
+3. **Job ASÍNCRONO con progreso, jamás request síncrono** — la lección de #42
+   (ECONNRESET): 700 páginas de OCR dentro de un request muere. Reusar el
+   patrón job de `descargar-cui`: `POST /api/pivote/ocr` (multipart) →
+   `{ocr_id}` → poll → `GET /ocr/{id}/resultado` (zip de `pNNNN.txt`).
+4. **Server side**: `apt-get install tesseract-ocr tesseract-ocr-spa` en el
+   Dockerfile (más fácil que instalar Tesseract en Windows) + N workers en
+   paralelo + disco temporal con limpieza.
+5. **Tope de subida nuevo** (`PIVOTE_MAX_MB_PDF`, ~600) — ojo que
+   `_leer_limitado` acumula EN RAM; ver nota en `deploy/docker-compose.yml`.
+6. **Fallback en TRES niveles, el local queda vivo**: OCR remoto (server) →
+   Tesseract local (Camino A actual) → visión (Camino B). Server caído o skill
+   fuera de la LAN del ing. no puede romper la corrida.
+7. **Constraint respetado**: Tesseract en el server es 100% on-prem (la regla
+   prohíbe APIs cloud, no software local) y los PDFs van al server del propio
+   cliente, que ya recibe el ZIP de certificados.
+
+**Beneficio real**: setup CERO para Manuel (el OCR viaja con el deploy) +
+paraleliza sin freír su máquina + LAN (350 MB = un par de minutos). La
+velocidad es secundaria: la laptop de Rafael hizo 410 págs "en una pasada".
+
+**Estimación**: ~1-1.5 días (endpoint+job+Dockerfile+cliente+fallback+docs).
+
+**Gates antes de priorizar**: (a) preguntar qué máquina tiene Manuel — si es
+decente, el argumento queda solo en el setup; (b) va DESPUÉS de la cola
+crítica (#62/#53, redeploy, validación urgente1); (c) entra a la conversación
+comercial V2 como módulo con nombre propio (canal cotización, no garantía).
+
+---
 id: T-TAREA-ISSUE51
 tipo: tarea
 zona: orquestador/ (etapas_reales.py) + entregables/ (generar_excel.py, excel_final.py)
