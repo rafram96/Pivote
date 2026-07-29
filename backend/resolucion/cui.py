@@ -922,6 +922,97 @@ def _es_experiencia_privada(exp: dict) -> bool:
     return bool(_RE_PRIVADA.search(campos))
 
 
+# ── FASES de un mismo CUI (#63) — vocabulario CERRADO, jamás fuzzy ───────────
+# Un CUI es una INVERSIÓN; puede tener varios registros de obra en InfoObras
+# (contingencia, principal, saldos, desagregados, ET), cada uno con su código,
+# fechas y valorizaciones. Los nombres de esos registros comparten la cola
+# completa (el nombre del proyecto), así que el fuzzy da ~90+ a TODOS: la parte
+# que distingue son 3-4 palabras contra 30 compartidas. La fase se detecta por
+# marcador exacto sobre texto normalizado — es un vocabulario finito y estable
+# que certificados y portal comparten (caso LaFora: el cert decía literal «PLAN
+# DE CONTINGENCIA» y el sistema eligió la OBRA PRINCIPAL, ciega al texto).
+_FASES = {
+    "CONTINGENCIA": re.compile(
+        r"\b(?:PLAN|OBRA|MODULOS?)\s+DE\s+CONTINGENCIA\b|\bCONTINGENCIA\s+DEL?\s+PROYECTO\b"),
+    "PRINCIPAL": re.compile(r"\bOBRA\s+PRINCIPAL\b"),
+    "SALDO": re.compile(r"\bSALDO\s+DE\s+(?:LA\s+)?OBRA\b|\bDESAGREGADO\s+N"),
+    "EXPEDIENTE": _RE_REGISTRO_ET,
+}
+
+
+def fase_de(texto) -> Optional[str]:
+    """Fase/componente que el texto declara ('CONTINGENCIA', 'PRINCIPAL',
+    'SALDO', 'EXPEDIENTE') o None si no declara ninguna (el caso común)."""
+    n = norm(str(texto or ""))
+    for fase, pat in _FASES.items():
+        if pat.search(n):
+            return fase
+    return None
+
+
+def _checkpoint_fase(r: dict, exp: dict, consulta: Consulta) -> dict:
+    """#63 · CHECKPOINT ÚNICO de fase, con SWAP al registro hermano. Corre sobre
+    TODO resultado «resuelto» (venga por CUI citado, nombre o RUC — un solo
+    sitio: duplicar esta lógica en los 3 puntos de selección garantiza deriva).
+
+    · fases compatibles (o el cert no declara) → sin cambios (el caso común
+      paga costo CERO: ni una llamada extra).
+    · el cert declara fase y la obra elegida la contradice (o no la tiene pero
+      un HERMANO del CUI sí) → swap al registro correcto: resuelve BIEN, no
+      solo se abstiene.
+    · contradicción sin hermano visible → revisión LISTANDO los registros del
+      CUI (la misma tabla que el portal muestra en Datos Generales).
+
+    Regresión que protege el diseño: Cajabamba (cert sin marcador + registro
+    «Desagregado del Saldo» correcto) queda intacta — sin fase declarada en el
+    certificado este checkpoint NO opina. El texto del certificado decide,
+    caso por caso; no existe preferencia fija entre fases."""
+    if r.get("estado") != "resuelto" or not r.get("obra") or not r.get("cui"):
+        return r
+    fase_cert = fase_de(exp.get("proyecto"))
+    if fase_cert is None:
+        return r
+    obra = r["obra"]
+    fase_obra = fase_de(obra.get("nombre_obra"))
+    if fase_obra == fase_cert:
+        return r
+    # contradicción explícita, o fase declarada con obra sin marcador: mirar a
+    # los hermanos SOLO ahora (una llamada, y únicamente en el caso raro)
+    try:
+        hermanos = consulta.por_codigo(r["cui"]) or []
+    except PortalNoResponde:
+        return r          # portal caído: no se degrada una resolución por esto
+    con_fase = [o for o in hermanos
+                if fase_de(o.get("nombrObra")) == fase_cert]
+    _traza().ev("checkpoint_fase", fase_cert=fase_cert, fase_obra=fase_obra,
+                registros=len(hermanos), hermanos_con_fase=len(con_fase))
+    if len(con_fase) == 1:
+        h = con_fase[0]
+        nuevo = dict(r)
+        nuevo["obra"] = {"cui": r["cui"], "nombre_obra": h.get("nombrObra"),
+                         "departamento": h.get("nombrDepartamento"),
+                         "obra_id": h.get("codigoObra") or h.get("obraId")}
+        nuevo["registros_cui"] = len(hermanos)
+        nuevo["decision"] = (str(r.get("decision") or "").rstrip() +
+                             f" · el CUI tiene {len(hermanos)} registros de obra; "
+                             f"se usó el de la fase del certificado ({fase_cert})")
+        return nuevo
+    if fase_obra is not None and fase_obra != fase_cert:
+        # contradicción sin hermano que la resuelva → el humano elige entre los
+        # registros reales del CUI (visibles, nunca un descarte silencioso)
+        cands = [{"cui": r["cui"], "nombre_obra": (o.get("nombrObra") or ""),
+                  "departamento": o.get("nombrDepartamento"), "score": 50}
+                 for o in hermanos[:4]] or r.get("candidatos") or []
+        return {"estado": "revision", "cui": None, "via": r.get("via"),
+                "decision": _con_pista_mef(exp,
+                    f"el certificado es de la fase {fase_cert} pero el registro "
+                    f"hallado es {fase_obra} y el CUI no muestra un registro de "
+                    f"{fase_cert} — elegir el registro correcto"),
+                "candidatos": cands, "obra": None,
+                "registros_cui": len(hermanos)}
+    return r              # fase declarada, obra sin marcador, sin hermano mejor
+
+
 def resolver(exp: dict, consulta: Consulta, base=None) -> dict:
     """Resuelve UNA experiencia. Devuelve:
     {estado: 'resuelto'|'revision'|'na', cui, via, decision, candidatos[], obra}
@@ -936,6 +1027,7 @@ def resolver(exp: dict, consulta: Consulta, base=None) -> dict:
     tr = _traza()
     with tr.span("resolver_cui", proyecto=str(exp.get("proyecto") or "")):
         r = _resolver(exp, consulta, base)
+        r = _checkpoint_fase(r, exp, consulta)   # #63 · un solo sitio, todas las vías
         tr.ev("decision", estado=r.get("estado"), via=r.get("via"),
               cui=r.get("cui"), motivo=str(r.get("decision")),
               n_candidatos=len(r.get("candidatos") or []))
@@ -1086,8 +1178,14 @@ def _paso_codigo_citado(exp: dict, consulta: Consulta, base=None) -> Optional[di
         via = "CUI_TEXTO" if nombre_ok else "PROBABLE"
         decision = ("código CUI verificado contra la obra" if nombre_ok else
                     "CUI exacto hallado en InfoObras; el nombre de la obra difiere — verificar")
-        return {"estado": "resuelto", "cui": cui_out, "via": via,
-                "decision": decision, "candidatos": [], "obra": obra}
+        out = {"estado": "resuelto", "cui": cui_out, "via": via,
+               "decision": decision, "candidatos": [], "obra": obra}
+        if len(obras) > 1:
+            # #63: el CUI tiene varios registros (contingencia/principal/saldo…)
+            # — se anota SIEMPRE (la lista ya está gratis aquí) para que la ficha
+            # del Excel lo declare, elija bien o mal el selector.
+            out["registros_cui"] = len(obras)
+        return out
     return {"estado": "revision", "cui": None, "via": "CUI_TEXTO",
             "decision": "el código CUI del certificado no coincide con la obra — confirmar",
             "candidatos": [{"cui": cui_out, "nombre_obra": (o.get("nombrObra") or ""),
