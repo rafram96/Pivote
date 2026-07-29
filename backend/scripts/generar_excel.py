@@ -135,18 +135,33 @@ def _fill_veredicto(value, polaridad):
 
 
 def _sin_jerga(v):
-    """La experiencia del POSTOR (Parte 2) la resuelve el evaluador/Comité, NO el
-    backend (el servidor solo cruza la experiencia de los PROFESIONALES vía
-    SUNAT/InfoObras). Por eso, en esa sección, 'backend' es jerga interna y además
-    incorrecta → se reescribe a lenguaje de evaluador para quien lee el Excel.
-    No-op en valores no-texto (números, None)."""
+    """Las celdas las lee el EVALUADOR, no un programador (#55). Todo texto
+    visible pasa por aquí: nombres de agentes internos, marcadores del
+    consolidador (⟦crudo:…⟧), campos del schema y 'null' se reescriben a
+    lenguaje de evaluador. Medido en urgente1 (job e7c0fff6afb1): 34 celdas
+    llegaban con jerga. No-op en valores no-texto (números, None)."""
     if not isinstance(v, str):
         return v
     out = re.sub(r"\bbackend\s*/\s*comit[eé]\b", "Comité", v, flags=re.I)
     out = re.sub(r"\bEl\s+backend\b", "El equipo evaluador", out)
     out = re.sub(r"\bel\s+backend\b", "el equipo evaluador", out)
     out = re.sub(r"\bbackend\b", "equipo evaluador", out, flags=re.I)
-    return out
+    # marcador del consolidador: la nota cruda del agente se vuelve una Nota legible
+    out = out.replace("⟦crudo:", "· Nota literal: ").replace("⟧", "")
+    # nombres de agentes internos → quién es para el evaluador
+    out = re.sub(r"\bagent-propuesta-mapa\b", "la lectura de la propuesta", out)
+    out = re.sub(r"\bagent-propuesta-profesional\b", "la lectura del profesional", out)
+    out = re.sub(r"\bagent-bases\b", "la lectura de las bases", out)
+    out = re.sub(r"\bagent-evaluador\b", "la evaluación automática", out)
+    out = re.sub(r"\bagent-[a-z-]+\b", "el sistema", out)
+    # campos del schema / valores de programador
+    out = re.sub(r"\bfunciones_similares\s*=\s*null\b",
+                 "funciones: no constan en el certificado", out, flags=re.I)
+    out = re.sub(r"\bfunciones_similares\b", "funciones", out)
+    out = re.sub(r"\bn_prof\s*=\s*(\d+)\b", r"profesional \1", out)
+    out = re.sub(r"\broster_bundles\.json\b", "el mapa de la propuesta", out)
+    out = re.sub(r"\bnull\b", "sin dato", out)
+    return re.sub(r"\s{2,}", " ", out).strip()
 
 
 # Un MONTO tiene forma de monto: miles agrupados ("16,670,989.88" / "16.670.989,88")
@@ -308,7 +323,7 @@ class Builder:
             (2, 3, "Verde = cumple / válido", FILL_CUMPLE, BORDER),
             (4, 5, "Rojo = no cumple / alerta", FILL_NO_CUMPLE, BORDER),
             (6, 8, "Amarillo = por verificar", FILL_PEND, BORDER),
-            (9, 12, "Borde azul izq. = verificado por el backend on-prem",
+            (9, 12, "Borde azul izq. = verificado automáticamente por el servidor",
              None, BORDER_BACKEND),
         ]
         for ini, fin, txt, fill, border in swatches:
@@ -365,7 +380,7 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
             propuesta, _ = parsed["propuesta"], rescatados.append("propuesta")
 
     b.headers(["", "CUANTÍA", "LÍMITE INFERIOR", "PROPUESTA", "DETALLE"])
-    b.row(["Monto", cuantia, limite_inf, propuesta, detalle],
+    b.row(["Monto", cuantia, limite_inf, propuesta, _sin_jerga(detalle)],
           fmts={2: FMT_MONEY, 3: FMT_MONEY, 4: FMT_MONEY})
     faltan = [n for n, v in (("CUANTÍA", cuantia), ("LÍMITE INFERIOR", limite_inf),
                              ("PROPUESTA", propuesta)) if v is None]
@@ -429,18 +444,47 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
         b.blank()
         b.subtitle(f"PARTE 4 - EXPERIENCIA DEL PROFESIONAL: {prof.get('cargo', '')}")
         b.headers(P4_HEAD)
-        for e in prof.get("experiencias", []):
-            b.row([e.get("n"), e.get("entidad_emisora"), e.get("proyecto"), e.get("tipo_documento"),
+        # ── La celda HABLA, nunca queda muda (pedido de Rafael, 28-jul) ──────
+        # Una abstención en blanco obliga a ir a buscar el porqué a las
+        # observaciones del job (caso real: L86-N87 de urgente1 — la fecha final
+        # del cert de Tingo María salió ilegible y días/meses/años + TOTAL
+        # quedaron vacíos sin explicación EN la hoja). Si el backend se abstuvo
+        # por una fecha no verificable, la celda lo dice.
+        def _fecha_pendiente(*fechas):
+            return any(str(f or "").upper().startswith("POR VERIFICAR")
+                       for f in fechas)
+
+        def _abst(valor, pendiente, texto="POR VERIFICAR"):
+            return texto if (valor is None and pendiente) else valor
+
+        exps = prof.get("experiencias", [])
+        for e in exps:
+            pend = _fecha_pendiente(e.get("fecha_inicial"), e.get("fecha_final"))
+            b.row([_sin_jerga(x) for x in
+                  [e.get("n"), e.get("entidad_emisora"), e.get("proyecto"), e.get("tipo_documento"),
                    e.get("nombre_emisor"), e.get("cargo_emisor"), e.get("cargo_valido_emitir"),
                    fecha_excel(e.get("fecha_inicial")), fecha_excel(e.get("fecha_final")),
                    fecha_excel(e.get("fecha_emision")), e.get("folio"),
-                   e.get("dias"), e.get("meses"), e.get("anios"), e.get("anterior_colegiatura"),
-                   e.get("cargo_ocupado"), e.get("cargo_bases_valido"), e.get("funciones_similares"),
+                   _abst(e.get("dias"), pend), _abst(e.get("meses"), pend),
+                   _abst(e.get("anios"), pend),
+                   _abst(e.get("anterior_colegiatura"),
+                         _fecha_pendiente(prof.get("fecha_colegiatura"))),
+                   e.get("cargo_ocupado"), e.get("cargo_bases_valido"),
+                   e.get("funciones_similares") if e.get("funciones_similares") is not None
+                   else "No constan en el certificado",
                    e.get("cert_antes_culminar"), e.get("incluye_covid"), e.get("tipo_obra_valido"),
-                   e.get("observaciones")], fmts=m4, verdicts=V4, backend_cols=BE4)
+                   e.get("observaciones")]], fmts=m4, verdicts=V4, backend_cols=BE4)
         t = prof.get("total", {})
+        # el TOTAL en blanco parecería "sin experiencias"; si la causa es que N
+        # de M no tienen días calculables, la celda lo declara con el conteo.
+        sin_dias = sum(1 for e in exps if e.get("dias") is None)
+        txt_tot = (f"POR VERIFICAR ({sin_dias} de {len(exps)} sin fechas verificables)"
+                   if exps and sin_dias else "POR VERIFICAR")
         b.row(["", "", "", "", "", "", "", "", "", "", "TOTAL",
-               t.get("dias"), t.get("meses"), t.get("anios"), "", "", "", "", "", "", "", ""],
+               _abst(t.get("dias"), bool(sin_dias), txt_tot),
+               _abst(t.get("meses"), bool(sin_dias), txt_tot),
+               _abst(t.get("anios"), bool(sin_dias), txt_tot),
+               "", "", "", "", "", "", "", ""],
               bold=True, fmts=m4, backend_cols={12, 13, 14})
         # El veredicto lo escribe el LLM sobre los días DECLARADOS; el backend calcula
         # los EFECTIVOS (menos paralizaciones y traslapes, recortados a la ventana de
@@ -450,13 +494,13 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
         vb = prof.get("cumple_backend")
         contradice = bool(vb) and str(prof.get("cumple", "")).upper().startswith("CUMPLE")
         if prof.get("cumple"):
-            b.kv("¿EL PROFESIONAL CUMPLE?", prof["cumple"],
+            b.kv("¿EL PROFESIONAL CUMPLE?", _sin_jerga(prof["cumple"]),
                  verdict="neg" if contradice else "pos")
         if vb:
             # `pos` sobre el TEXTO del backend: su "NO CUMPLE" se pinta rojo y su
             # "POR VERIFICAR" amarillo. Con `neg` un NO CUMPLE saldría VERDE.
             b.kv("⚠ Verificación del tiempo efectivo:" if contradice
-                 else "Verificación del tiempo efectivo:", vb, verdict="pos")
+                 else "Verificación del tiempo efectivo:", _sin_jerga(vb), verdict="pos")
         if prof.get("anios_adicionales"):
             b.kv("Años adicionales (Factor A):", prof["anios_adicionales"])
         b.blank()

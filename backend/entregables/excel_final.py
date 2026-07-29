@@ -38,7 +38,7 @@ from schemas.cargo import etiqueta_hoja
 from scripts.generar_excel import (
     AL_HEAD, AL_WRAP, BORDER, F_BOLD, F_CELL, F_HEAD, F_PARTE, F_PROF,
     FILL_BACKEND, FILL_CLAUDE, FILL_HEAD, FILL_PARTE, FILL_PROF,
-    FMT_DEC, FMT_FECHA, FMT_INT, _fill_veredicto, construir_hoja_evaluacion,
+    FMT_DEC, FMT_FECHA, FMT_INT, _fill_veredicto, _sin_jerga, construir_hoja_evaluacion,
     fecha_excel,
 )
 
@@ -241,6 +241,9 @@ def construir_hoja_base_datos(ws, espejo: dict) -> int:
                 e.get("incluye_covid"), e.get("traslape"), e.get("tipo_obra_valido"),
                 e.get("observaciones"),
             ]
+            # #55: las celdas las lee el evaluador — la jerga interna (⟦crudo⟧,
+            # agent-*, campos del schema) se reescribe igual que en la hoja CLAUDE
+            valores = [_sin_jerga(v) for v in valores]
             for i, v in enumerate(valores, start=1):
                 c = ws.cell(r, i, v)
                 c.font, c.border, c.alignment, c.fill = F_CELL, BORDER, AL_WRAP, fill
