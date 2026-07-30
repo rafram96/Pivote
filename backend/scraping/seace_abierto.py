@@ -66,7 +66,11 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def crear_session(session: Optional[requests.Session] = None) -> requests.Session:
     s = session or requests.Session()
-    s.headers.setdefault("User-Agent", _UA)
+    # OJO: setdefault NO sirve para User-Agent — requests ya trae
+    # "python-requests/x.y" de fábrica y el WAF de prodN.seace.gob.pe
+    # responde 403 instantáneo a ese UA (medido 30-jul).
+    if s.headers.get("User-Agent", "").startswith("python-requests"):
+        s.headers["User-Agent"] = _UA
     s.headers.setdefault("Referer", "https://bi.seace.gob.pe/")
     return s
 
@@ -310,16 +314,29 @@ def extension_documento(doc: Optional[dict]) -> str:
 
 
 def descargar_archivo(url: str, destino, session: Optional[requests.Session] = None,
-                      timeout: float = 120.0) -> bool:
-    """Streaming + rename atómico; rechaza HTML/JSON y valida PDF/ZIP/RAR por magia."""
+                      timeout=(30.0, 480.0)) -> bool:
+    """Streaming + rename atómico; rechaza HTML/JSON y valida PDF/ZIP/RAR por magia.
+
+    El timeout es (conexión, lectura): `prod1.seace.gob.pe` (Bases Integradas
+    vía SdescargarArchivoAlfresco) tarda 3-4 minutos en emitir el primer byte
+    — medido en vivo el 30-jul (200 en 168-242 s). Con 120 s este host parecía
+    siempre caído. Su WAF además exige User-Agent de navegador (403 instantáneo
+    sin él) y castiga el header Referer: con `Referer: bi.seace.gob.pe` la
+    conexión queda colgada indefinidamente o devuelve 403 (medido 30-jul), así
+    que para los hosts `prodN.seace.gob.pe` se manda la petición SIN Referer."""
     s = crear_session(session)
+    headers_extra = (
+        {"Referer": None}
+        if re.match(r"https?://prod\d*\.seace\.gob\.pe/", url)
+        else {}
+    )
     destino = Path(destino)
     destino.parent.mkdir(parents=True, exist_ok=True)
     tmp = destino.with_name(destino.name + ".part")
     for intento in range(_RETRIES):
         try:
             with s.get(url, timeout=timeout, stream=True, verify=False,
-                       allow_redirects=True) as r:
+                       allow_redirects=True, headers=headers_extra) as r:
                 if r.status_code != 200:
                     raise OSError(f"HTTP {r.status_code}")
                 with open(tmp, "wb") as f:
@@ -349,7 +366,7 @@ def descargar_archivo(url: str, destino, session: Optional[requests.Session] = N
 
 
 def descargar_pdf(url: str, destino, session: Optional[requests.Session] = None,
-                  timeout: float = 120.0) -> bool:
+                  timeout=(30.0, 480.0)) -> bool:
     """Compatibilidad para contratos y demás documentos que deben ser PDF."""
     return descargar_archivo(url, Path(destino).with_suffix(".pdf"),
                              session=session, timeout=timeout)
