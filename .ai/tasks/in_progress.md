@@ -2,13 +2,15 @@
 
 *(Actualizar al iniciar cualquier trabajo; mover a completed.md al cerrar.)*
 
-- **✅ RESCATE A VALIDADO (2-ago, Codex)**: sobre `demo`, `d4d3612` aplica el
+- **✅ RESCATES A Y B VALIDADOS (2-ago, Codex)**: sobre `demo`, `d4d3612` aplica el
   fix WAF de SEACE y `6e37605` cubre User-Agent, Referer, timeout, formatos,
   `.part` y bloqueo de red externa en pytest. **31 focales; 709 passed, 25
   skipped**. Prueba pública CUI 2279396: Bases Integradas RAR descargadas
-  correctamente (1,561,634 bytes, magia válida, cero parciales). Rama
-  `rescue/A-seace`, lista para fast-forward controlado a `demo`; sin push ni
-  despliegue. Después corresponde `rescue/B-atomicos`.
+  correctamente (1,561,634 bytes, magia válida, cero parciales). A avanzó por
+  fast-forward a `demo` (`586f430`). En `rescue/B-atomicos`, `c67e290` limita
+  el reintento NTFS a `PermissionError` y a los JSON del repositorio: **9
+  focales pasaron, 4 skips de PostgreSQL; 713 passed, 25 skipped**. B está
+  lista para fast-forward controlado; sin push ni despliegue.
 
 - **✅ #63 CERRADA CON VALIDACIÓN VIVA (29-jul 09:19)**: re-corrida
   `8a4b468ac700` (resubir de urgente1; `resubir_job.py` arreglado al layout

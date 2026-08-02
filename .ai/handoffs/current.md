@@ -4,18 +4,26 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
-## Nota (2026-08-02, Codex) — rescate A validado sobre `demo`
+## Nota (2026-08-02, Codex) — rescates A y B validados
 
 ADR-S007 fijó `demo` como línea de producto y congeló `refactor` en `65d41af`.
 El tag local `demo-pre-rescates` apunta a `5503082`. En `rescue/A-seace`, el
 fix WAF `ed9795c` se aplicó como `d4d3612` y las pruebas dirigidas quedaron en
 `6e37605`: User-Agent, Referer exclusivo de `prodN`, timeout, formatos,
-limpieza de `.part` y bloqueo automático de red externa en pytest. Validación:
-**31 focales; 709 passed, 25 skipped** en suite, `compileall` y `diff --check`.
-Sonda pública CUI 2279396: 5 procesos; Bases Integradas RAR descargadas,
-1,561,634 bytes, magia válida y cero parciales. No hubo push, fast-forward ni
-despliegue. Siguiente paso: registrar el cierre y fast-forward controlado a
-`demo`; después abrir `rescue/B-atomicos`.
+limpieza de `.part` y bloqueo automático de red externa en pytest. A quedó
+integrado por fast-forward en `demo` como `586f430`; el tag local
+`demo-pre-B-atomicos` marca ese punto. Sonda pública CUI 2279396: 5 procesos;
+Bases Integradas RAR descargadas, 1,561,634 bytes, magia válida y cero
+parciales.
+
+En `rescue/B-atomicos`, `c67e290` incorpora reintento acotado solo ante
+`PermissionError` y lo aplica únicamente a los JSON del repositorio. No toca
+ZIP ni otros artefactos. Cubre dos bloqueos y éxito, agotamiento, integridad
+del archivo anterior, limpieza del temporal y lectura concurrente. Validación
+B: **9 focales pasaron, 4 skips de PostgreSQL; 713 passed, 25 skipped** en la
+suite completa, `compileall` y `diff --check`. No hubo push ni despliegue.
+Siguiente paso: fast-forward controlado de B a `demo` y abrir
+`rescue/C-ingesta`.
 
 ## Nota (2026-07-29, Codex) — ReniPress integrado al orquestador
 

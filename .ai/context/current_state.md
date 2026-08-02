@@ -1,8 +1,8 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-08-02** · rama de trabajo: `rescue/A-seace`
+> Última actualización: **2026-08-02** · rama de trabajo: `rescue/B-atomicos`
 
-## ADR-S007 y rescate A de SEACE
+## ADR-S007 y tren de rescates A–B
 
 `demo` vuelve a ser la línea de producto; `refactor` queda congelada en
 `65d41af`. El primer rescate parte del tag local `demo-pre-rescates`
@@ -10,7 +10,15 @@
 La rama suma `d4d3612` (fix) y `6e37605` (pruebas y red offline). Suite:
 **709 passed, 25 skipped**. La validación pública con CUI 2279396 descargó un
 RAR válido de 1,561,634 bytes sin dejar `.part`. Actualmente no hay servicios
-de Pivote corriendo en el servidor del cliente; no hubo push ni despliegue.
+de Pivote corriendo en el servidor del cliente. A avanzó por fast-forward a
+`demo` como `586f430`.
+
+El tag local `demo-pre-B-atomicos` marca el retorno previo a B. En
+`rescue/B-atomicos`, `c67e290` añade un reintento de unos 200 ms solo para
+`PermissionError` de `os.replace` y lo conecta exclusivamente a la escritura
+JSON del repositorio; los ZIP quedan fuera. Validación: **9 focales pasaron, 4
+skips de PostgreSQL; 713 passed, 25 skipped** en suite completa, `compileall`
+y `diff --check`. No hubo push ni despliegue.
 
 ## ReniPress integrado al orquestador (29-jul, `demo`)
 
