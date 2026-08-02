@@ -2,7 +2,7 @@
 
 > Última actualización: **2026-08-02** · rama de trabajo: `demo`
 
-## ADR-S007 y tren de rescates A–B
+## ADR-S007 y tren de rescates A–C
 
 `demo` vuelve a ser la línea de producto; `refactor` queda congelada en
 `65d41af`. El primer rescate parte del tag local `demo-pre-rescates`
@@ -19,8 +19,14 @@ El tag local `demo-pre-B-atomicos` marca el retorno previo a B. En
 JSON del repositorio; los ZIP quedan fuera. Validación: **9 focales pasaron, 4
 skips de PostgreSQL; 713 passed, 25 skipped** en suite completa, `compileall`
 y `diff --check`. No hubo push ni despliegue.
-B avanzó por fast-forward a `demo` como `3beb94b`; el siguiente bloque es
-`rescue/C-ingesta`, siempre desde un punto de retorno propio.
+B avanzó por fast-forward a `demo` como `3beb94b`.
+
+El tag `demo-pre-C-ingesta` marca `90a3e1e`. C quedó integrado como `bb263c1`:
+la API valida JSON, límites de Excel, ZIP y magia PDF antes de crear el job;
+un ZIP roto ya no se ignora. Se mantuvieron `201 + job_id`, tareas en segundo
+plano y layout. No entraron las defensas diferidas. Validación: **22 API; 717
+passed, 25 skipped**, compilación y diff limpios. Sigue D, caché SEACE
+secuencial por `fileCode`.
 
 ## ReniPress integrado al orquestador (29-jul, `demo`)
 

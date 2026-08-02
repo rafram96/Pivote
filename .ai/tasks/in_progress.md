@@ -2,6 +2,12 @@
 
 *(Actualizar al iniciar cualquier trabajo; mover a completed.md al cerrar.)*
 
+- **✅ RESCATE C INTEGRADO (2-ago, Codex)**: `bb263c1` valida todos los
+  insumos antes de crear el job, hace explícito el ZIP roto y exige magia
+  `%PDF-` en certificados. Conserva contrato y layout; no incluye las defensas
+  diferidas. **22 API; 717 passed, 25 skipped**. Fast-forward a `demo`, sin
+  push ni despliegue. Sigue `rescue/D-cache-seace`.
+
 - **✅ RESCATES A Y B VALIDADOS (2-ago, Codex)**: sobre `demo`, `d4d3612` aplica el
   fix WAF de SEACE y `6e37605` cubre User-Agent, Referer, timeout, formatos,
   `.part` y bloqueo de red externa en pytest. **31 focales; 709 passed, 25

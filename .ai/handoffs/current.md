@@ -4,6 +4,19 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
+## Nota (2026-08-02, Codex) — rescate C integrado en `demo`
+
+El tag local `demo-pre-C-ingesta` apunta a `90a3e1e`. El rescate C quedó en
+`bb263c1`: `POST /analizar` lee y valida todos los insumos antes de crear el
+job, un ZIP roto produce 422 explícito y cada certificado aceptado debe
+comenzar con `%PDF-`. Se conservaron límites, conteo de entradas, control de
+ZIP bomb y path traversal. No entraron staging, hashes, validación estructural
+XLSX ni lista cerrada de nombres. El contrato sigue siendo `201 + job_id`, con
+`BackgroundTasks` y layout actual. Validación: **22 pruebas API; 717 passed,
+25 skipped** en suite completa, `compileall` y `diff --check`. El resolver no
+cambió; no aplicó golden. C avanzó por fast-forward a `demo`. No hubo push ni
+despliegue. Siguiente: tag de retorno y `rescue/D-cache-seace`.
+
 ## Nota (2026-08-02, Codex) — rescates A y B validados
 
 ADR-S007 fijó `demo` como línea de producto y congeló `refactor` en `65d41af`.
