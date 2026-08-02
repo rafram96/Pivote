@@ -501,17 +501,19 @@ def ver_concurso(concurso_id: str):
 
 # ── Análisis (ingesta + pipeline) ────────────────────────────────────────────
 
-def _guardar_certificados(job_id: str, contenido: bytes) -> int:
-    """Descomprime el ZIP de certificados de la skill a `{job}.certs/` — solo PDFs
-    `P{n}_E{m}.pdf`, ignorando rutas (anti zip-slip). Devuelve cuántos guardó."""
+def _validar_certificados(contenido: bytes) -> list[tuple[str, bytes]]:
+    """Valida el ZIP completo antes de que exista un job.
+
+    Conserva el filtro histórico de nombres y las defensas contra ZIP bomb y
+    path traversal, pero deja de aceptar en silencio un ZIP roto o un archivo
+    con extensión PDF cuyo contenido no sea PDF.
+    """
     import io
     import os
     import zipfile
     if not contenido:
-        return 0
-    cdir = _dir_job(job_id) / "certs"
-    cdir.mkdir(parents=True, exist_ok=True)
-    n = 0
+        return []
+    certificados: list[tuple[str, bytes]] = []
     try:
         with zipfile.ZipFile(io.BytesIO(contenido)) as z:
             infos = z.infolist()
@@ -524,11 +526,28 @@ def _guardar_certificados(job_id: str, contenido: bytes) -> int:
                     raise HTTPException(413, "el ZIP de certificados descomprimido excede el límite")
                 base = os.path.basename(info.filename)
                 if base.lower().endswith(".pdf") and base.upper().startswith("P"):
-                    (cdir / base).write_bytes(z.read(info.filename))
-                    n += 1
-    except zipfile.BadZipFile:
-        pass
-    return n
+                    pdf = z.read(info.filename)
+                    if not pdf.startswith(b"%PDF-"):
+                        raise HTTPException(422, f"{base} no contiene un PDF válido")
+                    certificados.append((base, pdf))
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(
+            422, "el archivo de certificados no es un ZIP válido"
+        ) from exc
+    return certificados
+
+
+def _guardar_certificados(
+    job_id: str, certificados: list[tuple[str, bytes]]
+) -> int:
+    """Guarda certificados ya validados en la carpeta actual del job."""
+    if not certificados:
+        return 0
+    cdir = _dir_job(job_id) / "certs"
+    cdir.mkdir(parents=True, exist_ok=True)
+    for nombre, contenido in certificados:
+        (cdir / nombre).write_bytes(contenido)
+    return len(certificados)
 
 
 @app.post("/api/pivote/analizar", status_code=201)
@@ -557,16 +576,23 @@ async def analizar(
             ],
         })
 
+    contenido_excel = await _leer_limitado(excel, _MAX_EXCEL, "el Excel")
+    contenido_certs = (
+        await _leer_limitado(certificados, _MAX_CERTS, "los certificados")
+        if certificados is not None
+        else b""
+    )
+    certificados_validados = _validar_certificados(contenido_certs)
+
+    # A partir de aquí todos los insumos ya pasaron sus validaciones. Crear el
+    # job antes dejaría huérfanos ante un Excel grande, ZIP roto o falso PDF.
     job = motor.crear_job(datos, concurso_id=concurso_id)
     job.origen = origen if origen in ("mcp", "dropzone") else "dropzone"
     repo.guardar(job)
     # guardar el Excel de Claude tal cual llegó (referencia/auditoría)
-    (_dir_job(job.job_id) / "claude.xlsx").write_bytes(
-        await _leer_limitado(excel, _MAX_EXCEL, "el Excel"))
+    (_dir_job(job.job_id) / "claude.xlsx").write_bytes(contenido_excel)
     # certificados de las experiencias (ZIP de PDFs que recortó la skill) → {job}.certs/
-    if certificados is not None:
-        _guardar_certificados(job.job_id,
-                              await _leer_limitado(certificados, _MAX_CERTS, "los certificados"))
+    _guardar_certificados(job.job_id, certificados_validados)
 
     tareas.add_task(_correr_y_descargar, job.job_id)
     return {"job_id": job.job_id}

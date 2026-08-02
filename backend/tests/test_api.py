@@ -121,6 +121,112 @@ def test_espejo_invalido_rechazado_con_errores_claros(cliente):
     detalle = r.json()["detail"]
     assert detalle["error"].startswith("el archivo de datos")
     assert detalle["errores"]  # lista campo a campo
+    assert cliente.get(f"/api/pivote/concursos/{cid}").json()["jobs"] == []
+
+
+def test_excel_sobre_limite_no_crea_job_huerfano(cliente, monkeypatch):
+    import api.app as modulo
+
+    cid = cliente.post(
+        "/api/pivote/concursos", json={"nomenclatura": "XLSX"}
+    ).json()["concurso_id"]
+    monkeypatch.setattr(modulo, "_MAX_EXCEL", 4)
+
+    r = cliente.post(
+        "/api/pivote/analizar",
+        data={"concurso_id": cid},
+        files={
+            "espejo": (
+                "e.json", io.BytesIO(json.dumps(ESPEJO).encode()),
+                "application/json",
+            ),
+            "excel": ("c.xlsx", io.BytesIO(b"12345"), "application/octet-stream"),
+        },
+    )
+
+    assert r.status_code == 413
+    assert cliente.get(f"/api/pivote/concursos/{cid}").json()["jobs"] == []
+
+
+def test_zip_certificados_invalido_no_crea_job_huerfano(cliente):
+    cid = cliente.post(
+        "/api/pivote/concursos", json={"nomenclatura": "ZIP"}
+    ).json()["concurso_id"]
+
+    r = cliente.post(
+        "/api/pivote/analizar",
+        data={"concurso_id": cid},
+        files={
+            "espejo": (
+                "e.json", io.BytesIO(json.dumps(ESPEJO).encode()),
+                "application/json",
+            ),
+            "excel": ("c.xlsx", io.BytesIO(b"PK"), "application/octet-stream"),
+            "certificados": (
+                "certs.zip", io.BytesIO(b"esto no es zip"), "application/zip",
+            ),
+        },
+    )
+
+    assert r.status_code == 422
+    assert "no es un ZIP válido" in r.json()["detail"]
+    assert cliente.get(f"/api/pivote/concursos/{cid}").json()["jobs"] == []
+
+
+def test_falso_pdf_en_zip_no_crea_job_huerfano(cliente):
+    cid = cliente.post(
+        "/api/pivote/concursos", json={"nomenclatura": "PDF"}
+    ).json()["concurso_id"]
+    certs = io.BytesIO()
+    with zipfile.ZipFile(certs, "w") as archivo:
+        archivo.writestr("carpeta/P1_E1.pdf", b"esto no es un PDF")
+
+    r = cliente.post(
+        "/api/pivote/analizar",
+        data={"concurso_id": cid},
+        files={
+            "espejo": (
+                "e.json", io.BytesIO(json.dumps(ESPEJO).encode()),
+                "application/json",
+            ),
+            "excel": ("c.xlsx", io.BytesIO(b"PK"), "application/octet-stream"),
+            "certificados": (
+                "certs.zip", io.BytesIO(certs.getvalue()), "application/zip",
+            ),
+        },
+    )
+
+    assert r.status_code == 422
+    assert "no contiene un PDF válido" in r.json()["detail"]
+    assert cliente.get(f"/api/pivote/concursos/{cid}").json()["jobs"] == []
+
+
+def test_zip_certificados_valido_conserva_pdf(cliente, tmp_path):
+    cid = cliente.post(
+        "/api/pivote/concursos", json={"nomenclatura": "PDF-OK"}
+    ).json()["concurso_id"]
+    certs = io.BytesIO()
+    with zipfile.ZipFile(certs, "w") as archivo:
+        archivo.writestr("recortes/P1_E1.pdf", b"%PDF-1.4\ncertificado")
+
+    r = cliente.post(
+        "/api/pivote/analizar",
+        data={"concurso_id": cid},
+        files={
+            "espejo": (
+                "e.json", io.BytesIO(json.dumps(ESPEJO).encode()),
+                "application/json",
+            ),
+            "excel": ("c.xlsx", io.BytesIO(b"PK"), "application/octet-stream"),
+            "certificados": (
+                "certs.zip", io.BytesIO(certs.getvalue()), "application/zip",
+            ),
+        },
+    )
+
+    assert r.status_code == 201
+    guardado = tmp_path / r.json()["job_id"] / "certs" / "P1_E1.pdf"
+    assert guardado.read_bytes().startswith(b"%PDF-")
 
 
 def test_decision_de_alerta_persiste(cliente):
