@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 
 import pytest
 
@@ -98,9 +99,11 @@ def test_lectura_concurrente_nunca_observa_json_parcial(tmp_path):
             try:
                 dato = json.loads(ruta.read_text(encoding="utf-8"))
                 versiones.append(dato["version"])
+                time.sleep(0.001)
             except PermissionError:
                 # NTFS puede negar transitoriamente la apertura mientras ocurre
                 # el reemplazo; eso no equivale a exponer contenido parcial.
+                time.sleep(0.001)
                 continue
             except Exception as exc:  # pragma: no cover - solo se llena al fallar
                 errores_de_contenido.append(exc)
