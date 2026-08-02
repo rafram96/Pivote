@@ -7,6 +7,8 @@ Si no están, esos tests se saltan en vez de fallar.
 """
 from __future__ import annotations
 
+import os
+import socket
 import sys
 from pathlib import Path
 
@@ -16,6 +18,22 @@ BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
 DUMP_SUNAT = BACKEND / "exploracion" / "_sunat_dump"
+
+
+@pytest.fixture(autouse=True)
+def bloquear_red_externa(monkeypatch):
+    """Un test offline que intenta salir a internet debe fallar, no ser flaky."""
+    if os.getenv("PIVOTE_PERMITIR_RED_TESTS") == "1":
+        return
+    conectar_real = socket.socket.connect
+
+    def _conectar(sock, direccion):
+        host = direccion[0] if isinstance(direccion, tuple) else direccion
+        if str(host).lower() in {"localhost", "127.0.0.1", "::1"}:
+            return conectar_real(sock, direccion)
+        raise AssertionError(f"test offline intentó tocar red externa: {host}")
+
+    monkeypatch.setattr(socket.socket, "connect", _conectar)
 
 
 @pytest.fixture

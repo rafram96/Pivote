@@ -14,7 +14,7 @@ import pytest
 from scraping.seace_abierto import (
     TIPO_EJECUCION, TIPO_EXPEDIENTE, TIPO_PREINVERSION, TIPO_SUPERVISION,
     CacheConosce, clasificar_proceso, codigo_convocatoria,
-    descargar_archivo, doc_bases_integradas, doc_contrato_firmado,
+    crear_session, descargar_archivo, doc_bases_integradas, doc_contrato_firmado,
     extension_documento, procesos_por_cui, seleccionar_proceso, tipo_esperado,
 )
 
@@ -155,9 +155,57 @@ class _SessionArchivo:
     def __init__(self, contenido):
         self.contenido = contenido
         self.headers = {}
+        self.llamadas = []
 
-    def get(self, *_args, **_kwargs):
+    def get(self, *args, **kwargs):
+        self.llamadas.append((args, kwargs))
         return _RespArchivo(self.contenido)
+
+
+def test_crear_session_reemplaza_solo_user_agent_de_requests():
+    default = _SessionArchivo(b"")
+    default.headers["User-Agent"] = "python-requests/2.32.0"
+    crear_session(default)
+    assert default.headers["User-Agent"].startswith("Mozilla/5.0")
+    assert default.headers["Referer"] == "https://bi.seace.gob.pe/"
+
+    personalizado = _SessionArchivo(b"")
+    personalizado.headers["User-Agent"] = "Cliente-Controlado/1.0"
+    crear_session(personalizado)
+    assert personalizado.headers["User-Agent"] == "Cliente-Controlado/1.0"
+
+
+def test_descarga_prod_omite_referer_y_usa_timeout_de_primer_byte(tmp_path):
+    sesion = _SessionArchivo(b"%PDF-1.7")
+    destino = tmp_path / "bases.pdf"
+    assert descargar_archivo(
+        "https://prod1.seace.gob.pe/x?fileCode=abc", destino, session=sesion
+    )
+    _, parametros = sesion.llamadas[0]
+    assert parametros["headers"] == {"Referer": None}
+    assert parametros["timeout"] == (30.0, 480.0)
+
+
+def test_descarga_fuera_de_prod_conserva_referer_de_la_sesion(tmp_path):
+    sesion = _SessionArchivo(b"%PDF-1.7")
+    destino = tmp_path / "contrato.pdf"
+    assert descargar_archivo(
+        "https://contratacionesabiertas.oece.gob.pe/contrato",
+        destino,
+        session=sesion,
+    )
+    _, parametros = sesion.llamadas[0]
+    assert parametros["headers"] == {}
+    assert sesion.headers["Referer"] == "https://bi.seace.gob.pe/"
+
+
+def test_descarga_invalida_elimina_archivo_parcial(tmp_path):
+    destino = tmp_path / "bases.pdf"
+    assert not descargar_archivo(
+        "https://estado/doc", destino, session=_SessionArchivo(b"<html>error")
+    )
+    assert not destino.exists()
+    assert not destino.with_name("bases.pdf.part").exists()
 
 
 @pytest.mark.parametrize(("nombre", "magia"), [
