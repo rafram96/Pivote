@@ -11,12 +11,12 @@ de un análisis real pesa ~100 KB).
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import uuid
 from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
+from infraestructura.archivos_atomicos import reemplazar_atomico
 from schemas import pipeline
 
 
@@ -29,10 +29,10 @@ def _escribir_atomico(ruta: Path, texto: str) -> None:
     tmp = ruta.with_name(f"{ruta.name}.{uuid.uuid4().hex}.tmp")
     try:
         tmp.write_text(texto, encoding="utf-8")
-        os.replace(tmp, ruta)          # atómico en el mismo filesystem
+        reemplazar_atomico(tmp, ruta)
     finally:
         try:
-            tmp.unlink(missing_ok=True)   # limpia el tmp si os.replace falló
+            tmp.unlink(missing_ok=True)   # limpia el tmp si el reemplazo falló
         except OSError:
             pass
 
