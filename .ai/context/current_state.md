@@ -2,7 +2,7 @@
 
 > Última actualización: **2026-08-02** · rama de trabajo: `demo`
 
-## ADR-S007 y tren de rescates A–C
+## ADR-S007 y tren de rescates A–D COMPLETO
 
 `demo` vuelve a ser la línea de producto; `refactor` queda congelada en
 `65d41af`. El primer rescate parte del tag local `demo-pre-rescates`
@@ -25,8 +25,15 @@ El tag `demo-pre-C-ingesta` marca `90a3e1e`. C quedó integrado como `bb263c1`:
 la API valida JSON, límites de Excel, ZIP y magia PDF antes de crear el job;
 un ZIP roto ya no se ignora. Se mantuvieron `201 + job_id`, tareas en segundo
 plano y layout. No entraron las defensas diferidas. Validación: **22 API; 717
-passed, 25 skipped**, compilación y diff limpios. Sigue D, caché SEACE
-secuencial por `fileCode`.
+passed, 25 skipped**, compilación y diff limpios.
+
+El tag `demo-pre-D-cache-seace` marca `3156d26`. D quedó integrado como
+`345c601`: una caché compartida por `fileCode` valida magia PDF/ZIP/RAR,
+publica atómicamente y reutiliza el documento entre experiencias y jobs. La
+descarga sigue secuencial y no trae piezas del runtime v2. Prueba clave: una
+descarga de red, tres entregables idénticos. Gate final del tren: **34 focales;
+721 passed, 25 skipped**, `compileall` y diff limpios. No se tocó el resolver.
+No hubo push ni despliegue; actualmente Pivote no corre en el servidor.
 
 ## ReniPress integrado al orquestador (29-jul, `demo`)
 

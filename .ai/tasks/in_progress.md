@@ -2,23 +2,6 @@
 
 *(Actualizar al iniciar cualquier trabajo; mover a completed.md al cerrar.)*
 
-- **✅ RESCATE C INTEGRADO (2-ago, Codex)**: `bb263c1` valida todos los
-  insumos antes de crear el job, hace explícito el ZIP roto y exige magia
-  `%PDF-` en certificados. Conserva contrato y layout; no incluye las defensas
-  diferidas. **22 API; 717 passed, 25 skipped**. Fast-forward a `demo`, sin
-  push ni despliegue. Sigue `rescue/D-cache-seace`.
-
-- **✅ RESCATES A Y B VALIDADOS (2-ago, Codex)**: sobre `demo`, `d4d3612` aplica el
-  fix WAF de SEACE y `6e37605` cubre User-Agent, Referer, timeout, formatos,
-  `.part` y bloqueo de red externa en pytest. **31 focales; 709 passed, 25
-  skipped**. Prueba pública CUI 2279396: Bases Integradas RAR descargadas
-  correctamente (1,561,634 bytes, magia válida, cero parciales). A avanzó por
-  fast-forward a `demo` (`586f430`). En `rescue/B-atomicos`, `c67e290` limita
-  el reintento NTFS a `PermissionError` y a los JSON del repositorio: **9
-  focales pasaron, 4 skips de PostgreSQL; 713 passed, 25 skipped**. B avanzó
-  por fast-forward a `demo` (`3beb94b`); sin push ni despliegue. Sigue
-  `rescue/C-ingesta`.
-
 - **✅ #63 CERRADA CON VALIDACIÓN VIVA (29-jul 09:19)**: re-corrida
   `8a4b468ac700` (resubir de urgente1; `resubir_job.py` arreglado al layout
   carpeta) → 13:1 = **PLAN DE CONTINGENCIA, inicio 11/11/2024** (la fecha que

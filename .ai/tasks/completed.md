@@ -1,5 +1,16 @@
 # Completado (más reciente primero)
 
+## 2026-08-02
+- **ADR-S007 — tren de rescates A–D hacia `demo`**: A destraba el WAF de
+  SEACE y bloquea red accidental en pytest; B reintenta `PermissionError` de
+  escrituras JSON en NTFS; C valida todos los insumos antes de crear el job,
+  hace ruidoso el ZIP roto y exige magia PDF; D deduplica documentos SEACE por
+  `fileCode` mediante caché compartida, válida y atómica. Tags de retorno:
+  `demo-pre-rescates`, `demo-pre-B-atomicos`, `demo-pre-C-ingesta` y
+  `demo-pre-D-cache-seace`. Gate final: **721 passed, 25 skipped**, compilación
+  y diff limpios; resolver intacto, sin golden. Todo integrado localmente en
+  `demo`; sin push ni despliegue. `refactor` permanece congelada en `65d41af`.
+
 ## 2026-07-26
 - **Issue #32 — factor de evaluación embebido** (`17b1e04`, rama
   `rafram96/issue-32-embeber-el-factor-2`): la página del Cuadro de Factores

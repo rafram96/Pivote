@@ -4,6 +4,25 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
+## Nota (2026-08-02, Codex) — tren A–D completo en `demo`
+
+El tag `demo-pre-D-cache-seace` apunta a `3156d26`. D quedó integrado como
+`345c601`: caché compartida en `datos/referencia/seace`, clave por `fileCode`
+(SHA-256 si falta), validación por magia PDF/ZIP/RAR, publicación y copias
+atómicas, reutilización entre experiencias y jobs y limpieza de temporales.
+La ejecución continúa secuencial: no entraron pool, manifiestos v2, ZIP
+parcial, routers/comandos ni métricas del runtime nuevo. Prueba clave: dos
+experiencias y un segundo job comparten una sola descarga y tres entregables
+idénticos. Validación: **34 focales; 721 passed, 25 skipped** en suite completa,
+`compileall` y `diff --check`. Se estabilizó además el test concurrente de B
+para que el lector de prueba no monopolice NTFS (`5cc0070`, cinco repeticiones
+verdes). El resolver no cambió; no aplicó golden.
+
+Los cuatro rescates están ya en `demo`. `refactor` sigue congelada en
+`65d41af`. No hubo push ni despliegue y no hay servicios de Pivote corriendo
+en el servidor del cliente. Siguiente trabajo: inventario de capacidades del
+backend y luego preparación del despliegue desde esta `demo`.
+
 ## Nota (2026-08-02, Codex) — rescate C integrado en `demo`
 
 El tag local `demo-pre-C-ingesta` apunta a `90a3e1e`. El rescate C quedó en
