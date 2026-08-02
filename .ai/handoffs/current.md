@@ -21,9 +21,9 @@ En `rescue/B-atomicos`, `c67e290` incorpora reintento acotado solo ante
 ZIP ni otros artefactos. Cubre dos bloqueos y éxito, agotamiento, integridad
 del archivo anterior, limpieza del temporal y lectura concurrente. Validación
 B: **9 focales pasaron, 4 skips de PostgreSQL; 713 passed, 25 skipped** en la
-suite completa, `compileall` y `diff --check`. No hubo push ni despliegue.
-Siguiente paso: fast-forward controlado de B a `demo` y abrir
-`rescue/C-ingesta`.
+suite completa, `compileall` y `diff --check`. B quedó integrado por
+fast-forward en `demo` como `3beb94b`. No hubo push ni despliegue. Siguiente
+paso: abrir `rescue/C-ingesta` desde un tag de retorno propio.
 
 ## Nota (2026-07-29, Codex) — ReniPress integrado al orquestador
 

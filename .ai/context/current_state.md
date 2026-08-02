@@ -1,6 +1,6 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-08-02** · rama de trabajo: `rescue/B-atomicos`
+> Última actualización: **2026-08-02** · rama de trabajo: `demo`
 
 ## ADR-S007 y tren de rescates A–B
 
@@ -19,6 +19,8 @@ El tag local `demo-pre-B-atomicos` marca el retorno previo a B. En
 JSON del repositorio; los ZIP quedan fuera. Validación: **9 focales pasaron, 4
 skips de PostgreSQL; 713 passed, 25 skipped** en suite completa, `compileall`
 y `diff --check`. No hubo push ni despliegue.
+B avanzó por fast-forward a `demo` como `3beb94b`; el siguiente bloque es
+`rescue/C-ingesta`, siempre desde un punto de retorno propio.
 
 ## ReniPress integrado al orquestador (29-jul, `demo`)
 

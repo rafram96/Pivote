@@ -9,8 +9,9 @@
   correctamente (1,561,634 bytes, magia válida, cero parciales). A avanzó por
   fast-forward a `demo` (`586f430`). En `rescue/B-atomicos`, `c67e290` limita
   el reintento NTFS a `PermissionError` y a los JSON del repositorio: **9
-  focales pasaron, 4 skips de PostgreSQL; 713 passed, 25 skipped**. B está
-  lista para fast-forward controlado; sin push ni despliegue.
+  focales pasaron, 4 skips de PostgreSQL; 713 passed, 25 skipped**. B avanzó
+  por fast-forward a `demo` (`3beb94b`); sin push ni despliegue. Sigue
+  `rescue/C-ingesta`.
 
 - **✅ #63 CERRADA CON VALIDACIÓN VIVA (29-jul 09:19)**: re-corrida
   `8a4b468ac700` (resubir de urgente1; `resubir_job.py` arreglado al layout
