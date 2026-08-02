@@ -858,7 +858,7 @@ class EtapaInfoObrasReal:
 
 def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                              max_descargas=None, descargar=None, reportar=None,
-                             descargar_seace=None):
+                             descargar_seace=None, dir_cache_seace=None):
     """Descarga DIFERIDA de InfoObras y SEACE a {job}.descargas/P{n}_E{m}.
     Cada fuente tiene su propia marca idempotente: una experiencia puede traer
     documentos SEACE aunque no tenga `obra_id`, y completar una fuente no salta
@@ -874,6 +874,12 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
         reset_descargas_stats, descargas_stats, resumen_descargas)
     from scraping.errores_red import corto
     base = carpeta_job(Path(dir_descargas), job_id) / "descargas"
+    from orquestador.descargas_seace import CacheDescargasSeace
+    cache_seace = CacheDescargasSeace(
+        Path(dir_cache_seace)
+        if dir_cache_seace is not None
+        else Path(dir_descargas) / "referencia" / "seace"
+    )
     reset_descargas_stats()
     bajadas = saltados = 0
 
@@ -913,11 +919,14 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                 continue
             nota_no.unlink(missing_ok=True)
             nota_err.unlink(missing_ok=True)
-            if descargar_seace is not None:
-                ok_archivo = bool(descargar_seace(doc["url"], archivo))
-            else:
+            if descargar_seace is None:
                 from scraping.seace_abierto import descargar_archivo
-                ok_archivo = descargar_archivo(doc["url"], archivo)
+                descargador = descargar_archivo
+            else:
+                descargador = descargar_seace
+            ok_archivo = cache_seace.materializar(
+                doc["url"], archivo, descargar=descargador
+            ).ok
             if not ok_archivo:
                 _nota_atomica(
                     nota_err,

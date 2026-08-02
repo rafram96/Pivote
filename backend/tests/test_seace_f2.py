@@ -42,6 +42,16 @@ def _seace(*, ambiguo=False):
     }
 
 
+def _espejo_dos_experiencias():
+    profesional = {**ESPEJO["profesionales"][0]}
+    primera = {**profesional["experiencias"][0]}
+    profesional["experiencias"] = [
+        primera,
+        {**primera, "n": 2, "proyecto": "Supervisión del segundo hospital"},
+    ]
+    return {**ESPEJO, "profesionales": [profesional]}
+
+
 def test_descarga_seace_sin_obra_id_es_idempotente_y_entra_al_zip(tmp_path):
     enr = {"1:1": {"cui": "2279396", "via": "CUI_TEXTO", "seace": _seace()}}
     llamadas = []
@@ -112,6 +122,47 @@ def test_descarga_seace_escribe_notas_honestas(tmp_path):
         "SEACE_02_CONTRATO_FIRMADO_ERROR.txt",
     ]
     assert "reintentar" in (destino / notas[0]).read_text(encoding="utf-8")
+
+
+def test_seace_descarga_filecode_una_vez_para_dos_experiencias_y_jobs(tmp_path):
+    espejo = _espejo_dos_experiencias()
+    seace = _seace()
+    seace["docs"]["bases"]["url"] = (
+        "https://prod1.seace.gob.pe/x?fileCode=BASE-COMPARTIDA"
+    )
+    seace["docs"]["contrato"] = {"estado": "no_disponible", "url": None}
+    enriquecimiento = {
+        "1:1": {"cui": "1", "seace": seace},
+        "1:2": {"cui": "1", "seace": seace},
+    }
+    llamadas = []
+
+    def descargar(url, destino):
+        llamadas.append(url)
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        destino.write_bytes(b"%PDF-1.7\ncontenido compartido")
+        return True
+
+    descargar_documentos_job(
+        espejo, enriquecimiento, "job-uno", tmp_path,
+        descargar_seace=descargar,
+    )
+    descargar_documentos_job(
+        ESPEJO, {"1:1": enriquecimiento["1:1"]}, "job-dos", tmp_path,
+        descargar_seace=descargar,
+    )
+
+    assert len(llamadas) == 1
+    entregables = [
+        carpeta_job(tmp_path, "job-uno") / "descargas" / "P1_E1"
+        / "SEACE_01_BASES_INTEGRADAS.pdf",
+        carpeta_job(tmp_path, "job-uno") / "descargas" / "P1_E2"
+        / "SEACE_01_BASES_INTEGRADAS.pdf",
+        carpeta_job(tmp_path, "job-dos") / "descargas" / "P1_E1"
+        / "SEACE_01_BASES_INTEGRADAS.pdf",
+    ]
+    assert all(ruta.is_file() for ruta in entregables)
+    assert len({ruta.read_bytes() for ruta in entregables}) == 1
 
 
 def test_excel_muestra_documentos_seace_y_ambiguedad(tmp_path):
