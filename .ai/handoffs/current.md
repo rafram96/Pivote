@@ -1,8 +1,21 @@
 # Handoff — punto de continuación
 
-> Actualizado: **2026-07-29**. Si eres un agente nuevo: lee esto completo,
+> Actualizado: **2026-08-02**. Si eres un agente nuevo: lee esto completo,
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
+
+## Nota (2026-08-02, Codex) — rescate A validado sobre `demo`
+
+ADR-S007 fijó `demo` como línea de producto y congeló `refactor` en `65d41af`.
+El tag local `demo-pre-rescates` apunta a `5503082`. En `rescue/A-seace`, el
+fix WAF `ed9795c` se aplicó como `d4d3612` y las pruebas dirigidas quedaron en
+`6e37605`: User-Agent, Referer exclusivo de `prodN`, timeout, formatos,
+limpieza de `.part` y bloqueo automático de red externa en pytest. Validación:
+**31 focales; 709 passed, 25 skipped** en suite, `compileall` y `diff --check`.
+Sonda pública CUI 2279396: 5 procesos; Bases Integradas RAR descargadas,
+1,561,634 bytes, magia válida y cero parciales. No hubo push, fast-forward ni
+despliegue. Siguiente paso: registrar el cierre y fast-forward controlado a
+`demo`; después abrir `rescue/B-atomicos`.
 
 ## Nota (2026-07-29, Codex) — ReniPress integrado al orquestador
 

@@ -2,14 +2,13 @@
 
 *(Actualizar al iniciar cualquier trabajo; mover a completed.md al cerrar.)*
 
-- **✅ T-004 F2 LISTA PARA PR (29-jul, Codex)**: cableado local completo en
-  `feat/seace-abierto` — selección estricta por tipo, enriquecimiento `seace`,
-  descarga diferida independiente de InfoObras, PDF/ZIP/RAR con extensión
-  real, notas honestas, ZIP y Excel. **677 passed, 24 skipped**. Prueba viva
-  CUI 2279396: contrato OK; Bases RAR con HTTP 403 del host, registrada como
-  error de fuente. Reintentado después del commit `d77d054`: mismo 403; con
-  cabeceras de navegador/sesión previa el host agotó timeout, sin dejar
-  parciales. Sin deploy/redeploy por instrucción expresa de Rafael.
+- **✅ RESCATE A VALIDADO (2-ago, Codex)**: sobre `demo`, `d4d3612` aplica el
+  fix WAF de SEACE y `6e37605` cubre User-Agent, Referer, timeout, formatos,
+  `.part` y bloqueo de red externa en pytest. **31 focales; 709 passed, 25
+  skipped**. Prueba pública CUI 2279396: Bases Integradas RAR descargadas
+  correctamente (1,561,634 bytes, magia válida, cero parciales). Rama
+  `rescue/A-seace`, lista para fast-forward controlado a `demo`; sin push ni
+  despliegue. Después corresponde `rescue/B-atomicos`.
 
 - **✅ #63 CERRADA CON VALIDACIÓN VIVA (29-jul 09:19)**: re-corrida
   `8a4b468ac700` (resubir de urgente1; `resubir_job.py` arreglado al layout

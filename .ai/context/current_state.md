@@ -1,6 +1,16 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-07-29** · rama de trabajo: `feat/seace-abierto`
+> Última actualización: **2026-08-02** · rama de trabajo: `rescue/A-seace`
+
+## ADR-S007 y rescate A de SEACE
+
+`demo` vuelve a ser la línea de producto; `refactor` queda congelada en
+`65d41af`. El primer rescate parte del tag local `demo-pre-rescates`
+(`5503082`) y corrige el WAF/timeout de Bases Integradas sin traer runtime v2.
+La rama suma `d4d3612` (fix) y `6e37605` (pruebas y red offline). Suite:
+**709 passed, 25 skipped**. La validación pública con CUI 2279396 descargó un
+RAR válido de 1,561,634 bytes sin dejar `.part`. Actualmente no hay servicios
+de Pivote corriendo en el servidor del cliente; no hubo push ni despliegue.
 
 ## ReniPress integrado al orquestador (29-jul, `demo`)
 
