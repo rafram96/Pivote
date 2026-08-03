@@ -1062,6 +1062,54 @@ def test_hoja_claude_blanca_con_veredictos(tmp_path):
         str(c.value) for row in ws.iter_rows() for c in row if c.value)
 
 
+def test_supuestos_tienen_procedencia_y_color_propio(tmp_path):
+    """#65: el violeta nace de `supuestos`, no de buscar una palabra en el valor.
+
+    Un hecho que contiene la palabra ASUMIDO no se pinta; un proyecto inferido
+    sin esa palabra sí. La marca llega a CLAUDE, Base de Datos y el recap del
+    profesional, y la leyenda no la confunde con el amarillo por verificar.
+    """
+    espejo = {
+        "_meta": {"analisis_id": "sup", "concurso": "C", "postor": "P"},
+        "postor": {},
+        "profesionales": [{
+            "n_prof": 1, "cargo": "JEFE", "nombre": "ASUMIDO ES UN APELLIDO",
+            "supuestos": [],
+            "experiencias": [{
+                "n": 1, "entidad_emisora": "ENTIDAD LITERAL",
+                "proyecto": "Proyecto inferido sin etiqueta textual",
+                "fecha_inicial": "2020-01-01", "fecha_final": "2020-12-31",
+                "cargo_ocupado": "Supervisor", "supuestos": ["proyecto"],
+            }],
+        }],
+        "resumen_evaluacion": {"factores": []},
+    }
+    salida = generar_excel_final(espejo, tmp_path / "supuestos.xlsx")
+    wb = openpyxl.load_workbook(salida)
+
+    def color(celda):
+        return celda.fill.fgColor.rgb[-6:] if celda.fill.patternType else None
+
+    claude = wb["CLAUDE"]
+    proyecto = next(c for row in claude.iter_rows() for c in row
+                     if c.value == "Proyecto inferido sin etiqueta textual")
+    nombre = next(c for row in claude.iter_rows() for c in row
+                  if c.value == "ASUMIDO ES UN APELLIDO")
+    assert color(proyecto) == "E4D7F5"
+    assert color(nombre) != "E4D7F5"
+    assert "Violeta = dato supuesto" in "\n".join(
+        str(c.value) for row in claude.iter_rows() for c in row if c.value)
+
+    base = wb["Base de Datos"]
+    assert color(base.cell(2, 7)) == "E4D7F5"      # proyecto
+    assert color(base.cell(2, 6)) != "E4D7F5"      # emisor literal
+
+    prof = wb[etiqueta_hoja(1, "JEFE")]
+    fila_proyecto = next(row for row in prof.iter_rows(min_col=1, max_col=4)
+                         if row[0].value == "PROYECTO U OBRA")
+    assert color(fila_proyecto[1]) == "E4D7F5"
+
+
 def test_excel_final_requisitos_lista_no_crashea(tmp_path):
     """Regresión: `requisitos.*` puede llegar como lista (el espejo permite
     record(any)); openpyxl no escribe listas en celdas. El generador coerce
@@ -1086,6 +1134,29 @@ def test_excel_final_requisitos_lista_no_crashea(tmp_path):
     rows = {str(row[0].value or ""): row[1].value for row in ws.iter_rows(min_col=1, max_col=2)}
     cargos = next((rows[k] for k in rows if "CARGOS VÁLIDOS" in k), None)
     assert cargos == "Residente de obra; Jefe de obra; Supervisor de obra"
+
+
+def test_tdr_multipagina_se_rotula_como_cuadro_completo(tmp_path):
+    """#68: un fallback amplio no puede presentarse como recorte individual exacto."""
+    fitz = pytest.importorskip("fitz")
+    tdr = tmp_path / "tdr-rango.pdf"
+    doc = fitz.open()
+    for n in range(3):
+        doc.new_page().insert_text((72, 100), f"PERSONAL CLAVE PAGINA {n + 1}")
+    doc.save(str(tdr))
+    doc.close()
+    espejo = {
+        "_meta": {}, "postor": {}, "resumen_evaluacion": {"factores": []},
+        "profesionales": [{
+            "n_prof": 1, "cargo": "ESPECIALISTA", "nombre": "JUAN",
+            "requisitos": {"cargos_validos": "ESPECIALISTA"},
+            "experiencias": [],
+        }],
+    }
+    salida = generar_excel_final(
+        espejo, tmp_path / "tdr.xlsx", certificados={(1, "TDR"): tdr})
+    ws = next(s for s in openpyxl.load_workbook(salida).worksheets if s.title.startswith("P1"))
+    assert _fila_de(ws, "REQUISITO DEL TDR — cuadro completo de personal clave") > 0
 
 
 # ── Factor de evaluación embebido al final de la hoja (issue #32) ────────────

@@ -44,7 +44,8 @@
   urgente1 → la 2ª puerta del candado #31 quedó inerte (¿certs sin funciones
   o agente no las busca?); (b) celdas de abstención en blanco sin rótulo
   (escribir "POR VERIFICAR" en celda — familia #55); (c) exención ruc_match
-  (golden ancha) sigue sin issue. Cola visible: #54, #55, #57, #19, #42.
+  (golden ancha) sigue sin issue. Cola visible: #54, #55 y #57. #19 y #42
+  quedaron cerradas el 2-ago.
 - **SIGUIENTE ACCIÓN GRANDE: redeploy del server del cliente** — `demo` acumula
   TODO el ciclo (#45-#62) y Manuel sigue viendo el código del 26-jul.
 

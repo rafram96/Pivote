@@ -1,6 +1,11 @@
 # Completado (más reciente primero)
 
 ## 2026-08-02
+- **Fixes pre-deploy #68, #64, #42 y #65**: recorte TDR amplio y honesto;
+  cómputo efectivo desde el inicio real de obra; revisión `202` con estado
+  persistido y panel recuperable; supuestos con procedencia estructurada y
+  color violeta. Gate: **727 passed, 25 skipped**, contrato histórico y build
+  productivo del Panel aprobados. Sin deploy; resolver CUI intacto.
 - **ADR-S007 — tren de rescates A–D hacia `demo`**: A destraba el WAF de
   SEACE y bloquea red accidental en pytest; B reintenta `PermissionError` de
   escrituras JSON en NTFS; C valida todos los insumos antes de crear el job,

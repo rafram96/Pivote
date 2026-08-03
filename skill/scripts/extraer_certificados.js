@@ -44,6 +44,32 @@ function parseFolios(folio) {
   return [...new Set(out)];
 }
 
+function claveFolios(folios) {
+  return [...new Set(folios)].sort((a, b) => a - b).join(",");
+}
+
+// Un folio compartido por la mayoría de los cargos casi siempre es la página
+// donde EMPIEZA el cuadro, no la página individual de cada requisito (#68).
+function foliosTdrSospechosos(profesionales) {
+  const claves = profesionales
+    .map((p) => claveFolios(parseFolios(p.requisitos && p.requisitos.folio)))
+    .filter(Boolean);
+  const conteos = new Map();
+  for (const k of claves) conteos.set(k, (conteos.get(k) || 0) + 1);
+  const umbral = Math.max(3, Math.ceil(claves.length * 0.5));
+  return new Set([...conteos].filter(([, n]) => n >= umbral).map(([k]) => k));
+}
+
+function ampliarTdr(folios, rangoDeclarado, total) {
+  const declarado = parseFolios(rangoDeclarado).filter((p) => p >= 1 && p <= total);
+  if (declarado.length) return declarado;
+  // Fallback conservador y ruidoso: cuadro de hasta 5 páginas desde la página
+  // repetida. Es preferible contexto amplio a una precisión falsa.
+  const inicio = Math.min(...folios);
+  const fin = Math.min(total, inicio + 4);
+  return Array.from({ length: fin - inicio + 1 }, (_, i) => inicio + i);
+}
+
 // Recorta `folios` (1-indexed) de `src` (con `total` páginas) → buffer PDF, o null.
 async function recortar(src, total, folios) {
   const idxs = folios.map((p) => p - 1).filter((i) => i >= 0 && i < total);
@@ -81,7 +107,11 @@ async function main() {
   }
   const zip = new JSZip();
   let nCerts = 0, nAnexo = 0, nTdr = 0, nFactor = 0, sinFolio = 0;
-  for (const prof of espejo.profesionales || []) {
+  let tdrAmpliados = 0;
+  const profesionales = espejo.profesionales || [];
+  const sospechosos = foliosTdrSospechosos(profesionales);
+  const rangoPersonal = espejo._meta && espejo._meta.paginas_personal_clave;
+  for (const prof of profesionales) {
     for (const exp of prof.experiencias || []) {
       // Páginas FÍSICAS reales del PDF si la skill las marcó (vienen con la
       // principal primero). El folio impreso del borde ≠ la página del PDF NO
@@ -107,7 +137,12 @@ async function main() {
       const b = await recortar(src, total, anexoFolios);
       if (b) { zip.file(`P${prof.n_prof}_ANEXO.pdf`, b); nAnexo++; }
     }
-    const tdrFolios = parseFolios(prof.requisitos && prof.requisitos.folio);
+    let tdrFolios = parseFolios(prof.requisitos && prof.requisitos.folio);
+    const folioRepetido = sospechosos.has(claveFolios(tdrFolios));
+    if (folioRepetido && tdrFolios.length) {
+      tdrFolios = ampliarTdr(tdrFolios, rangoPersonal, basesTotal);
+      tdrAmpliados++;
+    }
     if (bases && tdrFolios.length) {
       const b = await recortar(bases, basesTotal, tdrFolios);
       if (b) { zip.file(`P${prof.n_prof}_TDR.pdf`, b); nTdr++; }
@@ -129,6 +164,7 @@ async function main() {
     `OK · ${nCerts} constancias` +
       (nAnexo ? ` · ${nAnexo} anexos` : "") +
       (nTdr ? ` · ${nTdr} TDR` : "") +
+      (tdrAmpliados ? ` · ⚠ ${tdrAmpliados} TDR ampliados al cuadro completo (folio repetido)` : "") +
       (nFactor ? ` · ${nFactor} factor` : "") +
       ` recortados → ${zipPath}` +
       (sinFolio ? ` · ${sinFolio} experiencias sin folio (omitidas)` : "") +
@@ -137,7 +173,11 @@ async function main() {
   );
 }
 
-main().catch((e) => {
-  console.error("ERROR:", e.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((e) => {
+    console.error("ERROR:", e.message);
+    process.exit(1);
+  });
+}
+
+module.exports = { parseFolios, foliosTdrSospechosos, ampliarTdr };

@@ -121,10 +121,10 @@
 <body>
 
 <h1>Los 4 caminos de verificación — estado actual</h1>
-<p class="sub">Camino <b>A</b> (expedientes y estudios) y camino <b>B</b> (ejecución y supervisión de obra), cada uno con su rama pública y privada · derivado de la Hoja1 del Excel «para RAFAEL» · <b>27&nbsp;jul&nbsp;2026</b></p>
+<p class="sub">Camino <b>A</b> (expedientes y estudios) y camino <b>B</b> (ejecución y supervisión de obra), cada uno con su rama pública y privada · derivado de la Hoja1 del Excel «para RAFAEL» · <b>estado al 2&nbsp;ago&nbsp;2026</b></p>
 
 <div class="leyenda">
-  <span><i class="chip ok"></i> En producción — corriendo hoy en el servidor</span>
+  <span><i class="chip ok"></i> Capacidad de la línea estable</span>
   <span><i class="chip dep"></i> Construido y probado — <b>falta desplegar</b></span>
   <span><i class="chip cot"></i> Por construir</span>
   <span><i class="chip no"></i> Descartado con evidencia</span>
@@ -170,7 +170,7 @@
       <ol class="pasos">
         <li data-n="1"><div class="caja dep"><span class="tag">construido</span><span class="qn">Ubicar el CUI del proyecto</span><span class="quien">Base local del MEF · 579,481 CUIs · vetos por rubro, ubicación y entidad</span></div></li>
         <li data-n="2"><div class="caja dep"><span class="tag">construido</span><span class="qn">Clasificar como expediente</span><span class="quien">No se le exigen valorizaciones de la construcción posterior</span></div></li>
-        <li data-n="3"><div class="caja cot"><span class="tag">T-004</span><span class="qn">Bajar contrato del expediente + bases</span><span class="quien">SEACE por datos abiertos — sonda ✔ GO, falta integrar</span></div></li>
+        <li data-n="3"><div class="caja dep"><span class="tag">T-004 ✔</span><span class="qn">Bajar contrato del expediente + bases</span><span class="quien">SEACE por datos abiertos · selección por tipo, WAF resuelto y caché atómica</span></div></li>
         <li data-n="4"><div class="caja dep"><span class="tag">T-003</span><span class="qn">Bajar resolución de aprobación del ET</span><span class="quien">Formato 08-A del MEF, al ZIP de sustento</span></div></li>
         <li data-n="5"><div class="caja dep"><span class="tag">ADR-012</span><span class="qn">El cargo declarado figura en las bases</span><span class="quien">Exige el núcleo de especialidad completo; las funciones son segunda puerta</span></div></li>
         <li data-n="6"><div class="caja cot"><span class="tag">T-005</span><span class="qn">Inicio del profesional ≥ firma del contrato</span><span class="quien">Si el certificado declara una fecha anterior, está mal · <b>necesita T-004</b></span></div></li>
@@ -189,13 +189,13 @@
       <p class="cuando">El certificado acredita haber supervisado o ejecutado una obra. Es el camino original del sistema, el más maduro.</p>
       <ol class="pasos">
         <li data-n="1"><div class="caja dep"><span class="tag">construido</span><span class="qn">Ubicar el CUI del proyecto</span><span class="quien">Base local del MEF + veto por departamento contradictorio (ADR-013)</span></div></li>
-        <li data-n="2"><div class="caja cot"><span class="tag">T-004</span><span class="qn">Bajar contrato de supervisión + bases</span><span class="quien">SEACE por datos abiertos — sonda ✔ GO, falta integrar</span></div></li>
+        <li data-n="2"><div class="caja dep"><span class="tag">T-004 ✔</span><span class="qn">Bajar contrato de supervisión + bases</span><span class="quien">SEACE por datos abiertos · proceso del tipo correcto, ZIP y Excel</span></div></li>
         <li data-n="3"><div class="caja dep"><span class="tag">ADR-012</span><span class="qn">El cargo declarado figura en las bases</span><span class="quien">Exige el núcleo de especialidad completo; las funciones son segunda puerta</span></div></li>
         <li data-n="4"><div class="caja ok"><span class="tag">ALT-04</span><span class="qn">La empresa emisora ya existía</span><span class="quien">SUNAT · fecha de constitución vs inicio de la experiencia</span></div></li>
         <li data-n="5"><div class="caja dep"><span class="tag">T-007</span><span class="qn">¿Estaba HABIDO al emitir y durante la obra?</span><span class="quien">SUNAT · cobertura del periodo completo + cuadro histórico</span></div></li>
         <li data-n="6"><div class="caja no"><span class="tag">descartado</span><span class="qn">El firmante es el representante legal</span><span class="quien">Quien firma una constancia casi nunca lo es → falsos positivos en masa</span></div></li>
         <li data-n="7"><div class="caja ok"><span class="tag">producción</span><span class="qn">Verificar la ejecución en InfoObras</span><span class="quien">Ficha, valorizaciones, paralizaciones, días efectivos y documentos al ZIP</span></div></li>
-        <li data-n="8"><div class="caja cot"><span class="tag">T-006</span><span class="qn">Si es de salud: ¿el establecimiento existe?</span><span class="quien">RENIPRESS — sonda ✔ GO, falta integrar</span></div></li>
+        <li data-n="8"><div class="caja dep"><span class="tag">T-006 ✔</span><span class="qn">Si es de salud: ¿hay evidencia en RENIPRESS?</span><span class="quien">Consulta integrada; el matching automático conservador sigue pendiente</span></div></li>
       </ol>
       <div class="salida">Veredicto + alertas → Excel y panel</div>
     </div>
@@ -204,18 +204,15 @@
     <div class="via A">
       <span class="etiqueta">CAMINO A</span><span class="sello priv">PRIVADA</span>
       <h3>Expediente técnico o estudio · obra privada</h3>
-      <p class="cuando">Sin CUI no hay MEF ni SEACE. La única fuente estatal que queda es SUNAT — 2 verificaciones activas.</p>
+      <p class="cuando">Sin CUI no hay MEF ni SEACE. SUNAT verifica al emisor y RENIPRESS aporta evidencia si el proyecto declara rubro salud.</p>
       <ol class="pasos">
         <li data-n="1"><div class="caja ok"><span class="tag">ALT-04</span><span class="qn">La empresa emisora ya existía</span><span class="quien">SUNAT · fecha de constitución vs inicio de la experiencia</span></div></li>
         <li data-n="2"><div class="caja dep"><span class="tag">T-007</span><span class="qn">¿Estaba HABIDO al emitir y durante la obra?</span><span class="quien">SUNAT · cobertura del periodo completo + cuadro histórico</span></div></li>
-        <li data-n="3"><div class="caja no"><span class="tag">descartado</span><span class="qn">El firmante es el representante legal</span><span class="quien">Quien firma una constancia casi nunca lo es → falsos positivos en masa</span></div></li>
+        <li data-n="3"><div class="caja dep"><span class="tag">T-006 ✔</span><span class="qn">Si es de salud: ¿hay evidencia en RENIPRESS?</span><span class="quien">Se consulta también para expedientes privados; resultado informativo</span></div></li>
+        <li data-n="4"><div class="caja no"><span class="tag">descartado</span><span class="qn">El firmante es el representante legal</span><span class="quien">Quien firma una constancia casi nunca lo es → falsos positivos en masa</span></div></li>
       </ol>
       <div class="salida">Lo no verificable → «Por confirmar»</div>
-      <p class="aviso q">
-        <b>Hueco del flujograma:</b> el Excel pide RENIPRESS solo en el bloque de obra, no acá.
-        Pero un expediente técnico de una clínica privada tiene exactamente el mismo problema de
-        existencia que la obra. <b>Decisión pendiente</b>: ¿se extiende T-006 a este cuadrante?
-      </p>
+      <p class="aviso i"><b>Decisión aplicada:</b> RENIPRESS se consulta para toda experiencia cuyo proyecto declare salud, pública o privada. Por ahora informa; no decide el veredicto.</p>
     </div>
 
     <!-- ============== B · PRIVADA ============== -->
@@ -227,7 +224,7 @@
         <li data-n="1"><div class="caja ok"><span class="tag">ALT-04</span><span class="qn">La empresa emisora ya existía</span><span class="quien">SUNAT · fecha de constitución vs inicio de la experiencia</span></div></li>
         <li data-n="2"><div class="caja dep"><span class="tag">T-007</span><span class="qn">¿Estaba HABIDO al emitir y durante la obra?</span><span class="quien">SUNAT · cobertura del periodo completo + cuadro histórico</span></div></li>
         <li data-n="3"><div class="caja no"><span class="tag">descartado</span><span class="qn">El firmante es el representante legal</span><span class="quien">Quien firma una constancia casi nunca lo es → falsos positivos en masa</span></div></li>
-        <li data-n="4"><div class="caja cot"><span class="tag">T-006</span><span class="qn">¿Esa clínica existe o no?</span><span class="quien">RENIPRESS — sonda ✔ GO, falta integrar</span></div></li>
+        <li data-n="4"><div class="caja dep"><span class="tag">T-006 ✔</span><span class="qn">¿Hay evidencia de esa clínica?</span><span class="quien">RENIPRESS integrado; ausencia y portal caído nunca se confunden</span></div></li>
       </ol>
       <div class="salida">Lo no verificable → «Por confirmar»</div>
       <p class="aviso q">
@@ -253,27 +250,27 @@
     </tr>
     <tr>
       <td><b>A · pública</b></td><td class="c">9</td>
-      <td class="c"><span class="n ok">1</span></td><td class="c"><span class="n dep">5</span></td>
-      <td class="c"><span class="n cot">3</span></td><td class="c"><span class="n no">1</span></td>
-      <td>SEACE (T-004) y, encadenados a él, los dos cruces de fechas (T-005)</td>
+      <td class="c"><span class="n ok">1</span></td><td class="c"><span class="n dep">6</span></td>
+      <td class="c"><span class="n cot">2</span></td><td class="c"><span class="n no">1</span></td>
+      <td>Los dos cruces de fechas de T-005 y el candado F5 de T-004</td>
     </tr>
     <tr>
       <td><b>B · pública</b></td><td class="c">7</td>
-      <td class="c"><span class="n ok">2</span></td><td class="c"><span class="n dep">3</span></td>
-      <td class="c"><span class="n cot">2</span></td><td class="c"><span class="n no">1</span></td>
-      <td>SEACE (T-004) y RENIPRESS para obras de salud (T-006)</td>
+      <td class="c"><span class="n ok">2</span></td><td class="c"><span class="n dep">5</span></td>
+      <td class="c"><span class="n z">0</span></td><td class="c"><span class="n no">1</span></td>
+      <td>Calibrar matching RENIPRESS y cerrar el candado F5 de SEACE</td>
     </tr>
     <tr>
-      <td><b>A · privada</b></td><td class="c">2</td>
-      <td class="c"><span class="n ok">1</span></td><td class="c"><span class="n dep">1</span></td>
+      <td><b>A · privada</b></td><td class="c">3</td>
+      <td class="c"><span class="n ok">1</span></td><td class="c"><span class="n dep">2</span></td>
       <td class="c"><span class="n z">0</span></td><td class="c"><span class="n no">1</span></td>
-      <td>Nada pedido — pero queda abierta la pregunta de RENIPRESS</td>
+      <td>Render y matching conservador de RENIPRESS</td>
     </tr>
     <tr>
       <td><b>B · privada</b></td><td class="c">3</td>
-      <td class="c"><span class="n ok">1</span></td><td class="c"><span class="n dep">1</span></td>
-      <td class="c"><span class="n cot">1</span></td><td class="c"><span class="n no">1</span></td>
-      <td>RENIPRESS (T-006)</td>
+      <td class="c"><span class="n ok">1</span></td><td class="c"><span class="n dep">2</span></td>
+      <td class="c"><span class="n z">0</span></td><td class="c"><span class="n no">1</span></td>
+      <td>Render y matching conservador de RENIPRESS</td>
     </tr>
   </table>
   </div>
@@ -281,7 +278,7 @@
   <p class="aviso i">
     <b>Lo que salta a la vista:</b> las tres piezas azules —CUI, cargo↔bases y HABIDO— aparecen en
     <b>los cuatro caminos</b>. Un solo despliegue mueve la aguja en todos a la vez. Y las tres piezas
-    amarillas se reducen a <b>dos módulos</b>: T-004 (que además desbloquea T-005) y T-006.
+    amarillas se reducen a <b>T-005</b>. T-004 y T-006 ya aportan evidencia; sus saldos son candados, calibración y presentación.
   </p>
   <p class="aviso q">
     <b>Asimetría heredada del flujograma:</b> los cruces de fechas (inicio ≥ firma del contrato,

@@ -606,6 +606,12 @@ function consolidar(WS) {
         entidad_contratante: pick(e.entidad_contratante),
         ubicacion: pick(e.ubicacion),
         observaciones: obsExp || pick(j.observaciones),
+        // #65 · procedencia explícita: extractor/evaluador declaran el campo al
+        // inferirlo; aquí solo se unen las marcas, sin inspeccionar sus valores.
+        supuestos: [...new Set([
+          ...(Array.isArray(e.supuestos) ? e.supuestos : []),
+          ...(Array.isArray(j.supuestos) ? j.supuestos : []),
+        ])],
         // cert multi-obra: pasa la lista de sub-proyectos {proyecto, cui, fechas?}
         // (el backend resuelve cada CUI). Ausente en el caso normal (1 obra → `cui`).
         // fecha_inicial/fecha_final SOLO si el cert dio el rango POR obra (si no, null).
@@ -679,6 +685,10 @@ function consolidar(WS) {
       total: pe.total || {},
       cross_checks: crossChecks(raw.cross_checks),
       notas: Array.isArray(pr.notas) ? pr.notas : [],
+      supuestos: [...new Set([
+        ...(Array.isArray(pr.supuestos) ? pr.supuestos : []),
+        ...(Array.isArray(pe.supuestos) ? pe.supuestos : []),
+      ])],
       cumple: pick(pe.cumple),
       anios_adicionales: aniosAd,
     });
@@ -775,6 +785,11 @@ function consolidar(WS) {
       // página del PDF de bases con el Cuadro de Factores (4.2 A) → recorte que el
       // backend embebe al final de cada hoja de profesional (issue #32).
       pagina_factores: pick(bases.metadata_concurso && bases.metadata_concurso.pagina_factores),
+      // Rango físico completo del cuadro de personal. El recortador lo usa como
+      // fallback honesto si muchos cargos traen el mismo folio de inicio (#68).
+      paginas_personal_clave: pick(
+        bases.metadata_concurso && bases.metadata_concurso.paginas_personal_clave,
+        bases.metadata_concurso && bases.metadata_concurso.rango_personal_clave),
       postor: pick(P.postor, P.nombre, (roster.postor_nivel || {}).postor),
       postor_ruc: pick(P.postor_ruc, P.ruc, (roster.postor_nivel || {}).postor_ruc),
       fecha_presentacion_oferta: pick(P.fecha_presentacion_oferta),

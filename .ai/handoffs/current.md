@@ -4,6 +4,17 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
+## Nota (2026-08-02, Codex) — fixes pre-deploy completos
+
+Sobre `demo` quedaron implementadas #68 (rango TDR y detección de folio
+repetido), #64 (clamp desde inicio real de obra), #42 (revisión asíncrona
+consultable + polling/recuperación en el Panel) y #65 (procedencia estructurada
+de supuestos con color violeta). El contrato espejo sube a v1.3.0 de forma
+aditiva. Gate: **727 passed, 25 skipped**; contrato Pydantic/Zod aprobado sobre
+9 espejos históricos; build productivo del Panel aprobado; compilación y diff
+limpios. No cambió `backend/resolucion/cui.py`, por lo que no aplicó golden.
+No hubo despliegue.
+
 ## Nota (2026-08-02, Codex) — tren A–D completo en `demo`
 
 El tag `demo-pre-D-cache-seace` apunta a `3156d26`. D quedó integrado como

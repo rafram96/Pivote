@@ -64,6 +64,14 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
    > con la imagen. Solo esa página: es un dato dudoso por ~decenas de tokens,
    > contra un `POR VERIFICAR` que cuesta revisión humana. Si NI la imagen lo
    > resuelve, entonces sí `POR VERIFICAR` — esa abstención ya es de verdad.
+
+   **Procedencia de supuestos (#65):** cada profesional y cada experiencia lleva
+   `supuestos: []`. Si excepcionalmente completas un valor que NO está literal en
+   el documento, agrega el nombre exacto del campo a esa lista (por ejemplo,
+   `"ubicacion"` o `"cargo_ocupado"`) y explica el motivo en `notas` u
+   `observaciones`. Si el valor es literal, no lo marques. Si no puedes sostenerlo,
+   usa `null`/`POR VERIFICAR`: un dato ausente no es un supuesto. Nunca conviertas
+   una fecha parcial en un día completo inventado.
 5. **Identificadores para el cruce oficial (backend)** — campos dedicados:
    - **`proyecto`: ACCIÓN + OBJETO + UBICACIÓN, con las palabras del certificado.**
      El backend busca esa obra en el registro público **con ese texto**, así que el
@@ -243,7 +251,7 @@ Rellena este **esqueleto** con los valores reales (mismas claves, mismos tipos):
     "colegiatura": "CIP 123456", "fecha_colegiatura": "2008-05-12", "folio_colegiatura": 1153,
     "certificaciones": ["PMP (PMI, vig. 2024-2026)"],
     "experiencia_total_declarada": "12 años 3 meses (texto literal del cuadro)",
-    "notas": []
+    "notas": [], "supuestos": []
   },
   "experiencias": [
     {
@@ -259,7 +267,7 @@ Rellena este **esqueleto** con los valores reales (mismas claves, mismos tipos):
       "cert_antes_culminar": "NO", "incluye_covid": "SÍ", "traslape": "NO",
       "nivel_categoria": "II-2", "area_construida_m2": 12000, "monto_contrato_soles": 18015551.75,
       "entidad_contratante": "GOBIERNO REGIONAL DE X", "ubicacion": "Huancavelica",
-      "observaciones": null
+      "observaciones": null, "supuestos": []
     }
   ],
   "cross_checks": [

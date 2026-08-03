@@ -173,6 +173,11 @@ class Job(_ModelLax):
     # Descarga de documentos InfoObras: diferida tras el pipeline (no bloquea el
     # veredicto). pendiente → en_progreso → listas | error.
     descargas_estado: str = "pendiente"
+    # Una sola decisión humana pesada por job. El POST responde 202 y estas
+    # columnas permiten al panel seguirla sin mantener el request abierto (#42).
+    revision_estado: Optional[str] = None   # en_curso | completada | error
+    revision_item: Optional[str] = None     # "n_prof:n_exp"
+    revision_error: Optional[str] = None
     creado_en: Optional[datetime] = None
     actualizado_en: Optional[datetime] = None
 

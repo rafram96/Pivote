@@ -1,13 +1,18 @@
 """
 Pydantic v2 — JSON espejo de la skill `analizar-licitacion-osce`.
 
-Contrato **v1.2.0**. Valida el artefacto consolidado que la skill emite (la otra
+Contrato **v1.3.0**. Valida el artefacto consolidado que la skill emite (la otra
 cara del Excel). Refleja la forma **plana** que realmente fluye por el pipeline
 (la misma que consume `scripts/generar_excel.py` y que se validó round-trip
 contra Trujillo y Libertador).
 
 El bloque `_backend` es opcional y, en la salida de Claude, va vacío/null — es el
 contrato explícito de lo que el servidor on-prem llena después.
+
+Cambios v1.3.0:
+- `Profesional.supuestos` y `ExperienciaProf.supuestos` conservan la procedencia
+  de campos inferidos desde que nacen. El Excel los distingue visualmente de un
+  dato literal y de un dato simplemente pendiente de verificación (#65).
 
 Cambios v1.2.0 (lecciones de los espejos reales Libertador/Trujillo — ver
 docs/backend/validador.md §4):
@@ -214,6 +219,9 @@ class ExperienciaProf(_Model):
     entidad_contratante: Optional[str] = None  # dueño de la obra (≠ emisor del cert) → score CUI
     ubicacion: Optional[str] = None       # dpto/prov/distrito si el cert lo cita → score CUI
     observaciones: Optional[str] = None
+    # Nombres EXACTOS de campos cuyo valor fue inferido y no leído literalmente
+    # del certificado. No se reconstruye buscando "ASUMIDO" dentro del valor.
+    supuestos: list[str] = Field(default_factory=list)
     # Sub-proyectos si el cert es multi-obra (1 vínculo, N obras). None/vacío en el
     # caso normal (1 experiencia = 1 obra, va en `cui`). Ver SubObra.
     obras: Optional[list[SubObra]] = None
@@ -256,6 +264,7 @@ class Profesional(_ModelLax):
     total: dict = Field(default_factory=dict)
     cross_checks: list[CrossCheck] = Field(default_factory=list)
     notas: list[str] = Field(default_factory=list)
+    supuestos: list[str] = Field(default_factory=list)
     cumple: Optional[str] = None
     anios_adicionales: Optional[str] = None
 

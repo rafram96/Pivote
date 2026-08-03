@@ -125,11 +125,11 @@
 <body>
 
 <h1>Flujos de las otras skills del Excel</h1>
-<p class="sub">Hojas «cui» y «contrato bases y resolucion» del Excel «para RAFAEL-V2» (Ing. Manuel Echandía) · anotado con el estado real en el sistema — <b>v2 · 22&nbsp;jul&nbsp;2026</b>: actualizado con el refactor de resolución de CUI ya construido (base local MEF, rama <code>sonda/refactor-cui</code>)</p>
+<p class="sub">Hojas «cui» y «contrato bases y resolucion» del Excel «para RAFAEL-V2» (Ing. Manuel Echandía) · contrastadas con la rama <code>demo</code> — <b>v3 · 2&nbsp;ago&nbsp;2026</b>: CUI, Bases Integradas, contrato y resolución ya se obtienen por código; la cronología T-005 sigue pendiente.</p>
 
 <div class="leyenda">
-  <span><i class="chip ok"></i> Ya construido por código en el sistema (T-003 / T-008)</span>
-  <span><i class="chip cot"></i> Cotizable — paquetes T-004 / T-005</span>
+  <span><i class="chip ok"></i> Ya construido por código (T-003 / T-004 núcleo / T-008)</span>
+  <span><i class="chip cot"></i> Saldo técnico — T-004/F5 y T-005</span>
 </div>
 
 <!-- ============ SKILL 1: CUI ============ -->
@@ -199,7 +199,7 @@
       <!-- PARTE A -->
       <div class="rama pub">
         <span class="etiqueta">PARTE A — SEACE</span>
-        <span class="estado cot">T-004 · cotizable</span>
+        <span class="estado ok">T-004 · núcleo construido</span>
         <div class="paso">
           <div class="titulo"><span class="num">A1</span><b>Abrir el Buscador Público del SEACE</b></div>
           <p>Formulario de búsqueda de procedimientos (app con captcha).</p>
@@ -218,14 +218,14 @@
         <div class="paso">
           <div class="titulo"><span class="num">A4</span><b>Descargar las BASES INTEGRADAS</b></div>
           <ul>
-            <li class="cot"><span class="txt">Distinguir de «Bases» sin integrar y de bases administrativas → 01_BASES_INTEGRADAS_….pdf</span><span class="tag cot">T-004</span></li>
+            <li class="ok"><span class="txt">Distinguir Bases Integradas de bases administrativas y conservar PDF/ZIP/RAR real → SEACE_01_BASES_INTEGRADAS.*</span><span class="tag ok">T-004 ✔</span></li>
           </ul>
         </div>
         <div class="flecha"></div>
         <div class="paso">
           <div class="titulo"><span class="num">A5</span><b>Descargar el CONTRATO firmado</b></div>
           <ul>
-            <li class="cot"><span class="txt">Sección de ejecución contractual → 02_CONTRATO_FIRMADO_….pdf · si la entidad no lo publicó, se deja indicado (nunca se inventa)</span><span class="tag cot">T-004</span></li>
+            <li class="ok"><span class="txt">Contrato firmado → SEACE_02_CONTRATO_FIRMADO.* · si no está publicado, se deja nota explícita</span><span class="tag ok">T-004 ✔</span></li>
           </ul>
         </div>
       </div>
@@ -267,8 +267,8 @@
     <div class="paso" style="max-width:640px">
       <div class="titulo"><span class="num">✓</span><b>Entregable 1 — Paquete de documentos por obra</b></div>
       <ul>
-        <li class="cot"><span class="txt">01 Bases Integradas (SEACE)</span><span class="tag cot">T-004</span></li>
-        <li class="cot"><span class="txt">02 Contrato firmado (SEACE)</span><span class="tag cot">T-004</span></li>
+        <li class="ok"><span class="txt">01 Bases Integradas (SEACE; formato real preservado)</span><span class="tag ok">T-004 ✔</span></li>
+        <li class="ok"><span class="txt">02 Contrato firmado (SEACE)</span><span class="tag ok">T-004 ✔</span></li>
         <li class="ok"><span class="txt">03 Resolución de aprobación del ET (MEF, Formato 08-A)</span><span class="tag ok">T-003 ✔</span></li>
       </ul>
     </div>

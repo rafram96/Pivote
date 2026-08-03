@@ -110,11 +110,11 @@
 <body>
 
 <h1>Resolución de CUI + Datos Abiertos SEACE</h1>
-<p class="sub">Cómo se enlaza cada experiencia con su proceso SEACE <b>sin captcha</b>: flujo de resolución/confirmación del CUI, fuentes, y evidencia medida con los 29 concursos reales de <code>datos_pivote</code> — <b>v2 · 22&nbsp;jul&nbsp;2026</b>: el paso 1 ya es el resolver NUEVO (T-008, rama <code>sonda/refactor-cui</code>, construido y validado)</p>
+<p class="sub">Cómo se enlaza cada experiencia con su proceso SEACE <b>sin captcha</b>: flujo implementado, límites y evidencia medida — <b>v3 · 2&nbsp;ago&nbsp;2026</b>: resolución, selección por tipo y documentos ya están en <code>demo</code>; el candado F5 y los cruces T-005 continúan pendientes.</p>
 
 <div class="leyenda">
   <span><i class="chip ok"></i> Validado en vivo con datos reales</span>
-  <span><i class="chip ver"></i> Diseño propuesto (estructura verificada, falta integrarlo)</span>
+  <span><i class="chip ver"></i> Saldo pendiente: candado F5 y cruces T-005</span>
   <span><i class="chip no"></i> Límite conocido</span>
 </div>
 
@@ -138,7 +138,7 @@
     <div class="flecha"></div>
 
     <div class="paso">
-      <div class="titulo"><span class="num">2</span><b>Procesos del CUI — API OCDS (sin captcha)</b></div>
+      <div class="titulo"><span class="num">2</span><b>Procesos del CUI — API OCDS (sin captcha)</b> <span class="tag ok">✔ construido</span></div>
       <p><code>GET /api/v1/records?projectID={CUI}</code> en <code>contratacionesabiertas.oece.gob.pe</code> → todos los procesos SEACE de esa inversión.</p>
       <ul>
         <li class="ok"><span>Cobertura real: 158/194 CUIs (81%) · 553/641 experiencias (86%)</span><span class="tag ok">✔ medido</span></li>
@@ -147,7 +147,7 @@
     <div class="flecha"></div>
 
     <div class="paso">
-      <div class="titulo"><span class="num">3</span><b>Elegir el proceso correcto por TIPO</b></div>
+      <div class="titulo"><span class="num">3</span><b>Elegir el proceso correcto por TIPO</b> <span class="tag ok">✔ construido</span></div>
       <p>La distinción del flujograma del ingeniero, automática por la descripción/categoría del tender:</p>
       <ul>
         <li><span>Expediente técnico → consultoría con "ELABORACIÓN DEL EXPEDIENTE TÉCNICO" (services)</span></li>
@@ -158,16 +158,16 @@
     <div class="flecha"></div>
 
     <div class="paso">
-      <div class="titulo"><span class="num">4</span><b>Candado de confirmación</b> <span class="tag ver">cascada de 3 niveles — sección 2</span></div>
+      <div class="titulo"><span class="num">4</span><b>Candado de confirmación F5</b> <span class="tag ver">pendiente — cascada de 3 niveles</span></div>
       <p>¿La empresa que emitió el certificado participó de verdad en ese proceso? Confirma el CUI con evidencia dura y mata homónimos.</p>
     </div>
     <div class="flecha lbl"><i>confirmado ↓ · no confirmado → «Por confirmar»</i></div>
 
     <div class="paso">
-      <div class="titulo"><span class="num">5</span><b>Extraer documentos y fechas</b></div>
+      <div class="titulo"><span class="num">5</span><b>Extraer documentos y fechas</b> <span class="tag ok">✔ documentos construidos</span></div>
       <ul>
-        <li class="ok"><span><b>Bases Integradas</b> (tender.documents / biddingDocuments) — PDF directo</span><span class="tag ok">✔ 7.4MB probado</span></li>
-        <li class="ok"><span><b>Contrato firmado</b> (contractSigned) — PDF directo</span><span class="tag ok">✔ probado</span></li>
+        <li class="ok"><span><b>Bases Integradas</b> — se preserva su formato real PDF/ZIP/RAR; WAF del host resuelto</span><span class="tag ok">✔ descarga real</span></li>
+        <li class="ok"><span><b>Contrato firmado</b> — publicación atómica y caché por <code>fileCode</code></span><span class="tag ok">✔ probado</span></li>
         <li class="ok"><span><b>Fecha de suscripción</b> + vigencias (CONOSCE contratos / OCDS)</span><span class="tag ok">✔ estructurada, sin OCR</span></li>
         <li class="ok"><span>Pliego de consultas, buena pro, informes de evaluación (bonus)</span><span class="tag ok">✔ disponibles</span></li>
       </ul>
@@ -323,18 +323,18 @@
 
 <!-- ============ 7. ARTEFACTOS ============ -->
 <section>
-  <h2>7 · Scripts de sonda y pruebas (rama <code>sonda/seace</code>)</h2>
+  <h2>7 · Implementación y evidencia</h2>
   <div class="tabla-wrap">
   <table>
     <tr><th>Script</th><th>Qué hace</th><th>Estado</th></tr>
-    <tr><td class="num">tools/conosce.py</td><td>Descarga datasets CONOSCE por año + resumen de columnas; <code>--pdf</code> baja un contrato</td><td><span class="tag ok">✔ validado</span></td></tr>
-    <tr><td class="num">tools/ocds.py</td><td>Record por CUI/ocid + listado de documentos; <code>--bajar</code> descarga Bases Integradas + contrato</td><td><span class="tag ok">✔ validado</span></td></tr>
+    <tr><td class="num">backend/scraping/seace_abierto.py</td><td>CONOSCE + OCDS, clasificación por tipo, selección y descarga robusta</td><td><span class="tag ok">✔ integrado</span></td></tr>
+    <tr><td class="num">backend/orquestador/descargas_seace.py</td><td>Caché compartida, validación por magia y materialización atómica por experiencia</td><td><span class="tag ok">✔ integrado</span></td></tr>
     <tr><td class="num">tools/seace.py</td><td>Buscador JSF (proyecto previo) + veredicto reCAPTCHA v3 en cabecera — queda de fallback browser</td><td><span class="tag no">NO-GO requests puro</span></td></tr>
     <tr><td class="num">backend/datos_pivote/test_cobertura_ocds.py</td><td>Mide cobertura OCDS sobre los CUIs reales (con cache re-corrible)</td><td><span class="tag ok">✔ corrido: 86%</span></td></tr>
     <tr><td class="num">backend/datos_pivote/test_confirmacion_ruc.py</td><td>Mide el candado nivel 1 (RUC emisor vs parties del proceso)</td><td><span class="tag ok">✔ corrido: 31%</span></td></tr>
   </table>
   </div>
-  <p class="nota">Documentos hermanos en esta carpeta: <b>plan-desarrollo-extras.html</b> (cotización T-003…T-007) · <b>flujos-verificacion-experiencias.html</b> (qué se verifica por tipo) · <b>flujos-skills-excel.html</b> (las skills del Excel del ingeniero). Este documento actualiza de facto el riesgo de T-004/T-005: de «captcha/OCR» a «datos abiertos verificados».</p>
+  <p class="nota">Documentos hermanos: <b>plan-desarrollo-extras.html</b> (estado y valor actualizado) · <b>flujos-verificacion-experiencias.html</b> (qué se verifica por tipo) · <b>flujos-skills-excel.html</b> (cómo se obtienen los documentos). T-004 ya no es una sonda: es capacidad construida con F5 pendiente.</p>
 </section>
 
 </body>

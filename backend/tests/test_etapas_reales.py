@@ -96,6 +96,8 @@ class ObraFake:
     codigo_infoobras: str = "INF-001"
     avances: list = field(default_factory=list)
     aprobacion_expediente: object = None
+    fecha_inicio: date | None = None
+    fecha_fin: date | None = None
 
 
 def _meses(desde, hasta, paralizados=()):
@@ -755,6 +757,39 @@ def test_clamp_descuenta_cert_fuera_de_la_ventana(tmp_path):
     assert p1["dias_efectivos"] == 182     # solo ene-jun 2016 (lo valorizado)
 
 
+def test_clamp_arranca_en_fecha_real_de_la_obra(tmp_path):
+    """#64: enero valorizado no acredita días anteriores al inicio 25/01."""
+    espejo = {
+        "_meta": {"analisis_id": "clamp-dia", "concurso": "c", "postor": "p"},
+        "postor": {}, "resumen_evaluacion": {"factores": []},
+        "profesionales": [{
+            "n_prof": 1, "cargo": "GEOTECNIA", "nombre": "N",
+            "requisitos": {"tipo_experiencia": "mínimo 1 mes"},
+            "experiencias": [{
+                "n": 1, "proyecto": "OBRA GEOTECNIA", "cui": "2418877",
+                "fecha_inicial": "2023-01-04", "fecha_final": "2023-02-28", "folio": "1",
+            }],
+        }],
+    }
+
+    def fetcher(cui, *a, **k):
+        return ObraFake(
+            111, "OBRA GEOTECNIA", avances=_meses((2023, 1), (2023, 2)),
+            fecha_inicio=date(2023, 1, 25), fecha_fin=date(2023, 2, 10))
+
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(
+        tmp_path, consulta_cui=ConsultaFake(), fetcher_infoobras=fetcher,
+        consultor_sunat=lambda r: None, descargar=lambda *a, **k: None), repo)
+    job = motor.correr(motor.crear_job(espejo).job_id)
+    enr = repo.cargar_enriquecimiento(job.job_id)
+    tramos = enr["1:1"]["paralizaciones"]
+    previo = next(p for p in tramos if p["tipo"] == "antes_inicio_obra")
+    assert (previo["inicio"], previo["fin"]) == ("2023-01-04", "2023-01-24")
+    # 56 días brutos menos 21 previos al inicio; fecha_fin de ficha NO recorta febrero.
+    assert enr["prof:1"]["dias_efectivos"] == 35
+
+
 def test_rucs_postor_excluye_experiencia_postor():
     """_rucs_postor toma RUCs de formularios/consorciados/meta, NO de
     experiencia_postor (esos son clientes terceros → falsos positivos)."""
@@ -893,6 +928,12 @@ def test_cobertura_y_clamp_coinciden_en_borde_de_mes():
     assert _cobertura_cert(avs, ci, cf) > 0
     fuera = _fuera_de_ventana(avs, ci, cf)
     assert fuera and fuera[0][0] == date(2020, 4, 1)  # fuera empieza 01/04, no 16/03
+
+
+def test_clamp_sin_fecha_inicio_conserva_granularidad_mensual():
+    from orquestador.etapas_reales import _fuera_de_ventana
+    avs = [AvanceFake(2023, 1, "En ejecución")]
+    assert _fuera_de_ventana(avs, date(2023, 1, 4), date(2023, 1, 31)) == []
 
 
 def test_motivo_cobertura_distingue_la_causa():

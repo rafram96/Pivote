@@ -603,31 +603,52 @@ def ver_job(job_id: str):
     return json.loads(_job_o_404(job_id).model_dump_json())
 
 
-@app.post("/api/pivote/jobs/{job_id}/revision")
+def _resolver_revision_background(job_id: str, n_prof: int, n_exp: int, body: dict):
+    """Re-ejecuta la experiencia fuera del request y deja un estado consultable."""
+    with _lock_descargas(job_id):
+        try:
+            job = motor.resolver_revision(job_id, n_prof, n_exp, body)
+            # La obra/CUI pudo cambiar: invalida solo los documentos de este ítem.
+            base = _dir_job(job_id) / "descargas"
+            shutil.rmtree(base / f"P{n_prof}_E{n_exp}", ignore_errors=True)
+            (base / f"P{n_prof}_E{n_exp}.ok").unlink(missing_ok=True)
+            (base / f"P{n_prof}_E{n_exp}.seace.ok").unlink(missing_ok=True)
+            job.descargas_estado = "pendiente"
+            job.revision_estado = "completada"
+            job.revision_error = None
+            repo.guardar(job)
+        except Exception as exc:  # el fallo debe sobrevivir al log y llegar al panel
+            logger.exception("falló revisión background job=%s item=%s:%s", job_id, n_prof, n_exp)
+            job = repo.cargar(job_id)
+            if job:
+                job.revision_estado = "error"
+                job.revision_error = str(exc) or type(exc).__name__
+                repo.guardar(job)
+            return
+    _asegurar_descargas(job_id)
+
+
+@app.post("/api/pivote/jobs/{job_id}/revision", status_code=202)
 def resolver_revision(job_id: str, tareas: BackgroundTasks, body: dict):
     n_prof, n_exp = body.get("n_prof"), body.get("n_exp")
     if not isinstance(n_prof, int) or not isinstance(n_exp, int):
         raise HTTPException(400, "n_prof y n_exp son obligatorios")
     if not body.get("cui") and body.get("accion") != "no_existe":
         raise HTTPException(400, "se requiere cui o accion='no_existe'")
-    # TODO el read-modify-write del job va bajo el lock del job, para que NO se
-    # entrelace con `_asegurar_descargas` (que toma el mismo lock): antes,
-    # `motor.resolver_revision` guardaba FUERA del lock y una descarga en background
-    # podía pisar los `items_revision` recién resueltos (última escritura gana).
     with _lock_descargas(job_id):
-        try:
-            job = motor.resolver_revision(job_id, n_prof, n_exp, body)
-        except ValueError as e:
-            raise HTTPException(404, str(e))
-        # La obra/CUI del item pudo cambiar al re-resolver → invalida SUS PDFs y
-        # las marcas de AMBAS fuentes para re-bajarlos frescos.
-        base = _dir_job(job_id) / "descargas"
-        shutil.rmtree(base / f"P{n_prof}_E{n_exp}", ignore_errors=True)
-        (base / f"P{n_prof}_E{n_exp}.ok").unlink(missing_ok=True)
-        (base / f"P{n_prof}_E{n_exp}.seace.ok").unlink(missing_ok=True)
-        job.descargas_estado = "pendiente"
+        job = _job_o_404(job_id)
+        item = next((it for it in job.items_revision
+                     if it.n_prof == n_prof and it.n_exp == n_exp and not it.resuelto), None)
+        if item is None:
+            raise HTTPException(
+                404, f"no hay ItemRevision pendiente para prof={n_prof} exp={n_exp}")
+        if job.revision_estado == "en_curso":
+            raise HTTPException(409, "ya hay una revisión guardándose para este análisis")
+        job.revision_estado = "en_curso"
+        job.revision_item = f"{n_prof}:{n_exp}"
+        job.revision_error = None
         repo.guardar(job)
-    tareas.add_task(_asegurar_descargas, job_id)   # re-baja en background (fuera del lock)
+    tareas.add_task(_resolver_revision_background, job_id, n_prof, n_exp, dict(body))
     return json.loads(job.model_dump_json())
 
 

@@ -89,7 +89,8 @@ def _fin_de_mes(d: date) -> date:
     return date(d.year + d.month // 12, d.month % 12 + 1, 1) - timedelta(days=1)
 
 
-def _cobertura_cert(avances, cert_ini: Optional[date], cert_fin: Optional[date]) -> Optional[float]:
+def _cobertura_cert(avances, cert_ini: Optional[date], cert_fin: Optional[date],
+                    fecha_inicio_obra: Optional[date] = None) -> Optional[float]:
     """Fracción [0..1] del periodo del certificado cubierta por el rango de
     valorizaciones de la obra. None si faltan datos para decidir."""
     if not (cert_ini and cert_fin) or cert_fin <= cert_ini:
@@ -99,12 +100,15 @@ def _cobertura_cert(avances, cert_ini: Optional[date], cert_fin: Optional[date])
     if not meses:
         return 0.0
     vi, vf = min(meses), max(meses)
+    if fecha_inicio_obra:
+        vi = max(vi, fecha_inicio_obra)
     # fin-de-mes de la última valoriz: misma ventana que el clamp (_fuera_de_ventana)
     solape = (min(cert_fin, _fin_de_mes(vf)) - max(cert_ini, vi)).days
     return max(0, solape) / (cert_fin - cert_ini).days
 
 
-def _fuera_de_ventana(avances, cert_ini: Optional[date], cert_fin: Optional[date]
+def _fuera_de_ventana(avances, cert_ini: Optional[date], cert_fin: Optional[date],
+                      fecha_inicio_obra: Optional[date] = None,
                       ) -> list[tuple[date, date]]:
     """Tramos del certificado que caen FUERA de la ventana de valorizaciones de
     la obra (antes de la 1ª / después de la última). Son días sin valorización
@@ -121,6 +125,11 @@ def _fuera_de_ventana(avances, cert_ini: Optional[date], cert_fin: Optional[date
     if not meses:
         return [(cert_ini, cert_fin)]  # obra sin valorizaciones → todo fuera
     vi, vf = min(meses), max(meses)
+    # Una valorización mensual acredita únicamente días en los que la obra ya
+    # existía. El lado final NO usa fecha_fin: ampliaciones pueden valorizar
+    # legítimamente después de esa ficha (#64, regresión Cajabamba).
+    if fecha_inicio_obra:
+        vi = max(vi, fecha_inicio_obra)
     vf_fin = _fin_de_mes(vf)  # la valoriz del último mes cubre todo el mes
     fuera: list[tuple[date, date]] = []
     if vi > cert_ini:
@@ -130,7 +139,8 @@ def _fuera_de_ventana(avances, cert_ini: Optional[date], cert_fin: Optional[date
     return fuera
 
 
-def _motivo_cobertura(avances, cert_ini, cert_fin, cod, pct: int) -> str:
+def _motivo_cobertura(avances, cert_ini, cert_fin, cod, pct: int,
+                      fecha_inicio_obra: Optional[date] = None) -> str:
     """Mensaje específico —legible para un evaluador NO técnico— de por qué la
     obra no cubre el periodo certificado. Distingue las causas en vez de un
     genérico '% de solape'."""
@@ -141,6 +151,9 @@ def _motivo_cobertura(avances, cert_ini, cert_fin, cod, pct: int) -> str:
         return (f"la obra {cod} está registrada SIN valorizaciones ejecutadas "
                 f"— no es verificable en InfoObras")
     vi, vf = min(meses), max(meses)
+    if fecha_inicio_obra and cert_ini and cert_ini < fecha_inicio_obra:
+        return (f"la obra {cod} empezó el {fecha_inicio_obra.strftime('%d/%m/%Y')}; "
+                f"los días anteriores no están respaldados por una obra existente")
     if cert_ini and _fin_de_mes(vf) < cert_ini:  # mismo borde de mes que el clamp
         return (f"la obra {cod} valorizó hasta {vf.strftime('%m/%Y')}, antes de que "
                 f"empiece el certificado ({cert_ini.strftime('%m/%Y')}) — periodo no respaldado")
@@ -523,10 +536,17 @@ class EtapaInfoObrasReal:
             # A un EXPEDIENTE no se le aplica: el estudio precede a la construcción
             # y sus fechas jamás caen dentro de las valorizaciones de la obra.
             if not (es_exp_aprobado or _es_exped):
-                enr["paralizaciones"] += [
-                    {"inicio": a.isoformat(), "fin": b.isoformat(), "tipo": "fuera_de_ventana"}
-                    for a, b in _fuera_de_ventana(getattr(obra, "avances", []) or [], cert_ini, cert_fin)
-                ]
+                _inicio_obra = getattr(obra, "fecha_inicio", None)
+                for a, b in _fuera_de_ventana(
+                        getattr(obra, "avances", []) or [], cert_ini, cert_fin,
+                        _inicio_obra):
+                    _tipo = ("antes_inicio_obra" if _inicio_obra and b < _inicio_obra
+                             else "fuera_de_ventana")
+                    enr["paralizaciones"].append({
+                        "inicio": a.isoformat(), "fin": b.isoformat(), "tipo": _tipo,
+                        **({"fecha_inicio_obra": _inicio_obra.isoformat()}
+                           if _tipo == "antes_inicio_obra" else {}),
+                    })
             enr.pop("sin_verificar", None)  # se trajo OK: ya no es incierta
             enr["codigo_infoobras"] = getattr(obra, "codigo_infoobras", None)
             enr["obra_nombre"] = getattr(obra, "nombre", None)
@@ -585,7 +605,9 @@ class EtapaInfoObrasReal:
             # cobertura: ¿las valorizaciones de la obra elegida cubren el periodo
             # certificado? Si casi no solapan, el emparejamiento es dudoso (obra
             # equivocada o periodo en un hueco) → revisión humana.
-            cob = _cobertura_cert(getattr(obra, "avances", []) or [], cert_ini, cert_fin)
+            _inicio_obra = getattr(obra, "fecha_inicio", None)
+            cob = _cobertura_cert(
+                getattr(obra, "avances", []) or [], cert_ini, cert_fin, _inicio_obra)
             if not es_exp_aprobado and cob is not None and cob < _COBERTURA_MIN:
                 pct = round(cob * 100)
                 # La etapa REGLAS necesita saberlo: si el clamp deja al profesional
@@ -599,7 +621,7 @@ class EtapaInfoObrasReal:
                 ctx.enriquecimiento[k_cob] = enr_cob
                 cod = getattr(obra, "codigo_infoobras", None)
                 motivo = _motivo_cobertura(getattr(obra, "avances", []) or [],
-                                           cert_ini, cert_fin, cod, pct)
+                                           cert_ini, cert_fin, cod, pct, _inicio_obra)
                 obs.append(pipeline.Observacion(
                     codigo="COBERTURA", severidad=pipeline.Severidad.ADVERTENCIA,
                     mensaje=f"{motivo} (CUI {cui})",
@@ -664,7 +686,8 @@ class EtapaInfoObrasReal:
                                       "cert_ini": si.isoformat(), "cert_fin": sf.isoformat(),
                                       "nota": "obra sin valorizaciones"}
                 else:
-                    cob = _cobertura_cert(avances, si, sf)
+                    cob = _cobertura_cert(
+                        avances, si, sf, getattr(obra, "fecha_inicio", None))
                     s["cobertura"] = {
                         "pct": round(cob * 100) if cob is not None else None,
                         "cert_ini": si.isoformat(), "cert_fin": sf.isoformat(),

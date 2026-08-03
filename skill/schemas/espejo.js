@@ -4,7 +4,7 @@
  * Versión Node del contrato (la PC del ingeniero solo tiene Node, no Python).
  * Equivalente a `backend/schemas/espejo.py` (Pydantic), forma plana real.
  *
- * Contrato **v1.2.0** — mantener en paridad con el Pydantic (los cambios de
+ * Contrato **v1.3.0** — mantener en paridad con el Pydantic (los cambios de
  * versión se listan en el docstring de espejo.py). El test de contrato
  * (`tools/test_contrato.py`) corre los mismos fixtures por ambos validadores.
  *
@@ -104,6 +104,8 @@ const ExperienciaProf = z.object({
   entidad_contratante: txt,      // dueño de la obra (≠ emisor del cert) → score CUI
   ubicacion: txt,                // dpto/prov/distrito si el cert lo cita → score CUI
   observaciones: txt,
+  // Procedencia #65: campos inferidos, declarados en el punto donde nacen.
+  supuestos: z.array(z.string()).default([]),
   // Sub-proyectos si el cert es multi-obra (1 vínculo, N obras). Vacío/ausente en
   // el caso normal (1 experiencia = 1 obra, va en `cui`). Ver SubObra.
   obras: z.array(SubObra).nullable().optional(),
@@ -139,6 +141,7 @@ const Profesional = z.object({
   total: z.record(z.any()).default({}),
   cross_checks: z.array(CrossCheck).optional(),
   notas: z.array(z.string()).optional(),
+  supuestos: z.array(z.string()).default([]),
   cumple: txt, anios_adicionales: txt,
 }).passthrough().superRefine((p, ctx) => {
   const ns = p.experiencias.map((e) => e.n);

@@ -37,7 +37,7 @@ from reglas import (
 from schemas.cargo import etiqueta_hoja
 from scripts.generar_excel import (
     AL_HEAD, AL_WRAP, BORDER, F_BOLD, F_CELL, F_HEAD, F_PARTE, F_PROF,
-    FILL_BACKEND, FILL_CLAUDE, FILL_HEAD, FILL_PARTE, FILL_PROF,
+    FILL_BACKEND, FILL_CLAUDE, FILL_HEAD, FILL_PARTE, FILL_PROF, FILL_SUPUESTO,
     FMT_DEC, FMT_FECHA, FMT_INT, _fill_veredicto, _sin_jerga, construir_hoja_evaluacion,
     fecha_excel,
 )
@@ -229,6 +229,7 @@ def construir_hoja_base_datos(ws, espejo: dict) -> int:
     for idx, prof in enumerate(espejo.get("profesionales", [])):
         fill = PatternFill("solid", fgColor=_PALETA_PROF[idx % len(_PALETA_PROF)])
         for e in prof.get("experiencias", []):
+            sup = set(prof.get("supuestos") or []) | set(e.get("supuestos") or [])
             valores = [
                 prof.get("cargo"), prof.get("n_prof"), prof.get("nombre"),
                 prof.get("colegiatura"), e.get("n"), e.get("entidad_emisora"),
@@ -258,6 +259,17 @@ def construir_hoja_base_datos(ws, espejo: dict) -> int:
                     vf = _fill_veredicto(v, _BD_VERDICTS[i])
                     if vf:
                         c.fill = vf
+                campos_bd = {
+                    1: "cargo", 3: "nombre", 4: "colegiatura",
+                    6: "entidad_emisora", 7: "proyecto", 8: "cui",
+                    9: "tipo_documento", 10: "nombre_emisor", 11: "cargo_emisor",
+                    12: "fecha_inicial", 13: "fecha_final", 14: "fecha_emision",
+                    15: "folio", 19: "cargo_ocupado", 20: "cargo_bases_valido",
+                    21: "anterior_colegiatura", 22: "incluye_covid",
+                    23: "traslape", 24: "tipo_obra_valido",
+                }
+                if campos_bd.get(i) in sup and v not in (None, ""):
+                    c.fill = FILL_SUPUESTO
             r += 1
 
     ws.auto_filter.ref = f"A1:{get_column_letter(len(_BD_HEAD))}{max(r - 1, 1)}"
@@ -1271,6 +1283,10 @@ def construir_hoja_profesional(
     banda(f"PROFESIONAL {n_prof}: {prof.get('cargo', '')}")
     ws.cell(r, 1, f"Nombre: {prof.get('nombre') or '—'}").font = F_BOLD; r += 1
     ws.cell(r, 1, f"Colegiatura: {prof.get('colegiatura') or '—'}").font = F_CELL; r += 1
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
+    c = ws.cell(r, 1, "LEYENDA: violeta = dato supuesto o inferido; amarillo = por verificar")
+    c.font, c.fill, c.alignment = F_CELL, FILL_SUPUESTO, AL_WRAP
+    r += 1
     r += 1
 
     # ── A · Contexto del TDR + Anexo 16, ANTES de las experiencias ───────────
@@ -1296,7 +1312,16 @@ def construir_hoja_profesional(
             ws.row_dimensions[r].height = max(15, (-(-len(str(value)) // 35)) * 13 + 2)
             r += 1
         if _tdr_pdf:
-            embeber_cert(_tdr_pdf, "REQUISITO DEL TDR — recorte de las bases (imagen)")
+            import fitz
+            with fitz.open(str(_tdr_pdf)) as _tdr_doc:
+                _tdr_paginas = _tdr_doc.page_count
+            _tdr_rotulo = (
+                "REQUISITO DEL TDR — cuadro completo de personal clave "
+                "(recorte amplio; ubicar este cargo dentro del rango)"
+                if _tdr_paginas > 1 else
+                "REQUISITO DEL TDR — recorte de las bases (imagen)"
+            )
+            embeber_cert(_tdr_pdf, _tdr_rotulo)
         if _anexo_pdf:
             embeber_cert(_anexo_pdf, "ANEXO 16 — EXPERIENCIA DECLARADA Y FIRMADA (imagen)")
         r += 1
@@ -1352,19 +1377,29 @@ def construir_hoja_profesional(
         else:
             cui_text = "No consignado en el certificado"
 
-        for label, value in [("ENTIDAD / EMPRESA QUE EMITE", e.get("entidad_emisora")),
-                             ("TIPO DE DOCUMENTO", e.get("tipo_documento")),
-                             ("PROYECTO U OBRA", e.get("proyecto")),
-                             ("PERIODO (certificado)", periodo),
-                             ("PERIODO (InfoObras)", periodo_io),
-                             ("CARGO QUE OCUPÓ", e.get("cargo_ocupado")),
-                             ("CÓDIGO (CUI/SNIP)", cui_text)]:
+        sup = set(e.get("supuestos") or [])
+        filas_recap = [
+            ("ENTIDAD / EMPRESA QUE EMITE", e.get("entidad_emisora"), "entidad_emisora"),
+            ("TIPO DE DOCUMENTO", e.get("tipo_documento"), "tipo_documento"),
+            ("PROYECTO U OBRA", e.get("proyecto"), "proyecto"),
+            ("PERIODO (certificado)", periodo, "periodo"),
+            ("PERIODO (InfoObras)", periodo_io, None),
+            ("CARGO QUE OCUPÓ", e.get("cargo_ocupado"), "cargo_ocupado"),
+            # Si el certificado no citó código, la identificación nació en el
+            # enriquecimiento del servidor y se presenta como inferencia.
+            ("CÓDIGO (CUI/SNIP)", cui_text, "cui_inferido" if (cui and not cui_cert) else "cui"),
+        ]
+        for label, value, campo in filas_recap:
             cl = ws.cell(r, 1, label); cl.font, cl.fill, cl.border = F_BOLD, FILL_RECAP, BORDER
             cl.alignment = Alignment(vertical="top", wrap_text=True)
             ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=4)
             value = _xl(value)
             cv = ws.cell(r, 2, value or "—")
             cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
+            es_periodo_supuesto = campo == "periodo" and bool(
+                {"fecha_inicial", "fecha_final"} & sup)
+            if campo == "cui_inferido" or campo in sup or es_periodo_supuesto:
+                cv.fill = FILL_SUPUESTO
             lns = max(1, -(-len(str(value or "—")) // 35))   # B:D ≈ 35 car/línea
             ws.row_dimensions[r].height = max(15, lns * 13 + 2)
             r += 1
@@ -1418,6 +1453,12 @@ def construir_hoja_profesional(
                 elif tipo == "fuera_de_ventana":
                     n_fv += 1
                     etiqueta = f"Sin valorización {n_fv} — fuera del periodo de la obra (InfoObras)"
+                elif tipo == "antes_inicio_obra":
+                    n_fv += 1
+                    _fi_obra = p.get("fecha_inicio_obra") if isinstance(p, dict) else None
+                    etiqueta = (f"Sin valorización {n_fv} — antes del inicio de la obra"
+                                f" ({_fi_obra})" if _fi_obra else
+                                f"Sin valorización {n_fv} — antes del inicio de la obra")
                 else:
                     n_par += 1
                     etiqueta = f"Paralización {n_par} de la obra (InfoObras)"

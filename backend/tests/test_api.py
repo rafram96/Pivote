@@ -246,6 +246,64 @@ def test_revision_inexistente_404(cliente):
     assert r.status_code == 404
 
 
+def test_revision_responde_202_y_deja_estado_consultable(cliente, monkeypatch):
+    """#42: el request no ejecuta el reproceso pesado antes de responder."""
+    from api import app as modulo
+    from schemas import pipeline
+
+    cid = cliente.post("/api/pivote/concursos", json={"nomenclatura": "REV-ASYNC"}).json()["concurso_id"]
+    job_id = _subir(cliente, cid).json()["job_id"]
+    job = modulo.repo.cargar(job_id)
+    job.items_revision.append(pipeline.ItemRevision(
+        n_prof=1, n_exp=1, etapa=pipeline.Etapa.RESOLUCION_CUI,
+        motivo="elegir CUI", candidatos=[]))
+    modulo.repo.guardar(job)
+
+    def resolver(job_id_, n_prof, n_exp, body):
+        actualizado = modulo.repo.cargar(job_id_)
+        actualizado.items_revision[0].resuelto = True
+        modulo.repo.guardar(actualizado)
+        return actualizado
+
+    monkeypatch.setattr(modulo.motor, "resolver_revision", resolver)
+    monkeypatch.setattr(modulo, "_asegurar_descargas", lambda *_: None)
+    r = cliente.post(
+        f"/api/pivote/jobs/{job_id}/revision",
+        json={"n_prof": 1, "n_exp": 1, "cui": "2418877"})
+    assert r.status_code == 202
+    assert r.json()["revision_estado"] == "en_curso"
+    final = cliente.get(f"/api/pivote/jobs/{job_id}").json()
+    assert final["revision_estado"] == "completada"
+    assert final["items_revision"][0]["resuelto"] is True
+
+
+def test_revision_background_persiste_error_consultable(cliente, monkeypatch):
+    """#42: una excepción ya no corta la conexión ni deja el job en `en_curso`."""
+    from api import app as modulo
+    from schemas import pipeline
+
+    cid = cliente.post("/api/pivote/concursos", json={"nomenclatura": "REV-ERROR"}).json()["concurso_id"]
+    job_id = _subir(cliente, cid).json()["job_id"]
+    job = modulo.repo.cargar(job_id)
+    job.items_revision.append(pipeline.ItemRevision(
+        n_prof=1, n_exp=1, etapa=pipeline.Etapa.RESOLUCION_CUI,
+        motivo="elegir CUI", candidatos=[]))
+    modulo.repo.guardar(job)
+
+    def fallar(*_args, **_kwargs):
+        raise RuntimeError("fallo controlado de revisión")
+
+    monkeypatch.setattr(modulo.motor, "resolver_revision", fallar)
+    r = cliente.post(
+        f"/api/pivote/jobs/{job_id}/revision",
+        json={"n_prof": 1, "n_exp": 1, "cui": "2418877"})
+    assert r.status_code == 202
+    final = cliente.get(f"/api/pivote/jobs/{job_id}").json()
+    assert final["revision_estado"] == "error"
+    assert final["revision_error"] == "fallo controlado de revisión"
+    assert final["items_revision"][0]["resuelto"] is False
+
+
 # ── Descarga por un solo CUI (endpoint suelto) ───────────────────────────────
 
 def test_descargar_cui_valida_entrada(cliente):

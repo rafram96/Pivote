@@ -216,7 +216,7 @@
 <main>
   <header class="hero">
     <div>
-      <p class="eyebrow">InfoObras · mapa operativo v3</p>
+<p class="eyebrow">InfoObras · mapa operativo v4</p>
       <h1>Arquitectura,<br>flujo y estado</h1>
       <p class="lead">Una sola vista para entender qué ocurre con cada experiencia, qué está funcionando hoy y qué piezas ampliarán el sistema.</p>
       <div class="meta">
@@ -312,15 +312,15 @@
       <article class="state-card"><header><h3>Extracción local</h3><span class="status prod">Producción</span></header>
         <p>Skill en Claude Code: lee bases y propuestas, divide por profesional y produce el espejo para el backend.</p>
         <span class="evidence">El backend nunca llama APIs cloud de IA.</span></article>
-      <article class="state-card"><header><h3>Backend + API</h3><span class="status prod">Producción</span></header>
-        <p>Pipeline on‑prem, archivos por job, entregables y panel. El servidor aún usa una versión anterior a varias mejoras recientes.</p>
-        <span class="evidence">Deploy del paquete nuevo: pendiente y manual.</span></article>
+      <article class="state-card"><header><h3>Backend + API</h3><span class="status ready">Listo para pre-deploy</span></header>
+        <p>Pipeline on‑prem, archivos por job, entregables y contratos del panel consolidados en <code>demo</code>.</p>
+        <span class="evidence">Rama local 29 commits por delante del remoto; despliegue coordinado pendiente.</span></article>
       <article class="state-card"><header><h3>Resolver público‑primero</h3><span class="status ready">Construido</span></header>
         <p>Fusiona candidatos MEF/InfoObras, aplica señales de identidad y clasifica privadas solo al final.</p>
         <span class="evidence">Mergeado en demo; producción todavía no lo ejecuta.</span></article>
-      <article class="state-card"><header><h3>Base local MEF mínima</h3><span class="status ready">Construido</span></header>
-        <p>Tres CSV oficiales compactados, diez campos calientes, índice en memoria, modo offline, gates y reemplazo atómico.</p>
-        <span class="evidence">Actualización manual; el cron semanal NO existe aún.</span></article>
+      <article class="state-card"><header><h3>Base MEF serving-first</h3><span class="status ready">Construido</span></header>
+        <p>Índice RAM para búsqueda difusa y PostgreSQL obligatorio para fichas enriquecidas por CUI/SNIP; cargas versionadas y health de frescura.</p>
+        <span class="evidence">620,985 filas reales validadas; falta instalar la tarea semanal en el servidor.</span></article>
       <article class="state-card"><header><h3>InfoObras</h3><span class="status prod">Producción</span></header>
         <p>Ficha, valorizaciones, paralizaciones y documentos de ejecución. Alimenta días efectivos y el ZIP.</p>
         <span class="evidence">Portal externo intermitente: caída ≠ vacío.</span></article>
@@ -330,20 +330,20 @@
       <article class="state-card"><header><h3>SUNAT histórico / HABIDO</h3><span class="status ready">Construido</span></header>
         <p>Consulta la antigüedad del emisor y cobertura de la condición HABIDO durante la experiencia.</p>
         <span class="evidence">Excel listo; render detallado del panel pendiente.</span></article>
-      <article class="state-card"><header><h3>SEACE abierto · F1/F2</h3><span class="status build">En construcción</span></header>
-        <p>Selección por tipo, bases y contrato al ZIP/Excel construidos. Contrato real descargado; host de bases devolvió 403.</p>
-        <span class="evidence">677 tests verdes · F3 fechas y F5 candado pendientes.</span></article>
-      <article class="state-card"><header><h3>RENIPRESS</h3><span class="status probe">Sonda GO</span></header>
-        <p>Búsqueda SUSALUD por nombre, RUC o código sin captcha. Falta matching conservador e integración.</p>
-        <span class="evidence">Despriorizado por el cliente frente a bases/contratos.</span></article>
-      <article class="state-card"><header><h3>ETL MEF completo</h3><span class="status plan">Planificado</span></header>
-        <p>RAM para búsqueda por nombre + PostgreSQL enriquecido por CUI, cargas versionadas, gates y tarea semanal Windows.</p>
-        <span class="evidence">Construido y suite verde; golden histórica perdida, reemplazada por diferencial offline. Falta activar la tarea.</span></article>
+      <article class="state-card"><header><h3>SEACE abierto · T-004</h3><span class="status ready">Núcleo construido</span></header>
+        <p>Selección estricta por tipo, Bases Integradas y contrato al ZIP/Excel, fix WAF y caché atómica compartida.</p>
+        <span class="evidence">F3 alimenta T-005; F5 de identidad/procedencia sigue pendiente.</span></article>
+      <article class="state-card"><header><h3>RENIPRESS · T-006</h3><span class="status ready">Integrado como evidencia</span></header>
+        <p>Consulta SUSALUD por nombre, RUC o código; API, CLI, caché, progreso, checkpoints y reanudación.</p>
+        <span class="evidence">Falta calibrar matching automático y mostrar el resultado en el panel.</span></article>
+      <article class="state-card"><header><h3>Operación ETL MEF</h3><span class="status build">Código listo</span></header>
+        <p>Retry/backoff, lock, logs, manifiesto atómico, retención de dos cargas y scripts para el Programador de tareas de Windows.</p>
+        <span class="evidence">Falta registrar y supervisar la primera ejecución semanal en el servidor.</span></article>
       <article class="state-card"><header><h3>Golden de CUI</h3><span class="status risk">Sin instrumento</span></header>
         <p>El corpus histórico de 277 verdades y su caché se perdieron. No debe presentarse como validación disponible hoy.</p>
         <span class="evidence">Cambios del resolver: solo abstención pura hasta reconstruir golden v4.</span></article>
       <article class="state-card"><header><h3>Panel de evaluación</h3><span class="status build">Parcial</span></header>
-        <p>Histórico, resultados, descargas y Por confirmar existen. Faltan vistas para señales nuevas de SEACE, SUNAT y RENIPRESS.</p>
+        <p>Histórico, resultados, descargas y Por confirmar existen. Faltan vistas para SEACE, SUNAT HABIDO, RENIPRESS y frescura MEF.</p>
         <span class="evidence">Los contratos JSON ya permiten extensión aditiva.</span></article>
     </div>
   </section>
@@ -452,8 +452,8 @@
   </section>
 
   <footer>
-    <span>InfoObras · documento de arquitectura y estado · v3</span>
-    <span>Fuentes: para RAFAEL‑V2.xlsx · docs/nuevos_modulos · estado técnico del 29‑jul‑2026</span>
+<span>InfoObras · documento de arquitectura y estado · v4</span>
+<span>Fuentes: para RAFAEL‑V2.xlsx · docs/nuevos_modulos · estado técnico del 2‑ago‑2026</span>
   </footer>
 </main>
 </body>

@@ -2,6 +2,24 @@
 
 > Última actualización: **2026-08-02** · rama de trabajo: `demo`
 
+## Fixes pre-deploy #68, #64, #42 y #65 completos
+
+- **#68:** el recorte TDR usa el rango físico completo declarado y detecta
+  folios sospechosamente repetidos; el Excel no lo presenta como un recorte
+  individual exacto.
+- **#64:** el cómputo efectivo empieza como mínimo en la fecha real de inicio
+  de obra, sin cortar por la fecha final de ficha.
+- **#42 (backend + Panel):** resolver una revisión responde `202`, persiste
+  `en_curso/completada/error`, se consulta por polling y nunca deja la pantalla
+  bloqueada sin una acción de reintento.
+- **#65:** contrato espejo v1.3.0 con `supuestos` estructurados; el Excel pinta
+  violeta solo la procedencia inferida y conserva amarillo para «por verificar».
+
+Gate: **727 passed, 25 skipped**, 57 pruebas de entregables, 36 del
+consolidador, 9 espejos históricos en paridad Pydantic/Zod, `compileall` y
+`diff --check`. Panel: build productivo Next.js aprobado. No se tocó el
+resolver CUI; no aplicó golden. No hubo despliegue.
+
 ## ADR-S007 y tren de rescates A–D COMPLETO
 
 `demo` vuelve a ser la línea de producto; `refactor` queda congelada en
@@ -130,8 +148,8 @@ Suite: **685 passed, 25 skipped** + integración PostgreSQL explícita aprobada.
 - **Requisito N°1 de T-004, en sus palabras**: segmentar por tipo de proceso —
   un hospital puede tener hasta 4 juegos de bases (preinversión / expediente /
   supervisión / ejecución) con el MISMO CUI; solo valen las bases INTEGRADAS.
-- **Pedido nuevo**: marcar con color los datos SUPUESTOS del Excel →
-  [#65](https://github.com/rafram96/Pivote/issues/65).
+- **Pedido nuevo (resuelto 2-ago)**: marcar con color los datos SUPUESTOS del
+  Excel → [#65](https://github.com/rafram96/Pivote/issues/65).
 - **RENIPRESS despriorizado por él mismo** («ya olvidémonos», para no atrasar
   bases+contratos). Capturas de pantalla: pedidas y descartadas (aceptó).
   Firmante/representante legal: reconfirmó que NO va (ADR-008 se sostiene).

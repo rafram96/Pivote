@@ -116,19 +116,19 @@
 <body>
 
 <h1>Flujos de verificación por tipo de experiencia</h1>
-<p class="sub">Según el flujograma del Ing. Manuel (Excel "para RAFAEL", Hoja1) · anotado con el estado real de cada verificación en el sistema — <b>v3 · 27&nbsp;jul&nbsp;2026</b>: se separa lo que ya corre en el servidor del cliente de lo que está construido pero <b>aún no desplegado</b>.</p>
+<p class="sub">Según el flujograma del Ing. Manuel (Excel "para RAFAEL", Hoja1) · contrastado con la rama <code>demo</code> consolidada — <b>v4 · 2&nbsp;ago&nbsp;2026</b>: T-004 y T-006 ya aportan evidencia; T-005 continúa pendiente.</p>
 
 <div class="leyenda">
   <span><i class="chip ok"></i> En producción — corriendo hoy en el servidor</span>
   <span><i class="chip dep"></i> Construido y probado — <b>falta el despliegue</b></span>
-  <span><i class="chip cot"></i> Cotizable — por desarrollar (T-004 · T-005 · T-006)</span>
+  <span><i class="chip cot"></i> Saldo técnico — T-004/F5 · T-005 · matching/panel T-006</span>
   <span><i class="chip no"></i> Descartado con evidencia (falsos positivos)</span>
 </div>
 
 <p class="nota" style="margin:-22px 0 30px; padding:10px 14px; border-left:3px solid var(--dep-bd); background:var(--dep-bg); color:var(--dep-tx); border-radius:0 8px 8px 0">
   <b>Qué sigue, en una línea:</b> todo lo azul ya está hecho y esperando un solo despliegue.
-  Hasta que ese despliegue ocurra, el servidor sigue corriendo la versión del 12&nbsp;de&nbsp;julio
-  y nada de lo azul es visible para el evaluador.
+  Hasta que ese despliegue ocurra, lo azul no forma parte de una entrega operativa validada
+  en el servidor del cliente.
 </p>
 
 <!-- ============ FLUJO 1 ============ -->
@@ -158,7 +158,7 @@
         <div class="paso">
           <div class="titulo"><span class="num">2</span><b>Validez del contrato (SEACE + MEF)</b></div>
           <ul>
-            <li class="cot"><span class="txt">Bajar contrato DEL EXPEDIENTE y sus bases (SEACE)</span><span class="tag cot">T-004</span></li>
+            <li class="dep"><span class="txt">Bajar contrato DEL EXPEDIENTE y sus Bases Integradas (SEACE), con selección estricta por tipo</span><span class="tag dep">T-004 ✔ núcleo</span></li>
             <li class="dep"><span class="txt">Bajar resolución de aprobación del expediente (Formato 08-A) + contrato del MEF cuando el Banco lo registra</span><span class="tag dep">T-003 ✔ construido</span></li>
             <li class="dep"><span class="txt">Al expediente NO se le exigen valorizaciones de la construcción posterior</span><span class="tag dep">T-008 ✔ camino A</span></li>
           </ul>
@@ -229,7 +229,7 @@
         <div class="paso">
           <div class="titulo"><span class="num">2</span><b>Validez del contrato (SEACE)</b></div>
           <ul>
-            <li class="cot"><span class="txt">Bajar contrato DE SUPERVISIÓN y sus bases (SEACE)</span><span class="tag cot">T-004</span></li>
+            <li class="dep"><span class="txt">Bajar contrato DE SUPERVISIÓN y sus Bases Integradas (SEACE), sin cruzar con ejecución/expediente</span><span class="tag dep">T-004 ✔ núcleo</span></li>
             <li class="dep"><span class="txt">El cargo que postula figura en las bases — ahora se exige el <b>núcleo de especialidad completo</b> y las funciones sirven de segunda puerta</span><span class="tag dep">ADR-012</span></li>
           </ul>
         </div>
@@ -253,7 +253,7 @@
         <div class="paso">
           <div class="titulo"><span class="num">5</span><b>RENIPRESS — solo si es obra de salud</b></div>
           <ul>
-            <li class="cot"><span class="txt">Verificar que el establecimiento de salud existe — <b>sonda ✔ GO</b>: se consulta sin captcha, falta integrarlo</span><span class="tag cot">T-006 · por integrar</span></li>
+            <li class="dep"><span class="txt">Consultar RENIPRESS por nombre, RUC o código; caída del portal ≠ establecimiento inexistente</span><span class="tag dep">T-006 ✔ evidencia</span></li>
           </ul>
         </div>
         <div class="flecha"></div>
@@ -275,7 +275,7 @@
         <div class="paso">
           <div class="titulo"><span class="num">2</span><b>RENIPRESS — solo si es clínica / salud</b></div>
           <ul>
-            <li class="cot"><span class="txt">Verificar que esa clínica existe o no — <b>sonda ✔ GO</b>: se consulta sin captcha, falta integrarlo</span><span class="tag cot">T-006 · por integrar</span></li>
+            <li class="dep"><span class="txt">Consultar RENIPRESS como evidencia auxiliar; matching automático pendiente de calibración</span><span class="tag dep">T-006 ✔ evidencia</span></li>
           </ul>
         </div>
         <div class="flecha"></div>
@@ -303,18 +303,18 @@
     <div class="flecha"></div>
     <div class="nodo" style="border-color:var(--cot-bd); background:var(--cot-bg); max-width:520px">
       <b>3 · Construir lo amarillo</b>
-      <small>en este orden por dependencia: T-004 (SEACE) → T-005 (cruces de fechas, necesita el contrato de T-004) → T-006 (RENIPRESS, independiente)</small>
+      <small>orden restante: T-004/F5 (candado) → T-005 (cruces y cronología) · T-006 continúa con matching conservador y panel</small>
     </div>
     <p class="nota">
       Las dos casillas amarillas de <b>T-005</b> del Flujo 1 —«inicio ≥ firma del contrato» y
       «término ≤ aprobación del expediente»— son las únicas del flujograma que <b>no se pueden
       hacer hoy</b> con ninguna fuente disponible: dependen de la fecha de firma del contrato,
-      que llega con T-004. Todo lo demás del Excel ya está resuelto o descartado con evidencia.
+      que ya llega con T-004. Todo lo demás del Excel ya está resuelto, integrado como evidencia o descartado con sustento.
     </p>
   </div>
 </section>
 
-<p class="nota">Fuente del flujo: Hoja1 del Excel «para RAFAEL» (Ing. Manuel Echandía). Los rótulos T-003…T-008 corresponden al paquete de extras (ver <b>plan-desarrollo-extras.html</b>). <b>Azul</b> = construido y probado, esperando despliegue — el servidor del cliente corre hoy la versión del 12&nbsp;de&nbsp;julio y no lo tiene. <b>Amarillo</b> = por desarrollar.</p>
+<p class="nota">Fuente del flujo: Hoja1 del Excel «para RAFAEL» (Ing. Manuel Echandía). Los rótulos T-003…T-008 corresponden al paquete de extras. <b>Azul</b> = construido y probado en <code>demo</code>, esperando despliegue coordinado. <b>Amarillo</b> = saldo técnico.</p>
 
 </body>
 </html>

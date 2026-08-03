@@ -98,6 +98,7 @@ FILL_CL_HEAD = PatternFill("solid", fgColor="DDEBF7")     # azul claro: headers 
 FILL_CUMPLE = PatternFill("solid", fgColor="C6EFCE")      # verde: cumple / válido
 FILL_NO_CUMPLE = PatternFill("solid", fgColor="FFC7CE")   # rojo: no cumple / alerta
 FILL_PEND = PatternFill("solid", fgColor="FFF2CC")        # amarillo suave: por verificar
+FILL_SUPUESTO = PatternFill("solid", fgColor="E4D7F5")    # violeta: valor inferido
 
 # Marcador sutil de dato verificado/enriquecido por el backend on-prem: borde
 # izquierdo azul (coexiste con el verde/rojo del veredicto).
@@ -280,7 +281,8 @@ class Builder:
         ws.row_dimensions[self.r].height = 32
         self.r += 1
 
-    def row(self, values, bold=False, fmts=None, verdicts=None, backend_cols=None):
+    def row(self, values, bold=False, fmts=None, verdicts=None, backend_cols=None,
+            supuesto_cols=None):
         """Escribe una fila. Fondo blanco; verde/rojo SOLO en las columnas de
         veredicto (`verdicts` = {col: 'pos'|'neg'}, según si "SÍ" es bueno o malo)
         y amarillo suave en "POR VERIFICAR". Las columnas en `backend_cols` llevan
@@ -289,6 +291,7 @@ class Builder:
         fmts = fmts or {}
         verdicts = verdicts or {}
         backend_cols = backend_cols or set()
+        supuesto_cols = supuesto_cols or set()
         for i, v in enumerate(values, start=1):
             c = ws.cell(self.r, i, v)
             c.font = F_BOLD if bold else F_CELL
@@ -300,6 +303,10 @@ class Builder:
                 fill = _fill_veredicto(v, verdicts[i])
                 if fill:
                     c.fill = fill
+            # La procedencia gana al color semántico: primero debe quedar claro
+            # que el valor fue inferido; no se confunde con "por verificar".
+            if i in supuesto_cols and v not in (None, ""):
+                c.fill = FILL_SUPUESTO
         self.r += 1
 
     def kv(self, label, value, fmt=None, verdict=None):
@@ -325,6 +332,7 @@ class Builder:
             (6, 8, "Amarillo = por verificar", FILL_PEND, BORDER),
             (9, 12, "Borde azul izq. = verificado automáticamente por el servidor",
              None, BORDER_BACKEND),
+            (13, 16, "Violeta = dato supuesto / inferido", FILL_SUPUESTO, BORDER),
         ]
         for ini, fin, txt, fill, border in swatches:
             ws.merge_cells(start_row=self.r, start_column=ini,
@@ -434,13 +442,14 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
     # ¿anterior a colegiatura? (ALT03, recálculo a 25 años).
     BE4 = {7, 12, 13, 14, 15}
     for prof in espejo.get("profesionales", []):
+        sup_prof = set(prof.get("supuestos") or [])
         b.profblock(f"PROFESIONAL {prof.get('n_prof')}: {prof.get('cargo', '')}")
         b.headers(["No", "CARGO", "DETALLE", "INFORMACIÓN DE LA PROPUESTA", "FOLIO", "PUNTAJE"])
-        b.row([prof.get("n_prof"), prof.get("cargo"), "NOMBRE DEL PROFESIONAL", prof.get("nombre"), prof.get("folio_nombre"), ""])
-        b.row(["", "", "TÍTULO PROFESIONAL", prof.get("titulo"), prof.get("folio_titulo"), ""])
-        b.row(["", "", "¿La profesión es la indicada?", prof.get("profesion_valida"), "", ""], verdicts={4: "pos"})
-        b.row(["", "", "No de COLEGIATURA / Fecha", prof.get("colegiatura"), prof.get("folio_colegiatura"), ""])
-        b.row(["", "", "B. CERTIFICACIONES", prof.get("certificaciones"), "", ""])
+        b.row([prof.get("n_prof"), prof.get("cargo"), "NOMBRE DEL PROFESIONAL", prof.get("nombre"), prof.get("folio_nombre"), ""], supuesto_cols={2 if "cargo" in sup_prof else 0, 4 if "nombre" in sup_prof else 0})
+        b.row(["", "", "TÍTULO PROFESIONAL", prof.get("titulo"), prof.get("folio_titulo"), ""], supuesto_cols={4} if "titulo" in sup_prof else set())
+        b.row(["", "", "¿La profesión es la indicada?", prof.get("profesion_valida"), "", ""], verdicts={4: "pos"}, supuesto_cols={4} if "profesion_valida" in sup_prof else set())
+        b.row(["", "", "No de COLEGIATURA / Fecha", prof.get("colegiatura"), prof.get("folio_colegiatura"), ""], supuesto_cols={4} if "colegiatura" in sup_prof else set())
+        b.row(["", "", "B. CERTIFICACIONES", prof.get("certificaciones"), "", ""], supuesto_cols={4} if "certificaciones" in sup_prof else set())
         b.blank()
         b.subtitle(f"PARTE 4 - EXPERIENCIA DEL PROFESIONAL: {prof.get('cargo', '')}")
         b.headers(P4_HEAD)
@@ -459,6 +468,7 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
 
         exps = prof.get("experiencias", [])
         for e in exps:
+            sup = set(e.get("supuestos") or [])
             pend = _fecha_pendiente(e.get("fecha_inicial"), e.get("fecha_final"))
             b.row([_sin_jerga(x) for x in
                   [e.get("n"), e.get("entidad_emisora"), e.get("proyecto"), e.get("tipo_documento"),
@@ -473,7 +483,16 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
                    e.get("funciones_similares") if e.get("funciones_similares") is not None
                    else "No constan en el certificado",
                    e.get("cert_antes_culminar"), e.get("incluye_covid"), e.get("tipo_obra_valido"),
-                   e.get("observaciones")]], fmts=m4, verdicts=V4, backend_cols=BE4)
+                   e.get("observaciones")]], fmts=m4, verdicts=V4, backend_cols=BE4,
+                  supuesto_cols={col for campo, col in {
+                      "entidad_emisora": 2, "proyecto": 3, "tipo_documento": 4,
+                      "nombre_emisor": 5, "cargo_emisor": 6,
+                      "cargo_valido_emitir": 7, "fecha_inicial": 8,
+                      "fecha_final": 9, "fecha_emision": 10, "folio": 11,
+                      "cargo_ocupado": 16, "cargo_bases_valido": 17,
+                      "funciones_similares": 18, "cert_antes_culminar": 19,
+                      "incluye_covid": 20, "tipo_obra_valido": 21,
+                  }.items() if campo in sup})
         t = prof.get("total", {})
         # el TOTAL en blanco parecería "sin experiencias"; si la causa es que N
         # de M no tienen días calculables, la celda lo declara con el conteo.

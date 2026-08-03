@@ -18,7 +18,7 @@ def test_reemplazo_reintenta_dos_permission_error_y_tiene_exito(
     destino = tmp_path / "destino.json"
     origen.write_text("nuevo", encoding="utf-8")
     destino.write_text("anterior", encoding="utf-8")
-    reemplazo_real = archivos_atomicos.os.replace
+    reemplazo_real = archivos_atomicos._replace
     llamadas = 0
 
     def reemplazo_intermitente(ruta_origen, ruta_destino):
@@ -28,7 +28,7 @@ def test_reemplazo_reintenta_dos_permission_error_y_tiene_exito(
             raise PermissionError("lector concurrente")
         reemplazo_real(ruta_origen, ruta_destino)
 
-    monkeypatch.setattr(archivos_atomicos.os, "replace", reemplazo_intermitente)
+    monkeypatch.setattr(archivos_atomicos, "_replace", reemplazo_intermitente)
 
     archivos_atomicos.reemplazar_atomico(
         origen, destino, intentos=3, espera_segundos=0
@@ -53,7 +53,7 @@ def test_reemplazo_agota_intentos_y_propaga_permission_error(
         llamadas += 1
         raise PermissionError("destino bloqueado")
 
-    monkeypatch.setattr(archivos_atomicos.os, "replace", reemplazo_bloqueado)
+    monkeypatch.setattr(archivos_atomicos, "_replace", reemplazo_bloqueado)
 
     with pytest.raises(PermissionError, match="destino bloqueado"):
         archivos_atomicos.reemplazar_atomico(

@@ -74,8 +74,14 @@ los requisitos críticos si hay tacha.**
       venían en `.docx` el PDF limpio del script re-pagina.
     - Si la tabla ocupa dos páginas, dalas como rango: `"48-49"`.
     - Si no la ubicas con certeza, `null` + observación `severidad: warning` — se
-      omite el recorte, no se adivina (un recorte de la página equivocada es peor
-      que ninguno, porque parece correcto).
+    omite el recorte, no se adivina (un recorte de la página equivocada es peor
+    que ninguno, porque parece correcto).
+
+11. **`paginas_personal_clave`** (en `metadata_concurso`): rango de páginas
+    **FÍSICAS del PDF** que contiene el cuadro completo de personal clave, desde
+    el primer cargo hasta el último (ej. `"34-38"`). Es el salvoconducto cuando
+    varios cargos comparten el folio de inicio del cuadro: el recortador usa el
+    rango completo antes que mostrar una página precisa pero equivocada.
 
 ## Observaciones
 Emite una `Observacion` ante: ambigüedad (`ambiguedad`), cargo con profesión o
@@ -87,18 +93,20 @@ aplica).
 
 ## Salida
 JSON: `_meta` (con `subagente: "agent-bases"`), `metadata_concurso` (incluye
-**`pagina_factores`**), `factores_evaluacion`, `personal_clave[]`,
+**`pagina_factores`** y **`paginas_personal_clave`**), `factores_evaluacion`, `personal_clave[]`,
 `observaciones_claude[]`.
 Cada entrada de `personal_clave` incluye: `numero`, `cargos_similares_validos`,
 `profesiones_aceptadas`, `tiempo_minimo_experiencia`, `tipos_obra_validos`,
-`aplica` (Factor A) y **`folio`** = el folio de las bases donde aparece el
-requisito de ese cargo (lo usa el recorte del TDR — mejora A).
+`aplica` (Factor A) y **`folio`** = la página física del PDF donde aparece la
+fila/requisito de ESE cargo, no la página donde empieza el cuadro. Si el requisito
+continúa, usa rango. Lo consume el recorte TDR.
 
 ## Checklist antes de devolver
 - [ ] `personal_clave` tiene una entrada por cada cargo del cuadro (ninguno omitido).
 - [ ] `fecha_presentacion_oferta` en ISO o `null` + observación critical.
 - [ ] `cargos_similares_validos` no vacío para los cargos que sí los tienen.
 - [ ] cada `personal_clave` con `folio` (dónde está su requisito en las bases → recorte TDR).
+- [ ] `paginas_personal_clave` cubre desde el primer hasta el último cargo del cuadro.
 - [ ] `pagina_factores` = página del PDF con el Cuadro de Factores (o `null` + observación).
 - [ ] `cuantia` + `limite_inferior` (90% si la oferta es limitada) calculados.
 - [ ] cada factor con `aplica` true/false según el Cuadro Resumen (PMP puede ser NO APLICA).

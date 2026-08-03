@@ -117,25 +117,24 @@
 <body>
 
 <h1>Plan de desarrollo y cotización de extras</h1>
-<p class="sub">Todo lo pedido en el Excel «para RAFAEL», organizado en componentes cotizables (T-003 … T-008) · <b>v4 — 27&nbsp;jul&nbsp;2026</b>: T-007 (SUNAT HABIDO) pasa a <b>construido</b>, la sonda de RENIPRESS ya dio GO, y el alcance de T-008 se ajusta a lo que existe hoy en el código.</p>
+<p class="sub">Todo lo pedido en el Excel «para RAFAEL», organizado en componentes cotizables (T-003 … T-008) · <b>v5 — 2&nbsp;ago&nbsp;2026</b>: refleja la <code>demo</code> consolidada, el ETL MEF serving-first, SEACE operativo y RENIPRESS ya integrado.</p>
 
 <div class="leyenda">
-  <span><i class="chip ok"></i> Ya construido (se cotiza como entregado)</span>
-  <span><i class="chip cot"></i> Por desarrollar</span>
+  <span><i class="chip ok"></i> Construido y probado en la rama <code>demo</code></span>
+  <span><i class="chip cot"></i> Saldo técnico pendiente</span>
   <span><i class="chip ver"></i> Verificación previa (sonda) — todas ya ejecutadas</span>
 </div>
 
 <p class="nota" style="margin:-24px 0 30px; padding:10px 14px; border-left:3px solid var(--ok-bd); background:var(--ok-bg); border-radius:0 8px 8px 0">
   <b>Todo lo «ya construido» está en el repositorio, probado y sin desplegar.</b>
-  El servidor del cliente corre hoy la versión del 12&nbsp;de&nbsp;julio: nada de esto es
-  visible para el evaluador hasta que se haga el despliegue. La demo de estos extras
-  y la entrega del hito final dependen del mismo paso.
+  Nada de esto se considera entregado operativamente hasta completar el despliegue
+  coordinado, cargar la base MEF y ejecutar una corrida de humo en el servidor.
 </p>
 
 <!-- ============ 1. RESUMEN ============ -->
 <section>
   <h2>1 · Componentes de cotización</h2>
-  <p class="h2sub">Precios calculados a S/ 80/h. T-003 ya está construido y validado; el resto es desarrollo nuevo.</p>
+  <p class="h2sub">Valores técnicos a S/ 80/h. Se distingue el valor total de cada módulo del trabajo que todavía falta para cerrarlo.</p>
   <div class="tabla-wrap">
   <table>
     <tr><th>Código</th><th>Componente</th><th>Estado</th><th>Verificación previa</th><th>Tiempo aprox.</th><th>Depende de</th><th>Precio</th></tr>
@@ -150,21 +149,21 @@
     </tr>
     <tr>
       <td class="num">T-008</td>
-      <td>Refactor de resolución de CUI + <b>ingesta automática del Banco de Inversiones del MEF</b>: base local (579,481 CUIs offline, refresco semanal por cron, sin captcha) con reemplazo atómico de la base + catálogo de 11,011 entidades públicas + vetos de identidad (rubro/ubicación/entidad) + clasificación <b>expediente vs obra</b> + optimización de la skill</td>
+      <td>Resolver público-primero + <b>ETL serving-first del Banco de Inversiones</b>: índice RAM para búsqueda, ficha enriquecida PostgreSQL por CUI/SNIP, 579,481 CUIs, cargas versionadas, catálogo de entidades, health de frescura y clasificación <b>expediente vs obra</b></td>
       <td><span class="tag ok">✔ construido</span></td>
-      <td>Ya validado: auditoría golden de 277 casos reales (errores silenciosos 16→10, cero regresiones) + 2 corridas completas (105 y 68 experiencias)</td>
-      <td class="num">— (invertido)</td>
+      <td>620,985 filas reales cargadas en PostgreSQL 16; diferencial de 100 fichas + 20 rankings y suite completa</td>
+      <td class="num">~9–10 días<br><small>alcance real acumulado</small></td>
       <td>—</td>
-      <td class="num">S/ 2,800</td>
+      <td class="num">S/ 4,800<br><small>valor actualizado</small></td>
     </tr>
     <tr>
       <td class="num">T-004</td>
       <td>SEACE por <b>datos abiertos</b> (CONOSCE + API OCDS): Bases Integradas + Contrato firmado + candado de confirmación del CUI — sin captcha</td>
-      <td><span class="tag cot">por integrar</span> <span class="tag ok">sonda ✔ hecha</span></td>
-      <td>✔ Completada: GO validado, 86% de cobertura medida con datos reales</td>
-      <td class="num">4–5 días<br><small>(20–24 h)</small></td>
+      <td><span class="tag ok">✔ núcleo construido</span> <span class="tag cot">F5 pendiente</span></td>
+      <td>Selección y descarga reales; WAF resuelto; caché compartida y publicación atómica probadas</td>
+      <td class="num">5.5–6.5 días<br><small>incluye robustecimiento real</small></td>
       <td>—</td>
-      <td class="num">S/ 2,400</td>
+      <td class="num">S/ 3,200<br><small>S/ 800 pendientes</small></td>
     </tr>
     <tr>
       <td class="num">T-005</td>
@@ -178,11 +177,11 @@
     <tr>
       <td class="num">T-006</td>
       <td>RENIPRESS: verificación de establecimientos de salud (obras privadas de salud)</td>
-      <td><span class="tag cot">por integrar</span></td>
-      <td>✔ Completada: GO validado, se consulta sin captcha</td>
-      <td class="num">1–1.5 días<br><small>(8 h)</small></td>
+      <td><span class="tag ok">✔ integrado</span> <span class="tag cot">política/panel pendientes</span></td>
+      <td>Cliente, API, CLI y etapa durable del pipeline probados; caída de SUSALUD no se confunde con ausencia</td>
+      <td class="num">2.5–3 días<br><small>alcance real acumulado</small></td>
       <td>—</td>
-      <td class="num">S/ 800</td>
+      <td class="num">S/ 1,600<br><small>S/ 600 pendientes</small></td>
     </tr>
     <tr>
       <td class="num">T-007</td>
@@ -195,7 +194,7 @@
     </tr>
     <tr class="total">
       <td></td><td>Total del paquete</td><td></td><td></td>
-      <td class="num">~7–9 días por desarrollar</td><td></td><td class="num">S/ 9,800 + bolsa<br><small>(S/ 5,400 ya construido: T-003 + T-008 · S/ 4,400 por desarrollar)</small></td>
+      <td class="num">~4–5 días por cerrar</td><td></td><td class="num">S/ 13,400 + bolsa<br><small>S/ 10,800 construidos · S/ 2,600 de saldo técnico</small></td>
     </tr>
   </table>
   </div>
@@ -225,7 +224,7 @@
     <div class="flecha"></div>
     <div class="fila">
       <div class="etapa"><b>InfoObras</b><small>ficha · valorizaciones · paralizaciones · informes de control · docs al ZIP</small></div>
-      <div class="plugs"><span class="plug ok">T-003: resolución 08-A al ZIP (ya)</span><span class="plug cot">T-004: módulo hermano SEACE → 01 bases + 02 contrato al mismo ZIP</span></div>
+      <div class="plugs"><span class="plug ok">T-003: resolución 08-A al ZIP</span><span class="plug ok">T-004 ✔ Bases Integradas + contrato al mismo ZIP</span></div>
     </div>
     <div class="flecha"></div>
     <div class="fila">
@@ -235,7 +234,7 @@
     <div class="flecha"></div>
     <div class="fila">
       <div class="etapa"><b>Clasificación de privadas (al final)</b><small>primero se agota lo público; catálogo de 11k entidades públicas → «posible obra privada»</small></div>
-      <div class="plugs"><span class="plug ok">T-008 ✔ catálogo + público-primero</span><span class="plug cot">T-006: si es privada de salud → RENIPRESS antes de «Por confirmar» (sonda ✔ GO)</span></div>
+      <div class="plugs"><span class="plug ok">T-008 ✔ catálogo + público-primero</span><span class="plug ok">T-006 ✔ RENIPRESS como evidencia auxiliar de salud</span></div>
     </div>
     <div class="flecha"></div>
     <div class="fila">
@@ -245,7 +244,7 @@
     <div class="flecha"></div>
     <div class="fila">
       <div class="etapa"><b>Excel 5 hojas + ZIP → Panel</b><small>formato del cliente · «Por confirmar» · Postgres de respaldo</small></div>
-      <div class="plugs"><span class="plug cot">T-005: hoja nueva «Cronología de expedientes» + tabla comparativa</span><span class="plug cot">T-004/T-006: estados de documentos y flags nuevos en el panel</span></div>
+      <div class="plugs"><span class="plug cot">T-005: hoja nueva «Cronología de expedientes» + tabla comparativa</span><span class="plug cot">Panel: SEACE · RENIPRESS · SUNAT HABIDO · frescura MEF</span></div>
     </div>
   </div>
 </section>
@@ -279,14 +278,12 @@
 
   <!-- T-008 -->
   <div class="card ok">
-    <div class="head"><h3>T-008 — Módulo ETL del MEF + Refactor de resolución de CUI + Base Local + Camino Expedientes</h3><span class="tag ok">✔ construido y validado</span><span class="precio">S/ 2,800</span></div>
-    <p class="meta">Construido el 20-21&nbsp;jul (rama <code>sonda/refactor-cui</code>, 13 commits). El sistema ya no depende de los buscadores web del MEF: lleva una ingesta atómica del Banco de Inversiones completo (activas + cerradas + desactivadas) y resuelve por IDENTIDAD — nunca por conveniencia de fechas. Incluye la clasificación automática expediente/obra que pide el flujograma, con modo «concurso de expedientes» (usado en San Isidro).</p>
+    <div class="head"><h3>T-008 — ETL MEF serving-first + Resolver de CUI + Base Local + Camino Expedientes</h3><span class="tag ok">✔ construido y validado</span><span class="precio">S/ 4,800 · valor actualizado</span></div>
+    <p class="meta">El alcance creció después de perfilar los tres CSV reales: además del resolver y el índice local, ahora incluye PostgreSQL obligatorio para fichas enriquecidas, cargas inmutables, recarga sin reinicio, health de frescura y operación semanal preparada. El sistema resuelve por IDENTIDAD — nunca por conveniencia de fechas.</p>
     <p class="meta" style="border-left:3px solid var(--cot-bd,#d99a2b); padding-left:10px">
-      <b>Alcance, dicho con precisión:</b> la base local vive hoy como un archivo compacto
-      que el backend consulta directamente. Llevarla a tablas PostgreSQL con índice de
-      similitud es la <b>evolución prevista</b> del módulo — está en el backlog técnico,
-      <b>no está construida y no está incluida en este precio</b>. Para el evaluador el
-      resultado es idéntico: misma cobertura, mismas respuestas, sin captcha.
+      <b>Alcance, dicho con precisión:</b> la búsqueda difusa permanece en RAM y la ficha
+      enriquecida se obtiene de PostgreSQL. El raw histórico de las 95 columnas y una API
+      analítica general se mantienen fuera de alcance: no son necesarios para el resolver.
     </p>
     <div class="cols">
       <div class="col">
@@ -295,7 +292,8 @@
           <li><b>Ingesta resiliente</b>: Descarga por bloques con reintentos para los 3 CSVs de Datos Abiertos del MEF (~523&nbsp;MB → 31&nbsp;MB comprimido), tolerante a cortes, con modo offline desde carpeta local.</li>
           <li><b>Base local del Banco de Inversiones</b>: 620,985 filas → <b>579,481 CUIs distintos</b> (activas, cerradas y desactivadas), consultables sin salir a la red y sin captcha. Control de volumen antes de aceptar una base nueva.</li>
           <li><b>Reemplazo atómico</b>: la base vieja sigue sirviendo consultas hasta que la nueva está íntegra; una descarga a medias nunca deja al sistema sin datos.</li>
-          <li><b>Catálogo de Entidades & Siglas</b>: 11,011 entidades del Estado con extracción automática de siglas (ej. <code>- AGN</code>, <code>- INABIF</code>) para desempates por emisor.</li>
+          <li><b>Catálogo de Entidades & Siglas</b>: 14,665 entidades, incluyendo aliases <code>NOMBRE_*</code>/<code>NOM_*</code>, para desempates por emisor.</li>
+          <li><b>Fichas PostgreSQL</b>: campos canónicos enriquecidos por CUI/SNIP, carga por <code>COPY</code>, puntero activo y retención de dos cargas.</li>
           <li><b>Resolver público-primero</b>: Vetos de identidad por rubro, provincia/distrito y entidad municipal; ante homónimos indistinguibles, «Por confirmar» con candidatos — nunca adivina.</li>
           <li><b>Clasificación expediente vs obra (Camino A)</b>: Al expediente técnico no se le exigen valorizaciones de la construcción posterior.</li>
           <li><b>Optimización de la skill</b>: Eliminó el paso que quemaba ~3M de tokens por corrida (resolución de CUIs trasladada al backend).</li>
@@ -304,9 +302,9 @@
       <div class="col">
         <h4>Validación (con datos reales)</h4>
         <ul>
-          <li>Auditoría golden de 277 casos: errores silenciosos <b>16 → 10</b>, cero casos que antes salían bien y ahora mal.</li>
-          <li>2 corridas completas de punta a punta (105 y 68 experiencias) + rescate íntegro del análisis San Isidro.</li>
-          <li>266+ pruebas automáticas en verde; pendiente solo el despliegue al servidor (base de 26&nbsp;MB + 1 línea de cron).</li>
+          <li>Carga real: <b>620,985 filas / 620,984 identidades</b> en 117.5 s; tabla e índices PostgreSQL medidos en 719.3 MB.</li>
+          <li>Diferencial de 100 fichas + 20 rankings sin cambios en el contrato legacy.</li>
+          <li>Suite completa verde; falta desplegar, copiar los artefactos compactos y registrar la tarea semanal ya incluida.</li>
         </ul>
       </div>
     </div>
@@ -314,25 +312,23 @@
 
   <!-- T-004 -->
   <div class="card">
-    <div class="head"><h3>T-004 — SEACE por datos abiertos: Bases Integradas + Contrato + candado del CUI</h3><span class="tag cot">por integrar</span><span class="tag ok">sonda ✔ hecha</span><span class="precio">S/ 2,400 · 4–5 días</span></div>
-    <p class="meta"><b>La sonda ya se ejecutó y dio GO</b>: el buscador SEACE tiene reCAPTCHA v3, pero se esquiva por completo con los datos abiertos oficiales — CONOSCE (datasets Excel/año) + API OCDS del OECE, que buscan <b>por CUI directo</b> (<code>records?projectID=</code>) y bajan los PDF sin captcha. Evidencia medida con los 29 concursos reales: <b>86% de las experiencias públicas cubiertas</b> (bases + contrato + fechas). Herramientas validadas: tools/conosce.py, tools/ocds.py.</p>
+    <div class="head"><h3>T-004 — SEACE por datos abiertos: Bases Integradas + Contrato + candado del CUI</h3><span class="tag ok">✔ F1/F2 construidas</span><span class="tag cot">F5 pendiente</span><span class="precio">S/ 3,200 · S/ 800 pendientes</span></div>
+    <p class="meta">El núcleo ya está integrado: CONOSCE + OCDS buscan por CUI, separan estrictamente expediente/supervisión/ejecución y materializan Bases Integradas y contrato en ZIP y Excel. La validación real obligó a añadir un fix WAF, conservación PDF/ZIP/RAR y caché compartida atómica por <code>fileCode</code>; ese endurecimiento explica el valor actualizado.</p>
     <div class="cols">
       <div class="col">
-        <h4>Plan de desarrollo (la sonda ya está invertida)</h4>
+        <h4>Construido</h4>
         <ol>
-          <li><b>Módulo datos abiertos en el backend</b> <span class="dias">· 1.5 días</span> — portar conosce.py + ocds.py a src/scraping/: CUI → record OCDS → selección del proceso por tipo (expediente / supervisión / ejecución).</li>
-          <li><b>Candado de confirmación asimétrico</b> <span class="dias">· 1 día</span> — cascada RUC directo → nombre del consorcio → miembros (conformación CONOSCE); confirma el CUI sin penalizar cuando el proceso es pre-2018.</li>
-          <li><b>Descarga al ZIP + estados</b> <span class="dias">· 1 día</span> — Bases Integradas y Contrato al ZIP por obra (01_/02_); «No disponible en datos abiertos» sin inventar; cache de datasets anuales.</li>
-          <li><b>Prueba con corrida real</b> <span class="dias">· 0.5–1 día</span> — un concurso completo de datos_pivote end-to-end.</li>
+          <li><b>Selección por tipo</b>: un mismo CUI nunca mezcla bases de expediente, supervisión y ejecución.</li>
+          <li><b>Descarga honesta</b>: Bases Integradas y contrato al ZIP; PDF/ZIP/RAR válidos o nota de error explícita.</li>
+          <li><b>Operación resiliente</b>: fix WAF, timeouts diferenciados, limpieza de parciales y caché atómica compartida entre experiencias/jobs.</li>
+          <li><b>Salida visible</b>: bloque informativo en Excel, marcas idempotentes y estado independiente de InfoObras.</li>
         </ol>
       </div>
       <div class="col">
-        <h4>Integración con el sistema</h4>
+        <h4>Saldo técnico</h4>
         <ul>
-          <li>Módulo hermano de InfoObras en <b>src/scraping/</b>, en la misma etapa post-resolución de CUI.</li>
-          <li>El candado se engancha al <b>resolver CUI existente</b> como evidencia adicional (53% de confirmación automática medida).</li>
-          <li>Los Excel de CONOSCE se descargan 1 vez por año y se consultan <b>offline</b> (cero carga por experiencia).</li>
-          <li>Lo no disponible cae a <b>«Por confirmar»</b>, terminología sin jerga.</li>
+          <li><b>F5 · candado de identidad/procedencia</b>: confirmar que el proceso y el emisor corresponden al certificado antes de promover evidencia.</li>
+          <li>Corrida integral en el servidor con una propuesta real y rollback preparado.</li>
         </ul>
         <h4 style="margin-top:12px">Riesgo</h4>
         <ul>
@@ -340,7 +336,7 @@
         </ul>
       </div>
     </div>
-    <div class="aviso">Ya no hay cláusula NO-GO: la verificación que la motivaba se ejecutó y dio GO con evidencia. El precio baja de S/ 2,600 a S/ 2,400 porque el riesgo desapareció, y la sonda ya invertida se refleja en que el paquete entra directo a integración.</div>
+    <div class="aviso">El valor sube de S/ 2,400 a S/ 3,200: la fuente fue viable, pero la integración real exigió resolver el WAF del host, soportar tres formatos y construir deduplicación/publicación atómica. Queda S/ 800 de trabajo para F5 y validación integral.</div>
   </div>
 
   <!-- T-005 -->
@@ -374,22 +370,22 @@
 
   <!-- T-006 -->
   <div class="card">
-    <div class="head"><h3>T-006 — RENIPRESS: establecimientos de salud</h3><span class="tag cot">por integrar</span><span class="tag ver">sonda ✔ hecha</span><span class="precio">S/ 800 · 1–1.5 días</span></div>
-    <p class="meta">Cubre el «si es salud, ¿esa clínica existe?» del flujograma. Aplica solo a obras privadas de salud — las públicas ya se verifican por CUI/InfoObras. <b>La sonda ya se ejecutó y dio GO</b>: el registro de SUSALUD se consulta por nombre, RUC o código sin captcha; la incógnita de «¿por código o por navegación?» quedó resuelta.</p>
+    <div class="head"><h3>T-006 — RENIPRESS: establecimientos de salud</h3><span class="tag ok">✔ integrado como evidencia</span><span class="tag cot">matching/panel pendientes</span><span class="precio">S/ 1,600 · S/ 600 pendientes</span></div>
+    <p class="meta">Ya consulta SUSALUD por nombre, RUC o código y participa como etapa durable del pipeline para experiencias de salud públicas o privadas. Distingue «sin resultados» de «portal caído» y nunca convierte una caída en «no existe». El valor creció porque ahora incluye API, CLI, caché, progreso, checkpoints y reanudación.</p>
     <div class="cols">
       <div class="col">
-        <h4>Plan de desarrollo (la sonda ya está invertida)</h4>
+        <h4>Construido</h4>
         <ol>
-          <li><b>Portar la sonda al backend</b> <span class="dias">· 0.5 día</span> — módulo de consulta al registro, con los combos que el servicio exige por defecto.</li>
-          <li><b>Matching</b> <span class="dias">· 0.5–1 día</span> — por nombre del establecimiento + distrito/provincia; manejo de homónimos.</li>
-          <li><b>Salida en 3 estados</b> <span class="dias">· 0.5 día</span> — «Existe en RENIPRESS» / «No encontrado» (alerta) / «Homónimos — revisar»; prueba con casos reales.</li>
+          <li>Cliente inyectable, reintentos y contrato estable de resultados.</li>
+          <li><code>GET /api/pivote/renipress</code> y CLI de diagnóstico sobre el mismo núcleo.</li>
+          <li>Etapa 3c paralela a InfoObras/SUNAT, caché por término y checkpoints.</li>
         </ol>
       </div>
       <div class="col">
-        <h4>Integración con el sistema</h4>
+        <h4>Saldo técnico</h4>
         <ul>
-          <li>Se engancha al <b>gate de privadas</b> existente: antes de mandar la obra a «Por confirmar», si es de salud pasa por RENIPRESS.</li>
-          <li>Flag nuevo en el <b>Excel</b> y en <b>«Por confirmar»</b> del panel.</li>
+          <li>Calibrar matching conservador con un corpus auditado de homónimos, bajas y ausencias.</li>
+          <li>Mostrar el resultado en el panel sin convertirlo todavía en veredicto.</li>
         </ul>
       </div>
     </div>
@@ -425,19 +421,19 @@
 
 <!-- ============ 4. CRONOGRAMA ============ -->
 <section>
-  <h2>4 · Cronograma sugerido (~3 semanas calendario)</h2>
-  <p class="h2sub">Arranca después de cerrar el hito final del contrato vigente. La sonda SEACE ya se ejecutó (GO con evidencia), así que T-004 entra directo a integración — una semana menos que el plan v1.</p>
+  <h2>4 · Cronograma de cierre técnico</h2>
+  <p class="h2sub">El núcleo de T-004 y la integración durable de T-006 ya existen. El cronograma restante se concentra en candados, cronología, panel y prueba integral.</p>
   <div class="pipe">
     <div class="gantt">
       <div class="gfila cab"><div></div><div>Sem 1</div><div>Sem 2</div><div>Sem 3</div><div></div><div></div></div>
       <div class="gfila"><div>Sondas SEACE/CONOSCE/OCDS</div><div class="barra ok"><span>✔ ya ejecutadas (GO, 86% medido)</span></div><div></div><div></div><div></div><div></div></div>
       <div class="gfila"><div>T-007 SUNAT habido</div><div class="barra ok"><span>✔ ya construido — falta render en panel</span></div><div></div><div></div><div></div><div></div></div>
-      <div class="gfila"><div>T-004 datos abiertos + candado</div><div class="barra cot"><span>integración</span></div><div class="barra cot"><span>ZIP + prueba real</span></div><div></div><div></div><div></div></div>
+      <div class="gfila"><div>T-004 datos abiertos</div><div class="barra ok"><span>✔ F1/F2 + WAF + caché</span></div><div class="barra cot"><span>F5 + prueba real</span></div><div></div><div></div><div></div></div>
       <div class="gfila"><div>T-005 Cruces + cronología</div><div></div><div class="barra cot"><span>2–2.5 días</span></div><div></div><div></div><div></div></div>
-      <div class="gfila"><div>T-006 RENIPRESS</div><div></div><div></div><div class="barra cot"><span>1–1.5 días (sonda ✔ hecha)</span></div><div></div><div></div></div>
+      <div class="gfila"><div>T-006 RENIPRESS</div><div class="barra ok"><span>✔ integración durable</span></div><div></div><div class="barra cot"><span>matching + panel</span></div><div></div><div></div></div>
       <div class="gfila"><div>Prueba integral + entrega</div><div></div><div></div><div class="barra ok"><span>corrida completa real</span></div><div></div><div></div></div>
     </div>
-    <p class="nota">Hito de decisión único: <b>fin de Sem 3</b> — corrida integral sobre una propuesta real con todos los componentes activos. El GO/NO-GO desapareció del cronograma porque ya se resolvió (sondas RENIPRESS ✔ GO y SEACE ✔ GO por datos abiertos, ambas validadas en vivo).</p>
+    <p class="nota">Hito de cierre: corrida integral sobre una propuesta real en el servidor, con todos los componentes activos y punto de retorno probado.</p>
   </div>
 </section>
 
@@ -448,10 +444,10 @@
   <table>
     <tr><th>Punto</th><th>Detalle</th></tr>
     <tr><td class="num">Momento</td><td>Presentar junto con la entrega final del contrato vigente — no antes, para no mezclar alcances.</td></tr>
-    <tr><td class="num">T-003 + T-008</td><td>Se cobran como extras ya entregados (S/ 5,400): abrir la reunión con demo en vivo — es exactamente lo que sus hojas «cui» y su flujograma V2 describen hacer a mano, ya automatizado y auditado. El argumento V2: «tu propio Excel pide distinguir expediente de obra y ubicar el CUI: eso ya corre, medido sobre 277 casos tuyos».</td></tr>
-    <tr><td class="num">Bloques</td><td>T-004 + T-005 se ofrecen como un solo bloque «Expediente SEACE y cruces de fechas» (<b>S/ 3,600</b>). T-006 aparte. T-007 como muestra del canal de bolsa de horas.</td></tr>
+    <tr><td class="num">T-003 + T-008</td><td>Valor técnico actualizado: <b>S/ 7,400</b>. T-008 creció al incorporar PostgreSQL serving-first, operación versionada y validación sobre las 620,985 filas reales.</td></tr>
+    <tr><td class="num">Bloques</td><td>T-004 + T-005 forman «Expediente SEACE y cruces de fechas» (<b>S/ 4,400</b> valor total; S/ 2,000 de saldo técnico). T-006 vale S/ 1,600, con S/ 600 pendientes. T-007 permanece en bolsa.</td></tr>
     <tr><td class="num">Insumos del cliente</td><td>Ya no se necesitan contratos de muestra (el OCR salió del alcance). Solo 1–2 casos de obras privadas de salud (para probar T-006).</td></tr>
-    <tr><td class="num">Riesgo declarado</td><td><b>Resuelto antes de cotizar</b>: las sondas ya corrieron (SEACE con reCAPTCHA → esquivado por datos abiertos oficiales, GO medido con 86% de cobertura; RENIPRESS GO sin captcha). El precio v2 refleja el riesgo eliminado: T-004 S/ 2,600→2,400 y T-005 S/ 1,400→1,200.</td></tr>
+    <tr><td class="num">Riesgo declarado</td><td>Las fuentes son viables, pero la integración reveló complejidad operativa real: WAF y formatos múltiples en SEACE; homónimos y caída≠ausencia en RENIPRESS; PostgreSQL y cargas versionadas en MEF. Los valores v5 reflejan ese alcance, no una sonda idealizada.</td></tr>
     <tr><td class="num">Argumento de venta</td><td>«Con los datos reales de tus propios 29 concursos: bases integradas + contrato + fecha de firma automáticos y sin captcha para ~8.5 de cada 10 experiencias públicas, y confirmación automática del CUI en la mitad de los casos.» Evidencia en <b>resolucion-cui-datos-abiertos.html</b>.</td></tr>
     <tr><td class="num">Cerrar expectativa</td><td>«Firmante = representante legal» no se cotiza: ya se construyó y se descartó con evidencia (falsos positivos).</td></tr>
   </table>

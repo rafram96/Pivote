@@ -77,6 +77,8 @@ Para cada experiencia, cruzándola con los requisitos del cargo en `bases`:
    (ej. `"SÍ (ASUMIDO — Representante Común del consorcio emisor)"`).
    > El backend lo verifica de verdad contra SUNAT (`getRepLeg`). Tu valor es
    > provisional, no determinante.
+   Agrega también `"cargo_valido_emitir"` a `supuestos` en esa experiencia. Esta
+   marca estructurada —no el sufijo del texto— es la que usa el Excel.
 
 ### Por profesional (Parte 4, resumen)
 7. **Total** de DÍAS/MESES/AÑOS sumando sus experiencias válidas. Si alguna quedó
@@ -205,7 +207,8 @@ los campos de juicio dentro de cada `experiencia` y `profesional`, y
              "cargo_bases_valido": "SÍ — …", "tipo_obra_valido": "SÍ — …",
              "anterior_colegiatura": "NO", "cert_antes_culminar": "NO",
              "incluye_covid": "SÍ", "traslape": "NO",
-             "cargo_valido_emitir": "SÍ (ASUMIDO — …)", "observaciones": null } ],
+             "cargo_valido_emitir": "SÍ (ASUMIDO — …)",
+             "supuestos": ["cargo_valido_emitir"], "observaciones": null } ],
     "2": [ { "n": 1, "…": "…" } ]
   },
   "postor_eval": {
