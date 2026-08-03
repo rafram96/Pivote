@@ -32,10 +32,10 @@ Abstención (es un detector de mentiras — un falso CUMPLE es el peor fallo):
   no entra en la fila TOTAL: un número que el backend acaba de declarar no
   confiable no puede propagarse a la columna que lee el Factor A ni al
   acumulado que el evaluador lee como «años de experiencia» (ver `_confiable`).
-- **Fila TOTAL** → solo si TODAS las experiencias tienen periodo legible y DÍAS
-  no discrepante, y además **ninguna se traslapa** con otra. Ver
-  `_total_del_profesional`: un total incompleto se lee como la experiencia
-  completa del profesional, y con solape la suma bruta la exagera.
+- **Fila TOTAL** → autoridad exclusiva del backend (#57): suma las filas
+  calculables incluso si se traslapan, porque se rotula como TOTAL DECLARADO
+  bruto. El descuento por traslape vive separado en `total_backend`. Si falta
+  una fila, se abstiene y retira el total previo del LLM.
 
 **DÍAS es el dato; MESES y AÑOS son su conversión de unidad.** Se calculan igual,
 pero no se comparan contra el espejo: eso alertaría del divisor que usó el LLM
@@ -57,7 +57,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Optional
 
-from reglas import anios, dias_inclusivos, fusionar_traslapes, meses, periodo_fechas
+from reglas import anios, dias_inclusivos, meses, periodo_fechas
 from schemas import pipeline
 from schemas.espejo import SENTINEL_POR_VERIFICAR
 
@@ -101,7 +101,6 @@ MOTIVO_SIN_COLEGIATURA = "SIN_COLEGIATURA"
 MOTIVO_SIN_DIAS = "SIN_DIAS"
 MOTIVO_DIAS_DISCREPANTE = "DIAS_DISCREPANTE"
 MOTIVO_TOTAL_INCOMPLETO = "TOTAL_INCOMPLETO"
-MOTIVO_TOTAL_TRASLAPE = "TOTAL_TRASLAPE"
 
 _RE_ISO_COMPLETA = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -384,7 +383,9 @@ def recalcular_espejo(
     """Rellena en el espejo los campos calculables de la Parte 4. **Idempotente.**
 
     `sobrescribir=False` (defecto): solo escribe donde está vacío; lo que ya venía
-    se conserva tal cual y, si no cuadra, se reporta en `discrepancias`.
+    se conserva tal cual y, si no cuadra, se reporta en `discrepancias`. La fila
+    TOTAL es la excepción deliberada: días, meses y años son autoridad exclusiva
+    del backend y reemplazan cualquier cálculo previo del LLM.
     `sobrescribir=True`: impone el valor del backend. Ojo con el orden — con esta
     opción hay que correrlo **después** de `verificar_espejo`, porque las NOTAS 9
     y 10 comparan contra lo que escribió Claude y ya no lo encontrarían.
@@ -399,7 +400,8 @@ def recalcular_espejo(
     discrepancias: list[Discrepancia] = []
 
     def aplicar(destino: dict, n_prof, n_exp, campo: str, valor, motivo,
-                *, prefijo: str = "", dias_tolerados: int = TOLERANCIA_DIAS) -> object:
+                *, prefijo: str = "", dias_tolerados: int = TOLERANCIA_DIAS,
+                forzar: bool = False) -> object:
         """Escribe (o no) el campo; devuelve el valor VIGENTE en la celda.
 
         `prefijo` es solo etiqueta de reporte ("total.dias"); la clave escrita en
@@ -422,7 +424,7 @@ def recalcular_espejo(
             if _discrepa(campo, previo, valor, dias_tolerados):
                 discrepancias.append(
                     Discrepancia(n_prof, n_exp, etiqueta, previo, valor))
-            if not sobrescribir:
+            if not (sobrescribir or forzar):
                 return previo
         destino[campo] = valor
         rellenos.append(Relleno(n_prof, n_exp, etiqueta, valor, previo))
@@ -430,13 +432,15 @@ def recalcular_espejo(
 
     def derivar(destino: dict, n_prof, n_exp, dias_vigente, dias_calculado,
                 motivo_periodo, *, prefijo: str = "",
-                dias_tolerados: int = TOLERANCIA_DIAS) -> None:
+                dias_tolerados: int = TOLERANCIA_DIAS,
+                forzar: bool = False) -> None:
         """MESES/AÑOS de una celda de DÍAS — o la abstención con su porqué."""
         if _confiable(dias_vigente, dias_calculado, dias_tolerados):
             derivados = derivar_de_dias(dias_vigente)
             for campo in ("meses", "anios"):
                 aplicar(destino, n_prof, n_exp, campo, derivados[campo], None,
-                        prefijo=prefijo, dias_tolerados=dias_tolerados)
+                        prefijo=prefijo, dias_tolerados=dias_tolerados,
+                        forzar=forzar)
             return
         if _numero(dias_vigente):
             motivo = (MOTIVO_DIAS_DISCREPANTE,
@@ -451,13 +455,13 @@ def recalcular_espejo(
                 f"dias={dias_vigente!r} no es un número: no se derivan meses ni años")
         for campo in ("meses", "anios"):
             aplicar(destino, n_prof, n_exp, campo, None, motivo,
-                    prefijo=prefijo, dias_tolerados=dias_tolerados)
+                    prefijo=prefijo, dias_tolerados=dias_tolerados,
+                    forzar=forzar)
 
     for prof in espejo.get("profesionales", []) or []:
         n_prof = prof.get("n_prof")
         colegiatura = prof.get("fecha_colegiatura")
         sumables: list[Optional[int]] = []
-        periodos: list[tuple[date, date]] = []
 
         for exp in prof.get("experiencias", []) or []:
             n_exp = exp.get("n")
@@ -477,20 +481,17 @@ def recalcular_espejo(
             # total es enteramente derivado de fechas y se puede cruzar traslapes.
             if dias_calculado is not None and _confiable(dias_vigente, dias_calculado):
                 sumables.append(dias_vigente)
-                periodos.append(periodo_fechas(
-                    (fecha_dura(exp.get("fecha_inicial")),
-                     fecha_dura(exp.get("fecha_final")))))
             else:
                 sumables.append(None)
 
-        _total_del_profesional(prof, n_prof, sumables, periodos, aplicar, derivar)
+        _total_del_profesional(prof, n_prof, sumables, aplicar, derivar)
 
     return ResultadoRecalculo(
         tuple(rellenos), tuple(abstenciones), tuple(discrepancias))
 
 
 def _total_del_profesional(prof: dict, n_prof, sumables: list,
-                           periodos: list, aplicar, derivar) -> None:
+                           aplicar, derivar) -> None:
     """Fila TOTAL de la Parte 4 (`prof["total"]` → DÍAS/MESES/AÑOS del Excel).
 
     Es el número que el evaluador lee como «años de experiencia del profesional»
@@ -501,40 +502,29 @@ def _total_del_profesional(prof: dict, n_prof, sumables: list,
 
     Se llena la SUMA BRUTA de la columna —misma convención que
     `notas.totales_cuadran`, que compara `total.dias` contra la suma pelada— y
-    **solo cuando esa suma no puede exagerar la experiencia**. Dos candados:
+    se rotula como DECLARADA en el Excel. El total efectivo y sus descuentos se
+    muestran por separado; por eso un traslape ya no vuelve ambiguo este campo.
+    Conserva un candado:
 
     1. **Todas** las experiencias con periodo legible y DÍAS no discrepante. Un
        total al que le faltan periodos no se lee como "faltan datos": se lee como
        la experiencia completa del profesional.
-    2. **Sin traslapes** (ALT11 / NOTA 9). Medido en los 37 espejos reales:
-       cuando hay solape, Claude a veces pone en `total` la cifra YA de-solapada
-       (`013721553f0a` prof 4: total 5 años, columna 8.38, y su veredicto dice
-       "de-solapando 2022-2026"). Escribir ahí la suma bruta inflaría 3.4 años la
-       celda que decide el Factor A — la dirección peligrosa. Con solape el
-       backend se abstiene y el número lo pone quien descuenta: los días
-       EFECTIVOS del Paso 5 (`reglas.dias_efectivos_profesional`).
-
-    Por lo mismo un `total` que ya viene NO se pisa (`sobrescribir=False`): puede
-    ser bruto o de-solapado y el backend no puede saber cuál.
+    El valor previo del LLM se compara para dejar una discrepancia y luego se
+    reemplaza siempre. Así no quedan tres autoridades distintas para la misma
+    fila; el Anexo 16 conserva su cifra literal en
+    `experiencia_total_declarada`.
     """
     if not sumables:                           # profesional sin experiencias
         return
 
     n = len(sumables)
     faltan = sum(1 for d in sumables if not _numero(d))
-    traslape = fusionar_traslapes(periodos)[1] if not faltan else 0
     if faltan:
         total_dias = None
         motivo = (MOTIVO_TOTAL_INCOMPLETO,
                   f"{faltan} de {n} experiencias sin periodo legible o con DÍAS "
                   f"en discrepancia: un total parcial se leería como la "
                   f"experiencia completa del profesional")
-    elif traslape:
-        total_dias = None
-        motivo = (MOTIVO_TOTAL_TRASLAPE,
-                  f"los periodos se traslapan ({traslape} días en común): la suma "
-                  f"bruta exageraría la experiencia y no se sabe si el total "
-                  f"debe ir bruto o de-solapado — lo resuelve el Paso 5")
     else:
         total_dias = sum(sumables)
         motivo = None
@@ -545,13 +535,18 @@ def _total_del_profesional(prof: dict, n_prof, sumables: list,
     if not isinstance(destino, dict):
         destino = {}                           # se engancha solo si se escribe
 
-    vigente = aplicar(destino, n_prof, None, "dias", total_dias, motivo,
-                      prefijo="total.", dias_tolerados=tol)
-    derivar(destino, n_prof, None, vigente, total_dias, motivo,
-            prefijo="total.", dias_tolerados=tol)
+    if total_dias is None:
+        # Un total viejo del LLM no puede sobrevivir cuando el backend se abstiene:
+        # parecería completo aunque falten fechas. La cifra literal del Anexo vive
+        # en otro campo y no se pierde.
+        destino = {}
 
-    if destino and prof.get("total") is not destino:
-        prof["total"] = destino
+    vigente = aplicar(destino, n_prof, None, "dias", total_dias, motivo,
+                      prefijo="total.", dias_tolerados=tol, forzar=True)
+    derivar(destino, n_prof, None, vigente, total_dias, motivo,
+            prefijo="total.", dias_tolerados=tol, forzar=True)
+
+    prof["total"] = destino
 
 
 # ── Traducción a observaciones del pipeline (opcional; el que cablea decide) ──
@@ -569,8 +564,8 @@ def observaciones_recalculo(
     """
     out: list[pipeline.Observacion] = []
 
-    # INFO: solo los huecos. Lo sobrescrito NO es "calculado por el backend" a
-    # secas — es un dato de la propuesta que se perdió, y va aparte.
+    # INFO: solo los huecos. Lo sobrescrito es un valor previo reemplazado por la
+    # autoridad de cálculo (por opción global o por la regla especial del TOTAL).
     huecos = resultado.huecos_por_campo()
     if huecos:
         detalle = ", ".join(f"{k}={v}" for k, v in sorted(huecos.items()))
@@ -584,8 +579,8 @@ def observaciones_recalculo(
         detalle = ", ".join(f"{k}={v}" for k, v in sorted(sobrescritos.items()))
         out.append(pipeline.Observacion(
             codigo="RECALCULO", severidad=pipeline.Severidad.ADVERTENCIA,
-            mensaje=(f"sobrescribir=True: el backend reemplazó valores que traía la "
-                     f"propuesta ({detalle}); el texto original ya no está en el espejo"),
+            mensaje=(f"el backend reemplazó valores calculados que traía la "
+                     f"propuesta ({detalle}); prevalece el cálculo verificable"),
             origen=origen))
 
     # Abstenciones: agrupadas por (profesional, experiencia, motivo).

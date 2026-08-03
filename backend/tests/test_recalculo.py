@@ -263,7 +263,7 @@ def test_sobrescribir_borra_el_matiz_en_prosa_y_lo_deja_asentado():
         == [("anterior_colegiatura", SI)]
 
     obs = observaciones_recalculo(res)
-    avisos = [o for o in obs if "sobrescribir=True" in o.mensaje]
+    avisos = [o for o in obs if "reemplazó valores" in o.mensaje]
     assert len(avisos) == 1
     assert "anterior_colegiatura" in avisos[0].mensaje
     # El INFO de "calculado por el backend" no incluye lo sobrescrito.
@@ -357,24 +357,16 @@ def test_total_suma_las_experiencias():
     assert res.por_campo()["total.dias"] == 1
 
 
-def test_total_se_abstiene_si_los_periodos_se_traslapan():
-    """Con solape la suma bruta EXAGERA, y el backend no puede saber si esa celda
-    debía ir bruta o de-solapada.
-
-    Caso real (`013721553f0a` prof 4): Claude puso `total.anios = 5` con la
-    columna sumando 8.38 y su veredicto diciendo "de-solapando 2022-2026".
-    Escribir ahí la suma bruta habría inflado 3.4 años la celda que decide el
-    Factor A. Quien descuenta el solape es el Paso 5.
-    """
+def test_total_con_traslape_es_suma_bruta_y_no_finge_ser_efectivo():
+    """#57: TOTAL declarado cuadra con sus filas; Paso 5 descuenta aparte."""
     espejo = _espejo(
         _exp(1, "2020-01-01", "2020-06-30"),          # 182
         _exp(2, "2020-01-01", "2020-06-30"),          # 182, idéntico periodo
     )
     res = recalcular_espejo(espejo)
 
-    assert _total(espejo) == {}                        # ni 364 ni 182
-    motivos = [a.motivo for a in res.abstenciones if a.campo == "total.dias"]
-    assert len(motivos) == 1 and "182 días en común" in motivos[0]
+    assert _total(espejo) == {"dias": 364, "meses": 12.13, "anios": 1.0}
+    assert not [a for a in res.abstenciones if a.campo == "total.dias"]
 
 
 def test_periodos_contiguos_no_son_traslape():
@@ -402,14 +394,14 @@ def test_total_se_abstiene_si_falta_una_experiencia():
     assert len(motivos) == 1 and "1 de 2 experiencias" in motivos[0]
 
 
-def test_total_previo_que_no_cuadra_se_reporta_y_no_se_pisa():
+def test_total_previo_que_no_cuadra_se_reporta_y_se_reemplaza():
     """El caso real del corpus: total.dias=0 con 758 días ya calculados. El
     Comité manda; el backend alerta (y `notas.totales_cuadran` también)."""
     espejo = _espejo(_exp(1, "2019-05-01", "2019-10-31"))
     espejo["profesionales"][0]["total"] = {"dias": 0, "meses": 0, "anios": 0}
     res = recalcular_espejo(espejo)
 
-    assert _total(espejo) == {"dias": 0, "meses": 0, "anios": 0}
+    assert _total(espejo) == {"dias": 184, "meses": 6.13, "anios": 0.5}
     # UNA alerta, no tres: el defecto es el total, y meses/años tampoco se
     # rederivan de un número que el backend acaba de declarar no confiable.
     assert [(d.campo, d.valor_espejo, d.valor_calculado) for d in res.discrepancias] \
@@ -427,8 +419,18 @@ def test_total_tolera_el_off_by_one_acumulado():
     espejo["profesionales"][0]["total"] = {"dias": 703}
     res = recalcular_espejo(espejo)
     assert res.discrepancias == ()
-    assert _total(espejo)["dias"] == 703               # se respeta lo del espejo
-    assert _total(espejo)["meses"] == 23.43            # …y meses/años salen de ÉL
+    assert _total(espejo)["dias"] == 706               # autoridad backend
+    assert _total(espejo)["meses"] == 23.53
+
+
+def test_total_llm_se_retira_si_el_backend_no_puede_calcularlo():
+    espejo = _espejo(
+        _exp(1, "2019-05-01", "2019-10-31"),
+        _exp(2, "POR VERIFICAR", "2020-04-01"),
+    )
+    espejo["profesionales"][0]["total"] = {"dias": 9999, "anios": 27.39}
+    recalcular_espejo(espejo)
+    assert _total(espejo) == {}
 
 
 def test_profesional_sin_experiencias_no_estrena_total():

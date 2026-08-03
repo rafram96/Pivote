@@ -85,6 +85,7 @@ CODIGOS = (
     "VEREDICTOS_INCOMPLETOS",   # a buena parte del equipo le falta el veredicto
     "PROFESIONAL_SIN_EVALUAR",  # a ESE profesional no le llegó nada
     "PROFESIONAL_SIN_VEREDICTO",  # a ESE le calcularon las filas pero no el veredicto
+    "VEREDICTO_SIN_SUSTENTO",  # hay decisión, pero solo dice CUMPLE/NO CUMPLE
     "EXPERIENCIA_SIN_EVALUAR",  # a ESA fila no le llegó nada
     "COBERTURA_NULA",           # una columna del formato sale en blanco
     "VEREDICTO_AJENO",          # el sustento habla de otra especialidad
@@ -259,6 +260,48 @@ def _experiencias(prof: dict) -> list[dict]:
 
 def _lleno(v) -> bool:
     return v is not None and not (isinstance(v, str) and not v.strip())
+
+
+_RE_CABECERA_VEREDICTO = re.compile(
+    r"^(?:(?:S[IÍ]\s+)?CUMPLE|NO\s+CUMPLE|S[IÍ]|NO)(?=\s|$|[-–—:])",
+    re.IGNORECASE)
+_RE_INICIO_SUSTENTO = re.compile(r"^(?:(?:[-–—:]\s*)|(?:porque\s+))\S+", re.IGNORECASE)
+
+
+def _sin_sustento(valor) -> bool:
+    """Verdadero solo para una decisión reconocible que termina en el rótulo."""
+    if not isinstance(valor, str) or not valor.strip():
+        return False
+    texto = valor.strip()
+    cabecera = _RE_CABECERA_VEREDICTO.match(texto)
+    return bool(cabecera) and not _RE_INICIO_SUSTENTO.match(texto[cabecera.end():].strip())
+
+
+def veredictos_sin_sustento(espejo: dict) -> list[Hallazgo]:
+    """Detecta decisiones que no explican la evidencia que las sostiene (#54)."""
+    out: list[Hallazgo] = []
+    for prof in _profesionales(espejo):
+        n_prof = prof.get("n_prof")
+        cumple = prof.get("cumple")
+        if _sin_sustento(cumple):
+            out.append(Hallazgo(
+                "VEREDICTO_SIN_SUSTENTO", CRITICA,
+                f"El resultado del profesional {_etiqueta(prof)} solo dice "
+                f"«{cumple.strip()}» y no explica qué requisito, cifra o documento "
+                "lo sostiene. Hay que repetir esa evaluación con una razón "
+                "verificable antes de usar el archivo.",
+                n_prof=n_prof))
+        for exp in _experiencias(prof):
+            decisiones = [exp.get("cargo_bases_valido"), exp.get("tipo_obra_valido")]
+            if not any(_sin_sustento(v) for v in decisiones):
+                continue
+            out.append(Hallazgo(
+                "VEREDICTO_SIN_SUSTENTO", CRITICA,
+                f"La experiencia {exp.get('n')} del profesional {_etiqueta(prof)} "
+                "tiene una decisión sobre el cargo o el tipo de obra sin explicar "
+                "la evidencia. Hay que completarla con una razón verificable.",
+                n_prof=n_prof, n_exp=exp.get("n")))
+    return out
 
 
 def _entregado(exp: dict, campo: str) -> bool:
@@ -952,6 +995,7 @@ def revisar_integridad(espejo: dict) -> list[Hallazgo]:
         return [Hallazgo("NO_REVISABLE", ALERTA, MSG_NO_REVISABLE)]
     hallazgos = (
         cobertura_evaluador(espejo)
+        + veredictos_sin_sustento(espejo)
         + veredictos_ajenos(espejo)
         + veredicto_faltante_al_final(espejo)
         + referencias_inexistentes(espejo)

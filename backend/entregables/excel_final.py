@@ -1371,7 +1371,9 @@ def construir_hoja_profesional(
             # muestra al lado — nunca uno disfrazado del otro (#60)
             cui_text = f"{cui_cert} · el sistema identificó el CUI {cui} — verificar"
         elif cui_cert:
-            cui_text = str(cui_cert)
+            cui_text = (f"Citado en el certificado y verificado: {cui_cert}"
+                        if cui and str(cui_cert).strip() == str(cui).strip()
+                        else f"Citado en el certificado: {cui_cert}")
         elif cui:
             cui_text = f"No consignado en el certificado — el sistema identificó el CUI {cui}"
         else:
@@ -1762,7 +1764,7 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
 
 
 def inyectar_veredicto_backend(espejo: dict, enriquecimiento: Optional[dict]) -> None:
-    """Copia `cumple_backend` del enriquecimiento a cada profesional del espejo.
+    """Copia veredicto y desglose de totales del enriquecimiento al espejo.
 
     El espejo se persiste UNA vez (al crear el job) y no se vuelve a guardar; el
     enriquecimiento sí se persiste tras cada etapa. En la corrida en vivo la etapa
@@ -1772,9 +1774,18 @@ def inyectar_veredicto_backend(espejo: dict, enriquecimiento: Optional[dict]) ->
     """
     for p in (espejo or {}).get("profesionales", []):
         d = (enriquecimiento or {}).get(f"prof:{p.get('n_prof')}") or {}
+        if d:
+            p["total_backend"] = {
+                "dias_declarados": d.get("dias_brutos"),
+                "dias_paralizados": d.get("dias_paralizados"),
+                "dias_traslape": d.get("dias_traslape"),
+                "dias_efectivos": d.get("dias_efectivos"),
+                "anios_efectivos": d.get("anios_efectivos"),
+                "incompleto": bool(d.get("veredicto_provisional")),
+            }
+            p["dias_efectivos_backend"] = d.get("dias_efectivos")
         if d.get("cumple_backend"):
             p["cumple_backend"] = d["cumple_backend"]
-            p["dias_efectivos_backend"] = d.get("dias_efectivos")
             p["minimo_exigido_backend"] = d.get("minimo_texto")
 
 

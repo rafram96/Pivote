@@ -42,6 +42,8 @@ Para cada experiencia, cruzándola con los requisitos del cargo en `bases`:
    > Lo que nunca se sacrifica por esta aritmética es un veredicto (ítems 2, 3, 8).
 2. **`cargo_ocupado` y ¿es el cargo de las bases?** (`cargo_bases_valido`:
    cumple + razón literal citando la lista de cargos similares).
+   Devuelve siempre `"SÍ — razón verificable"` o `"NO — razón verificable"`;
+   `"SÍ"`/`"NO"` solos son una evaluación incompleta y bloquean la consolidación.
    > ⚠ **El núcleo de especialidad se exige COMPLETO.** La lista de cargos
    > válidos varía en el sustantivo inicial (especialista / responsable /
    > encargado / ingeniero / inspector…), pero la especialidad es obligatoria y,
@@ -55,6 +57,8 @@ Para cada experiencia, cruzándola con los requisitos del cargo en `bases`:
    > manda**: si tú dices "SÍ" donde falta un término del núcleo, la celda se
    > reescribe en rojo y queda registrada la contradicción. No fuerces el SÍ.
 3. **¿Tipo de obra válido?** (`tipo_obra_valido`) contra `tipos_obra_validos`.
+   Usa también `"SÍ — razón verificable"` o `"NO — razón verificable"`: el
+   resultado aislado no sirve como sustento.
 4. **`anterior_colegiatura`**: `"SÍ"` si la experiencia es anterior a la
    `fecha_colegiatura` del profesional; `"NO"` si no — **solo cuando ambas fechas
    son ISO completas y no hay duda**. Si la colegiatura es parcial, dice
@@ -89,7 +93,10 @@ Para cada experiencia, cruzándola con los requisitos del cargo en `bases`:
    este. El veredicto del ítem 8 **no depende** de que lo llenes: la experiencia
    total declarada y las fechas están a la vista.
 8. **¿Cumple el requisito mínimo (3.4.1.B.x)?** con razón literal (experiencia
-   total vs mínimo exigido).
+   total vs mínimo exigido). Formato obligatorio: `"CUMPLE — acredita X días
+   frente a Y exigidos"` o `"NO CUMPLE — acredita X días frente a Y exigidos"`.
+   Nunca devuelvas solo `CUMPLE`, `SÍ CUMPLE` o `NO CUMPLE`: esos rótulos sin
+   cifra, requisito o documento de respaldo bloquean la consolidación.
 9. **Años adicionales sobre el mínimo** → insumo del Factor A. Indica si CUENTA o
    NO para puntaje según las bases.
 9b. **Correspondencia de cargo — en campos propios, NO pegada al nombre.**
@@ -150,7 +157,9 @@ Para cada experiencia, cruzándola con los requisitos del cargo en `bases`:
       `isos_certificaciones[].titular` del mapa.
 
 ## Reglas
-- **Razón literal siempre**: cada cumple/no-cumple lleva un `detalle` que cita el
+- **Razón literal siempre**: la razón viaja en el mismo valor textual de cada
+  decisión, después de `—`; no existe un `detalle` separado que pueda rescatar
+  un rótulo huérfano. Cada cumple/no-cumple cita el
   texto de las bases o del certificado (ej. *"'Ingeniero Civil' está en la lista
   de profesiones aceptadas → CUMPLE"*; *"Nivel II-2 ≥ II-1 requerido → CUMPLE"*).
 - **Comparación de niveles hospitalarios**: II-2 ≥ II-1, etc. Si no estás seguro,

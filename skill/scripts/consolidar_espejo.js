@@ -82,6 +82,20 @@ const fechaOk = (v) => {
 };
 // SÍ/NO desde booleano o texto (incluye_covid, traslape, cert_antes_culminar…)
 const siNo = (jv, ev_) => pick(jv, (typeof ev_ === "boolean" ? (ev_ ? "SÍ" : "NO") : ev_));
+// #66 · CUI literal aunque venga al final de una oración, después de comillas:
+// `… Región Pasco" con CUI N° 2198318`. Es un rescate factual, no resolución:
+// solo acepta una etiqueta CUI explícita y 6–7 dígitos contiguos.
+const _RE_CUI_LITERAL = /\bCUI\s*(?:N(?:RO|[ÚU]MERO)?\.?\s*)?[Nº°#:]?\s*(\d{6,7})\b/i;
+function extraerCuiLiteral(...textos) {
+  for (const valor of textos) {
+    if (valor == null) continue;
+    const s = String(valor).trim();
+    if (/^\d{6,7}$/.test(s)) return s;
+    const m = _RE_CUI_LITERAL.exec(s);
+    if (m) return m[1];
+  }
+  return null;
+}
 const BACKEND = () => ({
   fecha_creacion_emisor: null, alerta_antiguedad_emisor: null,
   firmante_facultado_sunat: null, vinculacion_postor_emisor: null,
@@ -113,6 +127,17 @@ function _conValor(v) {
   if (Array.isArray(v)) return v.length > 0;
   if (typeof v === "object") return Object.keys(v).length > 0;
   return true; // números, booleanos
+}
+
+/** Un rótulo de decisión no es un sustento. Acepta una razón solo cuando el
+ * veredicto reconocido continúa con guion, dos puntos o «porque» y texto real. */
+function _veredictoSinSustento(v) {
+  if (typeof v !== "string" || !v.trim()) return false;
+  const texto = v.trim();
+  const cabecera = texto.match(/^(?:(?:S[IÍ]\s+)?CUMPLE|NO\s+CUMPLE|S[IÍ]|NO)(?=\s|$|[-–—:])/i);
+  if (!cabecera) return false; // texto no normalizado: lo revisan otros candados
+  const resto = texto.slice(cabecera[0].length).trim();
+  return !/^(?:(?:[-–—:]\s*)|(?:porque\s+))\S+/i.test(resto);
 }
 
 // Campos de juicio de una experiencia: si NINGUNO trae valor, la fila sale con
@@ -324,6 +349,18 @@ function auditarEvaluacion(ev, profs) {
       "evaluacion.json → profesionales_eval"));
   }
 
+  // Una etiqueta sola («CUMPLE», «NO CUMPLE») parece una decisión terminada en
+  // el Excel, pero no permite auditarla. Es crítico antes de consolidar (#54).
+  for (const i of nums) {
+    const cumple = (PE[String(i)] || {}).cumple;
+    if (_veredictoSinSustento(cumple)) {
+      avisos.push(obs("critical", "veredicto_sin_sustento",
+        `profesional ${i}: el resultado «${String(cumple).trim()}» no explica qué requisito, cifra o documento lo sostiene. `
+        + "No lo subas: vuelve a evaluar y conserva el resultado seguido de «— razón verificable».",
+        `evaluacion.json → profesionales_eval[${i}].cumple`));
+    }
+  }
+
   // ── 2 · cobertura de experiencias_eval (una entrada por experiencia declarada) ──
   for (const p of lista) {
     const i = Number(p.n_prof);
@@ -395,6 +432,18 @@ function auditarEvaluacion(ev, profs) {
       avisos.push(obs("critical", "evaluacion_experiencias_vacias",
         `${quien}: la(s) entrada(s) n=${huecas.join(", ")} de experiencias_eval no traen NINGÚN campo de juicio con valor. `
         + "Están presentes y cuentan para el conteo, pero dejan la fila igual que si no vinieran.",
+        `evaluacion.json → experiencias_eval[${i}]`));
+    }
+
+
+    for (const x of ee) {
+      if (!x || typeof x !== "object") continue;
+      const campos = ["cargo_bases_valido", "tipo_obra_valido"]
+        .filter((campo) => _veredictoSinSustento(x[campo]));
+      if (!campos.length) continue;
+      avisos.push(obs("critical", "veredicto_sin_sustento",
+        `${quien}, experiencia n=${x.n != null ? x.n : "?"}: ${campos.length === 2 ? "las decisiones sobre cargo y tipo de obra" : "la decisión evaluada"} `
+        + "solo trae el resultado, sin la razón verificable. No lo subas: completa cada decisión como «SÍ/NO — razón».",
         `evaluacion.json → experiencias_eval[${i}]`));
     }
   }
@@ -571,7 +620,8 @@ function consolidar(WS) {
         entidad_emisora: pick(e.entidad_emisora, e.cliente_empleador, e.emisor, e.entidad),
         ruc_emisor: pick(e.ruc_emisor),
         proyecto: pick(e.proyecto),
-        cui: pick(e.cui),
+        cui: extraerCuiLiteral(
+          e.cui, e.proyecto, e.servicio, e.objeto, e.descripcion),
         tipo_documento: pick(e.tipo_documento),
         nombre_emisor: pick(e.nombre_emisor, e.firmante),
         cargo_emisor: pick(e.cargo_emisor),
@@ -793,7 +843,7 @@ function consolidar(WS) {
       postor: pick(P.postor, P.nombre, (roster.postor_nivel || {}).postor),
       postor_ruc: pick(P.postor_ruc, P.ruc, (roster.postor_nivel || {}).postor_ruc),
       fecha_presentacion_oferta: pick(P.fecha_presentacion_oferta),
-      version_contrato: "1.2.0",
+      version_contrato: "1.3.0",
       generado_por: "claude-code",
     },
     postor: {
@@ -824,7 +874,9 @@ function consolidar(WS) {
 
 const main = (WS) => consolidar(WS).espejo;
 
-module.exports = { normalizarEval, auditarEvaluacion, consolidar, main };
+module.exports = {
+  normalizarEval, auditarEvaluacion, extraerCuiLiteral, consolidar, main,
+};
 
 if (require.main === module) {
   const WS = process.argv[2];

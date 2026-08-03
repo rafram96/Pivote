@@ -19,7 +19,16 @@ const os = require("os");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
-const { auditarEvaluacion, normalizarEval, main } = require("./consolidar_espejo");
+const {
+  auditarEvaluacion, normalizarEval, extraerCuiLiteral, main,
+} = require("./consolidar_espejo");
+
+test("#66 · extrae CUI incrustado al final del párrafo del servicio", () => {
+  const texto = 'Supervisión de la Ejecución de la Obra "Mejoramiento del Acceso – Región Pasco" con CUI N° 2198318.';
+  assert.strictEqual(extraerCuiLiteral(texto), "2198318");
+  assert.strictEqual(extraerCuiLiteral("obra sin código 2198318"), null,
+    "un número suelto no se convierte en CUI");
+});
 
 // ── el caso real: 3 profesionales de un mismo concurso ──────────────────────
 const HECHOS = [
@@ -47,6 +56,39 @@ const de = (avisos, tipo) => avisos.find((a) => a.tipo === tipo);
 test("caso sano (1:1 completo) → ningún aviso", () => {
   assert.deepStrictEqual(auditarEvaluacion(SANA, HECHOS), [],
     "el candado no debe gritar cuando la evaluación cubre a todos");
+});
+
+test("#54 · CUMPLE/NO CUMPLE sin razón bloquea; con sustento no", () => {
+  for (const rotulo of ["CUMPLE", "SÍ CUMPLE", "NO CUMPLE"]) {
+    const ev = {
+      profesionales_eval: { ...SANA.profesionales_eval, 2: evalDe(2, rotulo) },
+      experiencias_eval: SANA.experiencias_eval,
+    };
+    const aviso = de(auditarEvaluacion(ev, HECHOS), "veredicto_sin_sustento");
+    assert.ok(aviso && aviso.severidad === "critical", `debía bloquear «${rotulo}»`);
+  }
+  const ev = {
+    profesionales_eval: {
+      ...SANA.profesionales_eval,
+      2: evalDe(2, "NO CUMPLE — acredita 365 de los 730 días exigidos"),
+    },
+    experiencias_eval: SANA.experiencias_eval,
+  };
+  assert.ok(!de(auditarEvaluacion(ev, HECHOS), "veredicto_sin_sustento"));
+});
+
+test("#54 · decisiones por experiencia también exigen razón", () => {
+  const ev = {
+    profesionales_eval: SANA.profesionales_eval,
+    experiencias_eval: {
+      ...SANA.experiencias_eval,
+      1: [{ n: 1, cargo_bases_valido: "SÍ", tipo_obra_valido: "NO — no es hospitalaria" },
+          { n: 2, cargo_bases_valido: "SÍ — cargo equivalente", tipo_obra_valido: "SÍ — hospital II-2" }],
+    },
+  };
+  const avisos = auditarEvaluacion(ev, HECHOS).filter((a) => a.tipo === "veredicto_sin_sustento");
+  assert.strictEqual(avisos.length, 1);
+  assert.match(avisos[0].mensaje, /experiencia n=1/);
 });
 
 test("caso sano con un profesional sin experiencias → sigue en silencio", () => {
@@ -500,22 +542,22 @@ test("experiencias_eval anidado en profesionales_eval → fallback automático a
       "1": {
         cumple: "CUMPLE — OK",
         experiencias_eval: [
-          { n: 1, dias: 365, meses: 12, anios: 1, cargo_bases_valido: "SÍ", tipo_obra_valido: "SÍ" },
-          { n: 2, dias: 365, meses: 12, anios: 1, cargo_bases_valido: "SÍ", tipo_obra_valido: "SÍ" }
+          { n: 1, dias: 365, meses: 12, anios: 1, cargo_bases_valido: "SÍ — cargo equivalente", tipo_obra_valido: "SÍ — hospital válido" },
+          { n: 2, dias: 365, meses: 12, anios: 1, cargo_bases_valido: "SÍ — cargo equivalente", tipo_obra_valido: "SÍ — hospital válido" }
         ]
       },
       "2": {
         cumple: "CUMPLE — OK",
         experiencias_eval: [
-          { n: 1, dias: 365, meses: 12, anios: 1, cargo_bases_valido: "SÍ", tipo_obra_valido: "SÍ" },
-          { n: 2, dias: 180, meses: 6, anios: 0.5, cargo_bases_valido: "SÍ", tipo_obra_valido: "SÍ" },
-          { n: 3, dias: 180, meses: 6, anios: 0.5, cargo_bases_valido: "SÍ", tipo_obra_valido: "SÍ" }
+          { n: 1, dias: 365, meses: 12, anios: 1, cargo_bases_valido: "SÍ — cargo equivalente", tipo_obra_valido: "SÍ — hospital válido" },
+          { n: 2, dias: 180, meses: 6, anios: 0.5, cargo_bases_valido: "SÍ — cargo equivalente", tipo_obra_valido: "SÍ — hospital válido" },
+          { n: 3, dias: 180, meses: 6, anios: 0.5, cargo_bases_valido: "SÍ — cargo equivalente", tipo_obra_valido: "SÍ — hospital válido" }
         ]
       },
       "3": {
         cumple: "CUMPLE — OK",
         experiencias_eval: [
-          { n: 1, dias: 365, meses: 12, anios: 1, cargo_bases_valido: "SÍ", tipo_obra_valido: "SÍ" }
+          { n: 1, dias: 365, meses: 12, anios: 1, cargo_bases_valido: "SÍ — cargo equivalente", tipo_obra_valido: "SÍ — hospital válido" }
         ]
       }
     }

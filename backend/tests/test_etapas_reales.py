@@ -1430,6 +1430,10 @@ def test_traslape_real_bajo_el_minimo_da_no_cumple(tmp_path):
     assert p["dias_efectivos"] == 716
     assert p["cumple_backend"].startswith("NO CUMPLE")
     assert "24 meses" in p["cumple_backend"]
+    prof = repo.cargar_espejo(job.job_id)["profesionales"][0]
+    # El disco conserva el espejo de ingreso; el desglose durable vive en el
+    # enriquecimiento y se reinyecta al regenerar el Excel.
+    assert "total_backend" not in prof
 
 
 def test_el_veredicto_del_backend_llega_al_excel_al_regenerar(tmp_path):
@@ -1451,6 +1455,11 @@ def test_el_veredicto_del_backend_llega_al_excel_al_regenerar(tmp_path):
     prof = espejo_disco["profesionales"][0]
     assert prof["cumple_backend"].startswith("NO CUMPLE")
     assert prof["dias_efectivos_backend"] == 716
+    assert prof["total_backend"] == {
+        "dias_declarados": 781, "dias_paralizados": 0,
+        "dias_traslape": 65, "dias_efectivos": 716,
+        "anios_efectivos": 1.96, "incompleto": False,
+    }
     assert prof["minimo_exigido_backend"] == "24 meses"
     # y el veredicto del LLM se conserva: el backend no lo reescribe, lo contradice
     assert prof["cumple"].startswith("CUMPLE")

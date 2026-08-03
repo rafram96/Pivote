@@ -59,8 +59,10 @@ def _exp(n: int, **campos) -> dict:
     # Las fechas van de verdad para que `recalcular_espejo` pueda correr sobre
     # estos mismos espejos: los tests del orden lo necesitan.
     base = {"n": n, "folio": 100 + n, "fecha_inicial": "2018-01-01",
-            "fecha_final": "2018-12-31", "dias": 365, "cargo_bases_valido": "SÍ",
-            "tipo_obra_valido": "SÍ", "anterior_colegiatura": "NO"}
+            "fecha_final": "2018-12-31", "dias": 365,
+            "cargo_bases_valido": "SÍ — el cargo figura entre los admitidos.",
+            "tipo_obra_valido": "SÍ — corresponde al tipo exigido.",
+            "anterior_colegiatura": "NO"}
     base.update(campos)
     return base
 
@@ -781,6 +783,8 @@ def _un_espejo_por_codigo() -> dict[str, list]:
                     validos="Estructuras")]
     un_hueco = list(SANO)
     un_hueco[3] = _sin_veredicto(SANO[3])
+    sin_sustento = list(SANO)
+    sin_sustento[0] = dict(SANO[0], cumple="CUMPLE")
     return {
         "SIN_EVALUACION": revisar_integridad(_espejo([_sin_evaluar(p) for p in SANO])),
         "EVALUACION_INCOMPLETA": revisar_integridad(
@@ -788,6 +792,7 @@ def _un_espejo_por_codigo() -> dict[str, list]:
         "VEREDICTOS_INCOMPLETOS": revisar_integridad(
             _espejo([SANO[0]] + [_sin_veredicto(p) for p in SANO[1:]])),
         "PROFESIONAL_SIN_VEREDICTO": revisar_integridad(_espejo(un_hueco)),
+        "VEREDICTO_SIN_SUSTENTO": revisar_integridad(_espejo(sin_sustento)),
         "COBERTURA_NULA": revisar_integridad(_espejo(
             [dict(p, experiencias=[dict(e, tipo_obra_valido=None)
                                    for e in p["experiencias"]])
@@ -808,6 +813,31 @@ def _un_espejo_por_codigo() -> dict[str, list]:
                                  "propuesta": None, "detalle": "ver folio 345"}})),
         "NO_REVISABLE": revisar_integridad(None),
     }
+
+
+def test_veredicto_sin_sustento_invalida_la_corrida():
+    profs = list(SANO)
+    profs[0] = dict(SANO[0], cumple="NO CUMPLE")
+
+    conf = evaluar_confiabilidad(_espejo(profs))
+
+    assert conf.veredicto == "no_confiable"
+    hallazgo = next(h for h in conf.hallazgos if h.codigo == "VEREDICTO_SIN_SUSTENTO")
+    assert hallazgo.severidad == "critica"
+    assert "razón verificable" in hallazgo.mensaje
+
+
+def test_decision_de_experiencia_sin_sustento_tambien_invalida():
+    prof = dict(SANO[0], experiencias=[
+        dict(SANO[0]["experiencias"][0], cargo_bases_valido="SÍ",
+             tipo_obra_valido="NO — no corresponde al tipo exigido")])
+
+    conf = evaluar_confiabilidad(_espejo([prof] + SANO[1:]))
+
+    hallazgos = [h for h in conf.hallazgos if h.codigo == "VEREDICTO_SIN_SUSTENTO"]
+    assert conf.veredicto == "no_confiable"
+    assert len(hallazgos) == 1
+    assert hallazgos[0].n_exp == 1
 
 
 def test_los_escenarios_cubren_todos_los_codigos():

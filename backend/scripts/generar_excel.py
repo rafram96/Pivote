@@ -499,12 +499,26 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
         sin_dias = sum(1 for e in exps if e.get("dias") is None)
         txt_tot = (f"POR VERIFICAR ({sin_dias} de {len(exps)} sin fechas verificables)"
                    if exps and sin_dias else "POR VERIFICAR")
-        b.row(["", "", "", "", "", "", "", "", "", "", "TOTAL",
+        b.row(["", "", "", "", "", "", "", "", "", "", "TOTAL DECLARADO (suma de filas)",
                _abst(t.get("dias"), bool(sin_dias), txt_tot),
                _abst(t.get("meses"), bool(sin_dias), txt_tot),
                _abst(t.get("anios"), bool(sin_dias), txt_tot),
                "", "", "", "", "", "", "", ""],
               bold=True, fmts=m4, backend_cols={12, 13, 14})
+        tb = prof.get("total_backend") or {}
+        if tb:
+            b.row(["", "", "", "", "", "", "", "", "", "",
+                   "(−) Paralizaciones / periodos sin respaldo",
+                   tb.get("dias_paralizados"), "", "", "", "", "", "", "", "", "", ""],
+                  bold=True, fmts=m4, backend_cols={12})
+            b.row(["", "", "", "", "", "", "", "", "", "",
+                   "(−) Traslapes entre experiencias", tb.get("dias_traslape"),
+                   "", "", "", "", "", "", "", "", "", ""],
+                  bold=True, fmts=m4, backend_cols={12})
+            b.row(["", "", "", "", "", "", "", "", "", "",
+                   "TOTAL EFECTIVO (backend)", tb.get("dias_efectivos"), "",
+                   tb.get("anios_efectivos"), "", "", "", "", "", "", "", ""],
+                  bold=True, fmts=m4, backend_cols={12, 14})
         # El veredicto lo escribe el LLM sobre los días DECLARADOS; el backend calcula
         # los EFECTIVOS (menos paralizaciones y traslapes, recortados a la ventana de
         # valorizaciones). Cuando el backend contradice al veredicto, la celda se pinta

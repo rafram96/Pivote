@@ -1062,6 +1062,33 @@ def test_hoja_claude_blanca_con_veredictos(tmp_path):
         str(c.value) for row in ws.iter_rows() for c in row if c.value)
 
 
+def test_parte4_muestra_total_declarado_y_descuentos_backend(tmp_path):
+    espejo = {
+        "_meta": {"analisis_id": "tot", "concurso": "C", "postor": "P"},
+        "postor": {},
+        "profesionales": [{
+            "n_prof": 1, "cargo": "BIM", "nombre": "N",
+            "total": {"dias": 781, "meses": 26.03, "anios": 2.14},
+            "total_backend": {
+                "dias_declarados": 781, "dias_paralizados": 0,
+                "dias_traslape": 65, "dias_efectivos": 716,
+                "anios_efectivos": 1.96,
+            },
+            "experiencias": [{
+                "n": 1, "proyecto": "Obra", "fecha_inicial": "2024-01-01",
+                "fecha_final": "2026-02-19", "dias": 781,
+            }],
+        }],
+        "resumen_evaluacion": {"factores": []},
+    }
+    salida = generar_excel_final(espejo, tmp_path / "totales.xlsx")
+    texto = _texto(openpyxl.load_workbook(salida)["CLAUDE"])
+    assert "TOTAL DECLARADO (suma de filas)" in texto
+    assert "(−) Traslapes entre experiencias" in texto
+    assert "TOTAL EFECTIVO (backend)" in texto
+    assert "781" in texto and "716" in texto and "65" in texto
+
+
 def test_supuestos_tienen_procedencia_y_color_propio(tmp_path):
     """#65: el violeta nace de `supuestos`, no de buscar una palabra en el valor.
 
@@ -1278,14 +1305,14 @@ def test_excel_cui_rotulo_distingue_certificado_vs_sistema(tmp_path):
         }],
         "resumen_evaluacion": {"factores": []}
     }
-    cuis = {(1, 2): "222222"}
+    cuis = {(1, 1): "111111", (1, 2): "222222"}
     salida = tmp_path / "rotulo.xlsx"
     generar_excel_final(espejo, salida, cuis=cuis)
     wb = openpyxl.load_workbook(salida)
     ws = next(s for s in wb.worksheets if s.title.startswith("P1"))
     celdas = [str(c.value) for r in ws.iter_rows() for c in r if c.value]
 
-    assert "111111" in celdas
+    assert "Citado en el certificado y verificado: 111111" in celdas
     assert "No consignado en el certificado — el sistema identificó el CUI 222222" in celdas
 
 

@@ -117,6 +117,12 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
      obra (caso real San Isidro P1:E2, Mórrope). Captura también el
      `cargo_ocupado` tal cual ("JEFE DE PROYECTO en la Elaboración del ET" →
      cargo "Jefe de Proyecto"; el desempeño va en el `proyecto`).
+     **Busca el CUI en TODO el bloque del servicio/proyecto, no solo en un campo
+     o renglón propio.** Puede venir después de cerrar las comillas del nombre y
+     dentro del mismo párrafo: `… REGIÓN PASCO" con CUI N° 2198318`. En ese caso
+     `cui` debe ser `"2198318"`. Es literal, no una inferencia; no lo agregues a
+     `supuestos`. Antes de devolver `cui: null`, barre también patrones
+     `con CUI`, `CUI N°`, `CUI Nº` y `CUI:` dentro de la oración completa.
    - **Cert MULTI-OBRA (varias obras, un solo vínculo)**: si la constancia
      documenta **un periodo continuo** pero el trabajo abarca **varias obras o
      infraestructuras distintas**, es **UNA sola experiencia** (un periodo) —

@@ -1551,6 +1551,18 @@ class EtapaReglasReal:
                     f"invalida la experiencia — confirmar a mano antes de concluir; el "
                     f"cómputo puede estar incompleto.")
             ctx.enriquecimiento[f"prof:{np_}"] = datos
+            # #57 · las dos cifras viajan juntas y estructuradas. `total` en el
+            # espejo es la suma declarada de filas; este bloque explica exactamente
+            # cómo se llega desde ella al efectivo que sostiene el veredicto.
+            p["total_backend"] = {
+                "dias_declarados": res.dias_brutos,
+                "dias_paralizados": res.dias_paralizados,
+                "dias_traslape": res.dias_traslape,
+                "dias_efectivos": res.dias_efectivos,
+                "anios_efectivos": anios_ef,
+                "incompleto": bool(fechas_invalidas),
+            }
+            p["dias_efectivos_backend"] = res.dias_efectivos
             # El veredicto del backend viaja TAMBIÉN en el espejo: la hoja resumen del
             # Excel (`construir_hoja_evaluacion`) solo recibe el espejo, y hasta ahora
             # `cumple_backend` moría en el enriquecimiento — se calculaba, se guardaba
@@ -1558,7 +1570,6 @@ class EtapaReglasReal:
             # es passthrough/lax en las dos copias del contrato.
             if datos.get("cumple_backend"):
                 p["cumple_backend"] = datos["cumple_backend"]
-                p["dias_efectivos_backend"] = res.dias_efectivos
                 p["minimo_exigido_backend"] = datos.get("minimo_texto")
             ok += 1
         # B2 — resumen de incertidumbre InfoObras: "X de Y no encontrados". Solo en
