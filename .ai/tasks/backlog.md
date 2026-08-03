@@ -114,19 +114,6 @@ depende_de: []
 
 ---
 
-id: T-TAREA-ISSUE57
-tipo: tarea
-zona: skill/ (prompts/) + entregables/ (excel_final.py)
-agente_origen: desarrollador
-estado: pendiente
-depende_de: []
----
-**Seguimiento Discrepancias en Columna TOTAL (Issue #57):**
-- **Descripción**: Medir e identificar el mecanismo de no-determinismo en la suma de días por experiencia acumulada en la columna TOTAL (caso BIM: 1467 / 2387 / 1927).
-- **Detalles**: Desacoplar el cálculo aritmético de la suma total del prompt LLM y confiar en la suma determinista del backend/espejo.
-
----
-
 id: T-TAREA-ISSUE52
 tipo: tarea
 zona: backend/ (scripts/generar_excel.py:283) + entregables/ + skill/
@@ -156,15 +143,19 @@ depende_de: []
 
 ---
 
-id: T-TAREA-ISSUE54
+id: T-TAREA-ISSUE70
 tipo: tarea
-zona: skill/ (prompts/agent-evaluador.md) + entregables/
-agente_origen: desarrollador
-estado: aprobado
+zona: skill/ + backend/ + panel (contrato coordinado)
+agente_origen: codex
+estado: pendiente
 depende_de: []
 ---
-**Defecto 10 — Inconsistencia / No-determinismo en Sustento Textual de Veredictos:**
-- **Detalles**: Hacer obligatorio el campo `fundamentacion` / `razon_literal` en el schema Zod y en las instrucciones del prompt. Coordinar con Issue #49 para modificar el prompt del evaluador una sola vez (podando aritmética redundante pero obligando la razón literal).
+**Diseño de clasificación auditable por concurso y experiencia (Issue #70):**
+- Separar `tipo_concurso`, `tipo_experiencia` y modo de clasificación.
+- Resolver vocabulario, precedencias, contradicciones y procedencia antes de
+  tocar #50; migración aditiva coordinada en Pydantic, Zod y TypeScript.
+- Requiere fixtures/golden propios porque sí cambia qué evidencia busca y cómo
+  calcula el backend para cada experiencia.
 
 ---
 
@@ -842,7 +833,7 @@ faltantes de `excel_final`, detector de ciclos propio en vez de pydeps).
   3. `entregables/zip_infoobras.py` (872) → paquete; `descargar_cui` NO se muda de la fachada (los tests parchean sus 4 descargadores sobre el módulo).
   4. `scraping/sunat.py` (1,136) → paquete con `__init__.py` como fachada (el nombre público es el del módulo).
   5. `scraping/infoobras.py` (1,841) → paquete; `fetch_by_cui` vive en el `__init__.py`; los imports diferidos de `cui.py` NO se tocan.
-  6. `orquestador/etapas_reales.py` (1,366) → paquete `etapas/` con hogar para las ~350 líneas que no son etapas (`descargar_documentos_job` es público — lo llama `api/app.py:238`). Gate: no arranca con PRs abiertos sobre su zona (#52/#53/#54/#57). Incluye partir `test_etapas_reales.py`.
+  6. `orquestador/etapas_reales.py` (1,366) → paquete `etapas/` con hogar para las ~350 líneas que no son etapas (`descargar_documentos_job` es público — lo llama `api/app.py:238`). El gate de issues #52/#53/#54/#57 ya está cerrado; incluye partir `test_etapas_reales.py`.
 - **FUERA de alcance**: `resolucion/cui.py` — núcleo de decisión con semántica en movimiento (circularidad del solape abierta). Reingresa como T-REFACTOR-005 cuando la golden lleve 2 semanas quieta (doc §6, condición de reingreso).
 - **Reglas inquebrantables (doc §3)**: R1 función parcheada y llamador en el mismo módulo — es la regla que decide dónde cae cada corte; R2 las fachadas re-exportan también los ~19 símbolos privados que consumen tests y `app.py`; R3 un PR = un monolito; R4 cero cambios de comportamiento (bugs hallados → backlog, PR aparte); R5 los tests monolíticos se parten en el mismo PR.
 - **Criterio de Aceptación (por PR, doc §4)**: V1 pytest verde con cero `skipped` nuevos + V2 diff normalizado de Excel/ZIP = 0 sobre jobs `ff44d2833590`/`371fa5a1e704` vía `tools/utils/regenerar_excel_final.py` (obligatorio en PRs 2-3) + V3 `golden_cui.py --con-base --solo-cache` con diff EXACTAMENTE cero (PRs 5-6; en refactor no aplica el criterio suave) + V4 ciclos de import sin subir.

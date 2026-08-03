@@ -1,6 +1,11 @@
 # Completado (más reciente primero)
 
 ## 2026-08-02
+- **Issues #54, #57 y #66** (`7593dea`): gate estructural para decisiones sin
+  sustento en skill y backend; TOTAL declarado bajo autoridad del backend con
+  desglose visible hasta el efectivo; captura de CUI literal dentro de prosa y
+  rótulo de coincidencia verificada. Gate: **731 passed, 25 skipped** + **54/54**
+  scripts, compilación y diff limpios. Sin deploy; resolver intacto.
 - **Fixes pre-deploy #68, #64, #42 y #65**: recorte TDR amplio y honesto;
   cómputo efectivo desde el inicio real de obra; revisión `202` con estado
   persistido y panel recuperable; supuestos con procedencia estructurada y

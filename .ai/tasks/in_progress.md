@@ -44,8 +44,8 @@
   urgente1 → la 2ª puerta del candado #31 quedó inerte (¿certs sin funciones
   o agente no las busca?); (b) celdas de abstención en blanco sin rótulo
   (escribir "POR VERIFICAR" en celda — familia #55); (c) exención ruc_match
-  (golden ancha) sigue sin issue. Cola visible: #54, #55 y #57. #19 y #42
-  quedaron cerradas el 2-ago.
+  (golden ancha) sigue sin issue. Cola visible: #55; #54, #57, #19 y #42
+  quedaron cerradas el 2-ago. El diseño expediente/obra sigue en #70.
 - **SIGUIENTE ACCIÓN GRANDE: redeploy del server del cliente** — `demo` acumula
   TODO el ciclo (#45-#62) y Manuel sigue viendo el código del 26-jul.
 
@@ -163,11 +163,13 @@
   lo lee. Hoy una experiencia multi-obra se renderiza SIN información de obra,
   en silencio.
 - **Issue #51 — Falso CUMPLE**: CERRADA el 2026-07-27 (PR [#56](https://github.com/rafram96/Pivote/pull/56) mergeado a `demo`, 619 tests passed).
-- **Issue #57 — Columna TOTAL**: Issue de seguimiento abierta para desambiguar la suma de la columna TOTAL.
+- **Issues #54, #57 y #66**: cerradas en `7593dea`; ver `completed.md`.
+- **Issue #70**: diseño pendiente para clasificación por concurso y experiencia;
+  bloquea la implementación de #50.
 - **Nuevas Tareas Creadas (Defectos 8, 9, 10, 11)**:
   - `T-TAREA-ISSUE52` (Defecto 8): Oferta económica incompleta en celdas de entregable.
   - `T-TAREA-ISSUE53` (Defecto 9): Experiencia del postor no computada cuantitativamente.
-  - `T-TAREA-ISSUE54` (Defecto 10): Inconsistencia / No-determinismo en sustento textual de veredictos.
+  - `T-TAREA-ISSUE70`: clasificación auditable por concurso y experiencia.
   - `T-TAREA-ISSUE55` (Defecto 11): Jerga técnica filtrada en celdas del evaluador.
 - Ninguna otra tarea de código activa.
 - Fase comercial: preparar/realizar la reunión de cotización con el cliente

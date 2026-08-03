@@ -2,6 +2,25 @@
 
 > Última actualización: **2026-08-02** · rama de trabajo: `demo`
 
+## Cierre #54, #57 y #66; clasificación pendiente en #70
+
+El commit `7593dea` completa tres correcciones auditables sobre `demo`:
+
+- **#54:** `CUMPLE`/`NO CUMPLE` y `SÍ`/`NO` sin razón son críticos antes de
+  consolidar y también al revalidar en backend; el prompt exige el sustento en
+  el mismo valor textual.
+- **#57:** `total` es la suma declarada determinística de filas y reemplaza el
+  cálculo del LLM; `total_backend` muestra los descuentos y el efectivo aparte.
+- **#66:** se captura un CUI etiquetado dentro del párrafo completo del servicio
+  y el Excel distingue «citado y verificado» cuando coincide con el resolver.
+
+Gate: **731 passed, 25 skipped** en backend y **54/54** scripts de skill;
+compilación y diff limpios. Resolver intacto, sin golden y sin despliegue.
+
+La #70 conserva como diseño abierto la clasificación por `tipo_concurso` y
+`tipo_experiencia` (preinversión, expediente, supervisión y ejecución). #50 no
+se implementa hasta cerrar ese contrato; #49 permanece pausada por ADR-S007.
+
 ## Fixes pre-deploy #68, #64, #42 y #65 completos
 
 - **#68:** el recorte TDR usa el rango físico completo declarado y detecta

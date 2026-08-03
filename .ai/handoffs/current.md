@@ -4,6 +4,22 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
+## Nota (2026-08-02, Codex) — #54, #57 y #66 cerradas; diseño #70 abierto
+
+En `demo`, `7593dea` cierra los tres defectos restantes del bloque: los
+veredictos sin razón ahora bloquean tanto en la skill como en el backend
+(#54); la fila TOTAL declarada es autoridad exclusiva del backend y el Excel
+muestra por separado paralizaciones, traslapes y total efectivo (#57); y el
+CUI literal incrustado en el párrafo del servicio se conserva y se rotula como
+«citado y verificado» cuando coincide (#66). Gate: **731 passed, 25 skipped**
+en backend, **54/54** en scripts de la skill, `compileall` y `diff --check`.
+No cambió el resolver CUI, por lo que no aplicó golden. No hubo despliegue.
+
+La clasificación expediente/obra de #50 no se redujo a un booleano. Quedó
+documentada en la nueva #70 como un diseño pendiente por concurso y por
+experiencia, con vocabulario, precedencias, contradicciones, contrato y gates.
+#50 queda bloqueada por ese diseño; #49 continúa pausada por ADR-S007.
+
 ## Nota (2026-08-02, Codex) — fixes pre-deploy completos
 
 Sobre `demo` quedaron implementadas #68 (rango TDR y detección de folio
