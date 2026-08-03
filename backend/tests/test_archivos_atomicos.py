@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -23,6 +24,10 @@ def test_reemplazo_reintenta_dos_permission_error_y_tiene_exito(
 
     def reemplazo_intermitente(ruta_origen, ruta_destino):
         nonlocal llamadas
+        # La suite puede tener una escritura de otro job terminando en segundo
+        # plano. El doble solo simula el bloqueo de ESTE destino.
+        if Path(ruta_destino) != destino:
+            return reemplazo_real(ruta_origen, ruta_destino)
         llamadas += 1
         if llamadas <= 2:
             raise PermissionError("lector concurrente")
@@ -47,9 +52,12 @@ def test_reemplazo_agota_intentos_y_propaga_permission_error(
     origen.write_text("nuevo", encoding="utf-8")
     destino.write_text("anterior", encoding="utf-8")
     llamadas = 0
+    reemplazo_real = archivos_atomicos._replace
 
     def reemplazo_bloqueado(_ruta_origen, _ruta_destino):
         nonlocal llamadas
+        if Path(_ruta_destino) != destino:
+            return reemplazo_real(_ruta_origen, _ruta_destino)
         llamadas += 1
         raise PermissionError("destino bloqueado")
 

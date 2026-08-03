@@ -1,6 +1,30 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-08-02** · rama de trabajo: `demo`
+> Última actualización: **2026-08-03** · rama de trabajo: `demo`
+
+## Cierre de auditoría de entregables y panel (3-ago)
+
+La `demo` deja de presentar como completos resultados que solo estaban
+inventariados o que no habían pasado el escudo de integridad:
+
+- `Job` persiste `confiabilidad` y `hallazgos_criticos`; el resumen del panel y
+  la hoja CLAUDE muestran explícitamente `revisar`, `no_confiable` o
+  `no_revisable`. El Excel no queda con apariencia normal ante un crítico.
+- Cada experiencia guarda `descargas_reales` en el enriquecimiento: archivos
+  efectivos, conteo por hito, secciones y avisos. El Excel se regenera después
+  de descargar; el ZIP fuerza `SIN_DOCUMENTOS.txt` si no quedó ningún documento
+  utilizable y `indice.txt` enumera fallos y secciones incompletas.
+- El panel muestra RUC, razón social, estado/condición, HABIDO e histórico SUNAT;
+  incorpora RENIPRESS como novena etapa, muestra `en_revision` en Descargas y
+  traduce errores/diagnósticos técnicos a lenguaje de evaluador.
+- Excel sanea ambas marcas `⟦crudo:`/`⟦Claude:`, siempre hace visible un puntaje
+  total ausente y extiende el violeta de procedencia a hitos y Parte 5.
+
+No cambió `backend/resolucion/cui.py`; no aplica golden. La hipótesis de que un
+`.part` entre al ZIP por el orden de `.ok` sigue descartada; adicionalmente el
+empaquetador omite cualquier `.part` que aparezca por estado externo anómalo.
+Gate: **736 passed, 25 skipped**, focales posteriores **5/5**, `compileall` y
+`diff --check`; Panel: `tsc --noEmit` y build productivo aprobados.
 
 ## Cierre #54, #57 y #66; clasificación pendiente en #70
 

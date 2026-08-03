@@ -744,6 +744,21 @@ def test_la_etapa_de_validacion_emite_los_hallazgos_del_escudo():
     assert res.estado is EstadoEtapa.OK_CON_REVISION
 
 
+def test_validacion_persiste_veredicto_global_y_criticos():
+    from orquestador.etapas import Contexto
+    from orquestador.etapas_reales import EtapaValidacionReal
+    from schemas.pipeline import Job
+
+    job = Job(job_id="j-conf", analisis_id="a-conf")
+    EtapaValidacionReal().correr(
+        Contexto(job=job, espejo=_espejo(CORRIDO), enriquecimiento={})
+    )
+
+    assert job.confiabilidad == "no_confiable"
+    assert job.hallazgos_criticos
+    assert all(o.severidad.value == "critica" for o in job.hallazgos_criticos)
+
+
 def test_la_etapa_de_validacion_de_una_corrida_sana_termina_en_verde():
     from schemas.pipeline import EstadoEtapa
 

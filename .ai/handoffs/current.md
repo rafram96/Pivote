@@ -1,8 +1,22 @@
 # Handoff — punto de continuación
 
-> Actualizado: **2026-08-02**. Si eres un agente nuevo: lee esto completo,
+> Actualizado: **2026-08-03**. Si eres un agente nuevo: lee esto completo,
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
+
+## Nota (2026-08-03, Codex) — confiabilidad y descargas ya son auditables
+
+La auditoría Excel/ZIP/panel quedó implementada en `demo`: confiabilidad global
+y críticos persisten y aparecen en Excel/panel; el recuento de documentos nace
+del disco después de descargar; carpetas sin documentos reciben
+`SIN_DOCUMENTOS.txt`; el índice declara fallos y secciones incompletas. Panel:
+tarjeta SUNAT completa, RENIPRESS como etapa 9, progreso corregido,
+`en_revision` visible y mensajes técnicos saneados. Excel: saneo de
+`⟦Claude:`, puntaje ausente visible y violeta extendido a hitos/Parte 5.
+
+Resolver CUI intacto: no aplica golden. No hubo despliegue.
+Gate: **736 passed, 25 skipped** + 5 focales posteriores; Panel con TypeScript
+y build productivo aprobados.
 
 ## Nota (2026-08-02, Codex) — #54, #57 y #66 cerradas; diseño #70 abierto
 

@@ -1043,6 +1043,7 @@ def test_excel_marca_valorizaciones_con_archivos(tmp_path):
     }
     fichas = {(1, 1): {
         "cui": "123", "codigo_infoobras": "33900", "estado": "Finalizado",
+        "descargas_reales": {"archivos": 1, "por_hito": {"2015-06": 1, "2015-05": 0}},
         "valorizaciones": [
             {"anio": 2015, "mes": 6, "estado": "En ejecución", "fisico_real": 50,
              "valorizado_real": 100, "docs": 2},
@@ -1056,8 +1057,9 @@ def test_excel_marca_valorizaciones_con_archivos(tmp_path):
     texto = "\n".join(str(c.value) for row in wb[hoja].iter_rows()
                       for c in row if c.value)
     assert "ARCHIVOS (ZIP)" in texto   # nueva columna
-    assert "Sí (2)" in texto           # valorización con 2 documentos
-    assert "—" in texto                # valorización sin documentos
+    assert "1 archivo" in texto        # recuento REAL, no los 2 anunciados
+    assert "0 archivos" in texto       # intento sin documento descargado
+    assert "Sí (2)" not in texto
 
 
 def test_sunat_por_nombre_cuando_no_hay_ruc():

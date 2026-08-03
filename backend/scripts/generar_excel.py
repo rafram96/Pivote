@@ -24,6 +24,7 @@ import re
 import sys
 from datetime import date as _date
 from pathlib import Path
+from typing import Optional
 
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -148,7 +149,10 @@ def _sin_jerga(v):
     out = re.sub(r"\bel\s+backend\b", "el equipo evaluador", out)
     out = re.sub(r"\bbackend\b", "equipo evaluador", out, flags=re.I)
     # marcador del consolidador: la nota cruda del agente se vuelve una Nota legible
-    out = out.replace("⟦crudo:", "· Nota literal: ").replace("⟧", "")
+    # El consolidador histórico emitió ambas marcas. Aceptar las dos evita dejar
+    # `⟦Claude:` colgando al retirar únicamente el corchete de cierre.
+    out = re.sub(r"⟦\s*(?:crudo|Claude)\s*:\s*", "· Nota literal: ", out,
+                 flags=re.I).replace("⟧", "")
     # nombres de agentes internos → quién es para el evaluador
     out = re.sub(r"\bagent-propuesta-mapa\b", "la lectura de la propuesta", out)
     out = re.sub(r"\bagent-propuesta-profesional\b", "la lectura del profesional", out)
@@ -347,7 +351,8 @@ class Builder:
         self.r += 1
 
 
-def construir_hoja_evaluacion(ws, espejo: dict) -> None:
+def construir_hoja_evaluacion(ws, espejo: dict,
+                              confiabilidad: Optional[dict] = None) -> None:
     """Construye la hoja de evaluación (5 partes) en un worksheet existente.
     La usa este script (hoja única) y `entregables/excel_final.py` (hoja CLAUDE
     dentro del Excel final con Base de Datos + hojas por profesional)."""
@@ -359,6 +364,22 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
     # ── Encabezado ──
     b.kv("Postor:", p.get("detalle") or espejo["_meta"].get("postor", ""))
     b.kv("Concurso:", espejo["_meta"].get("concurso", ""))
+    if confiabilidad is not None:
+        veredicto = str(confiabilidad.get("veredicto") or "no_revisable").lower()
+        rotulos = {
+            "confiable": "CONFIABILIDAD: CONFIABLE — sin hallazgos críticos de integridad",
+            "revisar": "CONFIABILIDAD: REVISAR — hay observaciones que requieren atención",
+            "no_confiable": "CONFIABILIDAD: NO CONFIABLE — no usar sin revisar los hallazgos",
+            "no_revisable": "CONFIABILIDAD: NO REVISABLE — no se pudo comprobar la integridad",
+        }
+        fill = (FILL_CUMPLE if veredicto == "confiable" else
+                FILL_PEND if veredicto == "revisar" else FILL_NO_CUMPLE)
+        b._band(rotulos.get(veredicto, rotulos["no_revisable"]), F_BOLD, fill, 30)
+        for h in confiabilidad.get("hallazgos_criticos") or []:
+            codigo = h.get("codigo") or "INTEGRIDAD"
+            referencia = f" ({h['referencia']})" if h.get("referencia") else ""
+            b.kv(f"Hallazgo crítico · {codigo}",
+                 _sin_jerga(f"{h.get('mensaje') or 'Revisar el análisis'}{referencia}"))
     b.leyenda()
     b.blank()
 
@@ -547,6 +568,10 @@ def construir_hoja_evaluacion(ws, espejo: dict) -> None:
               fmts={5: FMT_INT})
     if re_.get("puntaje_total") is not None:
         b.row(["PUNTAJE TÉCNICO TOTAL", "", "", "", re_.get("puntaje_total")], bold=True, fmts={5: FMT_INT})
+    else:
+        b.row(["PUNTAJE TÉCNICO TOTAL", "", "",
+               "POR VERIFICAR — no se recibió un puntaje total calculable",
+               "POR VERIFICAR"], bold=True, verdicts={5: "pos"})
     if re_.get("nota"):
         b.kv("NOTA:", re_["nota"])
 

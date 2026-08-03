@@ -228,6 +228,14 @@ class EtapaValidacionReal:
         #     primero no basta — las celdas del backend ya vienen en el archivo.
         confiabilidad = evaluar_confiabilidad(ctx.espejo)
         observaciones = a_observaciones(confiabilidad.hallazgos)
+        # Persistir el resultado agregado y su evidencia crítica. El estado de la
+        # etapa (`ok_con_revision`) no expresa si el job es solo revisable o si el
+        # entregable completo no es confiable.
+        if ctx.job is not None:
+            ctx.job.confiabilidad = confiabilidad.veredicto
+            ctx.job.hallazgos_criticos = [
+                o for o in observaciones if o.severidad == pipeline.Severidad.CRITICA
+            ]
         # ANTES de verificar: días/meses/años, ¿anterior a colegiatura? y ¿COVID?
         # son ARITMÉTICA, no juicio — el backend los calcula y deja de depender de
         # que el LLM los mande (#45 · L2). Con el defecto `sobrescribir=False` solo
@@ -879,6 +887,51 @@ class EtapaInfoObrasReal:
         return _res(self.nombre, estado, _met(total, cont["ok"], cont["rev"], cont["err"]), obs)
 
 
+_NOTAS_DESCARGA = ("_ERROR.TXT", "_NO_DISPONIBLE.TXT", "SIN_DOCUMENTOS.TXT")
+
+
+def _es_documento_descargado(path: Path) -> bool:
+    """Distingue documentos reales de marcas, temporales y notas de diagnóstico."""
+    nombre = path.name.upper()
+    return (path.is_file() and path.suffix.lower() not in (".part", ".ok")
+            and not any(nombre.endswith(s) for s in _NOTAS_DESCARGA))
+
+
+def _inventario_real_descarga(destino: Path) -> tuple[int, dict[str, int]]:
+    """Cuenta archivos reales totales y por hito YYYY-MM dentro de Valorizaciones."""
+    if not destino.is_dir():
+        return 0, {}
+    archivos = [p for p in destino.rglob("*") if _es_documento_descargado(p)]
+    por_hito: dict[str, int] = {}
+    raiz = destino / "Valorizaciones"
+    if raiz.is_dir():
+        for carpeta in raiz.iterdir():
+            if not carpeta.is_dir():
+                continue
+            clave = carpeta.name[:7] if re.match(r"^\d{4}-\d{2}", carpeta.name) else carpeta.name
+            por_hito[clave] = sum(
+                1 for p in carpeta.rglob("*") if _es_documento_descargado(p)
+            )
+    return len(archivos), por_hito
+
+
+def _estado_seccion(secciones: dict, avisos: list[str], nombre: str,
+                    esperados: int, descargados: int) -> None:
+    if esperados <= 0:
+        estado = "sin_documentos"
+    elif descargados >= esperados:
+        estado = "completa"
+    elif descargados:
+        estado = "parcial"
+        avisos.append(f"{nombre}: {descargados} de {esperados} documentos descargados.")
+    else:
+        estado = "error"
+        avisos.append(f"{nombre}: no se descargó ninguno de los {esperados} documentos disponibles.")
+    secciones[nombre] = {
+        "estado": estado, "esperados": esperados, "descargados": descargados,
+    }
+
+
 def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                              max_descargas=None, descargar=None, reportar=None,
                              descargar_seace=None, dir_cache_seace=None):
@@ -984,39 +1037,77 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
             ok = base / f"P{np_}_E{ne}.ok"
             ok_seace = base / f"P{np_}_E{ne}.seace.ok"
             hizo_trabajo = False
+            previo = (enr.get("descargas_reales")
+                      if isinstance(enr.get("descargas_reales"), dict) else {})
+            avisos = list(previo.get("avisos") or [])
+            secciones = dict(previo.get("secciones") or {})
+            fallos_antes = len(descargas_stats().get("fallidos") or [])
             try:
                 if obra_id and not ok.exists():
                     hizo_trabajo = True
+                    avisos, secciones = [], {}
                     if descargar is not None:       # inyección de tests
                         descargar(obra_id, destino)
                     else:
-                        descargar_documentos_obra_por_hito(obra_id, destino)
+                        principal = descargar_documentos_obra_por_hito(obra_id, destino)
+                        inv = principal.get("inventario") or {}
+                        esperados = sum(
+                            len(a.get("documentos") or []) for a in inv.get("avances", [])
+                        ) + len((inv.get("obra") or {}).get("documentos") or [])
+                        _estado_seccion(secciones, avisos, "InfoObras", esperados,
+                                        principal.get("descargados") or 0)
                         cert_ini = _fecha_iso(e.get("fecha_inicial"))
                         cert_fin = _fecha_iso(e.get("fecha_final"))
                         try:
-                            descargar_informes_control(obra_id, destino,
-                                                       fecha_ini=cert_ini, fecha_fin=cert_fin)
+                            ctrl = descargar_informes_control(
+                                obra_id, destino, fecha_ini=cert_ini, fecha_fin=cert_fin)
+                            _estado_seccion(secciones, avisos, "Informes de control",
+                                            ctrl.get("relevantes") or 0,
+                                            ctrl.get("descargados") or 0)
                         except Exception as ex:  # noqa: BLE001
                             logger.debug("informes control obra %s: %s", obra_id, corto(ex))
+                            secciones["Informes de control"] = {"estado": "error"}
+                            avisos.append("Informes de control: la consulta no pudo completarse.")
                         try:
-                            descargar_datos_cierre(obra_id, destino)
+                            cierre = descargar_datos_cierre(obra_id, destino)
+                            _estado_seccion(secciones, avisos, "Datos de cierre",
+                                            cierre.get("encontrados") or 0,
+                                            cierre.get("descargados") or 0)
                         except Exception as ex:  # noqa: BLE001
                             logger.debug("datos de cierre obra %s: %s", obra_id, corto(ex))
+                            secciones["Datos de cierre"] = {"estado": "error"}
+                            avisos.append("Datos de cierre: la consulta no pudo completarse.")
                         _aprob = enr.get("aprobacion_expediente")
                         if _aprob:
                             try:
-                                descargar_aprobacion_expediente(_aprob, destino)
+                                aprob_ok = descargar_aprobacion_expediente(_aprob, destino)
+                                _estado_seccion(secciones, avisos, "Aprobación del expediente",
+                                                1, int(bool(aprob_ok)))
                             except Exception as ex:  # noqa: BLE001
                                 logger.debug("aprobación expediente obra %s: %s", obra_id, corto(ex))
+                                secciones["Aprobación del expediente"] = {"estado": "error"}
+                                avisos.append("Aprobación del expediente: la descarga falló.")
                         _vmef = enr.get("verificacion_expediente")
                         if _vmef and _vmef.get("cui_confirmado"):
                             try:
                                 from scraping.mef import descargar_documentos_expediente
-                                descargar_documentos_expediente(
+                                mef = descargar_documentos_expediente(
                                     _vmef["cui_confirmado"], destino / "Verificación MEF",
                                     codsnip=_vmef.get("cod_snip") or "")
+                                descargados_mef = sum(int(v or 0) for v in mef.values())
+                                contrato_mef = _vmef.get("contrato") or {}
+                                resolucion_mef = _vmef.get("resolucion") or {}
+                                esperados_mef = (
+                                    int(bool(contrato_mef.get("numero")))
+                                    + int(bool(resolucion_mef.get("numero")
+                                               or resolucion_mef.get("documento")))
+                                )
+                                _estado_seccion(secciones, avisos, "Verificación MEF",
+                                                max(1, esperados_mef), descargados_mef)
                             except Exception as ex:  # noqa: BLE001
                                 logger.debug("verificación MEF obra %s: %s", obra_id, corto(ex))
+                                secciones["Verificación MEF"] = {"estado": "error"}
+                                avisos.append("Verificación MEF: la consulta de documentos falló.")
                     base.mkdir(parents=True, exist_ok=True)
                     ok.write_text("ok", encoding="utf-8")
                 if seace and not ok_seace.exists():
@@ -1028,6 +1119,35 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                     bajadas += 1
             except Exception as ex:  # noqa: BLE001
                 logger.warning("Descargas ✗ P%sE%s: %s", np_, ne, corto(ex))
+                avisos.append("Descarga general: no se pudo completar esta experiencia.")
+
+            # El manifiesto se reconstruye incluso al reanudar: no confía en el
+            # inventario del portal ni en la mera existencia de una carpeta.
+            archivos_reales, por_hito = _inventario_real_descarga(destino)
+            fallos = (descargas_stats().get("fallidos") or [])[fallos_antes:]
+            for etiqueta, categoria, _mensaje in fallos:
+                aviso = f"Archivo «{etiqueta}»: no descargado ({categoria})."
+                if aviso not in avisos:
+                    avisos.append(aviso)
+            if destino.is_dir():
+                for nota in destino.rglob("*_ERROR.txt"):
+                    aviso = f"{nota.stem.removesuffix('_ERROR')}: la fuente devolvió un error."
+                    if aviso not in avisos:
+                        avisos.append(aviso)
+                for nota in destino.rglob("*_NO_DISPONIBLE.txt"):
+                    aviso = (f"{nota.stem.removesuffix('_NO_DISPONIBLE')}: "
+                             "no publicado por la fuente.")
+                    if aviso not in avisos:
+                        avisos.append(aviso)
+            enr["descargas_reales"] = {
+                "completada": bool((not obra_id or ok.exists())
+                                    and (not seace or ok_seace.exists())),
+                "archivos": archivos_reales,
+                "por_hito": por_hito,
+                "secciones": secciones,
+                "avisos": avisos,
+            }
+            enriquecimiento[_clave(np_, ne)] = enr
     if saltados:
         logger.info("descargas job %s: %d experiencia(s) sin fuentes descargables",
                     job_id, saltados)
@@ -1035,7 +1155,7 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
     n_files = n_bytes = 0
     if base.is_dir():
         for p in base.rglob("*"):
-            if p.is_file() and p.suffix != ".ok":   # no contar las marcas
+            if _es_documento_descargado(p):
                 n_files += 1
                 try:
                     n_bytes += p.stat().st_size
@@ -1634,7 +1754,15 @@ class EtapaExcelReal:
             ruta.unlink()  # regenerar (re-disparo tras revisión humana)
         # certificados de las experiencias (imágenes) que subió la skill, si los hay
         certs = mapear_certificados(self.dir_salida, ctx.job.job_id)
-        generar_excel_final(ctx.espejo, ruta, paral, cuis, fichas, revisiones, sunat, certs)
+        generar_excel_final(
+            ctx.espejo, ruta, paral, cuis, fichas, revisiones, sunat, certs,
+            confiabilidad={
+                "veredicto": ctx.job.confiabilidad,
+                "hallazgos_criticos": [
+                    o.model_dump(mode="json") for o in ctx.job.hallazgos_criticos
+                ],
+            },
+        )
         ctx.job.excel_final = f"/api/pivote/jobs/{ctx.job.job_id}/excel"
         ctx.job.zip_infoobras = f"/api/pivote/jobs/{ctx.job.job_id}/zip"
         zip_previo = carpeta_job(self.dir_salida, ctx.job.job_id) / "infoobras.zip"

@@ -218,6 +218,36 @@ def test_zip_arbol_de_4_niveles_con_y_sin_documentos(tmp_path):
         assert "SIN DOCUMENTOS" in indice
 
 
+def test_zip_carpeta_vacia_deja_nota_y_fallos_en_indice(tmp_path):
+    vacia = tmp_path / "vacia"
+    vacia.mkdir()
+    enr = {
+        "1:1": {
+            "cui": "2418877",
+            "descargas_reales": {
+                "archivos": 0,
+                "secciones": {
+                    "InfoObras": {"estado": "error", "esperados": 3, "descargados": 0},
+                    "Datos de cierre": {"estado": "sin_documentos", "esperados": 0,
+                                         "descargados": 0},
+                },
+                "avisos": ["InfoObras: no se descargó ninguno de los 3 documentos disponibles."],
+            },
+        },
+    }
+    salida = construir_zip_infoobras(
+        ESPEJO, {(1, 1): vacia}, tmp_path / "vacia.zip", enriquecimiento=enr,
+    )
+
+    with zipfile.ZipFile(salida) as zf:
+        nombres = zf.namelist()
+        assert any(n.startswith("P01 SUPERVISIÓN/E1/")
+                   and n.endswith("SIN_DOCUMENTOS.txt") for n in nombres)
+        indice = zf.read("indice.txt").decode("utf-8")
+        assert "SECCIÓN InfoObras: error · 0/3 documentos" in indice
+        assert "ADVERTENCIA: InfoObras" in indice
+
+
 # ── Inventario (parseo offline del HTML de InfoObras) ───────────────────────
 
 HTML_INVENTARIO = """
@@ -1106,7 +1136,7 @@ def test_supuestos_tienen_procedencia_y_color_propio(tmp_path):
                 "n": 1, "entidad_emisora": "ENTIDAD LITERAL",
                 "proyecto": "Proyecto inferido sin etiqueta textual",
                 "fecha_inicial": "2020-01-01", "fecha_final": "2020-12-31",
-                "cargo_ocupado": "Supervisor", "supuestos": ["proyecto"],
+                "cargo_ocupado": "Supervisor", "supuestos": ["proyecto", "fecha_inicial"],
             }],
         }],
         "resumen_evaluacion": {"factores": []},
@@ -1135,6 +1165,59 @@ def test_supuestos_tienen_procedencia_y_color_propio(tmp_path):
     fila_proyecto = next(row for row in prof.iter_rows(min_col=1, max_col=4)
                          if row[0].value == "PROYECTO U OBRA")
     assert color(fila_proyecto[1]) == "E4D7F5"
+    # La misma procedencia alcanza el cuadro de hitos y la Parte 5, no solo el recap.
+    fila_periodo = next(row for row in prof.iter_rows(min_col=1, max_col=4)
+                        if row[0].value == "Periodo certificado")
+    assert color(fila_periodo[1]) == "E4D7F5"
+    proyectos_violeta = [c for row in prof.iter_rows() for c in row
+                         if c.value == "Proyecto inferido sin etiqueta textual"
+                         and color(c) == "E4D7F5"]
+    assert len(proyectos_violeta) >= 2  # recap + Parte 5
+
+
+def test_confiabilidad_y_puntaje_ausente_son_visibles(tmp_path):
+    salida = generar_excel_final(
+        ESPEJO, tmp_path / "confiabilidad.xlsx",
+        confiabilidad={
+            "veredicto": "no_confiable",
+            "hallazgos_criticos": [{
+                "codigo": "VEREDICTO_SIN_SUSTENTO",
+                "mensaje": "El veredicto no explica su sustento.",
+                "referencia": "prof=1",
+            }],
+        },
+    )
+    ws = openpyxl.load_workbook(salida)["CLAUDE"]
+    texto = _texto(ws)
+    assert "CONFIABILIDAD: NO CONFIABLE" in texto
+    assert "VEREDICTO_SIN_SUSTENTO" in texto
+    assert "PUNTAJE TÉCNICO TOTAL" in texto
+    assert "no se recibió un puntaje total calculable" in texto
+
+
+def test_recuento_real_reemplaza_inventario_anunciado(tmp_path):
+    espejo = {
+        "_meta": {"analisis_id": "d", "concurso": "C", "postor": "P"},
+        "postor": {},
+        "profesionales": [{
+            "n_prof": 1, "cargo": "JEFE", "nombre": "N",
+            "experiencias": [{
+                "n": 1, "proyecto": "OBRA", "entidad_emisora": "E",
+                "cargo_ocupado": "SUP", "fecha_inicial": "2020-01-01",
+                "fecha_final": "2020-01-31",
+            }],
+        }],
+        "resumen_evaluacion": {"factores": [], "puntaje_total": 1},
+    }
+    fichas = {(1, 1): {
+        "obra_nombre": "OBRA", "codigo_infoobras": "I-1",
+        "valorizaciones": [{"anio": 2020, "mes": 1, "docs": 9}],
+        "descargas_reales": {"archivos": 2, "por_hito": {"2020-01": 2}},
+    }}
+    salida = generar_excel_final(espejo, tmp_path / "real.xlsx", fichas=fichas)
+    texto = _texto(openpyxl.load_workbook(salida)[etiqueta_hoja(1, "JEFE")])
+    assert "2 archivos" in texto
+    assert "Sí (9)" not in texto
 
 
 def test_excel_final_requisitos_lista_no_crashea(tmp_path):

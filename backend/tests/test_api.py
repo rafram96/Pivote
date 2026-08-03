@@ -74,6 +74,7 @@ def test_flujo_completo_de_la_demo(cliente):
         "schemas.pipeline", fromlist=["Etapa"]
     ).Etapa.orden())
     assert job["origen"] == "dropzone"
+    assert "confiabilidad" in job and "hallazgos_criticos" in job
 
     # 4 · el concurso lista el job
     r = cliente.get(f"/api/pivote/concursos/{cid}")
@@ -91,6 +92,7 @@ def test_flujo_completo_de_la_demo(cliente):
     r = cliente.get(f"/api/pivote/jobs/{job_id}/resumen")
     res = r.json()
     assert res["puntaje_total"] == 55
+    assert "confiabilidad" in res and "hallazgos_criticos" in res
     assert res["veredictos"][0]["cumple_claude"].startswith("SÍ")
 
     # 7 · Excel final REAL descargable (CLAUDE + Base de Datos + hoja del prof)
@@ -386,6 +388,37 @@ def test_progreso_endpoint_job_terminado(cliente):
 
 def test_progreso_404_si_no_existe(cliente):
     assert cliente.get("/api/pivote/jobs/nope/progreso").status_code == 404
+
+
+def test_avance_descargas_excluye_privadas_y_exige_archivo_real(cliente):
+    import api.app as modulo
+    from schemas import pipeline
+
+    job = pipeline.Job(job_id="j-desc-real", analisis_id="a")
+    job.items_revision.append(pipeline.ItemRevision(
+        n_prof=1, n_exp=4, etapa=pipeline.Etapa.RESOLUCION_CUI, motivo="confirmar",
+    ))
+    modulo.repo.guardar(job)
+    modulo.repo.guardar_espejo(job.job_id, {
+        "profesionales": [{"n_prof": 1, "experiencias": [
+            {"n": 1}, {"n": 2}, {"n": 3}, {"n": 4},
+        ]}],
+    })
+    modulo.repo.guardar_enriquecimiento(job.job_id, {
+        "1:1": {"obra": {"obra_id": 11},
+                "descargas_reales": {"completada": True, "archivos": 2}},
+        "1:2": {"via": "PRIVADA"},
+        "1:3": {"obra": {"obra_id": 13},
+                "descargas_reales": {"completada": True, "archivos": 0}},
+        "1:4": {"obra": {"obra_id": 14}},
+    })
+
+    avance = modulo._avance_descargas_dict(job)
+    assert avance == {
+        "estado": "pendiente", "listo": False,
+        "total": 2, "descargadas": 1, "faltan": 1,
+        "en_revision": 1, "obra_actual": None,
+    }
 
 
 def test_armar_progreso_fusiona_vivo_y_checkpoint(cliente):

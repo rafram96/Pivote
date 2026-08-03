@@ -15,6 +15,7 @@ def test_sin_jerga_limpia_lo_medido_en_urgente1():
         == "NO DETERMINADO — la lectura de la propuesta no extrajo monto"
     assert "Nota literal" in _sin_jerga("Traslape. ⟦crudo: El cargo es JEFE⟧")
     assert "⟦" not in _sin_jerga("x ⟦crudo: y⟧")
+    assert _sin_jerga("⟦Claude: dato textual⟧") == "· Nota literal: dato textual"
     assert _sin_jerga("funciones_similares=null") == "funciones: no constan en el certificado"
     assert _sin_jerga("El profesional n_prof=1 firma") == "El profesional profesional 1 firma"
     assert _sin_jerga(123) == 123 and _sin_jerga(None) is None
@@ -31,7 +32,7 @@ def _espejo(exp_extra=None, total=None):
             "profesionales": [{"n_prof": 3, "cargo": "INGENIERO DE CAMPO",
                                "nombre": "N", "experiencias": [exp],
                                "total": total or {"dias": None, "meses": None, "anios": None}}],
-            "resumen_evaluacion": {"factores": []}}
+            "resumen_evaluacion": {"factores": [], "puntaje_total": 100}}
 
 
 def _textos(ruta):

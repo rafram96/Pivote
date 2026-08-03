@@ -167,6 +167,11 @@ class Job(_ModelLax):
     estado: JobEstado = JobEstado.RECIBIDO
     etapas: list[ResultadoEtapa] = Field(default_factory=list)
     observaciones: list[Observacion] = Field(default_factory=list)
+    # Veredicto GLOBAL del escudo de integridad. Antes solo sobrevivían el color
+    # de la etapa y las observaciones sueltas, por lo que ningún consumidor podía
+    # distinguir con certeza `revisar` de `no_confiable`.
+    confiabilidad: Optional[str] = None  # confiable | revisar | no_confiable | no_revisable
+    hallazgos_criticos: list[Observacion] = Field(default_factory=list)
     items_revision: list[ItemRevision] = Field(default_factory=list)
     excel_final: Optional[str] = None      # ruta/ref del Excel regenerado
     zip_infoobras: Optional[str] = None    # ref del ZIP de archivos (⏳ futuro)

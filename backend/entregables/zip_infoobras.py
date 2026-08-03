@@ -282,6 +282,7 @@ def _descargar_a_carpeta(
                 if resp.status_code >= 500:
                     raise OSError(f"HTTP {resp.status_code}")   # transitorio → reintentar
                 if resp.status_code != 200:
+                    _registrar_fallo(OSError(f"HTTP {resp.status_code}"), it["nombre"])
                     return False                                 # 4xx → no disponible
                 os.makedirs(_wlong(carpeta), exist_ok=True)
                 n = 0
@@ -511,6 +512,7 @@ def _descargar_url(sess: requests.Session, url: str, destino: Path, *,
                 if resp.status_code >= 500:
                     raise OSError(f"HTTP {resp.status_code}")
                 if resp.status_code != 200:
+                    _registrar_fallo(OSError(f"HTTP {resp.status_code}"), destino.name)
                     return False
                 os.makedirs(_wlong(destino.parent), exist_ok=True)
                 n = 0
@@ -531,6 +533,7 @@ def _descargar_url(sess: requests.Session, url: str, destino: Path, *,
             if intento < intentos - 1:
                 time.sleep(_DL_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.5))
             else:
+                _registrar_fallo(e, destino.name)
                 logger.debug("InfoObras informe (control) falló: %s", corto(e))
     return False
 
@@ -771,17 +774,49 @@ def construir_zip_infoobras(
                 proyecto = str(e.get("proyecto") or "sin proyecto")
 
                 origen = descargas.get((n_prof, n_exp))
+                info = enr.get(f"{n_prof}:{n_exp}") or {}
+                manifiesto = (info.get("descargas_reales")
+                              if isinstance(info.get("descargas_reales"), dict) else {})
                 if origen and Path(origen).is_dir():
-                    archivos = [p for p in sorted(Path(origen).rglob("*")) if p.is_file()]
+                    # Un temporal nunca es un entregable. Las notas de error sí se
+                    # incluyen, pero no cuentan como documentos descargados.
+                    archivos = [p for p in sorted(Path(origen).rglob("*"))
+                                if p.is_file() and p.suffix.lower() != ".part"]
+                    reales = [p for p in archivos
+                              if not p.name.upper().endswith(
+                                  ("_ERROR.TXT", "_NO_DISPONIBLE.TXT", "SIN_DOCUMENTOS.TXT"))]
                     for p in archivos:
                         rel = p.relative_to(origen)
                         partes = "/".join(_ruta_segura(x, 38) for x in rel.parts)
                         zf.write(p, f"{base}/{partes}")
-                    indice.append(
-                        f"[P{n_prof:02d} / E{n_exp}]  {prof.get('cargo', '')} · "
-                        f"{proyecto[:70]}: {len(archivos)} archivo(s)")
+                    if not reales:
+                        cui = info.get("cui") or e.get("cui")
+                        motivo = ("la carpeta existe, pero ninguna descarga produjo "
+                                  "un documento utilizable")
+                        if not any(p.name.upper() == "SIN_DOCUMENTOS.TXT" for p in archivos):
+                            zf.writestr(
+                                f"{base}/SIN_DOCUMENTOS.txt",
+                                f"Sin documentos descargados para esta experiencia.\n"
+                                f"CUI: {cui or '(no resuelto)'}\nMotivo: {motivo}\n",
+                            )
+                        indice.append(
+                            f"[P{n_prof:02d} / E{n_exp}]  {prof.get('cargo', '')} · "
+                            f"{proyecto[:70]}: SIN DOCUMENTOS — {motivo}")
+                    else:
+                        indice.append(
+                            f"[P{n_prof:02d} / E{n_exp}]  {prof.get('cargo', '')} · "
+                            f"{proyecto[:70]}: {len(reales)} documento(s) descargado(s)"
+                            f" + {len(archivos) - len(reales)} nota(s)")
+
+                    for nombre, estado in (manifiesto.get("secciones") or {}).items():
+                        if (estado or {}).get("estado") != "completa":
+                            indice.append(
+                                f"  SECCIÓN {nombre}: {(estado or {}).get('estado') or 'sin estado'}"
+                                f" · {(estado or {}).get('descargados', 0)}/"
+                                f"{(estado or {}).get('esperados', 0)} documentos")
+                    for aviso in manifiesto.get("avisos") or []:
+                        indice.append(f"  ADVERTENCIA: {aviso}")
                 else:
-                    info = enr.get(f"{n_prof}:{n_exp}") or {}
                     cui = info.get("cui") or e.get("cui")
                     motivo = _motivo_sin_docs(info.get("via"), cui)
                     zf.writestr(

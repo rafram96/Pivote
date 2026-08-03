@@ -21,6 +21,7 @@ from __future__ import annotations
 import calendar
 import io
 import json
+import logging
 import re
 from datetime import date
 from pathlib import Path
@@ -41,6 +42,8 @@ from scripts.generar_excel import (
     FMT_DEC, FMT_FECHA, FMT_INT, _fill_veredicto, _sin_jerga, construir_hoja_evaluacion,
     fecha_excel,
 )
+
+logger = logging.getLogger(__name__)
 
 Paralizaciones = dict[tuple[int, int], list[tuple[date, date]]]
 
@@ -291,7 +294,7 @@ def _xl(v):
         return "; ".join(str(x) for x in v)
     if isinstance(v, dict):
         return "; ".join(f"{k}: {val}" for k, val in v.items())
-    return v
+    return _sin_jerga(v)
 
 
 def construir_hoja_profesional(
@@ -325,6 +328,7 @@ def construir_hoja_profesional(
 
     def banda(texto, font=F_PROF, fill=FILL_PROF, h=20):
         nonlocal r
+        texto = _sin_jerga(texto)
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
         c = ws.cell(r, 1, texto)
         c.font, c.fill = font, fill
@@ -336,7 +340,7 @@ def construir_hoja_profesional(
 
     def fila(hito, desde, hasta, dias_v, *, bold=False, fill=None):
         nonlocal r
-        valores = [hito, desde, hasta, dias_v]
+        valores = [_sin_jerga(hito), _sin_jerga(desde), _sin_jerga(hasta), dias_v]
         for i, v in enumerate(valores, start=1):
             c = ws.cell(r, i, v)
             c.font = F_BOLD if bold else F_CELL
@@ -394,6 +398,13 @@ def construir_hoja_profesional(
         kv("Monto ejecutado (S/)", fx.get("monto") if fx.get("monto") is not None else "—", FMT_SOLES)
         kv("Inicio de obra", _fecha_iso(fx.get("fecha_inicio")) or "—", FMT_FECHA)
         kv("Fin de obra", _fecha_iso(fx.get("fecha_fin")) or "—", FMT_FECHA)
+        descargas_reales = fx.get("descargas_reales")
+        if isinstance(descargas_reales, dict):
+            n_real = int(descargas_reales.get("archivos") or 0)
+            kv("Documentos en el ZIP",
+               f"{n_real} archivo{'s' if n_real != 1 else ''} descargado{'s' if n_real != 1 else ''}")
+        else:
+            kv("Documentos en el ZIP", "Pendiente de descarga")
         rr += 1
 
         vals = sorted(fx.get("valorizaciones") or [],
@@ -476,10 +487,15 @@ def construir_hoja_profesional(
                 anio, mes = v.get("anio") or 0, v.get("mes") or 0
                 resaltar = _mes_en_rango(anio, mes, ini, fin)
                 paraliz = "paraliz" in str(v.get("estado") or "").lower()
-                ndoc = v.get("docs") or 0
+                clave_hito = f"{anio:04d}-{mes:02d}" if anio and mes else ""
+                if isinstance(descargas_reales, dict):
+                    ndoc = int((descargas_reales.get("por_hito") or {}).get(clave_hito, 0))
+                    texto_docs = f"{ndoc} archivo{'s' if ndoc != 1 else ''}"
+                else:
+                    texto_docs = "Pendiente"
                 celdas = [n, f"{anio} / {_MES_ES.get(mes, mes)}",
                           v.get("fisico_real"), v.get("valorizado_real"), v.get("estado") or "",
-                          f"Sí ({ndoc})" if ndoc else "—"]
+                          texto_docs]
                 for i, val in enumerate(celdas, start=6):
                     cc = ws.cell(rr, i, val)
                     cc.font = F_CELL_ROJO if paraliz else F_CELL   # rojo: mes paralizado
@@ -1262,7 +1278,8 @@ def construir_hoja_profesional(
         try:
             paginas = _render_cert_pages(cert_pdf)
         except Exception as ex:    # noqa: BLE001 — no romper el Excel por un cert
-            c = ws.cell(r, 1, f"(certificado no embebido: {ex})")
+            logger.warning("certificado no embebido %s: %s", cert_pdf, ex)
+            c = ws.cell(r, 1, "Certificado no embebido — revisar el PDF original")
             c.font = F_CELL
             r += 1
             return
@@ -1284,8 +1301,14 @@ def construir_hoja_profesional(
     ws.cell(r, 1, f"Nombre: {prof.get('nombre') or '—'}").font = F_BOLD; r += 1
     ws.cell(r, 1, f"Colegiatura: {prof.get('colegiatura') or '—'}").font = F_CELL; r += 1
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
-    c = ws.cell(r, 1, "LEYENDA: violeta = dato supuesto o inferido; amarillo = por verificar")
-    c.font, c.fill, c.alignment = F_CELL, FILL_SUPUESTO, AL_WRAP
+    c = ws.cell(
+        r, 1,
+        "LEYENDA: violeta = supuesto o inferido · amarillo = dato del certificado / "
+        "valorización dentro del periodo · cyan = efectivo verificado · naranja = "
+        "periodo excluido · rojo = alerta o contradicción",
+    )
+    c.font, c.alignment = F_CELL, AL_WRAP
+    ws.row_dimensions[r].height = 30
     r += 1
     r += 1
 
@@ -1433,7 +1456,10 @@ def construir_hoja_profesional(
                  e.get("fecha_inicial"), e.get("fecha_final"), None)
             r += 1
         else:
-            fila("Periodo certificado", ini, fin, dias_inclusivos(ini, fin), fill=FILL_CLAUDE)
+            sup_hitos = set(prof.get("supuestos") or []) | set(e.get("supuestos") or [])
+            fill_periodo = (FILL_SUPUESTO if {"fecha_inicial", "fecha_final"} & sup_hitos
+                            else FILL_CLAUDE)
+            fila("Periodo certificado", ini, fin, dias_inclusivos(ini, fin), fill=fill_periodo)
 
             # periodos inactivos de la obra (dict con tipo, o tupla legacy=paralizado)
             # SOLO los que caen dentro del periodo que supervisó este profesional;
@@ -1579,13 +1605,18 @@ def construir_hoja_profesional(
         ws.row_dimensions[r].height = 30
         r += 1
 
-    def _p5(n, proyecto, cliente, objeto, fini, ffin, io_ini, io_fin, decl, efec):
+    def _p5(n, proyecto, cliente, objeto, fini, ffin, io_ini, io_fin, decl, efec,
+            supuestos=None):
         nonlocal r
+        supuestos = set(supuestos or [])
         # celdas combinadas en vertical (2 sub-filas)
-        for ci, cf, val in [(1, 1, n), (2, 8, proyecto), (9, 11, cliente),
-                            (13, 13, objeto)]:
+        for ci, cf, val, campo in [(1, 1, n, None), (2, 8, proyecto, "proyecto"),
+                                   (9, 11, cliente, "entidad_emisora"),
+                                   (13, 13, objeto, "cargo_ocupado")]:
             ws.merge_cells(start_row=r, start_column=ci, end_row=r + 1, end_column=cf)
             c = ws.cell(r, ci, val); c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
+            if campo in supuestos and val not in (None, ""):
+                c.fill = FILL_SUPUESTO
         # sub-fila 1: fechas del certificado (amarillo = declarado) · sub-fila 2:
         # fechas según InfoObras (naranja = dato del backend). Sin ficha → "—".
         io_falta = "— (obra no ubicada en InfoObras)"
@@ -1596,6 +1627,10 @@ def construir_hoja_profesional(
             for ci, val in [(14, fuente), (15, fi), (16, ff)]:
                 c = ws.cell(r + dr, ci, val)
                 c.font, c.fill, c.border, c.alignment = F_CELL, fill, BORDER, AL_WRAP
+                if dr == 0 and ci in (15, 16) and (
+                        (ci == 15 and "fecha_inicial" in supuestos)
+                        or (ci == 16 and "fecha_final" in supuestos)):
+                    c.fill = FILL_SUPUESTO
                 if isinstance(val, date):
                     c.number_format = FMT_FECHA
         for ci, val, fill in [(18, decl, FILL_CLAUDE), (19, efec, FILL_EFECTIVO)]:
@@ -1603,6 +1638,8 @@ def construir_hoja_profesional(
             c = ws.cell(r, ci, val); c.font, c.border, c.alignment = F_CELL, BORDER, AL_HEAD
             if isinstance(val, (int, float)):
                 c.number_format, c.fill = FMT_INT, fill
+            if ci == 18 and {"fecha_inicial", "fecha_final"} & supuestos:
+                c.fill = FILL_SUPUESTO
         lns = max(-(-len(str(proyecto)) // 74), -(-len(str(cliente)) // 43),
                   -(-len(str(objeto)) // 14), 1)   # alto total = celda más alta, en 2 filas
         alto = max(28, lns * 13 + 3)
@@ -1632,7 +1669,8 @@ def construir_hoja_profesional(
         _p5(ne, e.get("proyecto") or "—", e.get("entidad_emisora") or "—",
             e.get("cargo_ocupado") or "—", ini_, fin_,
             _fecha_iso(fx_.get("fecha_inicio")), _fecha_iso(fx_.get("fecha_fin")),
-            decl, efec)
+            decl, efec,
+            set(prof.get("supuestos") or []) | set(e.get("supuestos") or []))
         if isinstance(decl, (int, float)):
             _sd += decl
         if isinstance(efec, (int, float)):
@@ -1678,6 +1716,7 @@ def generar_excel_final(
     revisiones: Optional[dict] = None,
     sunat: Optional[dict] = None,
     certificados: Optional[dict] = None,
+    confiabilidad: Optional[dict] = None,
 ) -> Path:
     """Construye el Excel final: CLAUDE + Base de Datos + 1 hoja por profesional.
 
@@ -1700,7 +1739,7 @@ def generar_excel_final(
 
     ws = wb.active
     ws.title = "CLAUDE"
-    construir_hoja_evaluacion(ws, espejo)
+    construir_hoja_evaluacion(ws, espejo, confiabilidad=confiabilidad)
 
     construir_hoja_base_datos(wb.create_sheet("Base de Datos"), espejo)
 
@@ -1737,7 +1776,8 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
             sunat[(np_, ne)] = enr["sunat"]
         if (enr.get("obra_ficha") or enr.get("valorizaciones")
                 or enr.get("representante_obra") or enr.get("aprobacion_expediente")
-                or enr.get("verificacion_expediente") or enr.get("seace")):
+                or enr.get("verificacion_expediente") or enr.get("seace")
+                or enr.get("descargas_reales")):
             # `obra_ficha` NO trae el nombre (solo código/CUI/estado/monto/fechas);
             # el nombre viaja suelto en `obra_nombre` (o en `obra.nombre_obra`) y sin
             # esta línea nunca llegaba al Excel — el evaluador no podía ver con qué
@@ -1752,6 +1792,7 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                                  "aprobacion_expediente": enr.get("aprobacion_expediente"),
                                  "verificacion_expediente": enr.get("verificacion_expediente"),
                                  "seace": enr.get("seace"),
+                                 "descargas_reales": enr.get("descargas_reales"),
                                  # #63: N registros de obra bajo el mismo CUI
                                  "registros_cui": enr.get("registros_cui")}
         # cert multi-obra: la lista de sub-obras verificadas viaja en `fichas` para
@@ -1791,7 +1832,8 @@ def inyectar_veredicto_backend(espejo: dict, enriquecimiento: Optional[dict]) ->
 
 def regenerar_excel_final(espejo: dict, enriquecimiento: Optional[dict],
                           salida: Path, revisiones: Optional[dict] = None,
-                          certificados: Optional[dict] = None) -> Path:
+                          certificados: Optional[dict] = None,
+                          confiabilidad: Optional[dict] = None) -> Path:
     """Regenera el Excel final desde el espejo + enriquecimiento YA en disco (sin
     tocar red). Lo usa el backfill de cargos para dejar el entregable limpio.
 
@@ -1807,4 +1849,4 @@ def regenerar_excel_final(espejo: dict, enriquecimiento: Optional[dict],
     if salida.exists():
         salida.unlink()
     return generar_excel_final(espejo, salida, paral, cuis, fichas, revisiones or {},
-                               sunat, certificados)
+                               sunat, certificados, confiabilidad=confiabilidad)

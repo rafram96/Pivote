@@ -35,7 +35,7 @@ from pydantic import ValidationError
 
 from entregables import (
     construir_zip_infoobras, descargar_cui, generar_excel_final, mapear_certificados,
-    _zip_carpeta,
+    regenerar_excel_final, _zip_carpeta,
 )
 from orquestador import Motor, RepositorioArchivos, etapas_esqueleto, etapas_reales
 from orquestador.progreso import REGISTRO
@@ -241,6 +241,24 @@ def _asegurar_descargas(job_id: str) -> None:
             from orquestador.etapas_reales import descargar_documentos_job
             stats = descargar_documentos_job(espejo, enr, job_id, DATA_DIR,
                                              max_descargas=maxd, reportar=_rep)
+            # El manifiesto por experiencia es parte del enriquecimiento persistente:
+            # alimenta tanto el Excel como el índice y sobrevive a un reinicio.
+            repo.guardar_enriquecimiento(job_id, enr)
+            revisiones = {
+                (it.n_prof, it.n_exp): (it.motivo, it.accion_sugerida)
+                for it in job.items_revision if not it.resuelto
+            }
+            for clave, datos in enr.items():
+                if (isinstance(datos, dict)
+                        and str(datos.get("via") or "").upper() == "PRIVADA"
+                        and ":" in clave and not clave.startswith("prof:")):
+                    np_, ne = (int(x) for x in clave.split(":"))
+                    revisiones.setdefault((np_, ne), "[PRIVADA]")
+            regenerar_excel_final(
+                espejo, enr, _dir_job(job_id) / "final.xlsx", revisiones,
+                mapear_certificados(DATA_DIR, job_id),
+                confiabilidad=_confiabilidad_excel(job),
+            )
             # arma el ZIP COMPLETO recién ahora que están TODOS los documentos
             # (atómico → reemplaza cualquier zip parcial previo).
             ruta_zip = _dir_job(job_id) / "infoobras.zip"
@@ -404,13 +422,29 @@ def _avance_descargas_dict(job: pipeline.Job) -> dict:
     ya están en disco vs las que deben bajar (las en revisión no bajan) + la obra
     en curso (del RegistroProgreso, si hay una descarga corriendo)."""
     espejo = repo.cargar_espejo(job.job_id) or {}
+    enr = repo.cargar_enriquecimiento(job.job_id) or {}
+
+    def _tiene_fuente(clave: tuple[int, int]) -> bool:
+        d = enr.get(f"{clave[0]}:{clave[1]}") or {}
+        obra = d.get("obra") if isinstance(d.get("obra"), dict) else {}
+        return bool(obra.get("obra_id") or d.get("seace"))
+
     todas = [(p["n_prof"], e["n"])
              for p in espejo.get("profesionales", [])
-             for e in p.get("experiencias", [])]
+             for e in p.get("experiencias", [])
+             if _tiene_fuente((p["n_prof"], e["n"]))]
     rev = {(it.n_prof, it.n_exp) for it in job.items_revision if not it.resuelto}
     bajan = [x for x in todas if x not in rev]
-    carpetas = _mapa_descargas(job.job_id)
-    descargadas = sum(1 for x in bajan if x in carpetas)
+
+    def _descarga_real(clave: tuple[int, int]) -> bool:
+        manifiesto = ((enr.get(f"{clave[0]}:{clave[1]}") or {})
+                      .get("descargas_reales") or {})
+        return bool(manifiesto.get("completada")
+                    and int(manifiesto.get("archivos") or 0) > 0)
+
+    descargadas = sum(
+        1 for x in bajan if _descarga_real(x)
+    )
     total = len(bajan)
     viva = REGISTRO.etapas(job.job_id).get("descargas")
     return {
@@ -601,6 +635,16 @@ async def analizar(
 @app.get("/api/pivote/jobs/{job_id}")
 def ver_job(job_id: str):
     return json.loads(_job_o_404(job_id).model_dump_json())
+
+
+def _confiabilidad_excel(job: pipeline.Job) -> dict:
+    """Contrato único para el banner de confiabilidad del Excel."""
+    return {
+        "veredicto": job.confiabilidad,
+        "hallazgos_criticos": [
+            o.model_dump(mode="json") for o in job.hallazgos_criticos
+        ],
+    }
 
 
 def _resolver_revision_background(job_id: str, n_prof: int, n_exp: int, body: dict):
@@ -838,6 +882,10 @@ def resumen(job_id: str):
     return {
         "job_id": job_id,
         "postor": job.postor or job.analisis_id,
+        "confiabilidad": job.confiabilidad,
+        "hallazgos_criticos": [
+            o.model_dump(mode="json") for o in job.hallazgos_criticos
+        ],
         "veredictos": veredictos,
         "alertas": alertas,
         "factores": factores,
@@ -869,7 +917,8 @@ def descargar_excel(job_id: str):
         # Las paralizaciones reales las inyecta la etapa de InfoObras; sin
         # ellas el Excel sale con brutos = efectivos (y se regenera después).
         generar_excel_final(espejo, ruta,
-                            certificados=mapear_certificados(DATA_DIR, job_id))
+                            certificados=mapear_certificados(DATA_DIR, job_id),
+                            confiabilidad=_confiabilidad_excel(job))
         job.excel_final = f"/api/pivote/jobs/{job_id}/excel"
         repo.guardar(job)
     return FileResponse(
