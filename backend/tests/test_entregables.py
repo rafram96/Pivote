@@ -258,8 +258,13 @@ def test_zip_arbol_completo_por_experiencia_con_manifiestos(tmp_path):
     (a / "original-a.pdf").write_bytes(b"%PDF-1.4 misma evidencia")
     (b / "otro-nombre.pdf").write_bytes(b"%PDF-1.4 misma evidencia")
 
+    enriquecimiento = {
+        "1:1": {"obra": {"obra_id": 72056}},
+        "1:2": {"obra": {"obra_id": 72056}},
+    }
     salida = construir_zip_infoobras(
-        ESPEJO, {(1, 1): a, (1, 2): b}, tmp_path / "arbol.zip")
+        ESPEJO, {(1, 1): a, (1, 2): b}, tmp_path / "arbol.zip",
+        enriquecimiento=enriquecimiento)
     with zipfile.ZipFile(salida) as zf:
         nombres = zf.namelist()
         # cero almacén central: los PDF viven dentro de cada experiencia

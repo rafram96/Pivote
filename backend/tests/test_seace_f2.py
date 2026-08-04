@@ -78,13 +78,50 @@ def test_descarga_seace_sin_obra_id_es_idempotente_y_entra_al_zip(tmp_path):
         ESPEJO, {(1, 1): destino}, tmp_path / "infoobras.zip", enriquecimiento=enr)
     with zipfile.ZipFile(salida) as zf:
         nombres = zf.namelist()
-        # El fake devuelve bytes idénticos para ambos documentos: el ZIP guarda
-        # el contenido una sola vez y el manifiesto conserva las dos identidades.
+        # El árbol conserva ambos documentos aunque tengan bytes idénticos.
         assert any(n.endswith("SEACE_01_BASES_INTEGRADAS.pdf") for n in nombres)
         manifiesto = zf.read(next(n for n in nombres
                                   if n.endswith("MANIFIESTO_DOCUMENTOS.txt"))).decode("utf-8")
         assert "SEACE_01_BASES_INTEGRADAS.pdf" in manifiesto
         assert "SEACE_02_CONTRATO_FIRMADO.pdf" in manifiesto
+
+
+def test_infoobras_descarga_una_vez_y_materializa_tres_profesionales(tmp_path):
+    profesionales = []
+    enriquecimiento = {}
+    for n_prof in (8, 9, 11):
+        profesionales.append({
+            "n_prof": n_prof,
+            "cargo": f"ESPECIALISTA {n_prof}",
+            "nombre": "PEDRO SÁNCHEZ MEZA",
+            "experiencias": [{
+                "n": 1, "proyecto": "Hospital compartido",
+                "fecha_inicial": "2020-01-01", "fecha_final": "2020-12-31",
+            }],
+        })
+        enriquecimiento[f"{n_prof}:1"] = {
+            "cui": "1", "obra": {"obra_id": 72056},
+        }
+    espejo = {**ESPEJO, "profesionales": profesionales}
+    llamadas = []
+
+    def descargar(obra_id, destino):
+        llamadas.append(obra_id)
+        (destino / "Valorizaciones/2020-01 ENERO").mkdir(parents=True)
+        (destino / "Valorizaciones/2020-01 ENERO/val.pdf").write_bytes(
+            b"%PDF compartido"
+        )
+
+    descargar_documentos_job(
+        espejo, enriquecimiento, "job-tres-profesionales", tmp_path,
+        descargar=descargar,
+    )
+
+    base = carpeta_job(tmp_path, "job-tres-profesionales") / "descargas"
+    assert llamadas == [72056]
+    for n_prof in (8, 9, 11):
+        assert (base / f"P{n_prof}_E1.ok").is_file()
+        assert (base / f"P{n_prof}_E1/Valorizaciones/2020-01 ENERO/val.pdf").is_file()
 
 
 def test_marca_infoobras_previa_no_salta_seace(tmp_path):

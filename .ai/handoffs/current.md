@@ -4,21 +4,21 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
-## Nota (2026-08-04, Claude) — correctivo #80: el ZIP conserva su árbol por experiencia
+## Nota (2026-08-04, Codex) — #80 resuelta con caché InfoObras por job
 
-La auditoría del ZIP EsSalud reveló 1,205 referencias documentales pero solo 317
-contenidos únicos (~73% redundante, 971 MB). La primera corrección (almacén
-central `DOCUMENTOS_COMPARTIDOS/` por SHA-256, 405 MB) quedó **revertida por
-decisión de Rafael**: rompía la navegación del evaluador no técnico — cada P/E
-quedaba solo con manifiestos. Correctivo registrado en la issue #80: **la
-deduplicación pertenece a la DESCARGA (caché por `obra_id`, spec D1–D5 en la
-issue, pendiente de implementar — #80 sigue abierta), no a la entrega.**
-`construir_zip_infoobras` materializa el árbol completo por experiencia y
-conserva del trabajo original: `MANIFIESTO_DOCUMENTOS.txt` (ruta → SHA-256,
-junto a los PDF), estados de sección legibles, y el índice que explica los
-compartidos ("N documento(s) · M compartido(s) con otras experiencias de esta
-obra · K propio(s) del periodo"). El ZIP de 405 MB en Downloads queda como
-artefacto de referencia, no como formato de entrega.
+Implementadas D1–D5: `cache_obras/{obra_id}` descarga el corpus completo una
+vez, exige `.completa`, conserva estado serializado y materializa cada P/E por
+hardlink/copia atómica. Los informes se filtran localmente con la semántica
+histórica inclusiva por año; aprobaciones y documentos MEF invariantes se bajan
+una vez usando los requisitos agrupados de la obra. Las marcas `.ok` por
+experiencia permanecen compatibles con jobs históricos y la barra del panel.
+
+La entrega conserva el árbol completo; el índice compara SHA únicamente dentro
+de la misma `obra_id`. Replay offline Vitarte generado en Downloads como
+`InfoObras_essalud-vitarte_cons-hospitalario_CORREGIDO_V2.zip`: 971,718,423
+bytes, 1,205 PDF, 29 manifiestos, cero almacén central y `testzip` limpio. Gate:
+**748 passed, 25 skipped**. El resolver no cambió; la golden no es aplicable y
+su corpus sigue ausente. El ZIP centralizado de 405 MB queda solo como referencia.
 
 ## Nota (2026-08-04, Codex) — auditoría EsSalud corregida (#32, #72–#79)
 

@@ -58,10 +58,30 @@ def archivo_seace_valido(ruta: Path) -> bool:
         return False
 
 
-def _lock_para(ruta: Path) -> threading.Lock:
+def lock_para_descarga(ruta: Path) -> threading.Lock:
+    """Devuelve el lock de proceso compartido por una entrada de caché."""
     clave = str(ruta.resolve())
     with _GUARDIA_LOCKS:
         return _LOCKS.setdefault(clave, threading.Lock())
+
+
+def materializar_archivo(origen: Path, destino: Path) -> None:
+    """Publica ``origen`` en ``destino`` por hardlink y cae a copia.
+
+    El temporal vive junto al destino para que el reemplazo sea atómico también
+    en Windows. Este patrón es compartido por las cachés SEACE e InfoObras.
+    """
+    origen, destino = Path(origen), Path(destino)
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    temporal = destino.with_name(f".{destino.name}.{uuid.uuid4().hex}.part")
+    try:
+        try:
+            os.link(origen, temporal)
+        except OSError:
+            shutil.copyfile(origen, temporal)
+        reemplazar_atomico(temporal, destino)
+    finally:
+        temporal.unlink(missing_ok=True)
 
 
 class CacheDescargasSeace:
@@ -82,7 +102,7 @@ class CacheDescargasSeace:
         clave = clave_archivo_seace(url)
         cache = self.directorio / f"{clave}{extension}"
 
-        with _lock_para(cache):
+        with lock_para_descarga(cache):
             cache_hit = archivo_seace_valido(cache)
             if not cache_hit:
                 cache.parent.mkdir(parents=True, exist_ok=True)
@@ -103,17 +123,6 @@ class CacheDescargasSeace:
                         temporal_cache.name + ".part"
                     ).unlink(missing_ok=True)
 
-            destino.parent.mkdir(parents=True, exist_ok=True)
-            temporal_destino = destino.with_name(
-                f".{destino.name}.{uuid.uuid4().hex}.part"
-            )
-            try:
-                try:
-                    os.link(cache, temporal_destino)
-                except OSError:
-                    shutil.copyfile(cache, temporal_destino)
-                reemplazar_atomico(temporal_destino, destino)
-            finally:
-                temporal_destino.unlink(missing_ok=True)
+            materializar_archivo(cache, destino)
 
         return ResultadoCacheSeace(True, clave, cache_hit)

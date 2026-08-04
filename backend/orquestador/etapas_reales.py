@@ -964,7 +964,11 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
         reset_descargas_stats, descargas_stats, resumen_descargas)
     from scraping.errores_red import corto
     base = carpeta_job(Path(dir_descargas), job_id) / "descargas"
+    from orquestador.descargas_infoobras import CacheDescargasInfoObras
     from orquestador.descargas_seace import CacheDescargasSeace
+    cache_infoobras = CacheDescargasInfoObras(
+        carpeta_job(Path(dir_descargas), job_id) / "cache_obras"
+    )
     cache_seace = CacheDescargasSeace(
         Path(dir_cache_seace)
         if dir_cache_seace is not None
@@ -972,6 +976,25 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
     )
     reset_descargas_stats()
     bajadas = saltados = 0
+
+    requisitos_obra: dict[str, dict] = {}
+    for profesional in espejo.get("profesionales", []):
+        np_requisito = profesional.get("n_prof")
+        for experiencia in profesional.get("experiencias", []) or []:
+            enr_requisito = enriquecimiento.get(
+                _clave(np_requisito, experiencia.get("n"))) or {}
+            obra_requisito = (enr_requisito.get("obra")
+                              if isinstance(enr_requisito.get("obra"), dict) else {})
+            oid = obra_requisito.get("obra_id")
+            if not oid:
+                continue
+            requisito = requisitos_obra.setdefault(str(oid), {})
+            if enr_requisito.get("aprobacion_expediente") and not requisito.get("aprobacion"):
+                requisito["aprobacion"] = enr_requisito["aprobacion_expediente"]
+            verificacion = enr_requisito.get("verificacion_expediente")
+            if (isinstance(verificacion, dict) and verificacion.get("cui_confirmado")
+                    and not requisito.get("verificacion")):
+                requisito["verificacion"] = verificacion
 
     def _obra_id(np_, ne):
         enr = enriquecimiento.get(_clave(np_, ne)) or {}
@@ -1023,6 +1046,93 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                     "La descarga falló o la fuente no devolvió un PDF/ZIP/RAR válido. "
                     "Reintentar más tarde.\n")
 
+    def _descargar_corpus_obra(obra_id, destino_cache: Path) -> dict:
+        if descargar is not None:
+            descargar(obra_id, destino_cache)
+            archivos, _ = _inventario_real_descarga(destino_cache)
+            return {
+                "secciones": {"InfoObras": {
+                    "esperados": archivos, "descargados": archivos,
+                }},
+                "informes_anios": [],
+            }
+
+        estado: dict = {"secciones": {}, "avisos": [], "informes_anios": []}
+        principal = descargar_documentos_obra_por_hito(obra_id, destino_cache)
+        inventario = principal.get("inventario") or {}
+        esperados = sum(
+            len(avance.get("documentos") or [])
+            for avance in inventario.get("avances", [])
+        ) + len((inventario.get("obra") or {}).get("documentos") or [])
+        estado["secciones"]["InfoObras"] = {
+            "esperados": esperados,
+            "descargados": principal.get("descargados") or 0,
+        }
+        try:
+            control = descargar_informes_control(obra_id, destino_cache)
+            estado["informes_anios"] = control.get("anios") or []
+            estado["secciones"]["Informes de control"] = {
+                "esperados": control.get("encontrados") or 0,
+                "descargados": control.get("descargados") or 0,
+            }
+        except Exception as ex:  # noqa: BLE001
+            logger.debug("informes control obra %s: %s", obra_id, corto(ex))
+            estado["secciones"]["Informes de control"] = {"error": True}
+            estado["avisos"].append(
+                "Informes de control: la consulta no pudo completarse.")
+        try:
+            cierre = descargar_datos_cierre(obra_id, destino_cache)
+            estado["secciones"]["Datos de cierre"] = {
+                "esperados": cierre.get("encontrados") or 0,
+                "descargados": cierre.get("descargados") or 0,
+            }
+        except Exception as ex:  # noqa: BLE001
+            logger.debug("datos de cierre obra %s: %s", obra_id, corto(ex))
+            estado["secciones"]["Datos de cierre"] = {"error": True}
+            estado["avisos"].append(
+                "Datos de cierre: la consulta no pudo completarse.")
+
+        requisito = requisitos_obra.get(str(obra_id), {})
+        aprobacion = requisito.get("aprobacion")
+        if aprobacion:
+            try:
+                aprob_ok = descargar_aprobacion_expediente(aprobacion, destino_cache)
+                estado["secciones"]["Aprobación del expediente"] = {
+                    "esperados": 1, "descargados": int(bool(aprob_ok)),
+                }
+            except Exception as ex:  # noqa: BLE001
+                logger.debug("aprobación expediente obra %s: %s", obra_id, corto(ex))
+                estado["secciones"]["Aprobación del expediente"] = {"error": True}
+                estado["avisos"].append(
+                    "Aprobación del expediente: la descarga falló.")
+        verificacion = requisito.get("verificacion")
+        if verificacion:
+            try:
+                from scraping.mef import descargar_documentos_expediente
+                mef = descargar_documentos_expediente(
+                    verificacion["cui_confirmado"],
+                    destino_cache / "Verificación MEF",
+                    codsnip=verificacion.get("cod_snip") or "",
+                )
+                descargados_mef = sum(int(valor or 0) for valor in mef.values())
+                contrato_mef = verificacion.get("contrato") or {}
+                resolucion_mef = verificacion.get("resolucion") or {}
+                esperados_mef = (
+                    int(bool(contrato_mef.get("numero")))
+                    + int(bool(resolucion_mef.get("numero")
+                               or resolucion_mef.get("documento")))
+                )
+                estado["secciones"]["Verificación MEF"] = {
+                    "esperados": max(1, esperados_mef),
+                    "descargados": descargados_mef,
+                }
+            except Exception as ex:  # noqa: BLE001
+                logger.debug("verificación MEF obra %s: %s", obra_id, corto(ex))
+                estado["secciones"]["Verificación MEF"] = {"error": True}
+                estado["avisos"].append(
+                    "Verificación MEF: la consulta de documentos falló.")
+        return estado
+
     # total descargable = unión de InfoObras y SEACE (una cuenta por experiencia)
     total_desc = sum(1 for prof in espejo.get("profesionales", [])
                      for e in (prof.get("experiencias", []) or [])
@@ -1060,68 +1170,39 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                 if obra_id and not ok.exists():
                     hizo_trabajo = True
                     avisos, secciones = [], {}
-                    if descargar is not None:       # inyección de tests
-                        descargar(obra_id, destino)
-                    else:
-                        principal = descargar_documentos_obra_por_hito(obra_id, destino)
-                        inv = principal.get("inventario") or {}
-                        esperados = sum(
-                            len(a.get("documentos") or []) for a in inv.get("avances", [])
-                        ) + len((inv.get("obra") or {}).get("documentos") or [])
-                        _estado_seccion(secciones, avisos, "InfoObras", esperados,
-                                        principal.get("descargados") or 0)
-                        cert_ini = _fecha_iso(e.get("fecha_inicial"))
-                        cert_fin = _fecha_iso(e.get("fecha_final"))
-                        try:
-                            ctrl = descargar_informes_control(
-                                obra_id, destino, fecha_ini=cert_ini, fecha_fin=cert_fin)
-                            _estado_seccion(secciones, avisos, "Informes de control",
-                                            ctrl.get("relevantes") or 0,
-                                            ctrl.get("descargados") or 0)
-                        except Exception as ex:  # noqa: BLE001
-                            logger.debug("informes control obra %s: %s", obra_id, corto(ex))
-                            secciones["Informes de control"] = {"estado": "error"}
-                            avisos.append("Informes de control: la consulta no pudo completarse.")
-                        try:
-                            cierre = descargar_datos_cierre(obra_id, destino)
-                            _estado_seccion(secciones, avisos, "Datos de cierre",
-                                            cierre.get("encontrados") or 0,
-                                            cierre.get("descargados") or 0)
-                        except Exception as ex:  # noqa: BLE001
-                            logger.debug("datos de cierre obra %s: %s", obra_id, corto(ex))
-                            secciones["Datos de cierre"] = {"estado": "error"}
-                            avisos.append("Datos de cierre: la consulta no pudo completarse.")
-                        _aprob = enr.get("aprobacion_expediente")
-                        if _aprob:
-                            try:
-                                aprob_ok = descargar_aprobacion_expediente(_aprob, destino)
-                                _estado_seccion(secciones, avisos, "Aprobación del expediente",
-                                                1, int(bool(aprob_ok)))
-                            except Exception as ex:  # noqa: BLE001
-                                logger.debug("aprobación expediente obra %s: %s", obra_id, corto(ex))
-                                secciones["Aprobación del expediente"] = {"estado": "error"}
-                                avisos.append("Aprobación del expediente: la descarga falló.")
-                        _vmef = enr.get("verificacion_expediente")
-                        if _vmef and _vmef.get("cui_confirmado"):
-                            try:
-                                from scraping.mef import descargar_documentos_expediente
-                                mef = descargar_documentos_expediente(
-                                    _vmef["cui_confirmado"], destino / "Verificación MEF",
-                                    codsnip=_vmef.get("cod_snip") or "")
-                                descargados_mef = sum(int(v or 0) for v in mef.values())
-                                contrato_mef = _vmef.get("contrato") or {}
-                                resolucion_mef = _vmef.get("resolucion") or {}
-                                esperados_mef = (
-                                    int(bool(contrato_mef.get("numero")))
-                                    + int(bool(resolucion_mef.get("numero")
-                                               or resolucion_mef.get("documento")))
+                    resultado_cache = cache_infoobras.obtener(
+                        obra_id,
+                        descargar=lambda ruta, oid=obra_id: _descargar_corpus_obra(
+                            oid, ruta),
+                    )
+                    cert_ini = _fecha_iso(e.get("fecha_inicial"))
+                    cert_fin = _fecha_iso(e.get("fecha_final"))
+                    materializados = cache_infoobras.materializar(
+                        resultado_cache, destino,
+                        fecha_ini=cert_ini, fecha_fin=cert_fin,
+                    )
+                    estado_cache = resultado_cache.estado
+                    avisos.extend(estado_cache.get("avisos") or [])
+                    for nombre, datos_seccion in (
+                            estado_cache.get("secciones") or {}).items():
+                        if datos_seccion.get("error"):
+                            secciones[nombre] = {"estado": "error"}
+                            continue
+                        esperados = datos_seccion.get("esperados") or 0
+                        descargados = datos_seccion.get("descargados") or 0
+                        if nombre == "Informes de control":
+                            anios = estado_cache.get("informes_anios") or []
+                            if cert_ini is not None and cert_fin is not None:
+                                inferior, superior = sorted((cert_ini.year, cert_fin.year))
+                                esperados = sum(
+                                    1 for anio in anios
+                                    if anio is None or inferior <= anio <= superior
                                 )
-                                _estado_seccion(secciones, avisos, "Verificación MEF",
-                                                max(1, esperados_mef), descargados_mef)
-                            except Exception as ex:  # noqa: BLE001
-                                logger.debug("verificación MEF obra %s: %s", obra_id, corto(ex))
-                                secciones["Verificación MEF"] = {"estado": "error"}
-                                avisos.append("Verificación MEF: la consulta de documentos falló.")
+                            else:
+                                esperados = len(anios)
+                            descargados = materializados.informes
+                        _estado_seccion(
+                            secciones, avisos, nombre, esperados, descargados)
                     base.mkdir(parents=True, exist_ok=True)
                     ok.write_text("ok", encoding="utf-8")
                 if seace and not ok_seace.exists():

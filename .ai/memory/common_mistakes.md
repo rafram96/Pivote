@@ -65,3 +65,8 @@
   «decisión de diseño pendiente» la distinción NO CUMPLE / revisión, que ya estaba
   implementada y bien razonada («⚖ Regla legal» en `etapas_reales.py`). Leer la
   implementación antes de proponer el diseño.
+- **Deduplicar el entregable cuando el problema está en la descarga**: un almacén
+  plano por SHA redujo el ZIP de 971 a 405 MB, pero obligaba al evaluador a buscar
+  documentos con prefijos hash fuera de cada experiencia. En entregables humanos,
+  preservar la navegación; eliminar solicitudes repetidas mediante caché por obra
+  y materializar el árbol con hardlinks/copias.

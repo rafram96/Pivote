@@ -2,21 +2,20 @@
 
 > Última actualización: **2026-08-04** · rama de trabajo: `demo`
 
-## ZIP #80: correctivo — dedup en la DESCARGA, no en la entrega (4-ago)
+## ZIP #80 resuelta: caché por obra y árbol completo por experiencia (4-ago)
 
-⛔ El almacén central `DOCUMENTOS_COMPARTIDOS/` se implementó y luego se
-**revirtió por decisión de Rafael** (ver comentarios de la issue #80): el
-evaluador es no técnico y necesita cada carpeta P/E navegable con sus PDF
-reales. Lo que se deduplica es la **descarga** (caché por `obra_id`, spec D1–D5
-en la issue, aún PENDIENTE de implementar — la #80 sigue abierta para eso).
+La deduplicación quedó en la **descarga**, no en la entrega. Cada job guarda el
+corpus completo una sola vez en `cache_obras/{obra_id}/`, lo publica únicamente
+con marca `.completa` y materializa cada P/E mediante hardlink con fallback a
+copia atómica. Los informes de control se descargan completos y se filtran
+localmente por el año inclusivo del certificado. SEACE conserva su caché global
+separada por `fileCode`; InfoObras no cruza jobs porque su evidencia cambia.
 
-Del trabajo original se conservó lo ortogonal al layout: `MANIFIESTO_
-DOCUMENTOS.txt` por experiencia (ruta → SHA-256, junto a los PDF), estados de
-sección en lenguaje de evaluador, distinción `error de fuente` vs `no
-publicado`, y el índice que explica qué se comparte ("N documento(s) · M
-compartido(s) con otras experiencias de esta obra · K propio(s) del periodo").
-El replay EsSalud midió el problema real: 1,205 referencias → 317 contenidos
-únicos, es decir ~73% de descargas redundantes que la caché por obra eliminará.
+El ZIP mantiene PDF reales navegables en cada experiencia, manifiesto SHA-256,
+estados legibles e índice que compara compartidos solo dentro de la misma obra.
+Replay offline Vitarte: **1,205 PDF, 29 manifiestos, cero almacén central**, ZIP
+íntegro de 971,718,423 bytes. Gate: **748 passed, 25 skipped**; golden no aplica
+al veredicto/resolver y su corpus continúa ausente según la Regla de oro.
 
 ## Auditoría EsSalud y correcciones #32, #72–#79 (4-ago)
 

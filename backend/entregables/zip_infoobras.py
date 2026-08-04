@@ -542,10 +542,12 @@ def descargar_informes_control(
     obra_id: int | str, destino: Path, *, fecha_ini: Optional[date] = None,
     fecha_fin: Optional[date] = None, session: Optional[requests.Session] = None,
     timeout: float = 60.0,
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """Descarga a `destino/Informes de control/` los informes de control de la
     obra RELEVANTES al periodo [fecha_ini, fecha_fin] de la experiencia. Devuelve
-    {encontrados, relevantes, descargados}. NO corre en tests offline."""
+    {encontrados, relevantes, descargados, anios}. ``anios`` conserva el
+    inventario completo para filtrar localmente una caché por obra. NO corre en
+    tests offline."""
     sess = session or requests.Session()
     sess.headers.setdefault(
         "User-Agent",
@@ -568,7 +570,12 @@ def descargar_informes_control(
     if informes:
         logger.info("InfoObras informes obra %s: %d encontrados, %d relevantes, %d descargados",
                     obra_id, len(informes), len(rel), ok)
-    return {"encontrados": len(informes), "relevantes": len(rel), "descargados": ok}
+    return {
+        "encontrados": len(informes),
+        "relevantes": len(rel),
+        "descargados": ok,
+        "anios": [_anio_informe(informe) for informe in informes],
+    }
 
 
 # ── Datos de cierre (Recepción, Liquidación, Resolución de contrato) ──────────
@@ -790,7 +797,7 @@ def construir_zip_infoobras(
         # la deduplicación pertenece a la DESCARGA, no a la entrega). El índice
         # sí explica qué contenidos se comparten entre experiencias de la misma
         # obra, y el MANIFIESTO de cada carpeta deja la huella SHA-256.
-        vistos: dict[str, str] = {}      # digest → primera "P/E" que lo incluyó
+        vistos_por_obra: dict[str, set[str]] = {}
         for prof in espejo.get("profesionales", []):
             n_prof = prof.get("n_prof")
             # Carpeta corta y navegable: "P08 Estructuras" en vez del cargo completo
@@ -829,13 +836,16 @@ def construir_zip_infoobras(
                         "Un mismo SHA-256 en otra experiencia = el mismo documento.",
                         "",
                     ]
-                    nuevos = 0
-                    etiqueta_pe = f"P{n_prof:02d}/E{n_exp}"
+                    obra = info.get("obra") if isinstance(info.get("obra"), dict) else {}
+                    obra_id = obra.get("obra_id")
+                    # Sin obra resuelta no se atribuye una coincidencia casual de
+                    # hash a otra experiencia: cada P/E forma su propio grupo.
+                    grupo_obra = str(obra_id) if obra_id else f"P{n_prof}:E{n_exp}"
+                    vistos_antes = vistos_por_obra.setdefault(grupo_obra, set())
+                    digests: list[str] = []
                     for p in reales:
                         digest = _sha256_archivo(p)
-                        if digest not in vistos:
-                            vistos[digest] = etiqueta_pe
-                            nuevos += 1
+                        digests.append(digest)
                         rel = "/".join(str(x) for x in p.relative_to(origen).parts)
                         manifiesto_docs.append(f"{rel} -> {digest}")
                     if reales:
@@ -856,17 +866,19 @@ def construir_zip_infoobras(
                             f"{proyecto[:70]}: SIN DOCUMENTOS — {motivo}")
                     else:
                         nota_txt = (f" + {len(notas)} nota(s)" if notas else "")
-                        compartidos_n = len(reales) - nuevos
+                        compartidos_n = sum(digest in vistos_antes for digest in digests)
+                        propios_n = len(reales) - compartidos_n
                         if compartidos_n:
                             detalle = (f"{len(reales)} documento(s) · "
                                        f"{compartidos_n} compartido(s) con otras "
                                        f"experiencias de esta obra · "
-                                       f"{nuevos} propio(s) del periodo")
+                                       f"{propios_n} propio(s) del periodo")
                         else:
                             detalle = f"{len(reales)} documento(s)"
                         indice.append(
                             f"[P{n_prof:02d} / E{n_exp}]  {prof.get('cargo', '')} · "
                             f"{proyecto[:70]}: {detalle}{nota_txt}")
+                    vistos_antes.update(digests)
 
                     for nombre, estado in (manifiesto.get("secciones") or {}).items():
                         if (estado or {}).get("estado") != "completa":
@@ -886,7 +898,7 @@ def construir_zip_infoobras(
                         f"[P{n_prof:02d} / E{n_exp}]  {prof.get('cargo', '')} · "
                         f"{proyecto[:70]}: SIN DOCUMENTOS — {motivo}")
 
-        if vistos:
+        if any(vistos_por_obra.values()):
             indice[3:3] = [
                 "Cada experiencia contiene su árbol completo de documentos; los que",
                 "se comparten entre experiencias de una misma obra se repiten para",
