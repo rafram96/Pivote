@@ -735,6 +735,31 @@ def _corto(txt: str, maxlen: int) -> str:
     return t[:maxlen].strip() or "(sin nombre)"
 
 
+def _sha256_archivo(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for bloque in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(bloque)
+    return h.hexdigest()
+
+
+def _estado_seccion_legible(estado: dict) -> str:
+    """Estado del manifiesto en lenguaje de evaluador, sin nombres internos."""
+    estado = estado or {}
+    e = estado.get("estado")
+    bajados = int(estado.get("descargados") or 0)
+    esperados = int(estado.get("esperados") or 0)
+    if e == "sin_documentos":
+        return "sin documentos publicados (0 disponibles)"
+    if e == "completa":
+        return f"completa ({bajados}/{esperados})"
+    if e == "parcial":
+        return f"incompleta ({bajados}/{esperados} descargados)"
+    if e == "error":
+        return f"consulta fallida ({bajados}/{esperados} descargados)"
+    return f"por verificar ({bajados}/{esperados} descargados)"
+
+
 def construir_zip_infoobras(
     espejo: dict,
     descargas: dict[tuple[int, int], Path],
@@ -760,6 +785,12 @@ def construir_zip_infoobras(
     # el ZIP a medio escribir y h11 aborta ("Too much data for declared Content-Length").
     tmp = salida.with_name(f"{salida.name}.{os.urandom(4).hex()}.tmp")
     with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        # Cada experiencia lleva su árbol COMPLETO de documentos: el evaluador
+        # navega P/E con doble clic, sin indirecciones (correctivo issue #80 —
+        # la deduplicación pertenece a la DESCARGA, no a la entrega). El índice
+        # sí explica qué contenidos se comparten entre experiencias de la misma
+        # obra, y el MANIFIESTO de cada carpeta deja la huella SHA-256.
+        vistos: dict[str, str] = {}      # digest → primera "P/E" que lo incluyó
         for prof in espejo.get("profesionales", []):
             n_prof = prof.get("n_prof")
             # Carpeta corta y navegable: "P08 Estructuras" en vez del cargo completo
@@ -785,10 +816,31 @@ def construir_zip_infoobras(
                     reales = [p for p in archivos
                               if not p.name.upper().endswith(
                                   ("_ERROR.TXT", "_NO_DISPONIBLE.TXT", "SIN_DOCUMENTOS.TXT"))]
+                    notas = [p for p in archivos if p not in reales]
+                    # Notas y documentos van AMBOS al árbol de la experiencia,
+                    # conservando sus subcarpetas de sección.
                     for p in archivos:
                         rel = p.relative_to(origen)
                         partes = "/".join(_ruta_segura(x, 38) for x in rel.parts)
                         zf.write(p, f"{base}/{partes}")
+                    manifiesto_docs: list[str] = [
+                        "DOCUMENTOS DE ESTA EXPERIENCIA",
+                        "Cada línea conserva: ruta -> SHA-256 (huella del contenido).",
+                        "Un mismo SHA-256 en otra experiencia = el mismo documento.",
+                        "",
+                    ]
+                    nuevos = 0
+                    etiqueta_pe = f"P{n_prof:02d}/E{n_exp}"
+                    for p in reales:
+                        digest = _sha256_archivo(p)
+                        if digest not in vistos:
+                            vistos[digest] = etiqueta_pe
+                            nuevos += 1
+                        rel = "/".join(str(x) for x in p.relative_to(origen).parts)
+                        manifiesto_docs.append(f"{rel} -> {digest}")
+                    if reales:
+                        zf.writestr(f"{base}/MANIFIESTO_DOCUMENTOS.txt",
+                                    "\n".join(manifiesto_docs) + "\n")
                     if not reales:
                         cui = info.get("cui") or e.get("cui")
                         motivo = ("la carpeta existe, pero ninguna descarga produjo "
@@ -803,17 +855,23 @@ def construir_zip_infoobras(
                             f"[P{n_prof:02d} / E{n_exp}]  {prof.get('cargo', '')} · "
                             f"{proyecto[:70]}: SIN DOCUMENTOS — {motivo}")
                     else:
+                        nota_txt = (f" + {len(notas)} nota(s)" if notas else "")
+                        compartidos_n = len(reales) - nuevos
+                        if compartidos_n:
+                            detalle = (f"{len(reales)} documento(s) · "
+                                       f"{compartidos_n} compartido(s) con otras "
+                                       f"experiencias de esta obra · "
+                                       f"{nuevos} propio(s) del periodo")
+                        else:
+                            detalle = f"{len(reales)} documento(s)"
                         indice.append(
                             f"[P{n_prof:02d} / E{n_exp}]  {prof.get('cargo', '')} · "
-                            f"{proyecto[:70]}: {len(reales)} documento(s) descargado(s)"
-                            f" + {len(archivos) - len(reales)} nota(s)")
+                            f"{proyecto[:70]}: {detalle}{nota_txt}")
 
                     for nombre, estado in (manifiesto.get("secciones") or {}).items():
                         if (estado or {}).get("estado") != "completa":
                             indice.append(
-                                f"  SECCIÓN {nombre}: {(estado or {}).get('estado') or 'sin estado'}"
-                                f" · {(estado or {}).get('descargados', 0)}/"
-                                f"{(estado or {}).get('esperados', 0)} documentos")
+                                f"  SECCIÓN {nombre}: {_estado_seccion_legible(estado)}")
                     for aviso in manifiesto.get("avisos") or []:
                         indice.append(f"  ADVERTENCIA: {aviso}")
                 else:
@@ -828,6 +886,14 @@ def construir_zip_infoobras(
                         f"[P{n_prof:02d} / E{n_exp}]  {prof.get('cargo', '')} · "
                         f"{proyecto[:70]}: SIN DOCUMENTOS — {motivo}")
 
+        if vistos:
+            indice[3:3] = [
+                "Cada experiencia contiene su árbol completo de documentos; los que",
+                "se comparten entre experiencias de una misma obra se repiten para",
+                "navegación directa y el índice lo indica. El MANIFIESTO_DOCUMENTOS.txt",
+                "de cada carpeta lista su contenido con la huella SHA-256.",
+                "",
+            ]
         zf.writestr("indice.txt", "\n".join(indice) + "\n")
     os.replace(tmp, salida)   # atómico: recién aquí `salida` existe y está completo
     return salida

@@ -244,8 +244,41 @@ def test_zip_carpeta_vacia_deja_nota_y_fallos_en_indice(tmp_path):
         assert any(n.startswith("P01 SUPERVISIÓN/E1/")
                    and n.endswith("SIN_DOCUMENTOS.txt") for n in nombres)
         indice = zf.read("indice.txt").decode("utf-8")
-        assert "SECCIÓN InfoObras: error · 0/3 documentos" in indice
+        assert "SECCIÓN InfoObras: consulta fallida (0/3 descargados)" in indice
+        assert "SECCIÓN Datos de cierre: sin documentos publicados (0 disponibles)" in indice
         assert "ADVERTENCIA: InfoObras" in indice
+
+
+def test_zip_arbol_completo_por_experiencia_con_manifiestos(tmp_path):
+    # Correctivo issue #80: la deduplicación va en la DESCARGA, no en la
+    # entrega. Cada P/E conserva sus PDF reales navegables; el manifiesto
+    # deja la huella SHA-256 y el índice explica qué se comparte.
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir(); b.mkdir()
+    (a / "original-a.pdf").write_bytes(b"%PDF-1.4 misma evidencia")
+    (b / "otro-nombre.pdf").write_bytes(b"%PDF-1.4 misma evidencia")
+
+    salida = construir_zip_infoobras(
+        ESPEJO, {(1, 1): a, (1, 2): b}, tmp_path / "arbol.zip")
+    with zipfile.ZipFile(salida) as zf:
+        nombres = zf.namelist()
+        # cero almacén central: los PDF viven dentro de cada experiencia
+        assert not any(n.startswith("DOCUMENTOS_COMPARTIDOS/") for n in nombres)
+        assert "P01 SUPERVISIÓN/E1/original-a.pdf" in nombres
+        assert "P01 SUPERVISIÓN/E2/otro-nombre.pdf" in nombres
+        manifests = [n for n in nombres if n.endswith("MANIFIESTO_DOCUMENTOS.txt")]
+        assert len(manifests) == 2
+        huellas = [zf.read(m).decode("utf-8") for m in manifests]
+        # mismo contenido → misma huella SHA-256 en ambos manifiestos
+        sha_a = [l for l in huellas[0].splitlines() if "original-a.pdf ->" in l]
+        sha_b = [l for l in huellas[1].splitlines() if "otro-nombre.pdf ->" in l]
+        assert sha_a and sha_b
+        assert sha_a[0].split("-> ")[1] == sha_b[0].split("-> ")[1]
+        indice = zf.read("indice.txt").decode("utf-8")
+        # la primera aparición no anuncia compartidos; la segunda sí lo explica
+        assert "1 compartido(s) con otras experiencias de esta obra" in indice
+        assert "0 propio(s) del periodo" in indice
+        assert "+ 0 nota" not in indice
 
 
 # ── Inventario (parseo offline del HTML de InfoObras) ───────────────────────
@@ -470,7 +503,8 @@ def test_hoja_profesional_representantes_e_historico_del_emisor():
     # la pregunta va en el TÍTULO del campo, no solo en el valor
     assert any(v.startswith("¿Estaba habido al emitir el certificado?")
                for v in celdas.values())
-    assert any(v.startswith("¿Estuvo habido durante la obra?") for v in celdas.values())
+    assert any(v.startswith("¿Estuvo habido durante el periodo certificado?")
+               for v in celdas.values())
     assert "NO — NO HABIDO 01/07/22–30/09/22" in texto
 
     # cuadro histórico contiguo: arranca en R (col 18), en la misma fila que el emisor
@@ -723,10 +757,9 @@ def test_una_obra_repetida_se_detalla_completa_en_cada_experiencia(tmp_path):
     assert "YA DETALLADA" not in texto
 
 
-def test_la_misma_obra_en_dos_experiencias_no_colapsa_nunca(tmp_path):
-    """Ni siquiera con ficha IDÉNTICA: dos experiencias distintas (dos
-    certificados) se pintan completas cada una. Colapsar la franja F:K de una
-    experiencia dejaría su cuadro de hitos sin la evidencia al lado."""
+def test_la_misma_obra_en_dos_experiencias_se_detalla_una_vez(tmp_path):
+    """Los hitos de ambos certificados se conservan; la ficha idéntica se
+    sustituye por un puntero local para no repetir cientos de filas."""
     espejo = {
         "_meta": {}, "postor": {},
         "profesionales": [{
@@ -742,8 +775,8 @@ def test_la_misma_obra_en_dos_experiencias_no_colapsa_nunca(tmp_path):
     salida = generar_excel_final(espejo, tmp_path / "dup2.xlsx",
                                  fichas={(1, 1): dict(ficha), (1, 2): dict(ficha)})
     celdas = _celdas(_hoja_de(salida, 1, "JEFE"))
-    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 2
-    assert not any(v.startswith("OBRA YA DETALLADA") for v in celdas)
+    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 1
+    assert any(v.startswith("OBRA YA DETALLADA") for v in celdas)
 
 
 # ── Colapso de sub-obras repetidas (issue #46 punto 6, rediseñado) ────────────
@@ -831,10 +864,9 @@ def test_dos_subobras_del_mismo_cert_al_mismo_cui_colapsan_una_vez(tmp_path):
     assert "su única valorización" in texto
 
 
-def test_no_colapsa_si_el_periodo_resaltado_cambia(tmp_path):
-    """Dos apariciones de la MISMA obra con valorizaciones pero periodos de
-    certificado distintos pintan resaltados distintos: son información distinta →
-    ambas completas. Es la condición de igualdad de periodo."""
+def test_colapsa_ficha_aunque_el_periodo_del_certificado_cambie(tmp_path):
+    """El periodo propio sigue visible en los hitos; no justifica duplicar toda
+    la ficha y las valorizaciones de la misma obra."""
     espejo = _espejo_multi(2, [("2019-03-01", "2019-03-31"),
                                ("2019-05-01", "2019-05-31")])
     vals = [{"anio": 2019, "mes": 3, "estado": "En ejecución"},
@@ -843,15 +875,13 @@ def test_no_colapsa_si_el_periodo_resaltado_cambia(tmp_path):
               for i in (1, 2)}
     salida = generar_excel_final(espejo, tmp_path / "per.xlsx", fichas=fichas)
     celdas = _celdas(_hoja_de(salida, 1, "JEFE"))
-    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 2
-    assert not any(v.startswith("OBRA YA DETALLADA") for v in celdas)
+    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 1
+    assert any(v.startswith("OBRA YA DETALLADA") for v in celdas)
 
 
-def test_no_colapsa_por_periodo_distinto_aunque_no_cambie_el_resaltado(tmp_path):
-    """La igualdad de periodo se exige en crudo, no solo por sus efectos: aquí
-    ninguna valorización cae dentro de ninguna de las dos ventanas, así que el
-    resaltado sería el mismo — y aun así los periodos distintos bloquean el
-    colapso."""
+def test_colapsa_por_obra_aunque_los_periodos_sean_distintos(tmp_path):
+    """Las fechas del certificado viven en su propio bloque; la evidencia de
+    InfoObras idéntica se detalla una sola vez."""
     espejo = _espejo_multi(2, [("2021-01-01", "2021-01-31"),
                                ("2022-06-01", "2022-06-30")])
     vals = [{"anio": 2019, "mes": 3, "estado": "En ejecución"}]
@@ -859,8 +889,8 @@ def test_no_colapsa_por_periodo_distinto_aunque_no_cambie_el_resaltado(tmp_path)
               for i in (1, 2)}
     salida = generar_excel_final(espejo, tmp_path / "perb.xlsx", fichas=fichas)
     celdas = _celdas(_hoja_de(salida, 1, "JEFE"))
-    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 2
-    assert not any(v.startswith("OBRA YA DETALLADA") for v in celdas)
+    assert sum(1 for v in celdas if v.startswith("OBRA EN INFOOBRAS")) == 1
+    assert any(v.startswith("OBRA YA DETALLADA") for v in celdas)
 
 
 def test_no_colapsa_si_cambian_los_montos_de_las_valorizaciones(tmp_path):
@@ -1314,7 +1344,8 @@ def _fila_de(ws, texto: str) -> int:
 def test_excel_final_embebe_factor_al_final(tmp_path):
     """El recorte del Cuadro de Factores cierra la hoja del profesional, DESPUÉS de
     la PARTE 5 — y sin pisarla."""
-    factor = _pdf_una_pagina(tmp_path / "factor.pdf", "4.2 FACTORES DE EVALUACION")
+    factor = _pdf_una_pagina(tmp_path / "factor.pdf",
+                             "4.2 FACTORES DE EVALUACION - FACTOR A EXPERIENCIA ADICIONAL")
     salida = generar_excel_final(_ESPEJO_FACTOR, tmp_path / "factor.xlsx",
                                  certificados={(1, "FACTOR"): factor})
     ws = next(s for s in openpyxl.load_workbook(salida).worksheets if s.title.startswith("P1"))
@@ -1324,12 +1355,33 @@ def test_excel_final_embebe_factor_al_final(tmp_path):
     # (1) el recorte está, y (2) va DESPUÉS de la PARTE 5 (al final, no al inicio)
     assert fila_banda > 0 and fila_anios > 0
     assert fila_banda > fila_anios
-    # (3) REGRESIÓN del `r += 2`: la PARTE 5 deja `r` EN su última fila, así que sin
-    # el salto la banda se mergea encima y openpyxl la absorbe SIN error — el Excel
-    # sale válido pero con "AÑOS EFECTIVOS" pisado y el número huérfano en la col. S.
-    # Por eso NO basta con contar imágenes: hay que exigir que la fila sobreviva.
+    # La banda no puede pisar el cierre numérico de la Parte 5.
     assert isinstance(ws.cell(fila_anios, 19).value, (int, float))
     assert len(ws._images) == 1
+
+
+def test_excel_final_rechaza_recorte_que_no_es_factor_a(tmp_path):
+    factor = _pdf_una_pagina(tmp_path / "factor-jk.pdf", "FACTORES J Y K - PUNTAJE")
+    salida = generar_excel_final(_ESPEJO_FACTOR, tmp_path / "factor-mal.xlsx",
+                                 certificados={(1, "FACTOR"): factor})
+    ws = next(s for s in openpyxl.load_workbook(salida).worksheets if s.title.startswith("P1"))
+    texto = "\n".join(_celdas(ws))
+    assert "FACTOR A NO EMBEBIDO" in texto
+    assert not ws._images
+
+
+def test_base_de_datos_usa_cui_resuelto_y_rotula_colegiatura_pendiente(tmp_path):
+    espejo = {
+        "_meta": {}, "postor": {},
+        "profesionales": [{"n_prof": 1, "cargo": "ESP", "nombre": "N",
+                            "experiencias": [{"n": 1, "proyecto": "OBRA",
+                                               "anterior_colegiatura": None}]}],
+        "resumen_evaluacion": {"factores": []},
+    }
+    salida = generar_excel_final(espejo, tmp_path / "bd.xlsx", cuis={(1, 1): "2227389"})
+    ws = openpyxl.load_workbook(salida)["Base de Datos"]
+    assert ws["H2"].value == "2227389"
+    assert ws["U2"].value == "POR VERIFICAR"
 
 
 def test_excel_final_sin_factor_no_cambia_la_hoja(tmp_path):
@@ -1350,7 +1402,7 @@ def test_regenerar_excel_final_conserva_los_embeds(tmp_path):
 
     job = tmp_path / "job-1"
     (job / "certs").mkdir(parents=True)
-    _pdf_una_pagina(job / "certs" / "P1_FACTOR.pdf", "4.2 FACTORES")
+    _pdf_una_pagina(job / "certs" / "P1_FACTOR.pdf", "FACTOR A - EXPERIENCIA ADICIONAL")
     _pdf_una_pagina(job / "certs" / "P1_E1.pdf", "CONSTANCIA")
 
     salida = regenerar_excel_final(_ESPEJO_FACTOR, {}, job / "final.xlsx")
