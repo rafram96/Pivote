@@ -364,18 +364,18 @@ def construir_hoja_evaluacion(ws, espejo: dict,
     # ── Encabezado ──
     b.kv("Postor:", p.get("detalle") or espejo["_meta"].get("postor", ""))
     b.kv("Concurso:", espejo["_meta"].get("concurso", ""))
-    if confiabilidad is not None:
-        veredicto = str(confiabilidad.get("veredicto") or "no_revisable").lower()
-        rotulos = {
-            "confiable": "CONFIABILIDAD: CONFIABLE — sin hallazgos críticos de integridad",
-            "revisar": "CONFIABILIDAD: REVISAR — hay observaciones que requieren atención",
-            "no_confiable": "CONFIABILIDAD: NO CONFIABLE — no usar sin revisar los hallazgos",
-            "no_revisable": "CONFIABILIDAD: NO REVISABLE — no se pudo comprobar la integridad",
-        }
+    veredicto = str((confiabilidad or {}).get("veredicto") or "").lower()
+    rotulos = {
+        "confiable": "CONFIABILIDAD: CONFIABLE — sin hallazgos críticos de integridad",
+        "revisar": "CONFIABILIDAD: REVISAR — hay observaciones que requieren atención",
+        "no_confiable": "CONFIABILIDAD: NO CONFIABLE — no usar sin revisar los hallazgos",
+        "no_revisable": "CONFIABILIDAD: NO REVISABLE — no se pudo comprobar la integridad",
+    }
+    if veredicto in rotulos:
         fill = (FILL_CUMPLE if veredicto == "confiable" else
                 FILL_PEND if veredicto == "revisar" else FILL_NO_CUMPLE)
-        b._band(rotulos.get(veredicto, rotulos["no_revisable"]), F_BOLD, fill, 30)
-        for h in confiabilidad.get("hallazgos_criticos") or []:
+        b._band(rotulos[veredicto], F_BOLD, fill, 30)
+        for h in (confiabilidad or {}).get("hallazgos_criticos") or []:
             codigo = h.get("codigo") or "INTEGRIDAD"
             referencia = f" ({h['referencia']})" if h.get("referencia") else ""
             b.kv(f"Hallazgo crítico · {codigo}",

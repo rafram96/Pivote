@@ -418,9 +418,9 @@ def borrar_job(job_id: str):
 
 
 def _avance_descargas_dict(job: pipeline.Job) -> dict:
-    """Avance de descargas (compartido por /descargas y /progreso): cuántas obras
-    ya están en disco vs las que deben bajar (las en revisión no bajan) + la obra
-    en curso (del RegistroProgreso, si hay una descarga corriendo)."""
+    """Avance compartido por /descargas y /progreso: experiencias ya procesadas
+    frente a las descargables (las que están en revisión no bajan), más la obra en
+    curso. Procesada no implica que la fuente tuviera documentos publicados."""
     espejo = repo.cargar_espejo(job.job_id) or {}
     enr = repo.cargar_enriquecimiento(job.job_id) or {}
 
@@ -436,14 +436,25 @@ def _avance_descargas_dict(job: pipeline.Job) -> dict:
     rev = {(it.n_prof, it.n_exp) for it in job.items_revision if not it.resuelto}
     bajan = [x for x in todas if x not in rev]
 
-    def _descarga_real(clave: tuple[int, int]) -> bool:
-        manifiesto = ((enr.get(f"{clave[0]}:{clave[1]}") or {})
-                      .get("descargas_reales") or {})
-        return bool(manifiesto.get("completada")
-                    and int(manifiesto.get("archivos") or 0) > 0)
+    def _procesada(clave: tuple[int, int]) -> bool:
+        datos = enr.get(f"{clave[0]}:{clave[1]}") or {}
+        manifiesto = datos.get("descargas_reales")
+        if isinstance(manifiesto, dict):
+            return bool(manifiesto.get("completada"))
+
+        # Compatibilidad con jobs anteriores al manifiesto: las marcas solo se
+        # publican al terminar cada fuente. Una experiencia sin documentos puede
+        # estar correctamente procesada y no debe quedar como pendiente perpetua.
+        base = _dir_job(job.job_id) / "descargas"
+        obra = datos.get("obra") if isinstance(datos.get("obra"), dict) else {}
+        infoobras_ok = (not obra.get("obra_id")
+                        or (base / f"P{clave[0]}_E{clave[1]}.ok").exists())
+        seace_ok = (not datos.get("seace")
+                    or (base / f"P{clave[0]}_E{clave[1]}.seace.ok").exists())
+        return bool(infoobras_ok and seace_ok)
 
     descargadas = sum(
-        1 for x in bajan if _descarga_real(x)
+        1 for x in bajan if _procesada(x)
     )
     total = len(bajan)
     viva = REGISTRO.etapas(job.job_id).get("descargas")

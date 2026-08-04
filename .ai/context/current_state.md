@@ -2,6 +2,23 @@
 
 > Última actualización: **2026-08-03** · rama de trabajo: `demo`
 
+## Compatibilidad pre-push cerrada (3-ago)
+
+Los cuatro defectos adversariales de la ronda de auditoría quedaron corregidos:
+
+- un job anterior al campo `confiabilidad` ya no recibe una banda roja falsa al
+  regenerar su Excel; solo un veredicto explícito produce la banda;
+- el avance de descargas cuenta experiencias procesadas aunque legítimamente no
+  tengan documentos y recupera jobs antiguos desde sus marcas `.ok` por fuente;
+- SUNAT ambiguo muestra en el panel el número de coincidencias y sus candidatos,
+  en vez de degradarse a «sin datos»;
+- el ZIP individual por CUI omite archivos temporales `.part`, igual que el ZIP
+  principal.
+
+No cambió el resolver CUI; no aplica golden. Gate: **738 passed, 25 skipped**,
+`compileall` y diff limpios; Panel con TypeScript y build productivo aprobados.
+No hubo push ni despliegue.
+
 ## Cierre de auditoría de entregables y panel (3-ago)
 
 La `demo` deja de presentar como completos resultados que solo estaban

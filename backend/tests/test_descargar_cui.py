@@ -26,12 +26,14 @@ def test_zip_carpeta_empaqueta_el_arbol(tmp_path):
     (base / "Valorizaciones" / "2020-09" / "a.pdf").write_bytes(b"%PDF a")
     (base / "Datos de cierre").mkdir(parents=True)
     (base / "Datos de cierre" / "b.pdf").write_bytes(b"%PDF b")
+    (base / "Datos de cierre" / "incompleto.pdf.part").write_bytes(b"parcial")
     salida = tmp_path / "out.zip"
     _zip_carpeta(base, salida, "titulo demo")
     nombres = zipfile.ZipFile(salida).namelist()
     assert "indice.txt" in nombres
     assert any(n.endswith("a.pdf") for n in nombres)
     assert any(n.endswith("b.pdf") for n in nombres)
+    assert not any(n.endswith(".part") for n in nombres)
     # conserva el árbol relativo (no aplana todo a la raíz)
     assert any("Valorizaciones/" in n for n in nombres)
 

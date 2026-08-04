@@ -390,7 +390,7 @@ def test_progreso_404_si_no_existe(cliente):
     assert cliente.get("/api/pivote/jobs/nope/progreso").status_code == 404
 
 
-def test_avance_descargas_excluye_privadas_y_exige_archivo_real(cliente):
+def test_avance_descargas_excluye_privadas_y_cuenta_procesadas_sin_documentos(cliente):
     import api.app as modulo
     from schemas import pipeline
 
@@ -416,9 +416,32 @@ def test_avance_descargas_excluye_privadas_y_exige_archivo_real(cliente):
     avance = modulo._avance_descargas_dict(job)
     assert avance == {
         "estado": "pendiente", "listo": False,
-        "total": 2, "descargadas": 1, "faltan": 1,
+        "total": 2, "descargadas": 2, "faltan": 0,
         "en_revision": 1, "obra_actual": None,
     }
+
+
+def test_avance_descargas_job_antiguo_usa_marcas_de_fuente(cliente):
+    import api.app as modulo
+    from schemas import pipeline
+
+    job = pipeline.Job(job_id="j-desc-legado", analisis_id="a")
+    modulo.repo.guardar(job)
+    modulo.repo.guardar_espejo(job.job_id, {
+        "profesionales": [{"n_prof": 1, "experiencias": [{"n": 1}, {"n": 2}]}],
+    })
+    modulo.repo.guardar_enriquecimiento(job.job_id, {
+        "1:1": {"obra": {"obra_id": 11}},
+        "1:2": {"seace": {"estado": "seleccionado"}},
+    })
+    base = modulo._dir_job(job.job_id) / "descargas"
+    base.mkdir(parents=True)
+    (base / "P1_E1.ok").write_text("ok", encoding="utf-8")
+    (base / "P1_E2.seace.ok").write_text("ok", encoding="utf-8")
+
+    avance = modulo._avance_descargas_dict(job)
+    assert avance["descargadas"] == 2
+    assert avance["faltan"] == 0
 
 
 def test_armar_progreso_fusiona_vivo_y_checkpoint(cliente):

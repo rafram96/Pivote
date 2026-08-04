@@ -847,7 +847,7 @@ def _zip_carpeta(carpeta: Path, salida: Path, titulo: str = "") -> Path:
             zf.writestr("indice.txt", titulo + "\n")
         if carpeta.is_dir():
             for p in sorted(carpeta.rglob("*")):
-                if p.is_file():
+                if p.is_file() and p.suffix.lower() != ".part":
                     partes = "/".join(_ruta_segura(x, 38) for x in p.relative_to(carpeta).parts)
                     zf.write(p, partes)
     os.replace(tmp, salida)

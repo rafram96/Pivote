@@ -1195,6 +1195,15 @@ def test_confiabilidad_y_puntaje_ausente_son_visibles(tmp_path):
     assert "no se recibió un puntaje total calculable" in texto
 
 
+def test_job_antiguo_sin_confiabilidad_no_muestra_alerta_roja(tmp_path):
+    salida = generar_excel_final(
+        ESPEJO, tmp_path / "legado.xlsx",
+        confiabilidad={"veredicto": None, "hallazgos_criticos": []},
+    )
+    texto = _texto(openpyxl.load_workbook(salida)["CLAUDE"])
+    assert "CONFIABILIDAD:" not in texto
+
+
 def test_recuento_real_reemplaza_inventario_anunciado(tmp_path):
     espejo = {
         "_meta": {"analisis_id": "d", "concurso": "C", "postor": "P"},

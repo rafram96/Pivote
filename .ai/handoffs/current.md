@@ -4,6 +4,16 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
+## Nota (2026-08-03, Codex) — compatibilidad de auditoría cerrada
+
+Antes del push se corrigieron cuatro regresiones puntuales: jobs heredados sin
+confiabilidad ya no aparecen en rojo; una experiencia procesada sin documentos
+cuenta como terminada y los jobs viejos usan las marcas `.ok`; SUNAT ambiguo
+muestra candidatos en el Panel; y el ZIP por CUI excluye `.part`. No cambió el
+resolver CUI, por lo que no aplica golden. Gate: **738 passed, 25 skipped**,
+`compileall` y diff limpios; Panel con TypeScript y build productivo aprobados.
+No hubo push ni despliegue.
+
 ## Nota (2026-08-03, Codex) — confiabilidad y descargas ya son auditables
 
 La auditoría Excel/ZIP/panel quedó implementada en `demo`: confiabilidad global
