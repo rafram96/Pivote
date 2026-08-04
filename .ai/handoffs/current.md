@@ -1,8 +1,43 @@
 # Handoff — punto de continuación
 
-> Actualizado: **2026-08-03**. Si eres un agente nuevo: lee esto completo,
+> Actualizado: **2026-08-04**. Si eres un agente nuevo: lee esto completo,
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
+
+## Nota (2026-08-04, Claude) — correctivo #80: el ZIP conserva su árbol por experiencia
+
+La auditoría del ZIP EsSalud reveló 1,205 referencias documentales pero solo 317
+contenidos únicos (~73% redundante, 971 MB). La primera corrección (almacén
+central `DOCUMENTOS_COMPARTIDOS/` por SHA-256, 405 MB) quedó **revertida por
+decisión de Rafael**: rompía la navegación del evaluador no técnico — cada P/E
+quedaba solo con manifiestos. Correctivo registrado en la issue #80: **la
+deduplicación pertenece a la DESCARGA (caché por `obra_id`, spec D1–D5 en la
+issue, pendiente de implementar — #80 sigue abierta), no a la entrega.**
+`construir_zip_infoobras` materializa el árbol completo por experiencia y
+conserva del trabajo original: `MANIFIESTO_DOCUMENTOS.txt` (ruta → SHA-256,
+junto a los PDF), estados de sección legibles, y el índice que explica los
+compartidos ("N documento(s) · M compartido(s) con otras experiencias de esta
+obra · K propio(s) del periodo"). El ZIP de 405 MB en Downloads queda como
+artefacto de referencia, no como formato de entrega.
+
+## Nota (2026-08-04, Codex) — auditoría EsSalud corregida (#32, #72–#79)
+
+Se documentaron y corrigieron las observaciones del análisis de 31 experiencias:
+ALT04 reconcilia reinscripciones con histórico HABIDO; toda obra sin cruce deja
+el veredicto provisional; las 14 hojas P muestran conclusión; Factor A usa el
+exceso efectivo y retira el puntaje si el baremo no está estructurado; Base de
+Datos recibe CUI resuelto/procedencia y rotula colegiatura pendiente; se sanean
+textos, duplicados, regresiones, montos/fechas discordantes y descargas; la ficha
+de obra se deduplica entre certificados; los días se imponen inclusivos en todo
+el libro; y un recorte J/K ya no se embebe como Factor A.
+
+Entregable replay offline, sin sobrescribir el original:
+`Downloads/Analisis_essalud-vitarte_cons-hospitalario_CORREGIDO.xlsx`. Auditoría:
+31 filas, 29 CUI, 14/14 conclusiones, 6 reinscripciones reconciliadas, 10 punteros
+de obra repetida y 14 recortes Factor A incorrectos rechazados. Gate: **742
+passed, 25 skipped** y **54/54** scripts Node. El único cambio del resolver es
+abstención pura (`revision` persiste `sin_verificar`); golden v4 sigue ausente y
+no se promovió ninguna coincidencia.
 
 ## Nota (2026-08-03, Codex) — compatibilidad de auditoría cerrada
 

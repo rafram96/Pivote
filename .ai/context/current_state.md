@@ -1,6 +1,43 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-08-03** · rama de trabajo: `demo`
+> Última actualización: **2026-08-04** · rama de trabajo: `demo`
+
+## ZIP #80: correctivo — dedup en la DESCARGA, no en la entrega (4-ago)
+
+⛔ El almacén central `DOCUMENTOS_COMPARTIDOS/` se implementó y luego se
+**revirtió por decisión de Rafael** (ver comentarios de la issue #80): el
+evaluador es no técnico y necesita cada carpeta P/E navegable con sus PDF
+reales. Lo que se deduplica es la **descarga** (caché por `obra_id`, spec D1–D5
+en la issue, aún PENDIENTE de implementar — la #80 sigue abierta para eso).
+
+Del trabajo original se conservó lo ortogonal al layout: `MANIFIESTO_
+DOCUMENTOS.txt` por experiencia (ruta → SHA-256, junto a los PDF), estados de
+sección en lenguaje de evaluador, distinción `error de fuente` vs `no
+publicado`, y el índice que explica qué se comparte ("N documento(s) · M
+compartido(s) con otras experiencias de esta obra · K propio(s) del periodo").
+El replay EsSalud midió el problema real: 1,205 referencias → 317 contenidos
+únicos, es decir ~73% de descargas redundantes que la caché por obra eliminará.
+
+## Auditoría EsSalud y correcciones #32, #72–#79 (4-ago)
+
+El pipeline ya no presenta como verificado el tiempo de una experiencia sin
+cruce: persiste la abstención del resolver, propaga `POR VERIFICAR`, usa amarillo
+en lugar de cyan y muestra una conclusión en cada hoja profesional. ALT04 usa el
+histórico HABIDO para distinguir reinscripción de anomalía. La aritmética
+inclusiva sobrescribe las cifras del evaluador después de auditar la diferencia.
+
+Factor A cuenta únicamente `dias_efectivos - minimo_dias`, excluye provisionales
+y retira el puntaje heredado cuando falta la rúbrica estructurada. La skill
+transporta `factor_a_aplica`; su prompt exige la página del desarrollo del Factor
+A, y Excel rechaza recortes con texto de otros factores. Base de Datos vuelca el
+CUI resuelto con comentario de procedencia y explicita colegiatura pendiente.
+También quedaron saneo visible de portal/SUNAT, controles de duplicados,
+retrocesos, monto y fin de obra, detalle de descargas, deduplicación de fichas y
+paleta sin colisiones semánticas.
+
+Replay corregido en Descargas; no se tocaron los datos gitignored del job. Gate:
+**742 passed, 25 skipped** + **54/54** Node. Sin golden por pérdida del corpus;
+el resolver solo cambió en dirección resuelto/implícito → revisión explícita.
 
 ## Compatibilidad pre-push cerrada (3-ago)
 

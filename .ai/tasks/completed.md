@@ -1,5 +1,21 @@
 # Completado (más reciente primero)
 
+## 2026-08-04
+- **Issue #80 (parcial) — rescatables del ZIP + correctivo de rumbo**: el
+  almacén central SHA-256 se implementó y luego se REVIRTIÓ por decisión de
+  Rafael (la dedup va en la descarga, no en la entrega — spec D1–D5 en la
+  issue). Quedaron: árbol completo por experiencia, manifiestos SHA-256 junto
+  a los PDF, estados humanizados e índice que explica compartidos. La caché
+  de descarga por `obra_id` sigue PENDIENTE (#80 abierta). Medición del
+  problema: 1,205 referencias → 317 contenidos únicos (~73% redundante).
+- **Auditoría EsSalud — issues #32 y #72–#79**: consistencia inclusiva en todas
+  las hojas; abstenciones InfoObras provisionales; veredictos visibles en P;
+  Factor A sobre exceso efectivo; ALT04 reconciliado con histórico; CUI y
+  procedencia en Base de Datos; saneo, controles y deduplicación del portal;
+  validación semántica del recorte Factor A. Replay corregido generado fuera del
+  repo. Gate: **742 passed, 25 skipped** + **54/54** Node. Resolver: abstención
+  pura, sin promoción y sin golden disponible.
+
 ## 2026-08-02
 - **Issues #54, #57 y #66** (`7593dea`): gate estructural para decisiones sin
   sustento en skill y backend; TOTAL declarado bajo autoridad del backend con
