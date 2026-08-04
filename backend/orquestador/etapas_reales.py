@@ -965,7 +965,8 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
     from scraping.errores_red import corto
     base = carpeta_job(Path(dir_descargas), job_id) / "descargas"
     from orquestador.descargas_infoobras import CacheDescargasInfoObras
-    from orquestador.descargas_seace import CacheDescargasSeace
+    from orquestador.descargas_seace import (
+        DOCUMENTOS_SEACE, CacheDescargasSeace, etiqueta_documento_seace)
     cache_infoobras = CacheDescargasInfoObras(
         carpeta_job(Path(dir_descargas), job_id) / "cache_obras"
     )
@@ -1014,20 +1015,20 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
     def _bajar_seace(datos: dict, destino: Path) -> None:
         docs = datos.get("docs") or {}
         estado_general = datos.get("estado")
-        for clave_doc, nombre in (
-            ("bases", "SEACE_01_BASES_INTEGRADAS"),
-            ("contrato", "SEACE_02_CONTRATO_FIRMADO"),
-        ):
+        for clave_doc, nombre, _etiqueta in DOCUMENTOS_SEACE:
             doc = docs.get(clave_doc) or {}
             from scraping.seace_abierto import extension_documento
             archivo = destino / f"{nombre}{extension_documento(doc)}"
             nota_no = destino / f"{nombre}_NO_DISPONIBLE.txt"
             nota_err = destino / f"{nombre}_ERROR.txt"
             if estado_general != "seleccionado" or not doc.get("url"):
-                nota_err.unlink(missing_ok=True)
                 motivo = datos.get("motivo") or "documento no publicado en datos abiertos"
-                sufijo = "ERROR" if estado_general == "fuente_no_disponible" else "NO_DISPONIBLE"
-                ruta = destino / f"{nombre}_{sufijo}.txt"
+                # Al cambiar de estado se borra la nota CONTRARIA: si quedaran
+                # las dos, el índice avisaría a la vez "no publicado" y "error".
+                ruta, contraria = ((nota_err, nota_no)
+                                   if estado_general == "fuente_no_disponible"
+                                   else (nota_no, nota_err))
+                contraria.unlink(missing_ok=True)
                 _nota_atomica(ruta, f"{motivo}\n")
                 continue
             nota_no.unlink(missing_ok=True)
@@ -1225,13 +1226,18 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                 if aviso not in avisos:
                     avisos.append(aviso)
             if destino.is_dir():
+                # El rótulo del aviso es legible ("Bases Integradas (SEACE)"), no
+                # el nombre del archivo: el índice lo lee un evaluador.
                 for nota in destino.rglob("*_ERROR.txt"):
-                    aviso = f"{nota.stem.removesuffix('_ERROR')}: la fuente devolvió un error."
+                    etiqueta = etiqueta_documento_seace(
+                        nota.stem.removesuffix("_ERROR"))
+                    aviso = f"{etiqueta}: la fuente devolvió un error."
                     if aviso not in avisos:
                         avisos.append(aviso)
                 for nota in destino.rglob("*_NO_DISPONIBLE.txt"):
-                    aviso = (f"{nota.stem.removesuffix('_NO_DISPONIBLE')}: "
-                             "no publicado por la fuente.")
+                    etiqueta = etiqueta_documento_seace(
+                        nota.stem.removesuffix("_NO_DISPONIBLE"))
+                    aviso = f"{etiqueta}: no publicado por la fuente."
                     if aviso not in avisos:
                         avisos.append(aviso)
             enr["descargas_reales"] = {

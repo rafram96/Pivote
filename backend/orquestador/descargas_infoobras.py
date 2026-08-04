@@ -11,7 +11,9 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
-from orquestador.descargas_seace import lock_para_descarga, materializar_archivo
+from orquestador.descargas_seace import (
+    es_archivo_seace, lock_para_descarga, materializar_archivo,
+)
 
 _MARCA = ".completa"
 _ESTADO = ".estado.json"
@@ -112,11 +114,13 @@ class CacheDescargasInfoObras:
         """Copia el árbol completo salvo informes fuera del periodo certificado."""
         origen, destino = resultado.directorio, Path(destino)
         # La carpeta P/E solo mezcla dos fuentes. Al rematerializar InfoObras se
-        # preservan los archivos SEACE y se elimina cualquier resto de un corpus
-        # anterior, incluso una sección que ahora quedó vacía.
+        # preservan los archivos SEACE (nombres actuales e históricos: hay jobs
+        # en disco con el prefijo `SEACE_0…` y regenerar su ZIP no puede
+        # borrarlos) y se elimina cualquier resto de un corpus anterior, incluso
+        # una sección que ahora quedó vacía.
         if destino.is_dir():
             for anterior in destino.iterdir():
-                if anterior.name.upper().startswith("SEACE_"):
+                if es_archivo_seace(anterior.name):
                     continue
                 if anterior.is_dir():
                     shutil.rmtree(anterior)

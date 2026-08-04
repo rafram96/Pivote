@@ -47,7 +47,7 @@ def test_infoobras_cache_por_obra_id(tmp_path):
     segundo = cache.obtener(72056, descargar=descargar)
     destino_uno = tmp_path / "P1_E1"
     destino_uno.mkdir()
-    (destino_uno / "SEACE_01_BASES_INTEGRADAS.pdf").write_bytes(b"%PDF seace")
+    (destino_uno / "BASES_INTEGRADAS.pdf").write_bytes(b"%PDF seace")
     (destino_uno / "Informes de control").mkdir()
     (destino_uno / "Informes de control/2017 - obsoleto.pdf").write_bytes(b"%PDF")
     uno = cache.materializar(
@@ -64,10 +64,36 @@ def test_infoobras_cache_por_obra_id(tmp_path):
     assert (tmp_path / "P1_E1/Valorizaciones/2025-01 ENERO/val.pdf").is_file()
     assert (tmp_path / "P2_E1/Valorizaciones/2025-01 ENERO/val.pdf").is_file()
     assert (tmp_path / "P1_E1/Informes de control/2018 - I-18.pdf").is_file()
-    assert (tmp_path / "P1_E1/SEACE_01_BASES_INTEGRADAS.pdf").is_file()
+    assert (tmp_path / "P1_E1/BASES_INTEGRADAS.pdf").is_file()
     assert not (tmp_path / "P1_E1/Informes de control/2017 - obsoleto.pdf").exists()
     assert not (tmp_path / "P1_E1/Informes de control/2022 - I-22.pdf").exists()
     assert (tmp_path / "P2_E1/Informes de control/2022 - I-22.pdf").is_file()
+
+
+def test_materializar_preserva_los_seace_con_nombres_viejos(tmp_path):
+    """La caché de obra NO gestiona SEACE: al rematerializar InfoObras no puede
+    borrar los documentos SEACE de la experiencia. Hay jobs en disco con los
+    nombres históricos `SEACE_01_…`, así que se preservan ambos formatos."""
+    cache = CacheDescargasInfoObras(tmp_path / "job" / "cache_obras")
+    resultado = cache.obtener(72056, descargar=_corpus)
+    destino = tmp_path / "P1_E1"
+    destino.mkdir()
+    (destino / "SEACE_01_BASES_INTEGRADAS.pdf").write_bytes(b"%PDF viejo")
+    (destino / "SEACE_02_CONTRATO_FIRMADO_ERROR.txt").write_text("x", encoding="utf-8")
+    (destino / "CONTRATO_FIRMADO.pdf").write_bytes(b"%PDF nuevo")
+    (destino / "BASES_INTEGRADAS_NO_DISPONIBLE.txt").write_text("x", encoding="utf-8")
+    (destino / "resto-de-un-corpus-anterior.pdf").write_bytes(b"%PDF viejo corpus")
+
+    cache.materializar(resultado, destino, fecha_ini=None, fecha_fin=None)
+
+    for nombre in ("SEACE_01_BASES_INTEGRADAS.pdf",
+                   "SEACE_02_CONTRATO_FIRMADO_ERROR.txt",
+                   "CONTRATO_FIRMADO.pdf",
+                   "BASES_INTEGRADAS_NO_DISPONIBLE.txt"):
+        assert (destino / nombre).is_file(), nombre
+    # lo que no es SEACE sí se limpia antes de rematerializar
+    assert not (destino / "resto-de-un-corpus-anterior.pdf").exists()
+    assert (destino / "Valorizaciones/2025-01 ENERO/val.pdf").is_file()
 
 
 def test_cache_parcial_se_descarta_y_cache_completa_funciona_offline(tmp_path):

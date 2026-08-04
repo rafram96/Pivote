@@ -22,6 +22,46 @@ _MAGIAS = {
 _GUARDIA_LOCKS = threading.Lock()
 _LOCKS: dict[str, threading.Lock] = {}
 
+# ── Documentos SEACE dentro de la carpeta de una experiencia ─────────────────
+# (clave del payload, nombre del archivo en el entregable, rótulo legible).
+# El nombre YA NO lleva prefijo numérico: `SEACE_01_…` solo servía para que los
+# dos archivos encabezaran el listado de la carpeta y, al recortar cada
+# componente del ZIP a 38 caracteres, mutilaba las notas
+# (`SEACE_01_BASES_INTEGRADAS_N~2c5e00.txt`) borrando justo la diferencia entre
+# «no publicado» y «error de la fuente». Sin el prefijo, los nombres completos
+# caben (`BASES_INTEGRADAS_NO_DISPONIBLE.txt` = 34).
+DOCUMENTOS_SEACE: tuple[tuple[str, str, str], ...] = (
+    ("bases", "BASES_INTEGRADAS", "Bases Integradas (SEACE)"),
+    ("contrato", "CONTRATO_FIRMADO", "Contrato firmado (SEACE)"),
+)
+
+# Nombres históricos: los jobs ya descargados en disco tienen los archivos así.
+# Se siguen reconociendo para no borrarlos al rematerializar InfoObras (la caché
+# de obra no gestiona SEACE) ni perder su rótulo en el índice.
+_ETIQUETAS_SEACE: dict[str, str] = {
+    nombre: etiqueta for _, nombre, etiqueta in DOCUMENTOS_SEACE
+} | {
+    "SEACE_01_BASES_INTEGRADAS": "Bases Integradas (SEACE)",
+    "SEACE_02_CONTRATO_FIRMADO": "Contrato firmado (SEACE)",
+}
+
+
+def es_archivo_seace(nombre: str) -> bool:
+    """¿Este archivo de una carpeta P/E lo puso SEACE (documento o nota)?
+
+    Cubre los nombres actuales y los históricos con prefijo `SEACE_0…`.
+    """
+    n = str(nombre).upper()
+    return n.startswith("SEACE_") or any(
+        n.startswith(nombre_base) for _, nombre_base, _ in DOCUMENTOS_SEACE)
+
+
+def etiqueta_documento_seace(base: str) -> str:
+    """Rótulo legible para el índice a partir del nombre del archivo, ya sin el
+    sufijo `_ERROR`/`_NO_DISPONIBLE`. Un nombre desconocido se devuelve tal cual
+    (el aviso sigue siendo útil aunque no sepamos de qué documento habla)."""
+    return _ETIQUETAS_SEACE.get(str(base).upper(), str(base))
+
 
 @dataclass(frozen=True)
 class ResultadoCacheSeace:

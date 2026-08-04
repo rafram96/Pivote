@@ -30,6 +30,13 @@ el nombre completo de la obra, `json` estructurado; `0` = sin índice). El bucle
 del ZIP arma un registro de datos por experiencia y cada formato se renderiza
 desde ahí, así que agregar uno nuevo no duplica lógica.
 
+Los documentos SEACE se llaman `BASES_INTEGRADAS.*` / `CONTRATO_FIRMADO.*` (sin
+el prefijo `SEACE_01_`/`SEACE_02_`, que hacía que el recorte a 38 del ZIP
+mutilara las notas `_NO_DISPONIBLE`/`_ERROR`); los nombres viejos se siguen
+reconociendo en disco y los avisos del índice usan rótulo legible
+("Bases Integradas (SEACE)"). Fuente única: `DOCUMENTOS_SEACE` en
+`backend/orquestador/descargas_seace.py`.
+
 Registrada issue de seguimiento de resiliencia:
 1. Purgar caché/evitar marca `.completa` ante errores transitorios de sección durante descarga.
 2. Usabilidad del layout ZIP por Obra/Sección.

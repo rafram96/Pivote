@@ -69,8 +69,8 @@ def test_descarga_seace_sin_obra_id_es_idempotente_y_entra_al_zip(tmp_path):
 
     base = carpeta_job(tmp_path, "job-seace") / "descargas"
     destino = base / "P1_E1"
-    assert (destino / "SEACE_01_BASES_INTEGRADAS.pdf").read_bytes().startswith(b"%PDF")
-    assert (destino / "SEACE_02_CONTRATO_FIRMADO.pdf").read_bytes().startswith(b"%PDF")
+    assert (destino / "BASES_INTEGRADAS.pdf").read_bytes().startswith(b"%PDF")
+    assert (destino / "CONTRATO_FIRMADO.pdf").read_bytes().startswith(b"%PDF")
     assert (base / "P1_E1.seace.ok").exists()
     assert len(llamadas) == 2, "la segunda ejecución debe respetar la marca SEACE"
 
@@ -79,11 +79,11 @@ def test_descarga_seace_sin_obra_id_es_idempotente_y_entra_al_zip(tmp_path):
     with zipfile.ZipFile(salida) as zf:
         nombres = zf.namelist()
         # El árbol conserva ambos documentos aunque tengan bytes idénticos.
-        assert any(n.endswith("SEACE_01_BASES_INTEGRADAS.pdf") for n in nombres)
+        assert any(n.endswith("BASES_INTEGRADAS.pdf") for n in nombres)
         manifiesto = zf.read(next(n for n in nombres
                                   if n.endswith("MANIFIESTO_DOCUMENTOS.txt"))).decode("utf-8")
-        assert "SEACE_01_BASES_INTEGRADAS.pdf" in manifiesto
-        assert "SEACE_02_CONTRATO_FIRMADO.pdf" in manifiesto
+        assert "BASES_INTEGRADAS.pdf" in manifiesto
+        assert "CONTRATO_FIRMADO.pdf" in manifiesto
 
 
 def test_infoobras_descarga_una_vez_y_materializa_tres_profesionales(tmp_path):
@@ -158,12 +158,60 @@ def test_descarga_seace_escribe_notas_honestas(tmp_path):
     }}
     descargar_documentos_job(ESPEJO, enr, "job-notas", tmp_path)
     destino = carpeta_job(tmp_path, "job-notas") / "descargas" / "P1_E1"
-    notas = sorted(p.name for p in destino.glob("SEACE_*_ERROR.txt"))
+    notas = sorted(p.name for p in destino.glob("*_ERROR.txt"))
     assert notas == [
-        "SEACE_01_BASES_INTEGRADAS_ERROR.txt",
-        "SEACE_02_CONTRATO_FIRMADO_ERROR.txt",
+        "BASES_INTEGRADAS_ERROR.txt",
+        "CONTRATO_FIRMADO_ERROR.txt",
     ]
     assert "reintentar" in (destino / notas[0]).read_text(encoding="utf-8")
+
+
+def test_notas_seace_llegan_al_zip_con_el_nombre_completo(tmp_path):
+    # Sin el prefijo `SEACE_0…` el nombre cabe en el recorte de 38 por
+    # componente del ZIP: antes salía `SEACE_01_BASES_INTEGRADAS_N~2c5e00.txt`
+    # y no se distinguía «no publicado» de «error de la fuente».
+    enr = {"1:1": {
+        "cui": "2279396", "via": "CUI_TEXTO",
+        "seace": {"estado": "sin_proceso",
+                  "motivo": "el CUI no tiene procesos publicados"},
+    }}
+    descargar_documentos_job(ESPEJO, enr, "job-nombres", tmp_path)
+    destino = carpeta_job(tmp_path, "job-nombres") / "descargas" / "P1_E1"
+    assert (destino / "BASES_INTEGRADAS_NO_DISPONIBLE.txt").is_file()
+
+    salida = construir_zip_infoobras(
+        ESPEJO, {(1, 1): destino}, tmp_path / "notas.zip", enriquecimiento=enr)
+    with zipfile.ZipFile(salida) as zf:
+        nombres = zf.namelist()
+        assert any(n.endswith("/BASES_INTEGRADAS_NO_DISPONIBLE.txt") for n in nombres)
+        assert any(n.endswith("/CONTRATO_FIRMADO_NO_DISPONIBLE.txt") for n in nombres)
+        assert not any("~" in n for n in nombres), "ningún nombre queda mutilado"
+        # una nota no es un documento: la experiencia sigue SIN DOCUMENTOS
+        indice = zf.read("indice.txt").decode("utf-8")
+        assert "SIN DOCUMENTOS" in indice
+        # el aviso rotula el documento en lenguaje de evaluador, no el archivo
+        assert "Bases Integradas (SEACE): no publicado por la fuente." in indice
+        assert "BASES_INTEGRADAS_NO_DISPONIBLE" not in indice
+
+
+def test_nombres_seace_historicos_siguen_reconociendose(tmp_path):
+    # Jobs ya descargados tienen `SEACE_01_…`: su ZIP debe seguir saliendo bien
+    # (documento = documento, nota = nota) aunque el generador ya no los use.
+    destino = tmp_path / "P1_E1"
+    destino.mkdir()
+    (destino / "SEACE_01_BASES_INTEGRADAS.pdf").write_bytes(b"%PDF viejo")
+    (destino / "SEACE_02_CONTRATO_FIRMADO_ERROR.txt").write_text("falló\n",
+                                                                 encoding="utf-8")
+    salida = construir_zip_infoobras(
+        ESPEJO, {(1, 1): destino}, tmp_path / "viejo.zip",
+        enriquecimiento={"1:1": {"cui": "2279396"}})
+    with zipfile.ZipFile(salida) as zf:
+        nombres = zf.namelist()
+        assert any(n.endswith("/SEACE_01_BASES_INTEGRADAS.pdf") for n in nombres)
+        assert any(n.endswith("/SEACE_02_CONTRATO_FIRMADO_ERROR.txt") for n in nombres)
+        # 1 documento real + 1 nota (la nota no infla el conteo)
+        indice = zf.read("indice.txt").decode("utf-8")
+        assert "1 documento(s) + 1 nota(s)" in indice
 
 
 def test_seace_descarga_filecode_una_vez_para_dos_experiencias_y_jobs(tmp_path):
@@ -197,11 +245,11 @@ def test_seace_descarga_filecode_una_vez_para_dos_experiencias_y_jobs(tmp_path):
     assert len(llamadas) == 1
     entregables = [
         carpeta_job(tmp_path, "job-uno") / "descargas" / "P1_E1"
-        / "SEACE_01_BASES_INTEGRADAS.pdf",
+        / "BASES_INTEGRADAS.pdf",
         carpeta_job(tmp_path, "job-uno") / "descargas" / "P1_E2"
-        / "SEACE_01_BASES_INTEGRADAS.pdf",
+        / "BASES_INTEGRADAS.pdf",
         carpeta_job(tmp_path, "job-dos") / "descargas" / "P1_E1"
-        / "SEACE_01_BASES_INTEGRADAS.pdf",
+        / "BASES_INTEGRADAS.pdf",
     ]
     assert all(ruta.is_file() for ruta in entregables)
     assert len({ruta.read_bytes() for ruta in entregables}) == 1

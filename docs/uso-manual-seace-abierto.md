@@ -91,8 +91,8 @@ if r.get("ambiguo"):
 
 comp = r["elegido"]
 DESTINO.mkdir(parents=True, exist_ok=True)
-for etiqueta, doc in (("SEACE_01_BASES_INTEGRADAS", doc_bases_integradas(comp)),
-                      ("SEACE_02_CONTRATO_FIRMADO", doc_contrato_firmado(comp))):
+for etiqueta, doc in (("BASES_INTEGRADAS", doc_bases_integradas(comp)),
+                      ("CONTRATO_FIRMADO", doc_contrato_firmado(comp))):
     if doc is None:
         (DESTINO / f"{etiqueta}_NO_DISPONIBLE.txt").write_text(
             "Este documento no está publicado en los datos abiertos de este proceso.",
@@ -148,13 +148,16 @@ descargas de la receta:
 ```
 <Proyecto o Profesional>/
   <Experiencia N>/
-    SEACE_01_BASES_INTEGRADAS.pdf|zip|rar
-    SEACE_02_CONTRATO_FIRMADO.pdf     (o las notas _NO_DISPONIBLE.txt)
+    BASES_INTEGRADAS.pdf|zip|rar
+    CONTRATO_FIRMADO.pdf              (o las notas _NO_DISPONIBLE.txt)
 ```
 
-- Los nombres `SEACE_01_…`/`SEACE_02_…` son los del diseño (§7 del plan) — al
-  cablear F2 el pipeline generará exactamente los mismos, así el entregable
-  manual y el automático son indistinguibles.
+- Los nombres son los que genera el pipeline (`DOCUMENTOS_SEACE` en
+  `backend/orquestador/descargas_seace.py`), así el entregable manual y el
+  automático son indistinguibles. El diseño (§7 del plan) los llamaba
+  `SEACE_01_…`/`SEACE_02_…`: el prefijo se retiró porque el recorte de nombres
+  del ZIP mutilaba las notas `_NO_DISPONIBLE`/`_ERROR`; los jobs viejos con esos
+  nombres se siguen reconociendo.
 - **Si `ambiguo=True`, revisar el PDF antes de incluirlo** (nombre de la obra
   y entidad en la carátula de las bases vs el certificado).
 
