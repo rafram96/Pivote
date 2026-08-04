@@ -14,8 +14,8 @@ separada por `fileCode`; InfoObras no cruza jobs porque su evidencia cambia.
 El ZIP mantiene PDF reales navegables en cada experiencia, manifiesto SHA-256,
 estados legibles e índice que compara compartidos solo dentro de la misma obra.
 Replay offline Vitarte: **1,205 PDF, 29 manifiestos, cero almacén central**, ZIP
-íntegro de 971,718,423 bytes. Gate: **748 passed, 25 skipped**; golden no aplica
-al veredicto/resolver y su corpus continúa ausente según la Regla de oro.
+íntegro de 971,718,423 bytes. Gate consolidado y verificado de primera mano:
+**748 passed, 25 skipped** (+5 pruebas de caché).
 
 El manifiesto es opcional desde `PIVOTE_MANIFIESTOS_ZIP` (default `1` = se
 genera, conserva el contrato de la #80; `0` = no se escribe ningún
@@ -29,6 +29,13 @@ comas: `txt` default y byte a byte compatible, `md` legible por profesional con
 el nombre completo de la obra, `json` estructurado; `0` = sin índice). El bucle
 del ZIP arma un registro de datos por experiencia y cada formato se renderiza
 desde ahí, así que agregar uno nuevo no duplica lógica.
+
+Registrada issue de seguimiento de resiliencia:
+1. Purgar caché/evitar marca `.completa` ante errores transitorios de sección durante descarga.
+2. Usabilidad del layout ZIP por Obra/Sección.
+3. Precisar texto en índice para informes fuera de periodo.
+4. Recolección de carpetas `.part` huérfanas tras interrupciones.
+5. Reuso de caché en `descargar_cui`.
 
 ## Auditoría EsSalud y correcciones #32, #72–#79 (4-ago)
 

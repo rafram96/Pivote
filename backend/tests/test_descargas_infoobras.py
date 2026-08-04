@@ -34,7 +34,8 @@ def test_filtro_de_informes_conserva_semantica_anual_inclusiva():
     )
 
 
-def test_una_descarga_dos_arboles_y_filtro_local_distinto(tmp_path):
+def test_infoobras_cache_por_obra_id(tmp_path):
+    """Una sola descarga por obra_id, dos árboles materializados con filtro local distinto."""
     cache = CacheDescargasInfoObras(tmp_path / "job" / "cache_obras")
     llamadas = []
 

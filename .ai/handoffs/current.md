@@ -4,6 +4,21 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
+## Nota (2026-08-04, Agente) — Veredicto consolidado #80 y brechas de seguimiento
+
+Veredicto verificado de primera mano: el cierre de la **#80** es legítimo y cumple
+la especificación D1–D5 en lo esencial. Gate consolidado: **748 passed, 25 skipped**
+(+5 pruebas de caché de obra). D1, D3 y D5 limpios con agrupación por `obra_id` real.
+D2 comparte helper de materialización y filtra por año. D4 conserva marcas `.ok` e
+integridad con el Panel.
+
+Brechas identificadas (candidatas registradas para issue de seguimiento de resiliencia):
+1. **Resiliencia de Caché**: Evitar congelar marcas `.completa` en `cache_obras/` ante errores transitorios de sección; purgar entrada de `cache_obras/` al resolver/re-evaluar revisiones.
+2. ~~Layout ZIP por Obra~~ **RESUELTO por el correctivo #80**: el ZIP conserva el árbol completo por experiencia; `DOCUMENTOS_COMPARTIDOS/` quedó eliminado y NO debe reintroducirse (la dedup vive en la descarga, `cache_obras/`).
+3. **Texto del Índice**: Precisar nota a *"ninguno corresponde al periodo del certificado"* cuando existan informes fuera de rango.
+4. **Limpieza de `.part`**: Recolección de carpetas `.part` huérfanas en `cache_obras/` tras interrupción/kill duro.
+5. **Caché en `descargar_cui`**: Reutilizar `cache_obras/` en descargas directas por CUI.
+
 ## Nota (2026-08-04, Codex) — #80 resuelta con caché InfoObras por job
 
 Implementadas D1–D5: `cache_obras/{obra_id}` descarga el corpus completo una
