@@ -765,6 +765,152 @@ def _manifiestos_activos() -> bool:
     return (os.getenv("PIVOTE_MANIFIESTOS_ZIP") or "1").strip() not in ("0", "false", "no")
 
 
+_FORMATOS_INDICE = ("txt", "md", "json")
+
+
+def _formatos_indice() -> list[str]:
+    """Formatos del índice del ZIP, según `PIVOTE_INDICE_ZIP`.
+
+    Lista separada por comas con `txt`, `md` y/o `json` (`md,json`,
+    `txt,md,json`…). Sin definir → `["txt"]`: el `indice.txt` de siempre, byte a
+    byte. `"0"` (o una lista que no deja ningún formato, p.ej. `","`) → SIN
+    índice. Un valor vacío se trata como "sin definir" (el `.env`/compose dejan
+    variables vacías; no queremos que eso borre el índice en silencio).
+
+    Un formato desconocido se ignora con warning; si NINGUNO es válido cae al
+    default `txt` — un typo no puede dejar el entregable sin índice. El orden de
+    salida es canónico (txt → md → json), no el que traiga la variable.
+    """
+    raw = os.getenv("PIVOTE_INDICE_ZIP")
+    if raw is None or not raw.strip():
+        return ["txt"]
+    if raw.strip().lower() in ("0", "false", "no"):
+        return []
+    pedidos, desconocidos = set(), []
+    for parte in raw.split(","):
+        f = parte.strip().lower()
+        if not f:
+            continue
+        if f in _FORMATOS_INDICE:
+            pedidos.add(f)
+        else:
+            desconocidos.append(f)
+    if desconocidos:
+        logger.warning("PIVOTE_INDICE_ZIP: formato(s) desconocido(s) %s (válidos: %s)",
+                       ", ".join(desconocidos), ", ".join(_FORMATOS_INDICE))
+    if not pedidos and desconocidos:
+        return ["txt"]
+    return [f for f in _FORMATOS_INDICE if f in pedidos]
+
+
+def _cabecera_indice(manifiestos: bool) -> list[str]:
+    """Párrafo introductorio del índice (explica por qué un documento se repite
+    entre experiencias de la misma obra). La línea del manifiesto solo aparece si
+    el manifiesto se está generando (`PIVOTE_MANIFIESTOS_ZIP`)."""
+    lineas = [
+        "Cada experiencia contiene su árbol completo de documentos; los que",
+        "se comparten entre experiencias de una misma obra se repiten para",
+        "navegación directa y el índice lo indica.",
+    ]
+    if manifiestos:
+        lineas.append("El MANIFIESTO_DOCUMENTOS.txt de cada carpeta lista "
+                      "su contenido con la huella SHA-256.")
+    return lineas
+
+
+# Campos del registro por experiencia que se publican en `indice.json` (el
+# registro lleva además claves internas con "_" que no son parte del contrato).
+_CAMPOS_INDICE_JSON = (
+    "n_prof", "cargo", "n_exp", "proyecto", "documentos", "compartidos",
+    "propios", "notas", "sin_documentos", "motivo", "secciones_incompletas",
+    "advertencias",
+)
+
+
+def _indice_txt(meta: dict, registros: list[dict], cabecera: list[str]) -> str:
+    """Índice plano histórico: una línea por experiencia. Formato CONGELADO —
+    es el que ya conocen el cliente y los tests."""
+    lineas = [f"ZIP InfoObras · {meta['concurso']}",
+              f"Postor: {meta['postor']}", ""]
+    if cabecera:
+        lineas += cabecera + [""]
+    for r in registros:
+        prefijo = (f"[P{r['n_prof']:02d} / E{r['n_exp']}]  {r['cargo']} · "
+                   f"{r['proyecto'][:70]}: ")
+        if r["sin_documentos"]:
+            lineas.append(f"{prefijo}SIN DOCUMENTOS — {r['motivo']}")
+        else:
+            if r["compartidos"]:
+                detalle = (f"{r['documentos']} documento(s) · "
+                           f"{r['compartidos']} compartido(s) con otras "
+                           f"experiencias de esta obra · "
+                           f"{r['propios']} propio(s) del periodo")
+            else:
+                detalle = f"{r['documentos']} documento(s)"
+            nota_txt = f" + {r['notas']} nota(s)" if r["notas"] else ""
+            lineas.append(f"{prefijo}{detalle}{nota_txt}")
+        for s in r["secciones_incompletas"]:
+            lineas.append(f"  SECCIÓN {s['seccion']}: {s['estado']}")
+        for aviso in r["advertencias"]:
+            lineas.append(f"  ADVERTENCIA: {aviso}")
+    return "\n".join(lineas) + "\n"
+
+
+def _indice_md(meta: dict, registros: list[dict], cabecera: list[str]) -> str:
+    """Índice LEGIBLE para el evaluador: una sección por profesional y una
+    subsección por experiencia, con el nombre COMPLETO del proyecto (en el txt
+    se recorta a 70 y quedaba un muro de líneas kilométricas)."""
+    out = [f"# ZIP InfoObras · {meta['concurso']}", "",
+           f"**Postor:** {meta['postor']}", ""]
+    if cabecera:
+        out += cabecera + [""]
+    prof_actual: Any = object()
+    vistas: dict[str, int] = {}
+    for r in registros:
+        if r["n_prof"] != prof_actual:
+            prof_actual = r["n_prof"]
+            vistas = {}          # "misma obra que E…" se compara dentro del profesional
+            out += [f"## P{r['n_prof']:02d} · {r['cargo']}", ""]
+        grupo = r.get("_grupo_obra")
+        previa = vistas.get(grupo) if grupo else None
+        if previa is not None:
+            out += [f"### E{r['n_exp']} · misma obra que E{previa}", "",
+                    f"*{r['proyecto']}*", ""]
+        else:
+            out += [f"### E{r['n_exp']} · {r['proyecto']}", ""]
+            if grupo:
+                vistas[grupo] = r["n_exp"]
+        if r["sin_documentos"]:
+            out.append(f"- **Sin documentos** — {r['motivo']}")
+        else:
+            nota = ""
+            if r["notas"]:
+                nota = f" (+{r['notas']} nota{'s' if r['notas'] != 1 else ''})"
+            if r["compartidos"]:
+                out.append(f"- **Documentos:** {r['documentos']} — "
+                           f"{r['compartidos']} compartidos con otras experiencias "
+                           f"de esta obra, {r['propios']} propios del periodo{nota}")
+            else:
+                out.append(f"- **Documentos:** {r['documentos']}{nota}")
+        for s in r["secciones_incompletas"]:
+            out.append(f"- {s['seccion']}: {s['estado']}")
+        for aviso in r["advertencias"]:
+            out.append(f"- ⚠ {aviso}")
+        out.append("")
+    return "\n".join(out) + "\n"
+
+
+def _indice_json(meta: dict, registros: list[dict]) -> str:
+    """Índice ESTRUCTURADO (para integraciones y para depurar un entregable sin
+    abrirlo): los mismos datos que ven el txt y el md, sin formato."""
+    datos = {
+        "concurso": meta["concurso"],
+        "postor": meta["postor"],
+        "experiencias": [{c: r[c] for c in _CAMPOS_INDICE_JSON} for r in registros],
+    }
+    return json.dumps(datos, ensure_ascii=False, indent=2) + "\n"
+
+
 def _estado_seccion_legible(estado: dict) -> str:
     """Estado del manifiesto en lenguaje de evaluador, sin nombres internos."""
     estado = estado or {}
@@ -795,12 +941,22 @@ def construir_zip_infoobras(
     (del enriquecimiento: CUI resuelto sin descarga, no aplica, no existe, o
     pendiente). `enriquecimiento`: {"n_prof:n_exp": {cui, via, ...}} — la verdad
     del backend (sin ella, cae al `cui` del espejo, que puede estar incompleto).
+
+    Dos variables de entorno ajustan el entregable sin tocar el árbol:
+    `PIVOTE_MANIFIESTOS_ZIP` (manifiesto SHA-256 por experiencia, default sí) y
+    `PIVOTE_INDICE_ZIP` (formatos del índice: `txt` por default, más `md` y/o
+    `json`). Ninguna cambia qué documentos entran al ZIP.
     """
     enr = enriquecimiento or {}
     manifiestos = _manifiestos_activos()   # PIVOTE_MANIFIESTOS_ZIP (default: 1)
+    formatos = _formatos_indice()          # PIVOTE_INDICE_ZIP     (default: txt)
     raiz = _ruta_segura(espejo.get("_meta", {}).get("concurso") or "concurso")
-    indice: list[str] = [f"ZIP InfoObras · {raiz}",
-                         f"Postor: {espejo.get('_meta', {}).get('postor') or '—'}", ""]
+    meta_indice = {"concurso": raiz,
+                   "postor": espejo.get("_meta", {}).get("postor") or "—"}
+    # Una entrada por experiencia con los DATOS del índice (no texto): cada
+    # formato se renderiza después desde aquí. Antes se armaban las líneas del
+    # txt en el bucle y agregar un formato obligaba a duplicar la lógica.
+    registros: list[dict] = []
 
     salida.parent.mkdir(parents=True, exist_ok=True)
     # Se arma en un `.tmp` único y se renombra atómicamente al final → `salida`
@@ -832,6 +988,15 @@ def construir_zip_infoobras(
                 info = enr.get(f"{n_prof}:{n_exp}") or {}
                 manifiesto = (info.get("descargas_reales")
                               if isinstance(info.get("descargas_reales"), dict) else {})
+                reg: dict[str, Any] = {
+                    "n_prof": n_prof, "cargo": prof.get("cargo", ""),
+                    "n_exp": n_exp, "proyecto": proyecto,
+                    "documentos": 0, "compartidos": 0, "propios": 0, "notas": 0,
+                    "sin_documentos": True, "motivo": None,
+                    "secciones_incompletas": [], "advertencias": [],
+                    "_grupo_obra": None,
+                }
+                registros.append(reg)
                 if origen and Path(origen).is_dir():
                     # Un temporal nunca es un entregable. Las notas de error sí se
                     # incluyen, pero no cuentan como documentos descargados.
@@ -860,6 +1025,8 @@ def construir_zip_infoobras(
                     # Sin obra resuelta no se atribuye una coincidencia casual de
                     # hash a otra experiencia: cada P/E forma su propio grupo.
                     grupo_obra = str(obra_id) if obra_id else f"P{n_prof}:E{n_exp}"
+                    reg["_grupo_obra"] = str(obra_id) if obra_id else None
+                    reg["notas"] = len(notas)
                     vistos_antes = vistos_por_obra.setdefault(grupo_obra, set())
                     digests: list[str] = []
                     for p in reales:
@@ -880,31 +1047,20 @@ def construir_zip_infoobras(
                                 f"Sin documentos descargados para esta experiencia.\n"
                                 f"CUI: {cui or '(no resuelto)'}\nMotivo: {motivo}\n",
                             )
-                        indice.append(
-                            f"[P{n_prof:02d} / E{n_exp}]  {prof.get('cargo', '')} · "
-                            f"{proyecto[:70]}: SIN DOCUMENTOS — {motivo}")
+                        reg["motivo"] = motivo
                     else:
-                        nota_txt = (f" + {len(notas)} nota(s)" if notas else "")
                         compartidos_n = sum(digest in vistos_antes for digest in digests)
-                        propios_n = len(reales) - compartidos_n
-                        if compartidos_n:
-                            detalle = (f"{len(reales)} documento(s) · "
-                                       f"{compartidos_n} compartido(s) con otras "
-                                       f"experiencias de esta obra · "
-                                       f"{propios_n} propio(s) del periodo")
-                        else:
-                            detalle = f"{len(reales)} documento(s)"
-                        indice.append(
-                            f"[P{n_prof:02d} / E{n_exp}]  {prof.get('cargo', '')} · "
-                            f"{proyecto[:70]}: {detalle}{nota_txt}")
+                        reg.update(sin_documentos=False, documentos=len(reales),
+                                   compartidos=compartidos_n,
+                                   propios=len(reales) - compartidos_n)
                     vistos_antes.update(digests)
 
                     for nombre, estado in (manifiesto.get("secciones") or {}).items():
                         if (estado or {}).get("estado") != "completa":
-                            indice.append(
-                                f"  SECCIÓN {nombre}: {_estado_seccion_legible(estado)}")
-                    for aviso in manifiesto.get("avisos") or []:
-                        indice.append(f"  ADVERTENCIA: {aviso}")
+                            reg["secciones_incompletas"].append(
+                                {"seccion": nombre,
+                                 "estado": _estado_seccion_legible(estado)})
+                    reg["advertencias"] = list(manifiesto.get("avisos") or [])
                 else:
                     cui = info.get("cui") or e.get("cui")
                     motivo = _motivo_sin_docs(info.get("via"), cui)
@@ -913,21 +1069,15 @@ def construir_zip_infoobras(
                         f"Sin documentos descargados para esta experiencia.\n"
                         f"CUI: {cui or '(no resuelto)'}\nMotivo: {motivo}\n",
                     )
-                    indice.append(
-                        f"[P{n_prof:02d} / E{n_exp}]  {prof.get('cargo', '')} · "
-                        f"{proyecto[:70]}: SIN DOCUMENTOS — {motivo}")
+                    reg["motivo"] = motivo
 
-        if any(vistos_por_obra.values()):
-            cabecera = [
-                "Cada experiencia contiene su árbol completo de documentos; los que",
-                "se comparten entre experiencias de una misma obra se repiten para",
-                "navegación directa y el índice lo indica.",
-            ]
-            if manifiestos:
-                cabecera.append("El MANIFIESTO_DOCUMENTOS.txt de cada carpeta lista "
-                                "su contenido con la huella SHA-256.")
-            indice[3:3] = cabecera + [""]
-        zf.writestr("indice.txt", "\n".join(indice) + "\n")
+        cabecera = _cabecera_indice(manifiestos) if any(vistos_por_obra.values()) else []
+        if "txt" in formatos:
+            zf.writestr("indice.txt", _indice_txt(meta_indice, registros, cabecera))
+        if "md" in formatos:
+            zf.writestr("indice.md", _indice_md(meta_indice, registros, cabecera))
+        if "json" in formatos:
+            zf.writestr("indice.json", _indice_json(meta_indice, registros))
     os.replace(tmp, salida)   # atómico: recién aquí `salida` existe y está completo
     return salida
 

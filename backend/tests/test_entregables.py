@@ -4,6 +4,7 @@ por profesional con hitos) y ZIP InfoObras (árbol de 4 niveles).
 """
 from __future__ import annotations
 
+import json
 import zipfile
 from datetime import date
 from pathlib import Path
@@ -316,6 +317,120 @@ def test_zip_sin_manifiestos_cuando_la_variable_esta_en_cero(tmp_path, monkeypat
         # conteos del índice sin cambios (siguen calculándose con el SHA-256)
         assert "1 compartido(s) con otras experiencias de esta obra" in indice
         assert "0 propio(s) del periodo" in indice
+
+
+# ── Formatos del índice (PIVOTE_INDICE_ZIP) ─────────────────────────────────
+
+# Proyecto de nombre real (>70 chars): el txt lo recorta, el md no.
+PROYECTO_LARGO = ("MEJORAMIENTO DE LOS SERVICIOS DE SALUD DEL ESTABLECIMIENTO DE "
+                  "SALUD SAN MARTÍN DE PORRES, DISTRITO DE LIRCAY, PROVINCIA DE "
+                  "ANGARAES, DEPARTAMENTO DE HUANCAVELICA")
+
+
+def _espejo_dos_experiencias_misma_obra() -> dict:
+    """Un profesional con 2 experiencias de la MISMA obra (comparten documento)."""
+    return {
+        "_meta": {"concurso": "CP-TEST/2026", "postor": "POSTOR DEMO"},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "JEFE DE SUPERVISIÓN",
+             "experiencias": [{"n": 1, "proyecto": PROYECTO_LARGO},
+                              {"n": 2, "proyecto": PROYECTO_LARGO}]},
+        ],
+    }
+
+
+def _dos_carpetas_con_el_mismo_pdf(tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir(); b.mkdir()
+    (a / "original-a.pdf").write_bytes(b"%PDF-1.4 misma evidencia")
+    (b / "otro-nombre.pdf").write_bytes(b"%PDF-1.4 misma evidencia")
+    return a, b
+
+
+ENR_MISMA_OBRA = {"1:1": {"obra": {"obra_id": 72056}},
+                  "1:2": {"obra": {"obra_id": 72056}}}
+
+
+def test_indice_md_reemplaza_al_txt_y_no_recorta_el_proyecto(tmp_path, monkeypatch):
+    # El txt es un muro de líneas kilométricas; el md agrupa por profesional y
+    # muestra el nombre COMPLETO de la obra.
+    monkeypatch.setenv("PIVOTE_INDICE_ZIP", "md")
+    a, b = _dos_carpetas_con_el_mismo_pdf(tmp_path)
+    salida = construir_zip_infoobras(
+        _espejo_dos_experiencias_misma_obra(), {(1, 1): a, (1, 2): b},
+        tmp_path / "md.zip", enriquecimiento=ENR_MISMA_OBRA)
+    with zipfile.ZipFile(salida) as zf:
+        nombres = zf.namelist()
+        assert "indice.md" in nombres
+        assert "indice.txt" not in nombres
+        md = zf.read("indice.md").decode("utf-8")
+        assert "# ZIP InfoObras · CP-TEST-2026" in md
+        assert "**Postor:** POSTOR DEMO" in md
+        assert "## P01 · JEFE DE SUPERVISIÓN" in md
+        assert PROYECTO_LARGO in md                       # sin recorte a 70
+        assert "### E2 · misma obra que E1" in md         # no repite el titular
+        assert "- **Documentos:** 1" in md
+        assert ("- **Documentos:** 1 — 1 compartidos con otras experiencias "
+                "de esta obra, 0 propios del periodo") in md
+
+
+def test_indice_json_expone_los_conteos_por_experiencia(tmp_path, monkeypatch):
+    monkeypatch.setenv("PIVOTE_INDICE_ZIP", "json")
+    a, b = _dos_carpetas_con_el_mismo_pdf(tmp_path)
+    salida = construir_zip_infoobras(
+        _espejo_dos_experiencias_misma_obra(), {(1, 1): a, (1, 2): b},
+        tmp_path / "json.zip", enriquecimiento=ENR_MISMA_OBRA)
+    with zipfile.ZipFile(salida) as zf:
+        assert "indice.txt" not in zf.namelist()
+        datos = json.loads(zf.read("indice.json").decode("utf-8"))
+    assert datos["postor"] == "POSTOR DEMO"
+    e1, e2 = datos["experiencias"]
+    assert (e1["n_prof"], e1["n_exp"], e1["proyecto"]) == (1, 1, PROYECTO_LARGO)
+    # el documento es propio de la primera experiencia y compartido en la segunda
+    assert (e1["documentos"], e1["compartidos"], e1["propios"]) == (1, 0, 1)
+    assert (e2["documentos"], e2["compartidos"], e2["propios"]) == (1, 1, 0)
+    assert e1["sin_documentos"] is False and e1["motivo"] is None
+    assert e1["notas"] == 0 and e1["advertencias"] == []
+    assert "_grupo_obra" not in e1        # clave interna, fuera del contrato
+
+
+def test_indice_acepta_varios_formatos_a_la_vez(tmp_path, monkeypatch):
+    monkeypatch.setenv("PIVOTE_INDICE_ZIP", "txt,md")
+    a, b = _dos_carpetas_con_el_mismo_pdf(tmp_path)
+    salida = construir_zip_infoobras(
+        _espejo_dos_experiencias_misma_obra(), {(1, 1): a, (1, 2): b},
+        tmp_path / "ambos.zip", enriquecimiento=ENR_MISMA_OBRA)
+    with zipfile.ZipFile(salida) as zf:
+        nombres = zf.namelist()
+        assert "indice.txt" in nombres and "indice.md" in nombres
+        assert "indice.json" not in nombres
+        # el txt conserva su formato histórico (línea por experiencia, recortada)
+        txt = zf.read("indice.txt").decode("utf-8")
+        assert "[P01 / E1]  JEFE DE SUPERVISIÓN · " in txt
+        assert PROYECTO_LARGO not in txt
+
+
+def test_indice_desactivado_no_deja_ningun_indice(tmp_path, monkeypatch):
+    monkeypatch.setenv("PIVOTE_INDICE_ZIP", "0")
+    a, b = _dos_carpetas_con_el_mismo_pdf(tmp_path)
+    salida = construir_zip_infoobras(
+        _espejo_dos_experiencias_misma_obra(), {(1, 1): a, (1, 2): b},
+        tmp_path / "sin-indice.zip", enriquecimiento=ENR_MISMA_OBRA)
+    with zipfile.ZipFile(salida) as zf:
+        nombres = zf.namelist()
+        assert not any(n.startswith("indice.") for n in nombres)
+        assert "P01 SUPERVISIÓN/E1/original-a.pdf" in nombres   # el árbol no cambia
+
+
+def test_indice_formato_desconocido_cae_al_txt(tmp_path, monkeypatch):
+    # Un typo en el .env no puede dejar el entregable sin índice.
+    monkeypatch.setenv("PIVOTE_INDICE_ZIP", "markdown")
+    a, b = _dos_carpetas_con_el_mismo_pdf(tmp_path)
+    salida = construir_zip_infoobras(
+        _espejo_dos_experiencias_misma_obra(), {(1, 1): a, (1, 2): b},
+        tmp_path / "typo.zip", enriquecimiento=ENR_MISMA_OBRA)
+    with zipfile.ZipFile(salida) as zf:
+        assert "indice.txt" in zf.namelist()
 
 
 # ── Inventario (parseo offline del HTML de InfoObras) ───────────────────────

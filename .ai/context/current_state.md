@@ -24,6 +24,12 @@ genera, conserva el contrato de la #80; `0` = no se escribe ningún
 consume un equipo de evaluación no técnico; el SHA-256 se calcula siempre
 porque los conteos de compartidos/propios del índice dependen de él.
 
+El formato del índice se elige con `PIVOTE_INDICE_ZIP` (lista separada por
+comas: `txt` default y byte a byte compatible, `md` legible por profesional con
+el nombre completo de la obra, `json` estructurado; `0` = sin índice). El bucle
+del ZIP arma un registro de datos por experiencia y cada formato se renderiza
+desde ahí, así que agregar uno nuevo no duplica lógica.
+
 ## Auditoría EsSalud y correcciones #32, #72–#79 (4-ago)
 
 El pipeline ya no presenta como verificado el tiempo de una experiencia sin
