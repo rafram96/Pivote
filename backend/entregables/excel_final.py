@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Optional
 
 import openpyxl
+from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -48,8 +49,8 @@ logger = logging.getLogger(__name__)
 Paralizaciones = dict[tuple[int, int], list[tuple[date, date]]]
 
 # Paleta de fondos por profesional para la hoja Base de Datos (suaves, ciclan)
-_PALETA_PROF = ["FFF2CC", "DDEBF7", "E2EFDA", "FCE4D6", "EDEDED", "D9E1F2",
-                "FBE2D5", "E4DFEC"]
+_PALETA_PROF = ["D7E9F7", "DCEFE8", "F8E1D5", "E1E8F5", "E8ECEF", "D5E9E7",
+                "F1DDD3", "DDE6F0"]
 
 # Amarillo para resaltar las valorizaciones que caen dentro del certificado
 FILL_VALOR = PatternFill("solid", fgColor="FFFF00")
@@ -164,6 +165,17 @@ def _render_cert_pages(cert_pdf, dpi=130, q=70, max_pag=12):
     return out
 
 
+def _factor_a_pdf_valido(pdf) -> bool:
+    """Rechaza un recorte con texto que claramente pertenece a otro factor.
+    Un escaneo sin capa de texto se conserva: no hay evidencia para descartarlo."""
+    import fitz
+    with fitz.open(str(pdf)) as doc:
+        texto = " ".join(p.get_text("text") for p in doc).upper().strip()
+    if not texto:
+        return True
+    return bool(re.search(r"FACTOR\s*A\b|EXPERIENCIA\s+DEL\s+PERSONAL\s+CLAVE|EXPERIENCIA\s+ADICIONAL", texto))
+
+
 def _mapear_dir_certs(cdir) -> dict:
     """Mapea una carpeta `certs/` de PDFs recortados por la skill →
     `{(n_prof, n_exp | "TDR" | "ANEXO" | "FACTOR"): Path}`:
@@ -218,7 +230,7 @@ _BD_WIDTHS = [34, 8, 26, 18, 7, 32, 44, 10, 14, 24, 20, 12, 12, 12, 10,
 _BD_VERDICTS = {20: "pos", 21: "neg", 23: "neg", 24: "pos"}
 
 
-def construir_hoja_base_datos(ws, espejo: dict) -> int:
+def construir_hoja_base_datos(ws, espejo: dict, cuis: Optional[dict] = None) -> int:
     """Construye la hoja "Base de Datos". Devuelve el nº de filas de datos."""
     for i, w in enumerate(_BD_WIDTHS, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
@@ -228,6 +240,7 @@ def construir_hoja_base_datos(ws, espejo: dict) -> int:
         c.font, c.fill, c.border, c.alignment = F_HEAD, FILL_HEAD, BORDER, AL_HEAD
     ws.row_dimensions[1].height = 30
 
+    cuis = cuis or {}
     r = 2
     for idx, prof in enumerate(espejo.get("profesionales", [])):
         fill = PatternFill("solid", fgColor=_PALETA_PROF[idx % len(_PALETA_PROF)])
@@ -236,12 +249,14 @@ def construir_hoja_base_datos(ws, espejo: dict) -> int:
             valores = [
                 prof.get("cargo"), prof.get("n_prof"), prof.get("nombre"),
                 prof.get("colegiatura"), e.get("n"), e.get("entidad_emisora"),
-                e.get("proyecto"), e.get("cui"), e.get("tipo_documento"),
+                e.get("proyecto"), cuis.get((prof.get("n_prof"), e.get("n"))) or e.get("cui"), e.get("tipo_documento"),
                 e.get("nombre_emisor"), e.get("cargo_emisor"),
                 fecha_excel(e.get("fecha_inicial")), fecha_excel(e.get("fecha_final")),
                 fecha_excel(e.get("fecha_emision")), e.get("folio"),
                 e.get("dias"), e.get("meses"), e.get("anios"), e.get("cargo_ocupado"),
-                e.get("cargo_bases_valido"), e.get("anterior_colegiatura"),
+                e.get("cargo_bases_valido"), (e.get("anterior_colegiatura")
+                                               if e.get("anterior_colegiatura") not in (None, "")
+                                               else "POR VERIFICAR"),
                 e.get("incluye_covid"), e.get("traslape"), e.get("tipo_obra_valido"),
                 e.get("observaciones"),
             ]
@@ -273,6 +288,12 @@ def construir_hoja_base_datos(ws, espejo: dict) -> int:
                 }
                 if campos_bd.get(i) in sup and v not in (None, ""):
                     c.fill = FILL_SUPUESTO
+                if i == 8 and (prof.get("n_prof"), e.get("n")) in cuis:
+                    c.comment = Comment(
+                        "CUI identificado por el sistema durante el cruce con InfoObras; "
+                        "no necesariamente estaba escrito en el certificado.",
+                        "Pivote",
+                    )
             r += 1
 
     ws.auto_filter.ref = f"A1:{get_column_letter(len(_BD_HEAD))}{max(r - 1, 1)}"
@@ -383,7 +404,8 @@ def construir_hoja_profesional(
         # PRIMERO el nombre: es lo único que deja auditar de un vistazo si la obra
         # emparejada es la del certificado. Sin él, un CUI mal resuelto (un hospital
         # de otra región) pasa inadvertido detrás de un código y un monto correctos.
-        kv("Nombre de la obra", fx.get("obra_nombre") or "— (InfoObras no devolvió el nombre)")
+        kv("Nombre de la obra", _sin_jerga(fx.get("obra_nombre") or
+                                           "— (InfoObras no devolvió el nombre)"))
         # #63: un CUI puede tener varios registros de obra (plan de contingencia,
         # obra principal, saldos, ET) — cuando los hay, la ficha lo DECLARA para
         # que el evaluador sepa que se eligió uno entre varios (caso LaFora: el
@@ -394,8 +416,8 @@ def construir_hoja_profesional(
                "del certificado (ver nombre arriba)")
         kv("Código InfoObras", fx.get("codigo_infoobras") or "—")
         kv("CUI", fx.get("cui") or "—")
-        kv("Estado de obra", fx.get("estado") or "—")
-        kv("Monto ejecutado (S/)", fx.get("monto") if fx.get("monto") is not None else "—", FMT_SOLES)
+        kv("Estado de obra", _sin_jerga(fx.get("estado") or "—"))
+        kv("Monto informado en la ficha (S/)", fx.get("monto") if fx.get("monto") is not None else "—", FMT_SOLES)
         kv("Inicio de obra", _fecha_iso(fx.get("fecha_inicio")) or "—", FMT_FECHA)
         kv("Fin de obra", _fecha_iso(fx.get("fecha_fin")) or "—", FMT_FECHA)
         descargas_reales = fx.get("descargas_reales")
@@ -403,12 +425,43 @@ def construir_hoja_profesional(
             n_real = int(descargas_reales.get("archivos") or 0)
             kv("Documentos en el ZIP",
                f"{n_real} archivo{'s' if n_real != 1 else ''} descargado{'s' if n_real != 1 else ''}")
+            secciones = descargas_reales.get("secciones") or {}
+            if isinstance(secciones, dict) and secciones:
+                kv("Detalle de descargas", "; ".join(
+                    f"{_sin_jerga(str(k).replace('_', ' '))}: {v}"
+                    for k, v in secciones.items()))
         else:
             kv("Documentos en el ZIP", "Pendiente de descarga")
         rr += 1
 
-        vals = sorted(fx.get("valorizaciones") or [],
-                      key=lambda v: (v.get("anio") or 0, v.get("mes") or 0), reverse=True)
+        vals_crudas = fx.get("valorizaciones") or []
+        vals, vistas = [], set()
+        for v in vals_crudas:
+            huella = json.dumps(v, sort_keys=True, default=str, ensure_ascii=False)
+            if huella not in vistas:
+                vistas.add(huella)
+                vals.append(v)
+        vals.sort(key=lambda v: (v.get("anio") or 0, v.get("mes") or 0), reverse=True)
+        if len(vals_crudas) != len(vals):
+            kv("Control de datos", f"Se ocultaron {len(vals_crudas) - len(vals)} fila(s) "
+               "duplicada(s) idéntica(s) del portal; el JSON de origen se conserva.")
+        acumulados = [v.get("valorizado_real") for v in reversed(vals)
+                      if isinstance(v.get("valorizado_real"), (int, float))]
+        retrocesos = sum(b < a for a, b in zip(acumulados, acumulados[1:]))
+        if retrocesos:
+            kv("Control de acumulados", f"⚠ El acumulado retrocede en {retrocesos} mes(es); "
+               "se muestra tal como lo publicó InfoObras y requiere revisión.")
+        max_val = max(acumulados, default=None)
+        monto = fx.get("monto")
+        if isinstance(monto, (int, float)) and max_val and max(monto, max_val) / max(min(monto, max_val), 1) >= 5:
+            kv("Control de monto", "⚠ El monto de la ficha difiere materialmente de la última "
+               "valorización; podría corresponder al contrato de supervisión.")
+        fin_obra = _fecha_iso(fx.get("fecha_fin"))
+        meses_posteriores = [v for v in vals if fin_obra and v.get("anio") and v.get("mes")
+                             and date(v["anio"], v["mes"], 1) > date(fin_obra.year, fin_obra.month, 1)]
+        if meses_posteriores:
+            kv("Control de fechas", "⚠ Hay valorizaciones posteriores al fin de obra informado. "
+               "El cálculo usa la ventana de valorizaciones; confirmar si el fin fue ampliado.")
         verif = fx.get("verificacion_expediente")
         aprob = fx.get("aprobacion_expediente")
         # EXPEDIENTE técnico: la experiencia es de ELABORACIÓN del expediente, no de
@@ -494,7 +547,7 @@ def construir_hoja_profesional(
                 else:
                     texto_docs = "Pendiente"
                 celdas = [n, f"{anio} / {_MES_ES.get(mes, mes)}",
-                          v.get("fisico_real"), v.get("valorizado_real"), v.get("estado") or "",
+                          v.get("fisico_real"), v.get("valorizado_real"), _sin_jerga(v.get("estado") or ""),
                           texto_docs]
                 for i, val in enumerate(celdas, start=6):
                     cc = ws.cell(rr, i, val)
@@ -742,7 +795,6 @@ def construir_hoja_profesional(
             filas_val,
             _canon(fx.get("modificaciones_plazo") or []),
             _canon(fx.get("representante_obra")),
-            (str(ini), str(fin)) if vals else None,
         )
 
     def _registrar_obra(fx: Optional[dict], ini, fin, etiqueta: str, fila: int) -> None:
@@ -1012,7 +1064,7 @@ def construir_hoja_profesional(
                                + (" y otros" if len(sin) > 3 else ""))
                     else:
                         txt = "Sin dato de condición para ese periodo"
-                kv("¿Estuvo habido durante la obra?", txt,
+                kv("¿Estuvo habido durante el periodo certificado?", txt,
                    fill=FILL_OK if ok else (FILL_ALERTA if ok is False else None),
                    height=None if ok else 34)
 
@@ -1067,7 +1119,26 @@ def construir_hoja_profesional(
             render_habido(s.get("habido"))
             render_representantes_emisor(s.get("representantes"))
             emision = _fecha_iso(fecha_emision)
-            if creacion and emision and creacion > emision:
+            alt04 = s.get("alt04") or {}
+            if not alt04 and creacion and ((emision and creacion > emision)
+                                           or (ini and creacion > ini)):
+                habido = s.get("habido") or {}
+                if any((habido.get(k) or {}).get("ok") is True
+                       for k in ("emision", "periodo")):
+                    alt04 = {
+                        "estado": "REINSCRIPCION",
+                        "mensaje": ("La inscripción vigente es posterior, pero el histórico "
+                                    "SUNAT acredita actividad en el periodo: probable reinscripción."),
+                    }
+            if alt04.get("estado") == "REINSCRIPCION":
+                txt = "🟡 ALT04 — " + alt04.get(
+                    "mensaje", "Probable reinscripción; revisar el histórico SUNAT.")
+                fill = FILL_VALOR
+            elif alt04.get("estado") == "ALERTA":
+                txt = "🔴 ALT04 — " + alt04.get(
+                    "mensaje", "Confirmar la inscripción original en SUNAT.")
+                fill = FILL_ALERTA
+            elif creacion and emision and creacion > emision:
                 txt = (f"🔴 ALT04 — certificado emitido ({emision.strftime('%d/%m/%y')}) ANTES de "
                        f"la creación de la empresa ({creacion.strftime('%d/%m/%y')}): imposible, revisar.")
                 fill = FILL_ALERTA
@@ -1363,7 +1434,10 @@ def construir_hoja_profesional(
             if cf >= ci:
                 clamp.append((ci, cf))
         tramos = restar_paralizaciones((ini, fin), clamp)
-        return dias_inclusivos(ini, fin), sum(dias_inclusivos(a, b) for a, b in tramos), clamp
+        efectivo = sum(dias_inclusivos(a, b) for a, b in tramos)
+        if revisiones.get((n_prof, n_exp)):
+            return dias_inclusivos(ini, fin), f"{efectivo} PROVISIONAL", clamp
+        return dias_inclusivos(ini, fin), efectivo, clamp
 
     def cert_marco(n_exp, e, ini, fin, cui, fx=None):
         """Encabezado 'CERT. N°X' (amarillo) + recap 'DATOS DE LA EXPERIENCIA'
@@ -1434,6 +1508,8 @@ def construir_hoja_profesional(
 
     for e in prof.get("experiencias", []):
         n_exp = e.get("n")
+        rev = revisiones.get((n_prof, n_exp))
+        en_revision = bool(rev)
         ini, fin = _fecha_iso(e.get("fecha_inicial")), _fecha_iso(e.get("fecha_final"))
         fx = fichas.get((n_prof, n_exp))
         # CUI resuelto por el backend (etapa InfoObras); si no, el del espejo
@@ -1494,11 +1570,12 @@ def construir_hoja_profesional(
 
             tramos = restar_paralizaciones((ini, fin), tuplas)
             for k, (t_ini, t_fin) in enumerate(tramos, start=1):
-                fila(f"Tramo efectivo {k}", t_ini, t_fin,
-                     dias_inclusivos(t_ini, t_fin), fill=FILL_EFECTIVO)
+                fila(f"Tramo {'provisional' if en_revision else 'efectivo'} {k}", t_ini, t_fin,
+                     dias_inclusivos(t_ini, t_fin), fill=FILL_VALOR if en_revision else FILL_EFECTIVO)
             efectivo = sum(dias_inclusivos(a, b) for a, b in tramos)
-            fila(f"EFECTIVO EXPERIENCIA {n_exp}", "", "", efectivo, bold=True,
-                 fill=FILL_EFECTIVO)
+            fila(f"{'PROVISIONAL — POR VERIFICAR' if en_revision else 'EFECTIVO'} EXPERIENCIA {n_exp}",
+                 "", "", efectivo, bold=True,
+                 fill=FILL_VALOR if en_revision else FILL_EFECTIVO)
             r += 1
 
             idx = len(periodos_validos)
@@ -1512,7 +1589,6 @@ def construir_hoja_profesional(
         # propuesto una es justamente cuando más falta hace avisar que está sin
         # confirmar (antes solo se pintaba si NO había obra → 40% de los avisos
         # quedaban invisibles).
-        rev = revisiones.get((n_prof, n_exp))
         motivo_rev, accion_rev = _motivo_accion(rev) if rev else (None, None)
         if fx and fx.get("sub_obras"):
             # cert multi-obra: la banda F:K muestra un RESUMEN (cuántas + no halladas);
@@ -1526,15 +1602,14 @@ def construir_hoja_profesional(
                          "verificacion_expediente", "aprobacion_expediente")):
             top = (r_top if not motivo_rev
                    else render_aviso_revision(r_top, motivo_rev, accion_rev) + 1)
-            r_right = render_obra(top, fx, ini, fin)
+            ref = _ya_pintada(fx, ini, fin)
+            r_right = (render_ya_pintada(top, fx, ref) if ref
+                       else render_obra(top, fx, ini, fin))
             if fx.get("seace"):
                 r_right = render_seace(r_right + 1, fx["seace"])
             r = max(r, r_right + 1)
-            # el bloque de la experiencia SE PINTA SIEMPRE completo (es la
-            # evidencia de ESA experiencia, en la franja pegada a su cuadro de
-            # hitos); solo se registra para que una SubExperiencia posterior con
-            # exactamente el mismo contenido pueda apuntar aquí.
-            _registrar_obra(fx, ini, fin, f"Experiencia {n_exp}", r_top)
+            if not ref:
+                _registrar_obra(fx, ini, fin, f"Experiencia {n_exp}", top)
         elif fx and fx.get("seace"):
             top = (r_top if not motivo_rev
                    else render_aviso_revision(r_top, motivo_rev, accion_rev) + 1)
@@ -1681,12 +1756,28 @@ def construir_hoja_profesional(
     if res5 and res5.dias_traslape:
         _p5_tot("(−) Traslapes entre experiencias (ALT11)", None, res5.dias_traslape, FILL_BACKEND)
     _dias_ef = res5.dias_efectivos if res5 else _se
-    _p5_tot("DÍAS EFECTIVOS DEL PROFESIONAL", None, _dias_ef)
+    _hay_revision = any(revisiones.get((n_prof, e.get("n")))
+                        for e in prof.get("experiencias", []))
+    _p5_tot("DÍAS PROVISIONALES DEL PROFESIONAL — POR VERIFICAR" if _hay_revision
+            else "DÍAS EFECTIVOS DEL PROFESIONAL", None, _dias_ef,
+            FILL_VALOR if _hay_revision else FILL_EFECTIVO)
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=18)
     ca = ws.cell(r, 1, "AÑOS EFECTIVOS (días efectivos / 365)")
     ca.font, ca.border, ca.alignment = F_BOLD, BORDER, AL_HEAD
     cy = ws.cell(r, 19, round(anios(_dias_ef), 2))
-    cy.font, cy.fill, cy.border, cy.number_format = F_BOLD, FILL_EFECTIVO, BORDER, FMT_DEC
+    cy.font, cy.fill, cy.border, cy.number_format = (
+        F_BOLD, FILL_VALOR if _hay_revision else FILL_EFECTIVO, BORDER, FMT_DEC)
+
+    r += 2
+    veredicto = prof.get("cumple_backend") or prof.get("cumple") or "POR VERIFICAR — sin conclusión"
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+    cvl = ws.cell(r, 1, "CONCLUSIÓN DEL TIEMPO EFECTIVO")
+    cvl.font, cvl.fill, cvl.border, cvl.alignment = F_BOLD, FILL_RECAP, BORDER, AL_HEAD
+    ws.merge_cells(start_row=r, start_column=7, end_row=r, end_column=19)
+    cver = ws.cell(r, 7, _sin_jerga(veredicto))
+    cver.font, cver.border, cver.alignment = F_BOLD, BORDER, AL_WRAP
+    cver.fill = (_fill_veredicto(veredicto, "pos") or FILL_VALOR)
+    ws.row_dimensions[r].height = max(30, (-(-len(str(cver.value)) // 90)) * 14 + 4)
 
     # ── Factor de evaluación, AL FINAL de la hoja (issue #32) ────────────────
     # La página del Cuadro de Factores (4.2 A — la tabla de puntaje) cierra la
@@ -1701,8 +1792,12 @@ def construir_hoja_profesional(
     _factor_pdf = certificados.get((n_prof, "FACTOR"))
     if _factor_pdf:
         r += 2
-        embeber_cert(_factor_pdf, "FACTOR DE EVALUACIÓN — recorte de las bases "
-                                  "(el baremo con el que se puntúa lo anterior)")
+        if _factor_a_pdf_valido(_factor_pdf):
+            embeber_cert(_factor_pdf, "FACTOR DE EVALUACIÓN — recorte de las bases "
+                                      "(el baremo con el que se puntúa lo anterior)")
+        else:
+            banda("⚠ FACTOR A NO EMBEBIDO — el recorte recibido corresponde a otro "
+                  "factor de las bases; corregir la página de origen", F_AVISO, FILL_AVISO)
 
 
 # ── Entregable completo ──────────────────────────────────────────────────────
@@ -1741,7 +1836,7 @@ def generar_excel_final(
     ws.title = "CLAUDE"
     construir_hoja_evaluacion(ws, espejo, confiabilidad=confiabilidad)
 
-    construir_hoja_base_datos(wb.create_sheet("Base de Datos"), espejo)
+    construir_hoja_base_datos(wb.create_sheet("Base de Datos"), espejo, cuis)
 
     for prof in espejo.get("profesionales", []):
         nombre = etiqueta_hoja(prof.get("n_prof", 0), prof.get("cargo", ""))
@@ -1828,6 +1923,10 @@ def inyectar_veredicto_backend(espejo: dict, enriquecimiento: Optional[dict]) ->
         if d.get("cumple_backend"):
             p["cumple_backend"] = d["cumple_backend"]
             p["minimo_exigido_backend"] = d.get("minimo_texto")
+    # También al regenerar desde disco: el puntaje heredado de Factor A no puede
+    # sobrevivir si los efectivos actuales no sostienen sus excedentes.
+    from orquestador.etapas_reales import _recalcular_factor_a
+    _recalcular_factor_a(espejo, enriquecimiento or {})
 
 
 def regenerar_excel_final(espejo: dict, enriquecimiento: Optional[dict],
@@ -1842,6 +1941,8 @@ def regenerar_excel_final(espejo: dict, enriquecimiento: Optional[dict],
     pasaban en absoluto, así que regenerar arrancaba TODAS las imágenes embebidas
     (constancias, TDR, Anexo 16) del entregable — silenciosamente."""
     paral, cuis, fichas, sunat = desempaquetar_enriquecimiento(enriquecimiento)
+    from validacion.recalculo import recalcular_espejo
+    recalcular_espejo(espejo, sobrescribir=True)
     inyectar_veredicto_backend(espejo, enriquecimiento)
     salida = Path(salida)
     if certificados is None:

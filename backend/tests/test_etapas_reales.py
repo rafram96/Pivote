@@ -343,7 +343,9 @@ def test_flujo_real_completo_con_revision_humana(tmp_path):
     # siguiente (convención existente de _extraer_periodos_suspension) → 90
     assert p1["dias_paralizados"] == 90
     assert p1["minimo_anios"] == 3
-    assert "cumple_backend" not in p1  # 3.4 años efectivos ≥ 3
+    # Una de las experiencias que sostiene el total no fue cruzada: aunque la
+    # suma provisional supere el mínimo, no puede publicarse como CUMPLE firme.
+    assert p1["cumple_backend"].startswith("POR VERIFICAR")
 
     # el humano resuelve la pendiente pegando un CUI → job completa
     job = motor.resolver_revision(job.job_id, 1, 2, {"cui": "777999"})
@@ -1172,6 +1174,60 @@ def test_sunat_trae_representantes_e_historico_una_vez_por_ruc():
     assert s2["habido"]["periodo"]["ok"] is True
 
 
+def test_alt04_reinscripcion_se_reconcilia_con_historico_habido():
+    """Una fecha de inscripción vigente posterior no es una creación imposible
+    cuando el histórico acredita que el emisor ya operaba durante el certificado."""
+    from orquestador.etapas import Contexto
+    from orquestador.etapas_reales import EtapaSunatReal
+    from scraping.sunat import HistoricoSUNAT, TramoCondicion
+
+    espejo = {
+        "_meta": {}, "postor": {},
+        "profesionales": [{"n_prof": 1, "cargo": "ESP", "experiencias": [{
+            "n": 1, "entidad_emisora": "CONSORCIO X RUC 20512345678",
+            "fecha_inicial": "2012-01-01", "fecha_final": "2015-12-31",
+            "fecha_emision": "2016-01-15",
+        }]}], "resumen_evaluacion": {"factores": []},
+    }
+    hist = HistoricoSUNAT(ruc="20512345678", condiciones=[
+        TramoCondicion("HABIDO", date(2010, 1, 1), date(2016, 12, 31))])
+    ctx = Contexto(job=None, espejo=espejo, enriquecimiento={})
+    res = EtapaSunatReal(
+        consultor=lambda r: EmpresaFake(r, "CONSORCIO X", date(2026, 1, 7)),
+        buscador=lambda n: [], extras=lambda r: ([], hist),
+    ).correr(ctx)
+
+    s = ctx.enriquecimiento["1:1"]["sunat"]
+    assert s["alt04"]["estado"] == "REINSCRIPCION"
+    assert "reinscripción" in s["alt04"]["mensaje"]
+    assert not [o for o in res.observaciones if o.codigo == "ALT04"]
+
+
+def test_factor_a_descarta_cargos_sin_exceso_efectivo_y_retira_puntaje():
+    from orquestador.etapas_reales import _recalcular_factor_a
+
+    espejo = {
+        "profesionales": [
+            {"n_prof": 1, "requisitos": {"factor_a_aplica": True}},
+            {"n_prof": 2, "requisitos": {"factor_a_aplica": True}},
+        ],
+        "resumen_evaluacion": {
+            "factores": [{"factor": "A", "puntaje": 40, "detalle": "declarado"}],
+            "puntaje_total": 60,
+        },
+    }
+    enriquecimiento = {
+        "prof:1": {"minimo_dias": 730, "dias_efectivos": 1200},
+        "prof:2": {"minimo_dias": 730, "dias_efectivos": 900},
+    }
+    _recalcular_factor_a(espejo, enriquecimiento)
+
+    factor = espejo["resumen_evaluacion"]["factores"][0]
+    assert factor["puntaje"] is None
+    assert "1 de 2" in factor["detalle"] and "profesionales 1" in factor["detalle"]
+    assert espejo["resumen_evaluacion"]["puntaje_total"] == 20
+
+
 def test_sunat_desempate_por_nombre_exacto():
     """Varias filas en SUNAT (búsqueda por prefijo) pero solo UNA idéntica al
     nombre buscado → se cruza esa (via nombre_exacto), no va a ambiguo.
@@ -1417,9 +1473,9 @@ BIM_PERIODOS = [("2024-02-23", "2025-01-16"), ("2025-03-19", "2025-08-22"),
                 ("2025-08-04", "2025-11-14"), ("2025-09-30", "2026-04-09")]
 
 
-def test_traslape_real_bajo_el_minimo_da_no_cumple(tmp_path):
-    """781 días nominales − 65 de traslape = 716 efectivos < 720 exigidos.
-    Con datos verificados, el NO CUMPLE es DURO."""
+def test_traslape_bajo_minimo_sin_cruce_queda_provisional(tmp_path):
+    """781 días nominales − 65 de traslape = 716, pero el fake no devuelve
+    obra: el cálculo es provisional y no puede producir un NO CUMPLE duro."""
     repo = RepositorioMemoria()
     motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
                                 fetcher_infoobras=lambda *a, **k: None,
@@ -1430,7 +1486,7 @@ def test_traslape_real_bajo_el_minimo_da_no_cumple(tmp_path):
     assert p["minimo_dias"] == 720 and p["minimo_texto"] == "24 meses"
     assert p["dias_traslape"] == 65, "los 65 días de doble conteo deben descontarse"
     assert p["dias_efectivos"] == 716
-    assert p["cumple_backend"].startswith("NO CUMPLE")
+    assert p["cumple_backend"].startswith("POR VERIFICAR")
     assert "24 meses" in p["cumple_backend"]
     prof = repo.cargar_espejo(job.job_id)["profesionales"][0]
     # El disco conserva el espejo de ingreso; el desglose durable vive en el
@@ -1455,12 +1511,12 @@ def test_el_veredicto_del_backend_llega_al_excel_al_regenerar(tmp_path):
     assert "cumple_backend" not in espejo_disco["profesionales"][0],         "el espejo en disco es el de ingreso; el veredicto vive en el enriquecimiento"
     inyectar_veredicto_backend(espejo_disco, repo.cargar_enriquecimiento(job.job_id))
     prof = espejo_disco["profesionales"][0]
-    assert prof["cumple_backend"].startswith("NO CUMPLE")
+    assert prof["cumple_backend"].startswith("POR VERIFICAR")
     assert prof["dias_efectivos_backend"] == 716
     assert prof["total_backend"] == {
         "dias_declarados": 781, "dias_paralizados": 0,
         "dias_traslape": 65, "dias_efectivos": 716,
-        "anios_efectivos": 1.96, "incompleto": False,
+        "anios_efectivos": 1.96, "incompleto": True,
     }
     assert prof["minimo_exigido_backend"] == "24 meses"
     # y el veredicto del LLM se conserva: el backend no lo reescribe, lo contradice

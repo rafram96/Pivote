@@ -78,8 +78,13 @@ def test_descarga_seace_sin_obra_id_es_idempotente_y_entra_al_zip(tmp_path):
         ESPEJO, {(1, 1): destino}, tmp_path / "infoobras.zip", enriquecimiento=enr)
     with zipfile.ZipFile(salida) as zf:
         nombres = zf.namelist()
+        # El fake devuelve bytes idénticos para ambos documentos: el ZIP guarda
+        # el contenido una sola vez y el manifiesto conserva las dos identidades.
         assert any(n.endswith("SEACE_01_BASES_INTEGRADAS.pdf") for n in nombres)
-        assert any(n.endswith("SEACE_02_CONTRATO_FIRMADO.pdf") for n in nombres)
+        manifiesto = zf.read(next(n for n in nombres
+                                  if n.endswith("MANIFIESTO_DOCUMENTOS.txt"))).decode("utf-8")
+        assert "SEACE_01_BASES_INTEGRADAS.pdf" in manifiesto
+        assert "SEACE_02_CONTRATO_FIRMADO.pdf" in manifiesto
 
 
 def test_marca_infoobras_previa_no_salta_seace(tmp_path):

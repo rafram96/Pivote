@@ -165,6 +165,15 @@ def _sin_jerga(v):
     out = re.sub(r"\bfunciones_similares\b", "funciones", out)
     out = re.sub(r"\bn_prof\s*=\s*(\d+)\b", r"profesional \1", out)
     out = re.sub(r"\broster_bundles\.json\b", "el mapa de la propuesta", out)
+    out = re.sub(r"\bcargos_similares_validos\b", "cargos similares admitidos", out)
+    out = re.sub(r"\baplica\s*:\s*false\b", "no aplica", out, flags=re.I)
+    out = re.sub(r"\bsubagente(?:s)?\b", "revisión documental", out, flags=re.I)
+    out = re.sub(r"\bOCR\b", "lectura del documento", out)
+    out = re.sub(r"\bstint\b", "periodo", out, flags=re.I)
+    out = re.sub(r"Deber[aá]\s+acercarse\s+a\s+los\s+Centros\s+de\s+Servicios.*$",
+                 "", out, flags=re.I)
+    out = re.sub(r"^\s*-{2,}\s*", "", out)
+    out = re.sub(r"\bCHACARILLLA\b", "CHACARILLA", out, flags=re.I)
     out = re.sub(r"\bnull\b", "sin dato", out)
     return re.sub(r"\s{2,}", " ", out).strip()
 

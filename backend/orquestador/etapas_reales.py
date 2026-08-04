@@ -243,9 +243,13 @@ class EtapaValidacionReal:
         # cuadran. Si algún día se activa `sobrescribir=True`, este bloque debe ir
         # DESPUÉS de `verificar_espejo`: las NOTAS 9 y 10 comparan contra lo que
         # escribió Claude y ya no lo encontrarían.
-        recalculo = recalcular_espejo(ctx.espejo)
-        observaciones += observaciones_recalculo(recalculo, origen=E.VALIDACION)
         observaciones += verificar_espejo(ctx.espejo)
+        # La verificación conserva primero la cifra original para poder señalar
+        # discrepancias; después el entregable adopta SIEMPRE la aritmética
+        # inclusiva determinística. Así Base de Datos, CLAUDE y las hojas P usan
+        # la misma convención (incluidos los años bisiestos).
+        recalculo = recalcular_espejo(ctx.espejo, sobrescribir=True)
+        observaciones += observaciones_recalculo(recalculo, origen=E.VALIDACION)
         # DESPUÉS de verificar (que lee el veredicto original de Claude para
         # detectar la contradicción): marca en rojo, dentro del espejo que va al
         # Excel, las experiencias que no acreditan ni cargo ni funciones (#31).
@@ -403,6 +407,16 @@ class EtapaResolucionCuiReal:
                    # resuelto surge en "Por confirmar" (elegir candidato, pegar el
                    # CUI a mano, o descartar la experiencia).
                 rev += 1
+                # Persistir también la abstención. Sin esta marca, REGLAS veía
+                # una experiencia con fechas válidas pero sin ficha y la trataba
+                # como tiempo verificado. No se promueve ningún candidato: el
+                # resolver conserva exactamente su decisión de revisión.
+                ctx.enriquecimiento[k] = {
+                    **(ctx.enriquecimiento.get(k) or {}),
+                    "cui": None, "via": "REVISION", "sin_verificar": True,
+                    "decision": r.get("decision"),
+                    "candidatos": r.get("candidatos") or [],
+                }
                 ya = any(it.n_prof == np_ and it.n_exp == ne and not it.resuelto
                          for it in ctx.job.items_revision)
                 if not ya:
@@ -1369,6 +1383,32 @@ class EtapaSunatReal:
             enr = ctx.enriquecimiento.get(k) or {}
             fins = getattr(emp, "fecha_inscripcion", None)
             ini_act = getattr(emp, "fecha_inicio_actividades", None)
+            habido = _evaluar_habido_emisor(hist, emp, e, ini)
+            # Una inscripción actual posterior no demuestra que la empresa no
+            # existiera antes: SUNAT la reemplaza tras ciertas bajas de oficio y
+            # reinscripciones. Si el propio histórico acredita actividad en el
+            # periodo certificado, ALT04 queda reconciliada como reinscripción,
+            # nunca como una imposibilidad roja.
+            evidencia_previa = bool(
+                habido and any(
+                    (habido.get(k) or {}).get("ok") is True
+                    for k in ("emision", "periodo")
+                )
+            )
+            alt04 = None
+            if fins and ini and fins > ini:
+                alt04 = {
+                    "estado": "REINSCRIPCION" if evidencia_previa else "ALERTA",
+                    "fecha_referencia": fins.isoformat(),
+                    "mensaje": (
+                        "La fecha vigente de inscripción es posterior, pero el histórico "
+                        "SUNAT acredita actividad en el periodo: probable reinscripción "
+                        "tras una baja; no se trata como creación de la empresa."
+                        if evidencia_previa else
+                        "La inscripción SUNAT vigente es posterior al inicio de la "
+                        "experiencia; confirmar la inscripción original en el histórico."
+                    ),
+                }
             enr["sunat"] = {
                 "ruc": ruc, "via": via,
                 "razon_social": getattr(emp, "razon_social", None),
@@ -1386,14 +1426,16 @@ class EtapaSunatReal:
                 # información histórica + la pregunta que le importa al evaluador:
                 # ¿estaba HABIDO al emitir el certificado y durante la obra?
                 "historico": hist.to_dict() if hist else None,
-                "habido": _evaluar_habido_emisor(hist, emp, e, ini),
+                "habido": habido,
+                "alt04": alt04,
             }
             ctx.enriquecimiento[k] = enr
-            if fins and ini and fins > ini:
+            if fins and ini and fins > ini and not evidencia_previa:
                 obs.append(pipeline.Observacion(
-                    codigo="ALT04", severidad=pipeline.Severidad.ALERTA,
-                    mensaje=f"el emisor (RUC {ruc}) se constituyó el {fins.strftime('%d/%m/%y')}, "
-                            f"DESPUÉS del inicio de la experiencia que certifica",
+                    codigo="ALT04", severidad=pipeline.Severidad.ADVERTENCIA,
+                    mensaje=f"la inscripción SUNAT vigente del emisor (RUC {ruc}) figura el "
+                            f"{fins.strftime('%d/%m/%y')}, después del inicio de la experiencia; "
+                            "confirmar la inscripción original en el histórico antes de concluir",
                     origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
 
         return _res(self.nombre, EE.OK if err == 0 else EE.ERROR_PARCIAL,
@@ -1520,6 +1562,77 @@ def _minimo_exigido(requisitos) -> Optional[tuple[int, str]]:
             n, unidad = int(m.group(1)), m.group(2).lower()[0]
             return n * _DIAS_POR_UNIDAD[unidad], f"{n} {m.group(2)}"
     return None
+
+
+def _participantes_factor_a(espejo: dict) -> set[int]:
+    """Cargos que participan según las bases; legado: recupera la lista que
+    quedó escrita en el detalle del factor, sin confiar en sus resultados."""
+    estructurados = {
+        p.get("n_prof") for p in espejo.get("profesionales", [])
+        if (p.get("requisitos") or {}).get("factor_a_aplica") is True
+    }
+    if estructurados:
+        return estructurados
+    factor = next((f for f in (espejo.get("resumen_evaluacion") or {}).get("factores", [])
+                   if str(f.get("factor") or "").strip().upper() == "A"), None)
+    texto = str((factor or {}).get("detalle") or "")
+    # Formato histórico real: "Factor A (nº 2 ..., 3 ..., 4 ..., 6 ...)".
+    # El paréntesis termina antes de las cifras de años/porcentaje del resultado.
+    parentesis = re.search(r"factor\s*a\s*\(([^)]+)\)", texto, flags=re.I)
+    if parentesis:
+        numeros = {int(x) for x in re.findall(r"\b\d+\b", parentesis.group(1))}
+        existentes = {p.get("n_prof") for p in espejo.get("profesionales", [])}
+        if numeros & existentes:
+            return numeros & existentes
+    m = re.search(r"participan[^:]*:\s*([^.;]+)", texto, flags=re.I)
+    return {int(x) for x in re.findall(r"\d+", m.group(1))} if m else set()
+
+
+def _recalcular_factor_a(espejo: dict, enriquecimiento: dict) -> None:
+    """El Factor A solo existe sobre tiempo efectivo que excede el mínimo.
+
+    La rúbrica histórica no viaja estructurada, por lo que no se inventa un
+    tramo: se retira el puntaje anterior y se deja pendiente. Cuando la skill ya
+    traiga ``factor_a_aplica``, el detalle y la elegibilidad sí son plenamente
+    determinísticos.
+    """
+    resumen = espejo.get("resumen_evaluacion") or {}
+    factor = next((f for f in resumen.get("factores", [])
+                   if str(f.get("factor") or "").strip().upper() == "A"), None)
+    if not factor:
+        return
+    participantes = _participantes_factor_a(espejo)
+    if not participantes:
+        return
+    califican: list[int] = []
+    pendientes: list[int] = []
+    for p in espejo.get("profesionales", []):
+        np_ = p.get("n_prof")
+        if np_ not in participantes:
+            continue
+        d = enriquecimiento.get(f"prof:{np_}") or {}
+        minimo, efectivos = d.get("minimo_dias"), d.get("dias_efectivos")
+        provisional = bool(d.get("veredicto_provisional"))
+        if minimo is None or efectivos is None or provisional:
+            pendientes.append(np_)
+            p["anios_adicionales"] = "POR VERIFICAR — el tiempo efectivo no es definitivo"
+            continue
+        exceso = max(0, efectivos - minimo)
+        p["anios_adicionales"] = f"{round(exceso / 365, 2)} años efectivos adicionales"
+        if exceso >= 365:
+            califican.append(np_)
+    puntaje_anterior = factor.get("puntaje")
+    factor["puntaje"] = None
+    factor["detalle"] = (
+        f"{len(califican)} de {len(participantes)} cargos acreditan al menos un año "
+        f"efectivo adicional (profesionales {', '.join(map(str, califican)) or 'ninguno'}). "
+        + (f"Pendientes de verificación: {', '.join(map(str, pendientes))}. " if pendientes else "")
+        + "Puntaje por confirmar con el cuadro del Factor A de las bases."
+    )
+    if isinstance(puntaje_anterior, (int, float)) and isinstance(resumen.get("puntaje_total"), (int, float)):
+        resumen["puntaje_total"] = max(0, resumen["puntaje_total"] - puntaje_anterior)
+    resumen["nota"] = ((resumen.get("nota") or "") +
+                       " · Factor A recalculado con tiempo efectivo; su tramo queda por confirmar.").strip(" ·")
 
 
 class EtapaReglasReal:
@@ -1651,7 +1764,7 @@ class EtapaReglasReal:
             # Excel), nunca como NO CUMPLE duro. El NO CUMPLE se reserva para cuando los
             # días caen bajo el mínimo con datos EFECTIVAMENTE verificados.
             prov = datos.get("veredicto_provisional")
-            if prov and str(datos.get("cumple_backend", "")).startswith("NO CUMPLE"):
+            if prov:
                 exps = ", ".join(map(str, sorted(set(prov))))
                 # El motivo se nombra tal cual es: «no respondió» y «casi no cubre el
                 # periodo» mandan al evaluador a revisar cosas distintas.
@@ -1692,6 +1805,7 @@ class EtapaReglasReal:
                 p["cumple_backend"] = datos["cumple_backend"]
                 p["minimo_exigido_backend"] = datos.get("minimo_texto")
             ok += 1
+        _recalcular_factor_a(ctx.espejo, ctx.enriquecimiento)
         # B2 — resumen de incertidumbre InfoObras: "X de Y no encontrados". Solo en
         # corrida COMPLETA (en re-disparo de un item no se recalcula → evita duplicar,
         # porque el re-disparo EXTIENDE las observaciones en vez de reemplazarlas).
