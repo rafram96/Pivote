@@ -286,6 +286,38 @@ def test_zip_arbol_completo_por_experiencia_con_manifiestos(tmp_path):
         assert "+ 0 nota" not in indice
 
 
+def test_zip_sin_manifiestos_cuando_la_variable_esta_en_cero(tmp_path, monkeypatch):
+    # El manifiesto es un documento TÉCNICO; el entregable lo consume un equipo
+    # de evaluación no técnico. Con PIVOTE_MANIFIESTOS_ZIP=0 no se escribe ni se
+    # anuncia en el índice, pero los PDF y los conteos quedan intactos (el
+    # SHA-256 se sigue calculando: el índice depende de él).
+    monkeypatch.setenv("PIVOTE_MANIFIESTOS_ZIP", "0")
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir(); b.mkdir()
+    (a / "original-a.pdf").write_bytes(b"%PDF-1.4 misma evidencia")
+    (b / "otro-nombre.pdf").write_bytes(b"%PDF-1.4 misma evidencia")
+
+    enriquecimiento = {
+        "1:1": {"obra": {"obra_id": 72056}},
+        "1:2": {"obra": {"obra_id": 72056}},
+    }
+    salida = construir_zip_infoobras(
+        ESPEJO, {(1, 1): a, (1, 2): b}, tmp_path / "sin-manifiestos.zip",
+        enriquecimiento=enriquecimiento)
+    with zipfile.ZipFile(salida) as zf:
+        nombres = zf.namelist()
+        assert not any(n.endswith("MANIFIESTO_DOCUMENTOS.txt") for n in nombres)
+        # los documentos del evaluador siguen ahí, en su árbol por experiencia
+        assert "P01 SUPERVISIÓN/E1/original-a.pdf" in nombres
+        assert "P01 SUPERVISIÓN/E2/otro-nombre.pdf" in nombres
+        indice = zf.read("indice.txt").decode("utf-8")
+        assert "MANIFIESTO_DOCUMENTOS.txt" not in indice
+        assert "huella SHA-256" not in indice
+        # conteos del índice sin cambios (siguen calculándose con el SHA-256)
+        assert "1 compartido(s) con otras experiencias de esta obra" in indice
+        assert "0 propio(s) del periodo" in indice
+
+
 # ── Inventario (parseo offline del HTML de InfoObras) ───────────────────────
 
 HTML_INVENTARIO = """

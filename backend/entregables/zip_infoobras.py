@@ -750,6 +750,21 @@ def _sha256_archivo(path: Path) -> str:
     return h.hexdigest()
 
 
+def _manifiestos_activos() -> bool:
+    """¿Se escribe el `MANIFIESTO_DOCUMENTOS.txt` de cada experiencia?
+
+    `PIVOTE_MANIFIESTOS_ZIP` sin definir o "1" → SÍ (default; conserva el contrato
+    actual del ZIP, spec D5 de la issue #80). "0" → NO: el manifiesto es un
+    documento de verificación TÉCNICA (para el desarrollador) y el entregable lo
+    consume un equipo de evaluación no técnico. El SHA-256 se sigue calculando
+    siempre: el índice depende de él para los conteos de compartidos/propios.
+
+    Se lee en cada llamada (no al importar) para que el valor del `.env` se
+    respete sin reiniciar el proceso y para que los tests puedan monkeypatchearlo.
+    """
+    return (os.getenv("PIVOTE_MANIFIESTOS_ZIP") or "1").strip() not in ("0", "false", "no")
+
+
 def _estado_seccion_legible(estado: dict) -> str:
     """Estado del manifiesto en lenguaje de evaluador, sin nombres internos."""
     estado = estado or {}
@@ -782,6 +797,7 @@ def construir_zip_infoobras(
     del backend (sin ella, cae al `cui` del espejo, que puede estar incompleto).
     """
     enr = enriquecimiento or {}
+    manifiestos = _manifiestos_activos()   # PIVOTE_MANIFIESTOS_ZIP (default: 1)
     raiz = _ruta_segura(espejo.get("_meta", {}).get("concurso") or "concurso")
     indice: list[str] = [f"ZIP InfoObras · {raiz}",
                          f"Postor: {espejo.get('_meta', {}).get('postor') or '—'}", ""]
@@ -796,7 +812,8 @@ def construir_zip_infoobras(
         # navega P/E con doble clic, sin indirecciones (correctivo issue #80 —
         # la deduplicación pertenece a la DESCARGA, no a la entrega). El índice
         # sí explica qué contenidos se comparten entre experiencias de la misma
-        # obra, y el MANIFIESTO de cada carpeta deja la huella SHA-256.
+        # obra, y el MANIFIESTO de cada carpeta deja la huella SHA-256
+        # (opcional: `PIVOTE_MANIFIESTOS_ZIP=0` lo omite, ver `_manifiestos_activos`).
         vistos_por_obra: dict[str, set[str]] = {}
         for prof in espejo.get("profesionales", []):
             n_prof = prof.get("n_prof")
@@ -831,6 +848,8 @@ def construir_zip_infoobras(
                         partes = "/".join(_ruta_segura(x, 38) for x in rel.parts)
                         zf.write(p, f"{base}/{partes}")
                     manifiesto_docs: list[str] = [
+                        "Documento técnico de verificación — el equipo de "
+                        "evaluación puede ignorarlo.",
                         "DOCUMENTOS DE ESTA EXPERIENCIA",
                         "Cada línea conserva: ruta -> SHA-256 (huella del contenido).",
                         "Un mismo SHA-256 en otra experiencia = el mismo documento.",
@@ -848,7 +867,7 @@ def construir_zip_infoobras(
                         digests.append(digest)
                         rel = "/".join(str(x) for x in p.relative_to(origen).parts)
                         manifiesto_docs.append(f"{rel} -> {digest}")
-                    if reales:
+                    if reales and manifiestos:
                         zf.writestr(f"{base}/MANIFIESTO_DOCUMENTOS.txt",
                                     "\n".join(manifiesto_docs) + "\n")
                     if not reales:
@@ -899,13 +918,15 @@ def construir_zip_infoobras(
                         f"{proyecto[:70]}: SIN DOCUMENTOS — {motivo}")
 
         if any(vistos_por_obra.values()):
-            indice[3:3] = [
+            cabecera = [
                 "Cada experiencia contiene su árbol completo de documentos; los que",
                 "se comparten entre experiencias de una misma obra se repiten para",
-                "navegación directa y el índice lo indica. El MANIFIESTO_DOCUMENTOS.txt",
-                "de cada carpeta lista su contenido con la huella SHA-256.",
-                "",
+                "navegación directa y el índice lo indica.",
             ]
+            if manifiestos:
+                cabecera.append("El MANIFIESTO_DOCUMENTOS.txt de cada carpeta lista "
+                                "su contenido con la huella SHA-256.")
+            indice[3:3] = cabecera + [""]
         zf.writestr("indice.txt", "\n".join(indice) + "\n")
     os.replace(tmp, salida)   # atómico: recién aquí `salida` existe y está completo
     return salida

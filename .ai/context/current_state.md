@@ -17,6 +17,13 @@ Replay offline Vitarte: **1,205 PDF, 29 manifiestos, cero almacén central**, ZI
 íntegro de 971,718,423 bytes. Gate: **748 passed, 25 skipped**; golden no aplica
 al veredicto/resolver y su corpus continúa ausente según la Regla de oro.
 
+El manifiesto es opcional desde `PIVOTE_MANIFIESTOS_ZIP` (default `1` = se
+genera, conserva el contrato de la #80; `0` = no se escribe ningún
+`MANIFIESTO_DOCUMENTOS.txt` ni la línea que lo anuncia en el encabezado del
+`indice.txt`). Es un documento de verificación TÉCNICA y el entregable lo
+consume un equipo de evaluación no técnico; el SHA-256 se calcula siempre
+porque los conteos de compartidos/propios del índice dependen de él.
+
 ## Auditoría EsSalud y correcciones #32, #72–#79 (4-ago)
 
 El pipeline ya no presenta como verificado el tiempo de una experiencia sin
