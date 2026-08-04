@@ -521,6 +521,10 @@ function requisitosDe(bases, cargoNum) {
     cargos_validos: (c.cargos_similares_validos || []).join("; "),
     tipo_experiencia_valida: `Experiencia mínima: ${c.tiempo_minimo_experiencia}. Profesión aceptada: ${(c.profesiones_aceptadas || []).join(" / ")}.`,
     tipo_obra_valida: c.tipos_obra_validos || null,
+    // Participación en el Factor A es una regla de las bases, no un juicio del
+    // evaluador. Viaja estructurada para que el servidor puntúe solo el exceso
+    // de tiempo efectivo y no el declarado.
+    factor_a_aplica: c.factor_a_aplica ?? c.aplica_factor_a ?? c.aplica ?? null,
     folio: pick(c.folio, c.folio_requisito, c.folio_tdr),   // folio en las BASES → recorte TDR (mejora A)
   };
 }

@@ -420,6 +420,7 @@ function taller(evaluacion, postorMapa) {
     personal_clave: HECHOS.map((h) => ({
       numero: h.n_prof, cargo: h.cargo, cargos_similares_validos: ["A", "B"],
       tiempo_minimo_experiencia: "5 años", profesiones_aceptadas: ["Ingeniero Civil"],
+      factor_a_aplica: h.n_prof === 2,
     })),
   });
   w("roster_bundles.json", {
@@ -463,6 +464,8 @@ test("e2e · evaluación sana: ningún aviso crítico en el espejo", () => {
   const crit = espejo.observaciones_claude.filter((o) => o.severidad === "critical");
   assert.deepStrictEqual(crit, [], `no debía haber críticos: ${JSON.stringify(crit)}`);
   assert.match(espejo.profesionales[1].cumple, /estructuras/);
+  assert.strictEqual(espejo.profesionales[1].requisitos.factor_a_aplica, true);
+  assert.strictEqual(espejo.profesionales[0].requisitos.factor_a_aplica, false);
   fs.rmSync(ws, { recursive: true, force: true });
 });
 

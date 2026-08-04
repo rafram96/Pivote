@@ -65,8 +65,10 @@ los requisitos críticos si hay tacha.**
    que el cuadro lista explícitamente, con su `puntaje_maximo` literal.
 
 10. **`pagina_factores`** (en `metadata_concurso`): la **página del PDF que estás
-    leyendo** donde está el **Cuadro Resumen de Factores / "4.2 Factores de
-    Evaluación"** — la tabla con los puntajes. Se recorta esa página y se pega al
+    leyendo** donde está el desarrollo específico de **"A. EXPERIENCIA DEL
+    PERSONAL CLAVE"** dentro de **"4.2 Factores de Evaluación"**, incluida su
+    tabla de tramos y puntajes. **NO** uses la página del Cuadro Resumen ni una
+    página que empiece en los factores J/K aunque también muestre puntajes. Se recorta y pega al
     final de la hoja de cada profesional, para que el evaluador tenga el baremo a
     la mano sin volver a las bases.
     - Es el **número de página del PDF** (la 1ª página del archivo es la `1`),
@@ -107,7 +109,8 @@ continúa, usa rango. Lo consume el recorte TDR.
 - [ ] `cargos_similares_validos` no vacío para los cargos que sí los tienen.
 - [ ] cada `personal_clave` con `folio` (dónde está su requisito en las bases → recorte TDR).
 - [ ] `paginas_personal_clave` cubre desde el primer hasta el último cargo del cuadro.
-- [ ] `pagina_factores` = página del PDF con el Cuadro de Factores (o `null` + observación).
+- [ ] `pagina_factores` = página física con el desarrollo del Factor A y sus tramos,
+      no el Cuadro Resumen ni otros factores (o `null` + observación).
 - [ ] `cuantia` + `limite_inferior` (90% si la oferta es limitada) calculados.
 - [ ] cada factor con `aplica` true/false según el Cuadro Resumen (PMP puede ser NO APLICA).
 - [ ] bases `.docx` → se leyó el PDF LIMPIO del script; bases `.pdf` → se excluyó lo tachado (+ obs. `tachado_pdf` si tocaba plazo/experiencia/especialidad).
