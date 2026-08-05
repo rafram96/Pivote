@@ -6,13 +6,19 @@ lenguaje de evaluador, POR QUÉ el sistema dio (o no dio) por verificados los
 documentos de un proceso. Cada señal se imprime con sus dos lados y su
 resultado, para poder discutirla.
 
-Dos modos:
+Tres modos:
 
   caso    Un certificado inventado o real contra un CUI. Consulta los procesos
           del CUI y evalúa el candado contra el proceso que el selector elige.
 
   replay  Un job ya corrido de `datos_pivote/`: recorre sus experiencias y
           resume en qué estado del candado queda cada una.
+
+  cruces  (T-011) Sobre un job ya corrido: aplica las DOS reglas de fechas
+          —inicio vs firma del contrato, término vs aprobación del expediente—
+          y resume cuántas cuadran, cuántas no y cuántas se abstienen y por qué.
+          Con `--excel RUTA` regenera además el entregable para ver la hoja
+          «Cronología de expedientes» (sin tocar el original).
 
 La red solo se toca con `--vivo`. Sin esa bandera todo sale de la caché local
 (`datos_pivote/referencia/seace_procesos/`), así que la comprobación es
@@ -27,6 +33,8 @@ Ejemplos:
         --inicio 2021-10-01 --fin 2023-10-11
 
     venv/Scripts/python backend/scripts/probar_candado_seace.py replay 7e9306a321ac
+
+    venv/Scripts/python backend/scripts/probar_candado_seace.py cruces 7e9306a321ac
 """
 from __future__ import annotations
 
@@ -328,6 +336,283 @@ def _orden_clave(k):
         return (1, 0, 0)
 
 
+# ── Modo `cruces` (T-011) ────────────────────────────────────────────────────
+
+def _cargar_job(job: str):
+    """(espejo, enriquecimiento, carpeta) de un job de `datos_pivote/`."""
+    from config import data_dir
+    carpeta = data_dir() / job
+    espejo_f, enr_f = carpeta / "espejo.json", carpeta / "enriquecimiento.json"
+    if not enr_f.exists():
+        return None, None, carpeta
+    enr = json.loads(enr_f.read_text(encoding="utf-8"))
+    espejo = (json.loads(espejo_f.read_text(encoding="utf-8"))
+              if espejo_f.exists() else {})
+    return espejo, enr, carpeta
+
+
+def _certificados_por_clave(espejo: dict) -> dict:
+    certs: dict[str, dict] = {}
+    for i, prof in enumerate(espejo.get("profesionales") or [], start=1):
+        n_prof = prof.get("n_prof") or i
+        for e in prof.get("experiencias") or []:
+            certs[f"{n_prof}:{e.get('n')}"] = e
+    return certs
+
+
+def _completar_candado(enr: dict, certs: dict, vivo: bool) -> tuple[int, set]:
+    """Rellena `seace.proceso` y `seace.candado` de un job corrido ANTES de F5,
+    usando la copia local de los procesos del CUI. No escribe nada en disco: el
+    job queda intacto y el replay es repetible. Devuelve (completados, CUIs sin
+    copia local)."""
+    from scraping.seace_abierto import clasificar_proceso
+    cache: dict[str, list | None] = {}
+    completados, sin_cache = 0, set()
+    for clave, bloque in enr.items():
+        if ":" not in str(clave) or not isinstance(bloque, dict):
+            continue
+        seace = bloque.get("seace")
+        if not isinstance(seace, dict) or seace.get("estado") != "seleccionado":
+            continue
+        if seace.get("candado"):
+            continue
+        cui = str(seace.get("cui") or "")
+        if cui not in cache:
+            cache[cui] = procesos_de(cui, vivo)[0]
+        procesos = cache[cui] or []
+        elegido = next((p for p in procesos if p.get("ocid") == seace.get("ocid")), None)
+        if elegido is None:
+            sin_cache.add(cui)
+            continue
+        resumen = resumen_proceso(elegido)
+        resumen["tipo"] = clasificar_proceso(elegido)[0]
+        cert = certs.get(clave) or {}
+        seace["proceso"] = resumen
+        seace["fecha_suscripcion"] = resumen.get("fecha_firma")
+        seace["vigencia"] = [resumen.get("vigencia_inicio"),
+                             resumen.get("vigencia_fin")]
+        seace["candado"] = evaluar_candado(resumen, {
+            "entidad_contratante": cert.get("entidad_contratante"),
+            "entidad_emisora": cert.get("entidad_emisora"),
+            "ruc_emisor": cert.get("ruc_emisor"),
+            "tipo_experiencia": seace.get("proceso_objeto"),
+            "fecha_inicial": cert.get("fecha_inicial"),
+            "fecha_final": cert.get("fecha_final"),
+            "monto_contrato_soles": cert.get("monto_contrato_soles"),
+        }).como_dict()
+        completados += 1
+    return completados, sin_cache
+
+
+def modo_cruces(a) -> int:
+    """Replay OFFLINE de las dos reglas de fechas sobre un job ya corrido."""
+    from reglas.cruces_fechas import (
+        COINCIDE, DISPARA, POR_CONFIRMAR, PREGUNTA_REGLA, REGLA_INICIO,
+        REGLA_TERMINO, TOLERANCIA_DIAS_APROBACION, TOLERANCIA_DIAS_INICIO,
+        cruces_de_experiencia,
+    )
+
+    espejo, enr, carpeta = _cargar_job(a.job)
+    if enr is None:
+        _linea(f"No existe el job {a.job} en {carpeta.parent} "
+               f"(falta enriquecimiento.json).")
+        return 2
+    certs = _certificados_por_clave(espejo)
+
+    _linea("=" * 92)
+    _linea(f"CRUCES DE FECHAS CONTRATO / EXPEDIENTE vs CERTIFICADO · job {a.job}")
+    _linea(f"Concurso: {(espejo.get('_meta') or {}).get('concurso') or '—'}")
+    _linea("=" * 92)
+    _linea("Dos preguntas por experiencia:")
+    _linea(f"  A. {PREGUNTA_REGLA[REGLA_INICIO]}")
+    _linea(f"     (se admite un desfase de hasta {TOLERANCIA_DIAS_INICIO} días "
+           f"por la entrega de terreno u orden de inicio)")
+    _linea(f"  B. {PREGUNTA_REGLA[REGLA_TERMINO]}  — solo expedientes técnicos")
+    _linea(f"     (se admiten hasta {TOLERANCIA_DIAS_APROBACION} días por el "
+           f"cierre administrativo)")
+    _linea()
+
+    completados, sin_cache = _completar_candado(enr, certs, a.vivo)
+    if completados:
+        _linea(f"El job es anterior al candado de identidad: se reconstruyó la "
+               f"identidad de {completados} proceso(s)")
+        _linea("desde la copia local de los datos abiertos. El job en disco NO "
+               "se modifica.")
+        _linea()
+    if sin_cache:
+        _linea(f"Sin copia local de procesos para {len(sin_cache)} CUI "
+               f"({', '.join(sorted(sin_cache))}).")
+        _linea("  Corre una vez con --vivo para descargarlos.")
+        _linea()
+
+    conteo = {REGLA_INICIO: {DISPARA: 0, COINCIDE: 0, POR_CONFIRMAR: 0},
+              REGLA_TERMINO: {DISPARA: 0, COINCIDE: 0, POR_CONFIRMAR: 0}}
+    razones: dict[str, dict[str, int]] = {REGLA_INICIO: {}, REGLA_TERMINO: {}}
+    detalle: list[tuple] = []
+    total_exp = 0
+
+    for clave in sorted(certs, key=_orden_clave):
+        total_exp += 1
+        cruces = cruces_de_experiencia(enr.get(clave) or {}, certs[clave])
+        for c in cruces:
+            conteo[c.regla][c.resultado] = conteo[c.regla].get(c.resultado, 0) + 1
+            if c.resultado == POR_CONFIRMAR:
+                r = _razon_corta(c.motivo)
+                razones[c.regla][r] = razones[c.regla].get(r, 0) + 1
+            if c.resultado == DISPARA or a.detalle:
+                detalle.append((clave, c))
+
+    _linea(f"Experiencias del análisis: {total_exp}")
+    _linea()
+    for regla, titulo in ((REGLA_INICIO, "A · inicio declarado vs firma del contrato"),
+                          (REGLA_TERMINO, "B · término declarado vs aprobación del expediente")):
+        c = conteo[regla]
+        evaluadas = sum(c.values())
+        _linea(f"REGLA {titulo}")
+        _linea(f"  Se pronunció sobre        : {evaluadas} experiencia(s)")
+        _linea(f"  CUADRA (la fecha calza)   : {c[COINCIDE]}")
+        _linea(f"  NO CUADRA (a revisar)     : {c[DISPARA]}")
+        _linea(f"  POR VERIFICAR (se abstuvo): {c[POR_CONFIRMAR]}")
+        for razon, n in sorted(razones[regla].items(), key=lambda x: -x[1]):
+            for i, trozo in enumerate(_envolver(razon, 78)):
+                _linea(f"      {f'{n:>3}  ' if i == 0 else '     '}{trozo}")
+        _linea()
+
+    if detalle:
+        _linea("-" * 92)
+        _linea("Detalle (profesional:experiencia):")
+        for clave, c in detalle:
+            marca = {DISPARA: "[!]", COINCIDE: "[+]", POR_CONFIRMAR: "[ ]"}
+            _linea(f"  {marca.get(c.resultado, '[?]')} {clave:>7}  "
+                   f"{'A' if c.regla == REGLA_INICIO else 'B'}  "
+                   f"declarado {c.fecha_declarada or '—'} · documento "
+                   f"{c.fecha_fuente or '—'}")
+            for trozo in _envolver(c.motivo, 84):
+                _linea(f"          {trozo}")
+        _linea()
+
+    _linea("Recordatorio: una abstención NO es un incumplimiento. Cuando la "
+           "fuente no existe o no")
+    _linea("se pudo confirmar que corresponda a este certificado, la celda dice "
+           "POR VERIFICAR.")
+
+    if a.excel:
+        return _regenerar_con_cronologia(espejo, enr, carpeta, a.excel)
+    return 0
+
+
+def modo_cruce_caso(a) -> int:
+    """Un caso INVENTADO, sin red y sin job: las dos reglas de fechas sobre datos
+    que la persona escribe en la línea de comandos. Sirve para ver el mecanismo
+    completo —incluida la regla del expediente, que un job puede no ejercitar—
+    y para discutir los umbrales con números en la mano."""
+    from reglas.cruces_fechas import (
+        PREGUNTA_REGLA, REGLA_INICIO, TITULO_REGLA,
+        evaluar_inicio_vs_contrato, evaluar_termino_vs_aprobacion,
+    )
+
+    proceso = {
+        "entidad_convocante": a.entidad_proceso or a.entidad,
+        "rucs_adjudicatarios": [a.ruc_adjudicatario or a.ruc_emisor or ""],
+        "fecha_firma": a.firma,
+        "vigencia_inicio": a.firma,
+        "vigencia_fin": a.fin,
+        "nomenclatura": "PROCESO DE PRUEBA",
+        "tipo": a.tipo,
+    }
+    certificado = {
+        "entidad_contratante": a.entidad,
+        "entidad_emisora": a.emisor,
+        "ruc_emisor": a.ruc_emisor,
+        "tipo_experiencia": a.tipo,
+        "fecha_inicial": a.inicio,
+        "fecha_final": a.fin,
+        "monto_contrato_soles": None,
+    }
+    candado = evaluar_candado(proceso, certificado)
+    enr = {"seace": {"estado": "seleccionado", "cui": "0000000",
+                     "proceso_objeto": a.tipo, "proceso": proceso,
+                     "fecha_suscripcion": a.firma,
+                     "candado": candado.como_dict()}}
+    if a.aprobacion_et:
+        enr["aprobacion_expediente"] = {"fecha": a.aprobacion_et,
+                                        "nombre": "Resolución de aprobación (prueba)"}
+        enr["verificacion_expediente"] = {
+            "verificado_en_mef": True,
+            "contratista": {"valor": a.emisor or "(emisor)",
+                            "veredicto": "no_verificable" if a.mef_no_coincide else "ok"},
+            "resolucion": {"numero": "N° 000-PRUEBA", "veredicto": "ok"},
+        }
+
+    _linea("=" * 92)
+    _linea("CRUCES DE FECHAS · caso de prueba (sin red, sin job)")
+    _linea("=" * 92)
+    _linea(f"  Periodo declarado en el certificado : {a.inicio} a {a.fin}")
+    _linea(f"  Firma del contrato del proceso      : {a.firma or '—'}")
+    _linea(f"  Aprobación del expediente           : {a.aprobacion_et or '—'}")
+    _linea()
+    _linea(f"Identidad del proceso (candado F5): {candado.resultado.upper()} — "
+           f"{len(candado.a_favor)} señal(es) a favor, {len(candado.en_contra)} en contra.")
+    _linea()
+
+    cruces = [evaluar_inicio_vs_contrato(enr["seace"], certificado),
+              evaluar_termino_vs_aprobacion(enr, certificado)]
+    for c in cruces:
+        if c is None:
+            _linea("REGLA B · no aplica: la experiencia no es de expediente técnico "
+                   "(usa --aprobacion-et para ejercitarla).")
+            _linea()
+            continue
+        letra = "A" if c.regla == REGLA_INICIO else "B"
+        _linea(f"REGLA {letra} · {TITULO_REGLA[c.regla]}")
+        _linea(f"  {PREGUNTA_REGLA[c.regla]}  →  {c.respuesta}")
+        if c.dias is not None:
+            _linea(f"  Diferencia día-exacta: {c.dias} día(s)")
+        for trozo in _envolver(c.motivo, 88):
+            _linea(f"      {trozo}")
+        _linea()
+    _linea("Recordatorio: POR VERIFICAR nunca es un incumplimiento — es el "
+           "sistema absteniéndose.")
+    return 0
+
+
+def _razon_corta(motivo: str) -> str:
+    """Primera oración del motivo — agrupa las abstenciones por causa real."""
+    t = str(motivo or "").strip()
+    corte = t.find(": ")
+    if 0 < corte < 160:
+        t = t[corte + 2:]
+    punto = t.find(". ")
+    if punto > 0:
+        t = t[:punto]
+    return t[:200].rstrip(" .") + "."
+
+
+def _regenerar_con_cronologia(espejo: dict, enr: dict, carpeta, salida) -> int:
+    """Regenera el Excel del job en OTRA ruta, con la hoja «Cronología de
+    expedientes». No sobrescribe el entregable original."""
+    from pathlib import Path
+
+    from entregables import mapear_certificados, regenerar_excel_final
+    from entregables.excel_final import HOJA_CRONOLOGIA
+
+    salida = Path(salida).resolve()
+    certs = mapear_certificados(carpeta.parent, carpeta.name)
+    _linea()
+    _linea("-" * 92)
+    _linea(f"Regenerando el Excel en {salida} …")
+    regenerar_excel_final(espejo, enr, salida, certificados=certs)
+    import openpyxl
+    wb = openpyxl.load_workbook(salida, read_only=True)
+    hojas = wb.sheetnames
+    wb.close()
+    _linea(f"  Hojas del libro: {len(hojas)}")
+    _linea(f"  La hoja «{HOJA_CRONOLOGIA}» "
+           f"{'SÍ está' if HOJA_CRONOLOGIA in hojas else 'NO está'} "
+           f"(es la última: {hojas[-1]}).")
+    return 0 if HOJA_CRONOLOGIA in hojas else 1
+
+
 # ── Entrada ──────────────────────────────────────────────────────────────────
 
 def main(argv=None) -> int:
@@ -359,6 +644,42 @@ def main(argv=None) -> int:
     r.add_argument("--detalle", action="store_true",
                    help="listar el resultado de cada experiencia")
     r.set_defaults(func=modo_replay)
+
+    x = sub.add_parser("cruces",
+                       help="T-011 · cruces de fechas contrato/expediente ↔ "
+                            "certificado sobre un job ya corrido")
+    x.add_argument("job", help="id del job en datos_pivote (ej. 7e9306a321ac)")
+    x.add_argument("--vivo", action="store_true",
+                   help="consultar los datos abiertos si falta la copia local")
+    x.add_argument("--detalle", action="store_true",
+                   help="listar TODAS las experiencias, no solo las que no cuadran")
+    x.add_argument("--excel", metavar="RUTA",
+                   help="además, regenerar el Excel del job en esa ruta para ver "
+                        "la hoja «Cronología de expedientes» (no toca el original)")
+    x.set_defaults(func=modo_cruces)
+
+    y = sub.add_parser("cruce-caso",
+                       help="T-011 · las dos reglas de fechas sobre un caso "
+                            "inventado (sin red y sin job)")
+    y.add_argument("--inicio", required=True, help="inicio declarado (AAAA-MM-DD)")
+    y.add_argument("--fin", required=True, help="término declarado (AAAA-MM-DD)")
+    y.add_argument("--firma", help="firma del contrato del proceso (AAAA-MM-DD)")
+    y.add_argument("--tipo", default="supervision",
+                   choices=["supervision", "expediente", "ejecucion", "preinversion"])
+    y.add_argument("--entidad", help="entidad contratante del certificado")
+    y.add_argument("--entidad-proceso", dest="entidad_proceso",
+                   help="entidad convocante del proceso (por defecto, la misma)")
+    y.add_argument("--emisor", help="razón social que emite el certificado")
+    y.add_argument("--ruc-emisor", dest="ruc_emisor")
+    y.add_argument("--ruc-adjudicatario", dest="ruc_adjudicatario",
+                   help="RUC del adjudicatario del proceso (por defecto, el del emisor)")
+    y.add_argument("--aprobacion-et", dest="aprobacion_et",
+                   help="fecha de la resolución que aprobó el expediente "
+                        "(AAAA-MM-DD) — activa la regla B")
+    y.add_argument("--mef-no-coincide", dest="mef_no_coincide", action="store_true",
+                   help="simular que el MEF NO confirma al proyectista (la regla "
+                        "B debe abstenerse)")
+    y.set_defaults(func=modo_cruce_caso)
 
     a = p.parse_args(argv)
     try:
