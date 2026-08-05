@@ -309,6 +309,300 @@ def construir_hoja_base_datos(ws, espejo: dict, cuis: Optional[dict] = None) -> 
     return r - 2
 
 
+# ── Hoja · Cronología de expedientes (T-011) ─────────────────────────────────
+#
+# Hoja ADICIONAL. Las hojas del formato congelado (decisión del cliente
+# 2026-06-10: CLAUDE, Base de Datos y una por profesional) no se tocan: esta se
+# agrega AL FINAL del libro. Un job sin datos del proceso ni del expediente la
+# genera igual, con la nota que dice por qué está vacía — nunca en silencio.
+
+HOJA_CRONOLOGIA = "Cronología de expedientes"
+
+_CRON_HEAD = ["PROFESIONAL", "N° EXP", "PROYECTO U OBRA", "CUI",
+              "DESDE (declarado)", "HASTA (declarado)", "FIRMA DEL CONTRATO",
+              "APROBACIÓN DEL EXPEDIENTE",
+              "¿EMPEZÓ DESPUÉS DE FIRMADO EL CONTRATO?",
+              "¿TERMINÓ ANTES DE APROBARSE EL EXPEDIENTE?",
+              "QUÉ DICE EL CRUCE"]
+_CRON_WIDTHS = [26, 7, 44, 10, 13, 13, 15, 17, 20, 20, 76]
+_NCOL_CRON = len(_CRON_HEAD)
+
+_CRON_INTRO = (
+    "Esta hoja contrasta lo que declara cada certificado con las fechas que "
+    "publican las fuentes oficiales: la firma del contrato del proceso "
+    "(datos abiertos del Estado) y la resolución que aprobó el expediente "
+    "técnico (MEF / InfoObras). Nada de lo que aquí figure descalifica por sí "
+    "solo una experiencia: cuando la fuente no existe o no se pudo confirmar "
+    "que corresponda a este certificado, la celda dice POR VERIFICAR — la falta "
+    "de información nunca cuenta en contra del postor.")
+
+_CRON_LEYENDA = ("Colores: verde = la fecha declarada calza con el documento · "
+                 "rojo = incoherencia a revisar · amarillo = por verificar · "
+                 "violeta = dato deducido (no consta escrito, se dedujo del "
+                 "documento).")
+
+
+def _cron_dato(v) -> str:
+    return _sin_jerga(v) if isinstance(v, str) and v.strip() else "—"
+
+
+def _cron_cruce(cruces, regla) -> Optional[dict]:
+    for c in cruces or []:
+        if isinstance(c, dict) and c.get("regla") == regla:
+            return c
+    return None
+
+
+def _cron_proyectos(espejo: dict, fichas: dict) -> list[dict]:
+    """Un bloque de ficha por PROYECTO (no por experiencia): varias experiencias
+    del mismo CUI comparten contrato, aprobación y modificaciones. La clave es el
+    CUI cuando existe; si no, el nombre del proyecto — dos proyectos sin CUI y
+    con el mismo nombre son, para el evaluador, el mismo proyecto."""
+    orden: list[str] = []
+    por_clave: dict[str, dict] = {}
+    for prof in espejo.get("profesionales", []):
+        for e in prof.get("experiencias", []):
+            fx = fichas.get((prof.get("n_prof"), e.get("n"))) or {}
+            cui = str(fx.get("cui") or e.get("cui") or "").strip()
+            nombre = fx.get("obra_nombre") or e.get("proyecto") or ""
+            clave = cui or str(nombre)
+            if not clave:
+                continue
+            if clave not in por_clave:
+                orden.append(clave)
+                por_clave[clave] = {"cui": cui, "nombre": nombre, "seace": None,
+                                    "aprobacion": None, "verificacion": None,
+                                    "modificaciones": [], "experiencias": 0}
+            bloque = por_clave[clave]
+            bloque["experiencias"] += 1
+            bloque["nombre"] = bloque["nombre"] or nombre
+            seace = fx.get("seace")
+            if isinstance(seace, dict) and seace.get("estado") == "seleccionado":
+                bloque["seace"] = bloque["seace"] or seace
+            if fx.get("aprobacion_expediente"):
+                bloque["aprobacion"] = bloque["aprobacion"] or fx["aprobacion_expediente"]
+            if fx.get("verificacion_expediente"):
+                bloque["verificacion"] = bloque["verificacion"] or fx["verificacion_expediente"]
+            if fx.get("modificaciones_plazo") and not bloque["modificaciones"]:
+                bloque["modificaciones"] = fx["modificaciones_plazo"]
+    return [por_clave[c] for c in orden]
+
+
+def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -> int:
+    """Hoja «Cronología de expedientes». Devuelve el nº de filas comparadas.
+
+    Dos partes: (1) una ficha por proyecto — contrato del proceso, resolución de
+    aprobación del expediente y modificaciones de plazo conocidas; (2) la tabla
+    comparativa, una fila por experiencia, con el periodo declarado frente a esos
+    hitos y el resultado de las dos reglas en lenguaje de evaluador.
+    """
+    # Vocabulario y precedencias vienen del motor de reglas: la hoja PRESENTA,
+    # no vuelve a decidir (ni redefine cómo se lee un resultado).
+    from reglas.cruces_fechas import REGLA_INICIO, REGLA_TERMINO, RESPUESTA
+
+    fichas = fichas or {}
+    for i, w in enumerate(_CRON_WIDTHS, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    r = 1
+
+    def banda(texto, font=F_PARTE, fill=FILL_PARTE, alto=20):
+        nonlocal r
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=_NCOL_CRON)
+        # También los títulos: el nombre del proyecto viene del espejo y puede
+        # arrastrar marcas del consolidador (#55).
+        c = ws.cell(r, 1, _sin_jerga(texto))
+        c.font, c.fill, c.alignment = font, fill, Alignment(vertical="center",
+                                                            wrap_text=True)
+        ws.row_dimensions[r].height = alto
+        r += 1
+
+    def parrafo(texto, fill=None, filas=None):
+        nonlocal r
+        texto = _sin_jerga(texto)
+        n = filas or max(1, -(-len(texto) // 190))
+        ws.merge_cells(start_row=r, start_column=1, end_row=r + n - 1,
+                       end_column=_NCOL_CRON)
+        c = ws.cell(r, 1, texto)
+        c.font, c.alignment = F_CELL, AL_WRAP
+        if fill:
+            c.fill = fill
+        for k in range(n):
+            ws.row_dimensions[r + k].height = 14
+        r += n
+
+    def campo(etiqueta, valor, fill=None):
+        """Etiqueta (A:C) + valor (D:K) — la rejilla de las fichas por proyecto."""
+        nonlocal r
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=3)
+        cl = ws.cell(r, 1, etiqueta)
+        cl.font, cl.border, cl.alignment = F_BOLD, BORDER, AL_WRAP
+        ws.merge_cells(start_row=r, start_column=4, end_row=r, end_column=_NCOL_CRON)
+        cv = ws.cell(r, 4, _cron_dato(valor))
+        cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
+        if fill:
+            cv.fill = fill
+        r += 1
+
+    banda("CRONOLOGÍA DE EXPEDIENTES Y CONTRATOS", F_DATOS, FILL_DATOS, 24)
+    parrafo(_CRON_INTRO)
+    parrafo(_CRON_LEYENDA)
+    r += 1
+
+    proyectos = _cron_proyectos(espejo, fichas)
+    con_hito = [p for p in proyectos if p["seace"] or p["aprobacion"] or p["verificacion"]]
+
+    banda(f"1 · FICHA POR PROYECTO ({len(con_hito)} de {len(proyectos)} con "
+          f"documentos publicados)")
+    if not con_hito:
+        parrafo("Sin procesos verificables: ninguno de los proyectos de esta "
+                "propuesta tiene un proceso de contratación en los datos abiertos "
+                "del Estado (la cobertura empieza en 2018) ni una aprobación de "
+                "expediente publicada. No es un defecto de la propuesta ni del "
+                "análisis: es lo que las fuentes publican. Los periodos declarados "
+                "se evalúan con el resto del expediente, sin este contraste.",
+                FILL_VALOR, filas=3)
+    for p in con_hito:
+        r += 1
+        titulo = str(p["nombre"] or "Proyecto sin nombre")
+        if p["cui"]:
+            titulo += f"  ·  CUI {p['cui']}"
+        titulo += f"  ·  {p['experiencias']} experiencia(s)"
+        banda(titulo, F_CERT, FILL_CERT, 18)
+        seace = p["seace"] or {}
+        proceso = seace.get("proceso") or {}
+        candado = seace.get("candado") if isinstance(seace.get("candado"), dict) else {}
+        if seace:
+            campo("Proceso de contratación", proceso.get("nomenclatura")
+                  or seace.get("codigoconvocatoria"))
+            campo("Entidad que convocó", proceso.get("entidad_convocante"))
+            campo("Fecha de firma del contrato", _ddmmaa_larga(proceso.get("fecha_firma")
+                                                               or seace.get("fecha_suscripcion")))
+            vig = seace.get("vigencia") or [proceso.get("vigencia_inicio"),
+                                            proceso.get("vigencia_fin")]
+            campo("Vigencia del contrato",
+                  f"{_ddmmaa_larga(vig[0] if vig else None)} a "
+                  f"{_ddmmaa_larga(vig[1] if vig and len(vig) > 1 else None)}")
+            rot = _rotulo_candado_seace(candado.get("resultado"))
+            if rot:
+                campo("¿El proceso corresponde a este certificado?", rot,
+                      None if candado.get("resultado") == "confirmado" else FILL_VALOR)
+        else:
+            campo("Proceso de contratación",
+                  "No figura en los datos abiertos del Estado (cobertura desde 2018)",
+                  FILL_VALOR)
+        res = ((p["verificacion"] or {}).get("resolucion")) or {}
+        aprob = p["aprobacion"] or {}
+        if res or aprob:
+            campo("Resolución que aprobó el expediente",
+                  res.get("numero") or res.get("documento") or aprob.get("nombre"))
+            f_aprob, fuente, inferida = _fecha_aprobacion_proyecto(p)
+            campo("Fecha de la aprobación", _ddmmaa_larga(f_aprob),
+                  FILL_SUPUESTO if (f_aprob and inferida) else
+                  (None if f_aprob else FILL_VALOR))
+            if fuente:
+                campo("De dónde sale esa fecha", fuente)
+        mods = p["modificaciones"] or []
+        if mods:
+            for m in mods:
+                if not isinstance(m, dict):
+                    continue
+                partes = [str(m.get("tipo") or "Modificación de plazo")]
+                if m.get("dias_aprobados"):
+                    partes.append(f"{m['dias_aprobados']} días")
+                if m.get("causal"):
+                    partes.append(str(m["causal"]))
+                if m.get("fecha_aprobacion"):
+                    partes.append(f"aprobada el {_ddmmaa_larga(m['fecha_aprobacion'])}")
+                if m.get("fecha_fin"):
+                    partes.append(f"nuevo fin {_ddmmaa_larga(m['fecha_fin'])}")
+                campo("Modificación de plazo", " · ".join(partes))
+        else:
+            campo("Modificaciones de plazo",
+                  "InfoObras no registra modificaciones de plazo para este proyecto")
+
+    r += 2
+    banda("2 · TABLA COMPARATIVA — periodo declarado frente a los hitos documentales")
+    for i, h in enumerate(_CRON_HEAD, start=1):
+        c = ws.cell(r, i, h)
+        c.font, c.fill, c.border, c.alignment = F_HEAD, FILL_HEAD, BORDER, AL_HEAD
+    ws.row_dimensions[r].height = 40
+    fila_head = r
+    r += 1
+
+    filas = 0
+    for prof in espejo.get("profesionales", []):
+        for e in prof.get("experiencias", []):
+            fx = fichas.get((prof.get("n_prof"), e.get("n"))) or {}
+            cruces = fx.get("cruces_fechas") or []
+            ca = _cron_cruce(cruces, REGLA_INICIO) or {}
+            cb = _cron_cruce(cruces, REGLA_TERMINO)
+            seace = fx.get("seace") if isinstance(fx.get("seace"), dict) else {}
+            firma = (ca.get("fecha_fuente")
+                     or (seace.get("proceso") or {}).get("fecha_firma")
+                     or seace.get("fecha_suscripcion"))
+            aprobacion = (cb or {}).get("fecha_fuente")
+            resp_a = RESPUESTA.get(ca.get("resultado"), "POR VERIFICAR")
+            resp_b = (RESPUESTA.get(cb.get("resultado"), "POR VERIFICAR")
+                      if cb else "NO APLICA — no es un expediente técnico")
+            motivos = [x.get("motivo") for x in (ca, cb) if x and x.get("motivo")]
+            valores = [
+                prof.get("nombre"), e.get("n"),
+                fx.get("obra_nombre") or e.get("proyecto"),
+                fx.get("cui") or e.get("cui"),
+                fecha_excel(e.get("fecha_inicial")), fecha_excel(e.get("fecha_final")),
+                fecha_excel(firma), fecha_excel(aprobacion),
+                resp_a, resp_b, _sin_jerga(" ".join(str(m) for m in motivos)),
+            ]
+            for i, v in enumerate(valores, start=1):
+                c = ws.cell(r, i, _sin_jerga(v) if isinstance(v, str) else v)
+                c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
+                if i in (5, 6, 7, 8) and isinstance(v, date):
+                    c.number_format = FMT_FECHA
+                if i in (7, 8) and v in (None, ""):
+                    c.value = "—"
+            # Verde / rojo / amarillo en las dos preguntas (SÍ es lo bueno). El
+            # «no aplica» de la regla B va SIN color: amarillo significa «por
+            # verificar», y una supervisión no tiene nada que verificar aquí.
+            for col, resp, aplica in ((9, resp_a, True), (10, resp_b, cb is not None)):
+                f = _fill_veredicto(resp, "pos") if aplica else None
+                if f:
+                    ws.cell(r, col).fill = f
+            # Violeta = fecha deducida (la aprobación sale del nombre del archivo).
+            if cb and cb.get("inferida") and aprobacion:
+                ws.cell(r, 8).fill = FILL_SUPUESTO
+            filas += 1
+            r += 1
+
+    if not filas:
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=_NCOL_CRON)
+        c = ws.cell(r, 1, "No hay experiencias que comparar.")
+        c.font, c.fill, c.border, c.alignment = F_CELL, FILL_VALOR, BORDER, AL_WRAP
+        r += 1
+    else:
+        ws.auto_filter.ref = (f"A{fila_head}:"
+                              f"{get_column_letter(_NCOL_CRON)}{r - 1}")
+    return filas
+
+
+def _ddmmaa_larga(v) -> str:
+    """Fecha como dd/mm/aaaa para los textos de la cronología; '—' si no hay.
+    Con año de 4 dígitos a propósito: la ficha se lee sola, fuera de una tabla
+    con formato de celda."""
+    f = _fecha_iso(v)
+    return f.strftime("%d/%m/%Y") if f else "—"
+
+
+def _fecha_aprobacion_proyecto(bloque: dict):
+    """`(fecha, fuente, inferida)` de la aprobación del expediente del proyecto,
+    con la MISMA precedencia que usa la regla (una sola fuente de verdad)."""
+    from reglas.cruces_fechas import fecha_aprobacion_expediente
+    return fecha_aprobacion_expediente({
+        "aprobacion_expediente": bloque.get("aprobacion"),
+        "verificacion_expediente": bloque.get("verificacion"),
+    })
+
+
 # ── Hojas por profesional · cuadro de hitos ──────────────────────────────────
 
 _HITO_HEAD = ["HITO", "DESDE", "HASTA", "DÍAS"]
@@ -1874,6 +2168,10 @@ def generar_excel_final(
         construir_hoja_profesional(wb.create_sheet(nombre), prof, paralizaciones,
                                    cuis, fichas, revisiones, sunat, certs_prof)
 
+    # T-011 · hoja ADITIVA, al final: el formato congelado (CLAUDE + Base de
+    # Datos + una por profesional) conserva su orden y su contenido exactos.
+    construir_hoja_cronologia(wb.create_sheet(HOJA_CRONOLOGIA), espejo, fichas)
+
     salida.parent.mkdir(parents=True, exist_ok=True)
     wb.save(salida)
     return salida
@@ -1902,7 +2200,7 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
         if (enr.get("obra_ficha") or enr.get("valorizaciones")
                 or enr.get("representante_obra") or enr.get("aprobacion_expediente")
                 or enr.get("verificacion_expediente") or enr.get("seace")
-                or enr.get("descargas_reales")):
+                or enr.get("descargas_reales") or enr.get("cruces_fechas")):
             # `obra_ficha` NO trae el nombre (solo código/CUI/estado/monto/fechas);
             # el nombre viaja suelto en `obra_nombre` (o en `obra.nombre_obra`) y sin
             # esta línea nunca llegaba al Excel — el evaluador no podía ver con qué
@@ -1918,6 +2216,11 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                                  "verificacion_expediente": enr.get("verificacion_expediente"),
                                  "seace": enr.get("seace"),
                                  "descargas_reales": enr.get("descargas_reales"),
+                                 # T-011: los cruces de fechas de la etapa REGLAS.
+                                 # Viajan dentro de `fichas` (y no como argumento
+                                 # nuevo) para no cambiar la firma de
+                                 # `generar_excel_final`, igual que `seace`.
+                                 "cruces_fechas": enr.get("cruces_fechas"),
                                  # #63: N registros de obra bajo el mismo CUI
                                  "registros_cui": enr.get("registros_cui")}
         # cert multi-obra: la lista de sub-obras verificadas viaja en `fichas` para
@@ -1959,6 +2262,32 @@ def inyectar_veredicto_backend(espejo: dict, enriquecimiento: Optional[dict]) ->
     _recalcular_factor_a(espejo, enriquecimiento or {})
 
 
+def inyectar_cruces_fechas(espejo: dict, enriquecimiento: Optional[dict]) -> int:
+    """Calcula los cruces de fechas (T-011) de las experiencias que aún no los
+    traen, para que un Excel REGENERADO los muestre sin re-correr el pipeline.
+
+    Es el mismo motor puro que usa la etapa REGLAS (`reglas.cruces_fechas`), así
+    que el resultado es idéntico al de una corrida en vivo con las mismas
+    fuentes; no toca red ni disco. Solo RELLENA: una experiencia que ya trae
+    `cruces_fechas` se respeta tal cual (lo que se entregó es lo que se guardó).
+    Devuelve cuántas experiencias se completaron."""
+    from reglas.cruces_fechas import cruces_de_experiencia
+    enr_todo = enriquecimiento if isinstance(enriquecimiento, dict) else None
+    if enr_todo is None:
+        return 0
+    n = 0
+    for prof in (espejo or {}).get("profesionales", []):
+        for e in prof.get("experiencias", []):
+            k = f"{prof.get('n_prof')}:{e.get('n')}"
+            enr = enr_todo.get(k)
+            if not isinstance(enr, dict) or enr.get("cruces_fechas"):
+                continue
+            enr["cruces_fechas"] = [c.como_dict()
+                                    for c in cruces_de_experiencia(enr, e)]
+            n += 1
+    return n
+
+
 def regenerar_excel_final(espejo: dict, enriquecimiento: Optional[dict],
                           salida: Path, revisiones: Optional[dict] = None,
                           certificados: Optional[dict] = None,
@@ -1970,6 +2299,7 @@ def regenerar_excel_final(espejo: dict, enriquecimiento: Optional[dict],
     (el layout del repositorio: `<job>/final.xlsx` + `<job>/certs/`). Antes no se
     pasaban en absoluto, así que regenerar arrancaba TODAS las imágenes embebidas
     (constancias, TDR, Anexo 16) del entregable — silenciosamente."""
+    inyectar_cruces_fechas(espejo, enriquecimiento)
     paral, cuis, fichas, sunat = desempaquetar_enriquecimiento(enriquecimiento)
     from validacion.recalculo import recalcular_espejo
     recalcular_espejo(espejo, sobrescribir=True)

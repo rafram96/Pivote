@@ -1919,6 +1919,28 @@ class EtapaReglasReal:
                 p["cumple_backend"] = datos["cumple_backend"]
                 p["minimo_exigido_backend"] = datos.get("minimo_texto")
             ok += 1
+
+        # T-011 · cruces de fechas contrato/expediente ↔ certificado. Van aquí y
+        # no en la etapa SEACE porque necesitan que TODAS las fuentes hayan
+        # corrido (proceso + candado de identidad de F5, verificación MEF del
+        # expediente y su documento de aprobación). Nunca convierten una ausencia
+        # de datos en incumplimiento: sin fuente confirmada el cruce se abstiene
+        # con su razón escrita, y solo el resultado `dispara` levanta alerta.
+        from reglas.cruces_fechas import DISPARA, TITULO_REGLA, cruces_de_experiencia
+        for _e, (np_, ne) in ctx.items_experiencia():
+            k = _clave(np_, ne)
+            enr = ctx.enriquecimiento.get(k) or {}
+            cruces = cruces_de_experiencia(enr, _e)
+            enr["cruces_fechas"] = [c.como_dict() for c in cruces]
+            ctx.enriquecimiento[k] = enr
+            for c in cruces:
+                if c.resultado != DISPARA:
+                    continue
+                obs.append(pipeline.Observacion(
+                    codigo=c.regla, severidad=pipeline.Severidad.ALERTA,
+                    mensaje=f"{TITULO_REGLA.get(c.regla, c.regla)}: {c.motivo}",
+                    origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+
         _recalcular_factor_a(ctx.espejo, ctx.enriquecimiento)
         # B2 — resumen de incertidumbre InfoObras: "X de Y no encontrados". Solo en
         # corrida COMPLETA (en re-disparo de un item no se recalcula → evita duplicar,
