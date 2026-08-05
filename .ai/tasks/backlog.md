@@ -7,6 +7,60 @@
 ## Técnico (listo para ejecutar)
 
 ---
+id: T-TAREA-RUC-ADJUDICATARIO
+tipo: tarea
+zona: orquestador/ (etapas_reales.py, etapa SUNAT) + validacion/ (candado_seace.py)
+agente_origen: fable
+estado: pendiente
+depende_de: [T-TAREA-SEACE-F5]
+---
+**Resolución del RUC exacto del emisor vía adjudicatario SEACE (~0.5 día).
+Idea de Rafael, 2026-08-05, registrada con su OK. Cotización: definir —
+candidato a bolsa o a presentarse junto con el paquete F5.**
+
+**Problema**: cuando el certificado no trae RUC del emisor, la etapa SUNAT
+busca por nombre — y los consorcios de nombre genérico ("CONSORCIO
+SUPERVISOR…") producen el caso `ambiguo: N candidatos` (visible en panel
+desde el 3-ago, pero sin resolver). ALT04/HABIDO/histórico quedan sin
+verificar o a merced de un match de texto.
+
+**La llave que F5 destapó**: cuando el candado confirma el proceso, la
+metadata OCDS trae el **RUC exacto del adjudicatario** (`supplier`) — la
+supervisora que ganó el proceso es el emisor de la constancia de terceros.
+Verificado en Vitarte: INDECONSULT RUC 20263373058 figura como supplier.
+
+**Diseño**:
+1. Si `seace.candado == "confirmado"` Y el emisor no trae RUC (o su búsqueda
+   por nombre dio ambiguo), la etapa SUNAT consulta el RUC del adjudicatario
+   DIRECTO, rotulando la procedencia: "RUC obtenido del proceso SEACE
+   confirmado" (violeta/supuesto NO — es dato verificado de fuente oficial,
+   pero con procedencia visible).
+2. **CANDADO ANTI-CIRCULARIDAD (inquebrantable)**: el RUC del adjudicatario
+   se promueve SOLO si el candado confirmó por las señales independientes
+   (entidad + objeto + temporal), SIN contar la señal `adjudicatario`. Lo
+   que se verifica no puede elegir su propia identidad — misma lección del
+   solape-como-selector del resolver (memoria/ADR-005 familia). Si la
+   confirmación dependió del RUC, no hay promoción.
+3. **Consorcio vs integrante**: el supplier puede ser el consorcio (RUC
+   propio) o un integrante/líder. Si el nombre del emisor ≈ supplier →
+   usar ese RUC; si difieren, consultar ambos y rotular ("consorcio
+   adjudicatario" / "integrante"). Nunca fusionar silenciosamente.
+4. **Bandera roja nueva, gratis**: certificado CON RUC declarado que NO
+   coincide con el adjudicatario del proceso confirmado → Observación
+   (severidad ALERTA) "el RUC declarado no es el del adjudicatario del
+   proceso" — al Excel y al espejo de alertas.
+5. **Cobertura honesta**: aplica solo donde el proceso existe en datos
+   abiertos (post-2018; en Vitarte 10 de 29 experiencias). El resto sigue
+   con búsqueda por nombre + ambiguo visible. Jamás degradar lo que hoy
+   funciona.
+
+**Tests**: promoción con candado confirmado-sin-RUC; NO promoción cuando la
+confirmación dependía de la señal adjudicatario (anti-circularidad);
+consorcio vs integrante rotulados; bandera roja RUC declarado ≠ adjudicatario;
+cobertura pre-2018 intacta (sin cambios de comportamiento); cero red en
+pytest. Gate: suite completa, `resolucion/cui.py` intacto.
+
+---
 id: T-TAREA-CRUCES-FECHAS
 tipo: tarea
 zona: reglas/ + entregables/ (excel_final.py, hoja nueva) + orquestador/
