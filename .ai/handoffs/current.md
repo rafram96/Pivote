@@ -4,6 +4,30 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
+## Nota (2026-08-05, Claude) — #81 (bloque R) cerrada en código
+
+Las 5 brechas de resiliencia que dejó la #80 quedaron resueltas (la 2 estaba
+descartada de antes). Lo que un agente nuevo debe saber:
+
+1. **`cache_obras/{obra}` ahora tiene dos marcas**: `.completa` y `.parcial`.
+   Una sección caída publica PARCIAL y el siguiente pedido de esa obra
+   re-descarga **solo lo fallido** (lo sano viaja por enlace duro). El callback
+   de descarga cambió de firma: `descargar(ruta, pendientes)`.
+2. **Una experiencia con corpus parcial no recibe su `.ok`** — a propósito: así
+   la siguiente pasada la completa y el panel no la da por terminada.
+3. **Resolver una revisión purga las secciones en error** de la caché de esa
+   obra (`purgar_secciones_en_error`), incluso sobre entradas heredadas marcadas
+   `.completa`. Las cachés viejas sanas siguen siendo válidas tal cual.
+4. **Los textos de las notas SEACE tienen fuente única** en
+   `orquestador/descargas_seace.py`. No volver a escribirlos a mano en
+   `etapas_reales`.
+5. `descargar_cui` va por la misma caché y reporta las secciones extra.
+
+Gate: **837 passed, 25 skipped** (base 826), sin red, `cui.py` intacto → no
+aplica golden. Sin push, sin despliegue, issue #81 **abierta** (la cierra el
+dueño al comprobar). Comprobación manual:
+`docs/pruebas/bloque-r-comprobacion-manual.md`.
+
 ## Nota (2026-08-04, Claude) — planes F5 y T-005 en el backlog
 
 El plan operativo del saldo técnico (S/2,600) quedó documentado en tres

@@ -112,12 +112,60 @@ reconociendo en disco y los avisos del índice usan rótulo legible
 ("Bases Integradas (SEACE)"). Fuente única: `DOCUMENTOS_SEACE` en
 `backend/orquestador/descargas_seace.py`.
 
-Registrada issue de seguimiento de resiliencia:
-1. Purgar caché/evitar marca `.completa` ante errores transitorios de sección durante descarga.
-2. Usabilidad del layout ZIP por Obra/Sección.
-3. Precisar texto en índice para informes fuera de periodo.
-4. Recolección de carpetas `.part` huérfanas tras interrupciones.
-5. Reuso de caché en `descargar_cui`.
+Las 5 brechas de resiliencia registradas al cerrar la #80 quedaron **todas
+resueltas o descartadas** (detalle abajo, «Bloque R»):
+
+1. Marca `.completa` ante errores transitorios → **resuelta** (#81 R1).
+2. Usabilidad del layout ZIP por Obra/Sección → **descartada**: el correctivo de
+   la #80 (árbol completo por experiencia) ya la resolvió; no reintroducir
+   `DOCUMENTOS_COMPARTIDOS/`.
+3. Texto del índice para informes fuera de periodo → **resuelta** (#81 R3).
+4. Recolección de `.part` huérfanas → **resuelta** (#81 R4).
+5. Reuso de caché en `descargar_cui` → **resuelta** (#81 R5).
+
+## Bloque R #81: la caché de descargas ya es reintentable (5-ago)
+
+**R1 — una sección caída ya no se congela.** La entrada de `cache_obras/{obra}`
+tiene dos estados: `.completa` (todo sano, se reutiliza sin tocar la fuente, y
+las publicadas por versiones anteriores siguen siendo válidas tal cual) y
+`.parcial` (alguna sección con `{"error": true}`). Ante una entrada parcial, el
+siguiente pedido de esa obra **clona lo sano por enlace duro y re-descarga solo
+las secciones fallidas**, fusionando el estado (avisos de una sección caducan
+con ella). El corpus publicado se borra recién antes del `os.replace`, así que
+un reintento que revienta deja intacto lo anterior. La sección principal también
+se atrapa: un fallo suyo ya no tira el corpus entero. La experiencia cuyo corpus
+quedó parcial **no** recibe su marca `.ok` — la siguiente pasada (otra
+experiencia de la misma obra, una revisión o una reanudación) la completa, y
+mientras tanto la barra del panel la cuenta como pendiente, que es la verdad.
+Resolver una revisión llama a `purgar_secciones_en_error`: degrada la entrada a
+`.parcial` y borra lo de las secciones caídas — también sobre una marca
+`.completa` heredada, el caso que un evaluador no podía desatascar. Las entradas
+de obras que cambiaron de resolución quedan huérfanas a propósito (no molestan y
+se van con el job).
+
+**R3 — textos de evaluador.** El índice distingue «no hay informes publicados»
+de «los hay, pero de otros años»: el manifiesto guarda `publicados` (inventario
+completo por año que ya traía la descarga) y la sección dice *«los informes de
+control publicados no corresponden al periodo de este certificado (N publicados,
+todos de otros años)»*, con singular propio. Una sección que ni pudo listarse
+dice *«la fuente no respondió en esta corrida (se puede reintentar)»* en vez de
+un `(0/0)`. Las notas SEACE son frases completas con fuente única
+(`NOTA_SEACE_DESCARGA_FALLIDA` y `nota_seace_ausencia` en `descargas_seace.py`),
+conservando la distinción reintentable/definitivo.
+
+**R4** — `CacheDescargasInfoObras.recolectar_temporales()` borra los
+`.{obra}.{uuid}.part` al arrancar la descarga del job.
+
+**R5** — `descargar_cui` corre sobre la misma caché (alcance: **la descarga en
+curso**, carpeta hermana de la de entrega; D3 de la #80 intacta: nada de caché
+global con datos que caducan) y su reporte suma **todas** las secciones, con
+`secciones`/`avisos` en el estado del endpoint. Antes decía «0 fallidos» aunque
+se cayeran informes, cierre o aprobación enteros.
+
+Gate: **837 passed, 25 skipped** (línea base 826), sin red, `cui.py` intacto.
+Comprobación manual: `docs/pruebas/bloque-r-comprobacion-manual.md` +
+`backend/scripts/probar_cache_descargas.py` (modos `notas`, `informes`,
+`reintento`, `part`).
 
 ## Auditoría EsSalud y correcciones #32, #72–#79 (4-ago)
 
