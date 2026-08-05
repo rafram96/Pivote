@@ -117,7 +117,7 @@
 <body>
 
 <h1>Plan de desarrollo y cotización de extras</h1>
-<p class="sub">Todo lo pedido en el Excel «para RAFAEL», organizado en componentes cotizables (T-003 … T-008) · <b>v5 — 2&nbsp;ago&nbsp;2026</b>: refleja la <code>demo</code> consolidada, el ETL MEF serving-first, SEACE operativo y RENIPRESS ya integrado.</p>
+<p class="sub">Todo lo pedido en el Excel «para RAFAEL», organizado en componentes cotizables (T-003 … T-008) · <b>v6 — 4&nbsp;ago&nbsp;2026</b>: suma la auditoría integral del entregable Vitarte (Excel celda a celda, ZIP y panel — ~40 correcciones dentro del cierre, sin costo adicional), la caché de descargas por obra (~73% menos descargas repetidas), la entrega configurable (manifiestos técnicos apagables; índice en texto, MD o JSON) y nombres SEACE legibles. T-007 quedó completo también en el panel.</p>
 
 <div class="leyenda">
   <span><i class="chip ok"></i> Construido y probado en la rama <code>demo</code></span>
@@ -188,7 +188,7 @@
       <td>SUNAT: condición HABIDO / estado ACTIVO del emisor del certificado</td>
       <td><span class="tag ok">✔ construido</span></td>
       <td>✔ Probado en vivo contra 6 RUCs</td>
-      <td class="num">— (invertido)<br><small>falta render en panel</small></td>
+      <td class="num">— (invertido)<br><small>completo: Excel + panel</small></td>
       <td>—</td>
       <td class="num">bolsa 8 h · S/ 520</td>
     </tr>
@@ -427,7 +427,7 @@
     <div class="gantt">
       <div class="gfila cab"><div></div><div>Sem 1</div><div>Sem 2</div><div>Sem 3</div><div></div><div></div></div>
       <div class="gfila"><div>Sondas SEACE/CONOSCE/OCDS</div><div class="barra ok"><span>✔ ya ejecutadas (GO, 86% medido)</span></div><div></div><div></div><div></div><div></div></div>
-      <div class="gfila"><div>T-007 SUNAT habido</div><div class="barra ok"><span>✔ ya construido — falta render en panel</span></div><div></div><div></div><div></div><div></div></div>
+      <div class="gfila"><div>T-007 SUNAT habido</div><div class="barra ok"><span>✔ completo — Excel + tarjeta en panel</span></div><div></div><div></div><div></div><div></div></div>
       <div class="gfila"><div>T-004 datos abiertos</div><div class="barra ok"><span>✔ F1/F2 + WAF + caché</span></div><div class="barra cot"><span>F5 + prueba real</span></div><div></div><div></div><div></div></div>
       <div class="gfila"><div>T-005 Cruces + cronología</div><div></div><div class="barra cot"><span>2–2.5 días</span></div><div></div><div></div><div></div></div>
       <div class="gfila"><div>T-006 RENIPRESS</div><div class="barra ok"><span>✔ integración durable</span></div><div></div><div class="barra cot"><span>matching + panel</span></div><div></div><div></div></div>
@@ -445,7 +445,8 @@
     <tr><th>Punto</th><th>Detalle</th></tr>
     <tr><td class="num">Momento</td><td>Presentar junto con la entrega final del contrato vigente — no antes, para no mezclar alcances.</td></tr>
     <tr><td class="num">T-003 + T-008</td><td>Valor técnico actualizado: <b>S/ 7,400</b>. T-008 creció al incorporar PostgreSQL serving-first, operación versionada y validación sobre las 620,985 filas reales.</td></tr>
-    <tr><td class="num">Bloques</td><td>T-004 + T-005 forman «Expediente SEACE y cruces de fechas» (<b>S/ 4,400</b> valor total; S/ 2,000 de saldo técnico). T-006 vale S/ 1,600, con S/ 600 pendientes. T-007 permanece en bolsa.</td></tr>
+    <tr><td class="num">Bloques</td><td>T-004 + T-005 forman «Expediente SEACE y cruces de fechas» (<b>S/ 4,400</b> valor total; S/ 2,000 de saldo técnico). T-006 vale S/ 1,600, con S/ 600 pendientes. T-007 quedó <b>completo</b> (bolsa: 8 h consumidas).</td></tr>
+    <tr><td class="num">Siguiente cotizable</td><td>Optimización del consumo de la skill (issue #71): baseline medido en la corrida real (~USD 31 por análisis; los subagentes consumen el 69% de los límites del plan). En fase de medición; se cotiza al cerrar el diseño.</td></tr>
     <tr><td class="num">Insumos del cliente</td><td>Ya no se necesitan contratos de muestra (el OCR salió del alcance). Solo 1–2 casos de obras privadas de salud (para probar T-006).</td></tr>
     <tr><td class="num">Riesgo declarado</td><td>Las fuentes son viables, pero la integración reveló complejidad operativa real: WAF y formatos múltiples en SEACE; homónimos y caída≠ausencia en RENIPRESS; PostgreSQL y cargas versionadas en MEF. Los valores v5 reflejan ese alcance, no una sonda idealizada.</td></tr>
     <tr><td class="num">Argumento de venta</td><td>«Con los datos reales de tus propios 29 concursos: bases integradas + contrato + fecha de firma automáticos y sin captcha para ~8.5 de cada 10 experiencias públicas, y confirmación automática del CUI en la mitad de los casos.» Evidencia en <b>resolucion-cui-datos-abiertos.html</b>.</td></tr>
