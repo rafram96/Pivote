@@ -303,9 +303,20 @@ def doc_contrato_firmado(comp: dict) -> Optional[dict]:
 
 def extension_documento(doc: Optional[dict]) -> str:
     """Extensión honesta del documento OCDS. Las Bases Integradas reales pueden
-    publicarse como PDF, ZIP o RAR; nunca se les fuerza extensión `.pdf`."""
-    formato = _minusculas((doc or {}).get("format"))
-    url = _minusculas((doc or {}).get("url"))
+    publicarse como PDF, ZIP o RAR; nunca se les fuerza extensión `.pdf`.
+
+    Acepta las DOS formas del documento: la de la fuente (`format`, inglés) y la
+    que se persiste en `enriquecimiento[…]["seace"]["docs"]` (`formato`). La
+    descarga diferida trabaja sobre la persistida, así que leer solo `format`
+    devolvía `.pdf` siempre; el archivo bajaba bien pero la validación por magia
+    lo rechazaba por no empezar con `%PDF` y quedaba un `*_ERROR.txt`. Es la
+    causa REAL de los 3 errores de Bases Integradas de la corrida Vitarte
+    (verificado el 2026-08-05: con la extensión correcta, el ZIP baja en 428,781
+    bytes y el RAR en 1,515,008) — no era el host.
+    """
+    doc = doc or {}
+    formato = _minusculas(doc.get("format") or doc.get("formato"))
+    url = _minusculas(doc.get("url"))
     if "rar" in formato or url.endswith(".rar"):
         return ".rar"
     if "zip" in formato or url.endswith(".zip"):
