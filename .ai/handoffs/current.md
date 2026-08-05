@@ -4,6 +4,18 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
+## Nota (2026-08-04, Claude) — planes F5 y T-005 en el backlog
+
+El plan operativo del saldo técnico (S/2,600) quedó documentado en tres
+niveles: **`tasks/backlog.md`** con las tareas estructuradas
+`T-TAREA-SEACE-F5` (candado de identidad CUI↔proceso, S/800, con fixtures
+obligatorios de la corrida Vitarte) y `T-TAREA-CRUCES-FECHAS` (2 reglas +
+hoja «Cronología de expedientes», S/1,200, depende de F5) — ahí está el
+detalle de desarrollo; **`docs/nuevos_modulos/plan-desarrollo-extras.html`
+§4b** con la versión para el cliente (día a día + cobros); y el **dashboard
+projects-list** (tickets T-010/T-011) con partidas y rangos internos de
+negociación. Ninguna arranca sin cerrar la cotización con Manuel.
+
 ## Nota (2026-08-04, Agente) — Veredicto consolidado #80 y brechas de seguimiento
 
 Veredicto verificado de primera mano: el cierre de la **#80** es legítimo y cumple

@@ -7,6 +7,105 @@
 ## Técnico (listo para ejecutar)
 
 ---
+id: T-TAREA-SEACE-F5
+tipo: tarea
+zona: orquestador/ (descargas_seace.py, etapas_reales.py) + scraping/ (seace_abierto.py)
+agente_origen: fable
+estado: pendiente
+depende_de: []
+---
+**F5 de T-004: candado de identidad CUI↔proceso + corrida integral en el
+servidor (saldo comercial S/800 del ticket T-010; 1–1.5 días). Plan aprobado
+por Rafael el 2026-08-04; NO arranca hasta presentar/cerrar la cotización
+S/2,800 con Manuel.**
+
+**Problema**: hoy el selector SEACE elige el proceso por CUI + tipo, pero nada
+confirma que el proceso elegido corresponda de verdad al certificado que se
+evalúa. Un proceso equivocado promovería Bases/Contrato de otro concurso como
+evidencia — el peor fallo posible (mismo patrón que el veto de rubro del
+resolver, ADR-013).
+
+**Diseño — confirmación asimétrica (promover exige señales; degradar es el
+default)**:
+1. Señales a cruzar ANTES de promover: (a) entidad convocante del proceso vs
+   entidad contratante/emisora del certificado (comparador de nombres de
+   empresa existente en scraping/sunat.py — reutilizar, no duplicar);
+   (b) objeto del proceso vs tipo de la experiencia (ya existe la segmentación
+   estricta expediente/supervisión/ejecución — F5 la endurece con la entidad);
+   (c) ventana temporal: la convocatoria/firma del proceso debe ser coherente
+   con el periodo del certificado (firma ≤ inicio del profesional, con
+   tolerancia); (d) monto referencial si ambos lados lo publican (señal débil,
+   solo suma — nunca veta sola).
+2. Resultado ternario en `enriquecimiento.seace.candado`:
+   `confirmado` (≥2 señales fuertes, cero contradicciones) ·
+   `por_confirmar` (señales insuficientes) · `contradice` (alguna señal
+   fuerte en contra). Solo `confirmado` presenta los documentos como
+   verificados; los otros dos usan el render "Por confirmar" que YA existe en
+   excel_final.py (render_seace) — no inventar UI nueva.
+3. La descarga NO se bloquea: los PDFs igual van al ZIP (sustento), lo que
+   cambia es el rótulo de confianza en Excel/panel/índice.
+
+**Fixtures obligatorios (de la corrida Vitarte, ya en datos_pivote):**
+- POSITIVO: Pedro Sánchez Meza (proceso correcto, bases+contrato bajados) →
+  `confirmado`.
+- NEGATIVO: Altiplano CUI 2300016 ("procesos vistos: otro" en obra 2021+) —
+  ANTES de codear, verificar a mano en CONOSCE si su proceso de supervisión
+  existe con otra nomenclatura; ese resultado define si el fixture prueba
+  `por_confirmar` o un miss del selector a corregir.
+- Reintento de las 3 descargas `_ERROR` de Vitarte (Challhuahuacho ×2,
+  La Libertad) — deben resolverse o quedar con nota honesta.
+
+**Cierre**: corrida integral en el SERVIDOR del cliente con una propuesta
+real, snapshot/punto de retorno previo (regla ADR-S007), y comparación del
+espejo antes/después (solo pueden cambiar los campos `seace.*`).
+
+**Gates**: suite completa sin regresiones; cero red en pytest (fixtures
+sintéticos para el candado); `backend/resolucion/cui.py` intacto (no aplica
+golden); los tests del candado cubren promoción, degradación y contradicción.
+
+---
+id: T-TAREA-CRUCES-FECHAS
+tipo: tarea
+zona: reglas/ + entregables/ (excel_final.py, hoja nueva) + orquestador/
+agente_origen: fable
+estado: pendiente
+depende_de: [T-TAREA-SEACE-F5]
+---
+**T-005 comercial (ticket T-011, S/1,200; 2–2.5 días): cruces de fechas
+contrato/ET ↔ certificado + hoja «Cronología de expedientes» en el Excel.
+Ejecutar DESPUÉS de F5 — consume fechas cuya identidad F5 valida. Partidas y
+rango interno en el dashboard projects-list (T-011).**
+
+**D1 AM — Fechas estructuradas desde datos abiertos (S/250)**: extraer
+`fecha_suscripcion_contrato` (CONOSCE) / `dateSigned` (OCDS) y vigencias al
+bloque `seace` del enriquecimiento. SIN OCR — campo del dataset, verificado
+con datos reales. El contrato PDF queda solo como sustento en el ZIP.
+
+**D1 PM — Dos reglas nuevas al motor de alertas (S/500)**, mismo esquema ALT
+de validacion/rules.py — no crear un mecanismo paralelo:
+1. Inicio del profesional ≥ fecha de firma del contrato del proceso (nadie
+   supervisa antes de que el contrato exista).
+2. Término del profesional ≤ fecha de la resolución de aprobación del ET
+   (para experiencias de expediente; la resolución ya llega vía T-003/MEF).
+Semántica de abstención OBLIGATORIA: sin fuente (pre-2018, ~14% de
+experiencias) → veredicto provisional "Por confirmar"; JAMÁS un NO CUMPLE
+por ausencia de datos (misma regla que el clamp del Paso 5).
+
+**D2 — Hoja nueva «Cronología de expedientes» (S/300)**: ficha por proyecto
+(contrato del ET → resolución de aprobación → modificaciones) + tabla
+comparativa final. Es una hoja ADICIONAL: las 5 hojas congeladas del formato
+(decisión cliente 2026-06-10) no se tocan. Colores/rotulado con las
+convenciones vigentes (violeta = supuesto, amarillo = por verificar,
+_sin_jerga aplicado).
+
+**D2.5 — QA (S/150)**: suite offline + un caso real cotejado contra lectura
+manual del PDF; comparación de espejo antes/después (solo campos nuevos).
+
+**Gates**: los 2 cruces disparan en un caso sintético y uno real; cero red en
+pytest; resolver intacto; el Excel regenerado de un job viejo sin datos SEACE
+no rompe (hoja Cronología vacía con nota, no crash).
+
+---
 id: T-TAREA-OCR-REMOTO
 tipo: tarea
 zona: api/ + deploy/ (Dockerfile) + skill/ (scripts/)
