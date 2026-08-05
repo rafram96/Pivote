@@ -32,6 +32,42 @@ el CLI `backend/scripts/probar_candado_seace.py`. Gate: **789 passed, 25
 skipped** (base 757/25), resolver intacto, sin golden y sin despliegue. Queda
 pendiente la corrida integral en el servidor.
 
+## T-011: cruces de fechas contrato/expediente ↔ certificado (5-ago)
+
+Las fechas que F5 identificó ya se usan para preguntar dos cosas al motor de
+alertas existente: **el inicio declarado no puede anteceder a la firma del
+contrato** (tolerancia 15 días, la MISMA constante del candado — una sola vara)
+y, en expedientes, **el término declarado no puede ser posterior a la resolución
+que aprobó el expediente** (tolerancia propia de 30 días, que cubre el cierre
+administrativo). Aritmética día-exacta: 05/01 contra una firma del 30/01 son 25
+días sin respaldo aunque compartan enero. Motor puro en
+`backend/reglas/cruces_fechas.py`; disparan `Observacion` ALERTA
+(`FECHA_CONTRATO` / `FECHA_APROBACION_ET`) y nada más — una abstención se
+persiste con su razón y jamás levanta alerta.
+
+Lo que decide el diseño es el **gate anti-circularidad**: una regla solo habla
+cuando la identidad de su fuente está confirmada por señales **independientes de
+la fecha que va a cruzar** (entidad/adjudicatario/objeto para la A; que el MEF
+confirme al proyectista para la B). Exigir literalmente `candado == confirmado`
+habría dejado la regla A muda para siempre, porque la señal temporal del candado
+usa esas mismas dos fechas: un desfase real deja el candado en `contradice` y la
+regla no podría pronunciarse nunca. Con el gate por señales independientes, la
+regla dispara justo ahí —proceso confirmado por lo demás, fechas que no
+cuadran— y se abstiene ante cualquier otra contradicción. Es el CASO 0 de
+`T-TAREA-RUC-ADJUDICATARIO` aplicado a fechas (familia ADR-005).
+
+El entregable suma una hoja **ADITIVA** al final, «Cronología de expedientes»:
+ficha por proyecto (proceso, firma, vigencia, resolución de aprobación con su
+procedencia, modificaciones de plazo) y tabla comparativa por experiencia. Las
+hojas del formato congelado no se movieron — comprobado regenerando Lircay
+(`371fa5a1e704`, sin datos SEACE) con `HEAD` y con el código nuevo: 19 hojas
+idénticas celda por celda. Un job sin fuentes genera la hoja igual, con la nota
+«Sin procesos verificables». Replay Vitarte: 31 experiencias, 9 cuadran, 0 no
+cuadran, 22 se abstienen (21 por cobertura pre-2018, 1 por identidad
+insuficiente). Comprobación manual en
+`docs/pruebas/t011-comprobacion-manual.md`. Gate: **819 passed, 25 skipped**
+(base 789/25), resolver intacto, panel sin tocar, sin despliegue.
+
 ## ZIP #80 resuelta: caché por obra y árbol completo por experiencia (4-ago)
 
 La deduplicación quedó en la **descarga**, no en la entrega. Cada job guarda el

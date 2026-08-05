@@ -80,47 +80,8 @@ consorcio vs integrante rotulados; bandera roja RUC declarado ≠ adjudicatario;
 cobertura pre-2018 intacta (sin cambios de comportamiento); cero red en
 pytest. Gate: suite completa, `resolucion/cui.py` intacto.
 
----
-id: T-TAREA-CRUCES-FECHAS
-tipo: tarea
-zona: reglas/ + entregables/ (excel_final.py, hoja nueva) + orquestador/
-agente_origen: fable
-estado: pendiente
-depende_de: [T-TAREA-SEACE-F5]
----
-**T-005 comercial (ticket T-011, S/1,200; 2–2.5 días): cruces de fechas
-contrato/ET ↔ certificado + hoja «Cronología de expedientes» en el Excel.
-Ejecutar DESPUÉS de F5 — consume fechas cuya identidad F5 valida. Partidas y
-rango interno en el dashboard projects-list (T-011).**
-
-**D1 AM — Fechas estructuradas desde datos abiertos (S/250)**: extraer
-`fecha_suscripcion_contrato` (CONOSCE) / `dateSigned` (OCDS) y vigencias al
-bloque `seace` del enriquecimiento. SIN OCR — campo del dataset, verificado
-con datos reales. El contrato PDF queda solo como sustento en el ZIP.
-
-**D1 PM — Dos reglas nuevas al motor de alertas (S/500)**, mismo esquema ALT
-de validacion/rules.py — no crear un mecanismo paralelo:
-1. Inicio del profesional ≥ fecha de firma del contrato del proceso (nadie
-   supervisa antes de que el contrato exista).
-2. Término del profesional ≤ fecha de la resolución de aprobación del ET
-   (para experiencias de expediente; la resolución ya llega vía T-003/MEF).
-Semántica de abstención OBLIGATORIA: sin fuente (pre-2018, ~14% de
-experiencias) → veredicto provisional "Por confirmar"; JAMÁS un NO CUMPLE
-por ausencia de datos (misma regla que el clamp del Paso 5).
-
-**D2 — Hoja nueva «Cronología de expedientes» (S/300)**: ficha por proyecto
-(contrato del ET → resolución de aprobación → modificaciones) + tabla
-comparativa final. Es una hoja ADICIONAL: las 5 hojas congeladas del formato
-(decisión cliente 2026-06-10) no se tocan. Colores/rotulado con las
-convenciones vigentes (violeta = supuesto, amarillo = por verificar,
-_sin_jerga aplicado).
-
-**D2.5 — QA (S/150)**: suite offline + un caso real cotejado contra lectura
-manual del PDF; comparación de espejo antes/después (solo campos nuevos).
-
-**Gates**: los 2 cruces disparan en un caso sintético y uno real; cero red en
-pytest; resolver intacto; el Excel regenerado de un job viejo sin datos SEACE
-no rompe (hoja Cronología vacía con nota, no crash).
+*(T-TAREA-CRUCES-FECHAS pasó a `in_progress.md` el 2026-08-05 — Rafael la
+aprobó; el detalle vinculante viaja con la entrada.)*
 
 ---
 id: T-TAREA-OCR-REMOTO

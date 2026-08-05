@@ -2,6 +2,139 @@
 
 *(Actualizar al iniciar cualquier trabajo; mover a completed.md al cerrar.)*
 
+---
+id: T-TAREA-CRUCES-FECHAS
+tipo: tarea
+zona: reglas/ (cruces_fechas.py) + orquestador/ (etapas_reales.py) + entregables/ (excel_final.py, hoja nueva)
+agente_origen: fable
+estado: en_progreso  # aprobada por Rafael el 2026-08-05 ("lanza otro agente
+#   opus para que resuelva el T-011"); arrancada el mismo día
+depende_de: [T-TAREA-SEACE-F5]
+---
+**T-005 comercial (ticket T-011, S/1,200; 2–2.5 días): cruces de fechas
+contrato/ET ↔ certificado + hoja «Cronología de expedientes» en el Excel.
+Ejecutar DESPUÉS de F5 — consume fechas cuya identidad F5 valida. Partidas y
+rango interno en el dashboard projects-list (T-011).**
+
+**D1 AM — Fechas estructuradas desde datos abiertos (S/250)**: extraer
+`fecha_suscripcion_contrato` (CONOSCE) / `dateSigned` (OCDS) y vigencias al
+bloque `seace` del enriquecimiento. SIN OCR — campo del dataset, verificado
+con datos reales. El contrato PDF queda solo como sustento en el ZIP.
+
+**D1 PM — Dos reglas nuevas al motor de alertas (S/500)**, mismo esquema ALT
+— no crear un mecanismo paralelo:
+1. Inicio del profesional ≥ fecha de firma del contrato del proceso (nadie
+   supervisa antes de que el contrato exista).
+2. Término del profesional ≤ fecha de la resolución de aprobación del ET
+   (para experiencias de expediente; la resolución ya llega vía T-003/MEF).
+Semántica de abstención OBLIGATORIA: sin fuente (pre-2018, ~14% de
+experiencias) → veredicto provisional "Por confirmar"; JAMÁS un NO CUMPLE
+por ausencia de datos (misma regla que el clamp del Paso 5).
+
+**D2 — Hoja nueva «Cronología de expedientes» (S/300)**: ficha por proyecto
+(contrato del ET → resolución de aprobación → modificaciones) + tabla
+comparativa final. Es una hoja ADICIONAL: las 5 hojas congeladas del formato
+(decisión cliente 2026-06-10) no se tocan. Colores/rotulado con las
+convenciones vigentes (violeta = supuesto, amarillo = por verificar,
+_sin_jerga aplicado).
+
+**D2.5 — QA (S/150)**: suite offline + un caso real cotejado contra lectura
+manual del PDF; comparación de espejo antes/después (solo campos nuevos).
+
+**Gates**: los 2 cruces disparan en un caso sintético y uno real; cero red en
+pytest; resolver intacto; el Excel regenerado de un job viejo sin datos SEACE
+no rompe (hoja Cronología vacía con nota, no crash).
+
+### Estado al cierre de la sesión del 2026-08-05 — CÓDIGO COMPLETO
+
+**Hecho** (en `demo`, commits `ae96924` + `c369fe9`, sin push ni despliegue):
+
+- **`backend/reglas/cruces_fechas.py`** (nuevo, PURO — ni red ni disco): las
+  dos reglas, con el vocabulario cerrado (`coincide` / `dispara` /
+  `por_confirmar`) y sus frases ya redactadas en lenguaje de evaluador.
+- **Las tolerancias, con su porqué**: regla A = **15 días**, LA MISMA constante
+  del candado F5 (`TOLERANCIA_DIAS_FIRMA`) importada, no copiada — una sola
+  vara para la misma comparación, o el Excel diría una cosa en el bloque del
+  proceso y otra en la cronología. Regla B = **30 días**, vara propia porque
+  mide otra cosa (el cierre administrativo entre la resolución de aprobación y
+  la conformidad del servicio).
+- **Aritmética día-exacta**, jamás truncada a mes. Tests del borde
+  «mismo mes, días incompatibles» (05/01 vs 30/01 = 25 días → dispara) y de los
+  bordes exactos de las dos tolerancias (15 sí / 16 no · 30 sí / 31 no).
+- **GATE ANTI-CIRCULARIDAD — el corazón del diseño, y donde se refinó la
+  especificación**. La instrucción decía «solo dispara si el candado está
+  `confirmado`». Tomada al pie de la letra, la regla A **jamás podría
+  disparar**: la señal `temporal` del candado usa esas mismas dos fechas, así
+  que un desfase mayor a la tolerancia deja el candado en `contradice` y la
+  regla quedaría muda para siempre — el caso borde que Rafael pidió probar es
+  literalmente inalcanzable bajo esa lectura. El gate implementado es el
+  equivalente funcional y ya canónico en la casa (CASO 0 de
+  `T-TAREA-RUC-ADJUDICATARIO`, familia ADR-005): **identidad confirmada por las
+  señales INDEPENDIENTES de la fecha que se va a cruzar** — ≥2 señales fuertes
+  a favor entre entidad/adjudicatario/objeto y cero en contra entre ellas.
+  Consecuencias, todas verificadas con tests: candado `confirmado` → la regla
+  concluye COINCIDE; `por_confirmar` → siempre se abstiene (nunca hay 2 señales
+  ajenas); `contradice` por entidad u objeto → se abstiene; `contradice` SOLO
+  por la fecha, con la identidad sostenida aparte → **dispara**, que es
+  exactamente el hallazgo que la regla existe para nombrar. Es más conservador
+  que la lectura literal en un caso (`confirmado` gracias a temporal + una
+  sola señal ajena → abstención), y la abstención siempre está permitida.
+  El gate de la regla B es su equivalente: el MEF tiene que confirmar que el
+  emisor de la constancia es el proyectista del expediente
+  (`contratista.veredicto == "ok"`), no basta con que el MEF haya respondido.
+- **Fecha de la aprobación del ET**: el 08-A del MEF publica el NÚMERO de la
+  resolución, casi nunca su fecha («N° 262-2023-GRH/GRI»). Precedencia
+  implementada: (1) `aprobacion_expediente.fecha` de InfoObras — día completo,
+  deducido del nombre del archivo, se marca `inferida` → **violeta** en el
+  Excel, y como puede ser posterior a la resolución real solo puede callar una
+  incoherencia, nunca inventarla; (2) una fecha DD/MM/AAAA dentro del rótulo de
+  la resolución. Un año o un mes sueltos **no** se aceptan: sin día no hay
+  fecha, y deducirla es justo lo prohibido.
+- **Cableado**: `EtapaReglasReal` calcula los cruces al final (necesita SEACE +
+  MEF + InfoObras ya corridos), los persiste en
+  `enriquecimiento[…]["cruces_fechas"]` y emite `Observacion` ALERTA con
+  códigos `FECHA_CONTRATO` / `FECHA_APROBACION_ET` **solo** cuando el resultado
+  es `dispara`. Una abstención se persiste con su razón y NO levanta alerta.
+- **Hoja «Cronología de expedientes»** (`excel_final.py`), ADITIVA y al final
+  del libro: ficha por proyecto (proceso, entidad convocante, firma, vigencia,
+  correspondencia con el certificado, resolución de aprobación con su
+  procedencia, modificaciones de plazo) + tabla comparativa de 11 columnas, una
+  fila por experiencia, con las dos preguntas en palabras del evaluador.
+  Convenciones respetadas: violeta = deducido, amarillo = por verificar, verde/
+  rojo en los veredictos, `_sin_jerga` en TODA celda (incluidos los títulos —
+  el nombre del proyecto viene del espejo y arrastra marcas del consolidador),
+  cero enums crudos. `inyectar_cruces_fechas` los calcula al regenerar cuando
+  el job no los trae, con el mismo motor puro.
+- **Compatibilidad probada sobre un job real, no sintético**: Lircay
+  (`371fa5a1e704`, 67 experiencias, cero datos SEACE) regenerado con el código
+  de `HEAD` y con el nuevo → **19 hojas congeladas idénticas celda por celda**
+  (valor, formato numérico y color) y una hoja más al final, con la nota
+  «Sin procesos verificables».
+- **Comprobación manual**: subcomandos `cruces` (replay de un job, con
+  `--excel` para regenerar el entregable aparte) y `cruce-caso` (un caso
+  escrito a mano, sin red ni job — la única forma de ejercitar la regla B
+  cuando ningún job la ejercita) en
+  `backend/scripts/probar_candado_seace.py`, más los 7 casos copy-paste de
+  **`docs/pruebas/t011-comprobacion-manual.md`**.
+
+**Replay Vitarte (`7e9306a321ac`, offline)**: 31 experiencias · regla A se
+pronuncia sobre las 31 → **9 cuadran, 0 no cuadran, 22 se abstienen** (21
+porque el CUI no figura en datos abiertos —cobertura desde 2018— y 1 porque
+solo hay 1 de 2 señales ajenas a la fecha). **Regla B: 0**, ese job se corrió
+sin la verificación MEF de expedientes y no hay ninguno que cotejar. Cero
+incoherencias de fechas en ese análisis es un RESULTADO, no un fallo de la
+herramienta: los casos 1 y 3 del documento la muestran disparando.
+
+**Gates**: `backend/resolucion/cui.py` intacto byte a byte → **no aplica
+golden** · suite **819 passed, 25 skipped** (línea base 789/25; +30 pruebas,
+cero regresiones) · cero red en pytest · `compileall` y `git diff --check`
+limpios · panel intacto (regla de contención del 5-ago).
+
+**PENDIENTE**: el D2.5 de la especificación pide además **un caso real cotejado
+contra la lectura manual del PDF** — hoy ningún job local tiene un expediente
+verificado en el MEF que ejercite la regla B de punta a punta. Queda para la
+corrida en el servidor, junto con la de F5.
+
 ## T-TAREA-SEACE-F5 — candado de identidad CUI↔proceso (en progreso, 2026-08-05)
 
 ### Estado al cierre de la sesión del 2026-08-05 — CÓDIGO COMPLETO, FALTA SERVIDOR
