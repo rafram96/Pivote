@@ -29,30 +29,50 @@ metadata OCDS trae el **RUC exacto del adjudicatario** (`supplier`) — la
 supervisora que ganó el proceso es el emisor de la constancia de terceros.
 Verificado en Vitarte: INDECONSULT RUC 20263373058 figura como supplier.
 
-**Diseño**:
-1. Si `seace.candado == "confirmado"` Y el emisor no trae RUC (o su búsqueda
-   por nombre dio ambiguo), la etapa SUNAT consulta el RUC del adjudicatario
-   DIRECTO, rotulando la procedencia: "RUC obtenido del proceso SEACE
-   confirmado" (violeta/supuesto NO — es dato verificado de fuente oficial,
-   pero con procedencia visible).
-2. **CANDADO ANTI-CIRCULARIDAD (inquebrantable)**: el RUC del adjudicatario
-   se promueve SOLO si el candado confirmó por las señales independientes
-   (entidad + objeto + temporal), SIN contar la señal `adjudicatario`. Lo
-   que se verifica no puede elegir su propia identidad — misma lección del
-   solape-como-selector del resolver (memoria/ADR-005 familia). Si la
-   confirmación dependió del RUC, no hay promoción.
-3. **Consorcio vs integrante**: el supplier puede ser el consorcio (RUC
-   propio) o un integrante/líder. Si el nombre del emisor ≈ supplier →
-   usar ese RUC; si difieren, consultar ambos y rotular ("consorcio
-   adjudicatario" / "integrante"). Nunca fusionar silenciosamente.
-4. **Bandera roja nueva, gratis**: certificado CON RUC declarado que NO
-   coincide con el adjudicatario del proceso confirmado → Observación
-   (severidad ALERTA) "el RUC declarado no es el del adjudicatario del
-   proceso" — al Excel y al espejo de alertas.
-5. **Cobertura honesta**: aplica solo donde el proceso existe en datos
-   abiertos (post-2018; en Vitarte 10 de 29 experiencias). El resto sigue
-   con búsqueda por nombre + ambiguo visible. Jamás degradar lo que hoy
-   funciona.
+**Diseño — árbol de casos (boceto de Rafael 2026-08-05, refinado; VINCULANTE)**:
+
+CASO 0 (gate previo, anti-circularidad inquebrantable): solo aplica si
+`seace.candado == "confirmado"` POR las señales independientes
+(entidad + objeto + temporal), SIN contar la señal `adjudicatario`. Lo que
+se verifica no puede elegir su propia identidad (lección solape-selector,
+familia ADR-005). Sin proceso, pre-2018, `por_confirmar` o `contradice` →
+TODO sigue como hoy (búsqueda por nombre + ambiguo visible). Jamás degradar
+lo que funciona. Cobertura honesta: en Vitarte, 10 de 29 experiencias.
+
+CASO 1 — el certificado SÍ trae RUC del emisor → COMPROBAR:
+  1a. RUC declarado == RUC adjudicatario → sello "RUC verificado contra el
+      proceso" (máxima confianza; SUNAT ya corría con ese RUC, ahora con
+      respaldo oficial).
+  1b. RUC distinto PERO nombre del emisor ≈ un integrante del consorcio
+      adjudicatario (parties del OCDS) → NO es discordancia: rotular
+      "emisor = integrante del consorcio adjudicatario". Los consorcios
+      emiten por el líder o con RUC propio del consorcio. Nunca fusionar
+      silenciosamente.
+  1c. RUC distinto Y nombre tampoco cuadra → Observación severidad ALERTA:
+      "el RUC declarado no es el del adjudicatario del proceso". NO se
+      enriquece NI se reemplaza el declarado (se consulta el declarado en
+      SUNAT igual; la alerta viaja a Excel/espejo). El sistema no corrige
+      al certificado: lo confronta.
+
+CASO 2 — sin RUC declarado, nombre del emisor vs adjudicatario con
+score_match_empresa (MISMOS umbrales del candado — una sola vara):
+  ≥85 → ENRIQUECER: SUNAT consulta el RUC del adjudicatario, procedencia
+      rotulada "RUC obtenido del proceso SEACE confirmado". BONUS: si la
+      búsqueda por nombre había dado AMBIGUO con N candidatos y uno tiene
+      ese RUC → se resuelve la ambigüedad por intersección (el caso del
+      consorcio homónimo que motivó esta tarea).
+  60–84 → ZONA GRIS: abstención total — ni enriquecer ni alertar. Flujo
+      actual + nota informativa "adjudicatario del proceso: X (RUC Y) — no
+      se pudo confirmar que sea el emisor". Decisión humana.
+
+CASO 3 — sin RUC declarado y nombre <60 → ALERTA, NO ENRIQUECER:
+  "el emisor del certificado no coincide con el adjudicatario del proceso
+  confirmado". Dato erróneo o tercero ajeno emitiendo — enriquecer
+  contaminaría SUNAT en cascada.
+
+Regla de contención vigente (backlog sistema, 5-ago): todas las señales
+nuevas entran por los mecanismos EXISTENTES (Observacion → Excel/espejo),
+sin vistas nuevas en el panel hasta la sesión de diseño de alertas.
 
 **Tests**: promoción con candado confirmado-sin-RUC; NO promoción cuando la
 confirmación dependía de la señal adjudicatario (anti-circularidad);
