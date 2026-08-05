@@ -928,19 +928,33 @@ def _indice_json(meta: dict, registros: list[dict]) -> str:
     return json.dumps(datos, ensure_ascii=False, indent=2) + "\n"
 
 
-def _estado_seccion_legible(estado: dict) -> str:
-    """Estado del manifiesto en lenguaje de evaluador, sin nombres internos."""
+def _estado_seccion_legible(estado: dict, nombre: str = "documentos") -> str:
+    """Estado del manifiesto en lenguaje de evaluador, sin nombres internos.
+
+    `publicados` (inventario COMPLETO de la sección en la fuente) distingue dos
+    ausencias que antes se leían igual: la obra no tiene nada publicado, o sí
+    tiene pero todo de años ajenos al periodo del certificado (issue #81, R3).
+    """
     estado = estado or {}
     e = estado.get("estado")
     bajados = int(estado.get("descargados") or 0)
     esperados = int(estado.get("esperados") or 0)
+    publicados = int(estado.get("publicados") or 0)
     if e == "sin_documentos":
+        if publicados:
+            detalle = (f"{publicados} publicados, todos de otros años"
+                       if publicados != 1 else "1 publicado, de otro año")
+            return (f"los {nombre.lower()} publicados no corresponden al periodo "
+                    f"de este certificado ({detalle})")
         return "sin documentos publicados (0 disponibles)"
     if e == "completa":
         return f"completa ({bajados}/{esperados})"
     if e == "parcial":
         return f"incompleta ({bajados}/{esperados} descargados)"
     if e == "error":
+        if not esperados and not bajados:
+            # La consulta ni siquiera pudo listar qué había: un (0/0) no dice nada.
+            return "la fuente no respondió en esta corrida (se puede reintentar)"
         return f"consulta fallida ({bajados}/{esperados} descargados)"
     return f"por verificar ({bajados}/{esperados} descargados)"
 
@@ -1077,7 +1091,7 @@ def construir_zip_infoobras(
                         if (estado or {}).get("estado") != "completa":
                             reg["secciones_incompletas"].append(
                                 {"seccion": nombre,
-                                 "estado": _estado_seccion_legible(estado)})
+                                 "estado": _estado_seccion_legible(estado, nombre)})
                     reg["advertencias"] = list(manifiesto.get("avisos") or [])
                 else:
                     cui = info.get("cui") or e.get("cui")
@@ -1130,6 +1144,7 @@ def descargar_cui(
     fetch=None,
     session: Optional[requests.Session] = None,
     timeout: float = 90.0,
+    dir_cache: Optional[Path] = None,
 ) -> dict:
     """Resuelve el obra_id del CUI y baja TODOS sus documentos de InfoObras a `destino/`
     con el mismo árbol que el ZIP de un análisis: valorizaciones por hito + documentos
@@ -1137,38 +1152,112 @@ def descargar_cui(
     expediente (si la obra es de expediente). Es el motor del endpoint "descargar por
     un solo CUI", desacoplado del pipeline.
 
-    Devuelve `{cui, obra_id, nombre, descargados, fallidos, error}`. `fetch` es
-    inyectable para tests; con red real usa `fetch_by_cui`. NO corre en tests offline
-    salvo con `fetch` inyectado (y las descargas monkeypatcheadas)."""
+    Corre sobre `CacheDescargasInfoObras` (issue #81, R5), igual que el pipeline:
+    el corpus se baja a una entrada de caché, se publica de forma atómica y recién
+    entonces se materializa en `destino` (los informes se filtran localmente por el
+    periodo). El alcance de esa caché es la DESCARGA en curso — `dir_cache` por
+    defecto es una carpeta hermana de `destino`, jamás una caché global compartida
+    entre pedidos (decisión D3 de la issue #80: nada de datos que caducan a
+    espaldas de quien pide).
+
+    Devuelve `{cui, obra_id, nombre, descargados, fallidos, secciones, avisos,
+    error}`. `descargados`/`fallidos` cubren TODAS las secciones, no solo las
+    valorizaciones. `fetch` es inyectable para tests; con red real usa
+    `fetch_by_cui`. NO corre en tests offline salvo con `fetch` inyectado (y las
+    descargas monkeypatcheadas)."""
     if fetch is None:
         from scraping.infoobras import fetch_by_cui as fetch
     obra = fetch(str(cui).strip(), fecha_inicio, fecha_fin, None)
     obra_id = getattr(obra, "obra_id", None) if obra is not None else None
     if obra_id is None:
         return {"cui": cui, "obra_id": None, "nombre": None,
-                "descargados": 0, "fallidos": 0,
+                "descargados": 0, "fallidos": 0, "secciones": {}, "avisos": [],
                 "error": "el CUI no resolvió a ninguna obra en InfoObras"}
 
+    from orquestador.descargas_infoobras import CacheDescargasInfoObras
     sess = session or requests.Session()
     destino = Path(destino)
-    r = descargar_documentos_obra_por_hito(obra_id, destino, session=sess, timeout=timeout)
-    # secciones extra, best-effort: la caída de una no tumba el resto de la descarga
-    try:
-        descargar_informes_control(obra_id, destino, fecha_ini=fecha_inicio,
-                                   fecha_fin=fecha_fin, session=sess)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("descargar_cui %s informes de control: %s", cui, corto(e))
-    try:
-        descargar_datos_cierre(obra_id, destino, session=sess)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("descargar_cui %s datos de cierre: %s", cui, corto(e))
     aprob = getattr(obra, "aprobacion_expediente", None)
-    if aprob:
-        try:
-            descargar_aprobacion_expediente(aprob, destino, session=sess)
-        except Exception as e:  # noqa: BLE001
-            logger.debug("descargar_cui %s aprobación: %s", cui, corto(e))
 
+    def _bajar(ruta: Path, pendientes) -> dict:
+        """Corpus completo de la obra en la caché; cada sección informa su estado
+        y una caída se registra (antes se perdía en un `logger.debug`)."""
+        def _toca(seccion: str) -> bool:
+            return pendientes is None or seccion in pendientes
+
+        estado: dict = {"secciones": {}, "avisos": [], "informes_anios": []}
+        if _toca("InfoObras"):
+            try:
+                r = descargar_documentos_obra_por_hito(
+                    obra_id, ruta, session=sess, timeout=timeout)
+                estado["secciones"]["InfoObras"] = {
+                    "esperados": (r.get("descargados") or 0) + (r.get("fallidos") or 0),
+                    "descargados": r.get("descargados") or 0,
+                }
+            except Exception as e:  # noqa: BLE001
+                logger.warning("descargar_cui %s documentos de obra: %s", cui, corto(e))
+                estado["secciones"]["InfoObras"] = {"error": True}
+                estado["avisos"].append(
+                    "InfoObras: la consulta de documentos de la obra no pudo "
+                    "completarse.")
+        if _toca("Informes de control"):
+            # Se bajan TODOS y el filtro por periodo lo hace la materialización
+            # (misma semántica anual inclusiva que el pipeline).
+            try:
+                control = descargar_informes_control(obra_id, ruta, session=sess) or {}
+                estado["informes_anios"] = control.get("anios") or []
+                estado["secciones"]["Informes de control"] = {
+                    "esperados": control.get("encontrados") or 0,
+                    "descargados": control.get("descargados") or 0,
+                }
+            except Exception as e:  # noqa: BLE001
+                logger.warning("descargar_cui %s informes de control: %s", cui, corto(e))
+                estado["secciones"]["Informes de control"] = {"error": True}
+                estado["avisos"].append(
+                    "Informes de control: la consulta no pudo completarse.")
+        if _toca("Datos de cierre"):
+            try:
+                cierre = descargar_datos_cierre(obra_id, ruta, session=sess) or {}
+                estado["secciones"]["Datos de cierre"] = {
+                    "esperados": cierre.get("encontrados") or 0,
+                    "descargados": cierre.get("descargados") or 0,
+                }
+            except Exception as e:  # noqa: BLE001
+                logger.warning("descargar_cui %s datos de cierre: %s", cui, corto(e))
+                estado["secciones"]["Datos de cierre"] = {"error": True}
+                estado["avisos"].append(
+                    "Datos de cierre: la consulta no pudo completarse.")
+        if aprob and _toca("Aprobación del expediente"):
+            try:
+                bajo = descargar_aprobacion_expediente(aprob, ruta, session=sess)
+                estado["secciones"]["Aprobación del expediente"] = {
+                    "esperados": 1, "descargados": int(bool(bajo)),
+                }
+            except Exception as e:  # noqa: BLE001
+                logger.warning("descargar_cui %s aprobación: %s", cui, corto(e))
+                estado["secciones"]["Aprobación del expediente"] = {"error": True}
+                estado["avisos"].append(
+                    "Aprobación del expediente: la descarga falló.")
+        return estado
+
+    raiz_cache = (Path(dir_cache) if dir_cache is not None
+                  else destino.parent / f"{destino.name}.cache")
+    cache = CacheDescargasInfoObras(raiz_cache)
+    cache.recolectar_temporales()
+    resultado = cache.obtener(obra_id, descargar=_bajar)
+    cache.materializar(resultado, destino,
+                       fecha_ini=fecha_inicio, fecha_fin=fecha_fin)
+
+    secciones = (resultado.estado.get("secciones") or {})
+    descargados = sum(int(s.get("descargados") or 0) for s in secciones.values())
+    # Un fallo es un documento que la fuente publicaba y no llegó, MÁS cada
+    # sección que ni siquiera pudo consultarse.
+    fallidos = sum(
+        max(0, int(s.get("esperados") or 0) - int(s.get("descargados") or 0))
+        for s in secciones.values() if not s.get("error")
+    ) + sum(1 for s in secciones.values() if s.get("error"))
     return {"cui": cui, "obra_id": obra_id, "nombre": getattr(obra, "nombre", None),
-            "descargados": r.get("descargados", 0), "fallidos": r.get("fallidos", 0),
+            "descargados": descargados, "fallidos": fallidos,
+            "secciones": secciones,
+            "avisos": list(resultado.estado.get("avisos") or []),
             "error": None}

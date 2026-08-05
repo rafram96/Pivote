@@ -46,6 +46,50 @@ _ETIQUETAS_SEACE: dict[str, str] = {
 }
 
 
+# ── Textos de las notas SEACE (fuente única, issue #81 R3) ───────────────────
+# Las lee un evaluador dentro de la carpeta de la experiencia: frases completas,
+# sin jerga, y con la distinción intacta entre «falló ahora, se puede reintentar»
+# y «no existe publicado, no lo busques más».
+NOTA_SEACE_DESCARGA_FALLIDA = (
+    "No se pudo descargar este documento en esta corrida: la fuente oficial "
+    "falló temporalmente. El proceso sí lo publica; se puede reintentar."
+)
+
+_NOTAS_SEACE_AUSENCIA: dict[str, str] = {
+    # reintentable: la consulta misma no respondió
+    "fuente_no_disponible": (
+        "La consulta a los datos abiertos del SEACE no respondió en esta corrida, "
+        "así que no fue posible obtener este documento. Se puede reintentar."
+    ),
+    # definitivos: la fuente respondió y el documento no está
+    "sin_tipo": (
+        "El SEACE solo publica procesos de otro tipo para esta obra (por ejemplo "
+        "ejecución o equipamiento); el proceso que certifica esta experiencia no "
+        "figura en los datos abiertos."
+    ),
+    "sin_procesos": (
+        "Los datos abiertos del SEACE cubren contrataciones desde 2018; esta "
+        "contratación es anterior, por eso sus documentos no están publicados ahí."
+    ),
+    "seleccionado": (
+        "El proceso de contratación sí fue identificado en el SEACE, pero no "
+        "publica este documento entre sus archivos."
+    ),
+}
+
+_NOTA_SEACE_AUSENCIA_GENERICA = (
+    "Este documento no figura publicado en los datos abiertos del SEACE para "
+    "esta experiencia."
+)
+
+
+def nota_seace_ausencia(estado: str | None) -> str:
+    """Texto de la nota cuando NO hay documento que descargar, según el estado
+    de la búsqueda del proceso. Un estado desconocido cae a la frase genérica:
+    una nota siempre dice algo comprensible, nunca un código interno."""
+    return _NOTAS_SEACE_AUSENCIA.get(str(estado or ""), _NOTA_SEACE_AUSENCIA_GENERICA)
+
+
 def es_archivo_seace(nombre: str) -> bool:
     """¿Este archivo de una carpeta P/E lo puso SEACE (documento o nota)?
 

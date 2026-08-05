@@ -991,12 +991,20 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
         reset_descargas_stats, descargas_stats, resumen_descargas)
     from scraping.errores_red import corto
     base = carpeta_job(Path(dir_descargas), job_id) / "descargas"
-    from orquestador.descargas_infoobras import CacheDescargasInfoObras
+    from orquestador.descargas_infoobras import (
+        CacheDescargasInfoObras, secciones_en_error)
     from orquestador.descargas_seace import (
-        DOCUMENTOS_SEACE, CacheDescargasSeace, etiqueta_documento_seace)
+        DOCUMENTOS_SEACE, CacheDescargasSeace, etiqueta_documento_seace,
+        NOTA_SEACE_DESCARGA_FALLIDA, nota_seace_ausencia)
     cache_infoobras = CacheDescargasInfoObras(
         carpeta_job(Path(dir_descargas), job_id) / "cache_obras"
     )
+    # Un corte duro (kill/reinicio) deja `.{obra}.{uuid}.part` que nadie recoge:
+    # se limpian al arrancar la descarga del job (issue #81, R4).
+    huerfanos = cache_infoobras.recolectar_temporales()
+    if huerfanos:
+        logger.info("descargas job %s: %d carpeta(s) temporal(es) recolectada(s)",
+                    job_id, huerfanos)
     cache_seace = CacheDescargasSeace(
         Path(dir_cache_seace)
         if dir_cache_seace is not None
@@ -1049,14 +1057,13 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
             nota_no = destino / f"{nombre}_NO_DISPONIBLE.txt"
             nota_err = destino / f"{nombre}_ERROR.txt"
             if estado_general != "seleccionado" or not doc.get("url"):
-                motivo = datos.get("motivo") or "documento no publicado en datos abiertos"
                 # Al cambiar de estado se borra la nota CONTRARIA: si quedaran
                 # las dos, el índice avisaría a la vez "no publicado" y "error".
                 ruta, contraria = ((nota_err, nota_no)
                                    if estado_general == "fuente_no_disponible"
                                    else (nota_no, nota_err))
                 contraria.unlink(missing_ok=True)
-                _nota_atomica(ruta, f"{motivo}\n")
+                _nota_atomica(ruta, nota_seace_ausencia(estado_general) + "\n")
                 continue
             nota_no.unlink(missing_ok=True)
             nota_err.unlink(missing_ok=True)
@@ -1069,12 +1076,16 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                 doc["url"], archivo, descargar=descargador
             ).ok
             if not ok_archivo:
-                _nota_atomica(
-                    nota_err,
-                    "La descarga falló o la fuente no devolvió un PDF/ZIP/RAR válido. "
-                    "Reintentar más tarde.\n")
+                _nota_atomica(nota_err, NOTA_SEACE_DESCARGA_FALLIDA + "\n")
 
-    def _descargar_corpus_obra(obra_id, destino_cache: Path) -> dict:
+    def _descargar_corpus_obra(obra_id, destino_cache: Path,
+                               pendientes: frozenset[str] | None = None) -> dict:
+        """Baja el corpus de una obra a la caché. `pendientes` = reintento
+        selectivo (issue #81): se rehacen SOLO esas secciones y el estado
+        devuelto habla solo de ellas; la caché lo fusiona con lo sano."""
+        def _toca(seccion: str) -> bool:
+            return pendientes is None or seccion in pendientes
+
         if descargar is not None:
             descargar(obra_id, destino_cache)
             archivos, _ = _inventario_real_descarga(destino_cache)
@@ -1086,43 +1097,55 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
             }
 
         estado: dict = {"secciones": {}, "avisos": [], "informes_anios": []}
-        principal = descargar_documentos_obra_por_hito(obra_id, destino_cache)
-        inventario = principal.get("inventario") or {}
-        esperados = sum(
-            len(avance.get("documentos") or [])
-            for avance in inventario.get("avances", [])
-        ) + len((inventario.get("obra") or {}).get("documentos") or [])
-        estado["secciones"]["InfoObras"] = {
-            "esperados": esperados,
-            "descargados": principal.get("descargados") or 0,
-        }
-        try:
-            control = descargar_informes_control(obra_id, destino_cache)
-            estado["informes_anios"] = control.get("anios") or []
-            estado["secciones"]["Informes de control"] = {
-                "esperados": control.get("encontrados") or 0,
-                "descargados": control.get("descargados") or 0,
-            }
-        except Exception as ex:  # noqa: BLE001
-            logger.debug("informes control obra %s: %s", obra_id, corto(ex))
-            estado["secciones"]["Informes de control"] = {"error": True}
-            estado["avisos"].append(
-                "Informes de control: la consulta no pudo completarse.")
-        try:
-            cierre = descargar_datos_cierre(obra_id, destino_cache)
-            estado["secciones"]["Datos de cierre"] = {
-                "esperados": cierre.get("encontrados") or 0,
-                "descargados": cierre.get("descargados") or 0,
-            }
-        except Exception as ex:  # noqa: BLE001
-            logger.debug("datos de cierre obra %s: %s", obra_id, corto(ex))
-            estado["secciones"]["Datos de cierre"] = {"error": True}
-            estado["avisos"].append(
-                "Datos de cierre: la consulta no pudo completarse.")
+        if _toca("InfoObras"):
+            # Que la sección principal reviente ya no tira TODO el corpus: se
+            # publica lo demás y esta sección queda marcada para reintento.
+            try:
+                principal = descargar_documentos_obra_por_hito(obra_id, destino_cache)
+                inventario = principal.get("inventario") or {}
+                esperados = sum(
+                    len(avance.get("documentos") or [])
+                    for avance in inventario.get("avances", [])
+                ) + len((inventario.get("obra") or {}).get("documentos") or [])
+                estado["secciones"]["InfoObras"] = {
+                    "esperados": esperados,
+                    "descargados": principal.get("descargados") or 0,
+                }
+            except Exception as ex:  # noqa: BLE001
+                logger.warning("documentos de la obra %s: %s", obra_id, corto(ex))
+                estado["secciones"]["InfoObras"] = {"error": True}
+                estado["avisos"].append(
+                    "InfoObras: la consulta de documentos de la obra no pudo "
+                    "completarse.")
+        if _toca("Informes de control"):
+            try:
+                control = descargar_informes_control(obra_id, destino_cache)
+                estado["informes_anios"] = control.get("anios") or []
+                estado["secciones"]["Informes de control"] = {
+                    "esperados": control.get("encontrados") or 0,
+                    "descargados": control.get("descargados") or 0,
+                }
+            except Exception as ex:  # noqa: BLE001
+                logger.debug("informes control obra %s: %s", obra_id, corto(ex))
+                estado["secciones"]["Informes de control"] = {"error": True}
+                estado["avisos"].append(
+                    "Informes de control: la consulta no pudo completarse.")
+        if _toca("Datos de cierre"):
+            try:
+                cierre = descargar_datos_cierre(obra_id, destino_cache)
+                estado["secciones"]["Datos de cierre"] = {
+                    "esperados": cierre.get("encontrados") or 0,
+                    "descargados": cierre.get("descargados") or 0,
+                }
+            except Exception as ex:  # noqa: BLE001
+                logger.debug("datos de cierre obra %s: %s", obra_id, corto(ex))
+                estado["secciones"]["Datos de cierre"] = {"error": True}
+                estado["avisos"].append(
+                    "Datos de cierre: la consulta no pudo completarse.")
 
         requisito = requisitos_obra.get(str(obra_id), {})
         aprobacion = requisito.get("aprobacion")
-        if aprobacion:
+        if aprobacion and _toca("Aprobación del expediente"):
             try:
                 aprob_ok = descargar_aprobacion_expediente(aprobacion, destino_cache)
                 estado["secciones"]["Aprobación del expediente"] = {
@@ -1134,7 +1157,7 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                 estado["avisos"].append(
                     "Aprobación del expediente: la descarga falló.")
         verificacion = requisito.get("verificacion")
-        if verificacion:
+        if verificacion and _toca("Verificación MEF"):
             try:
                 from scraping.mef import descargar_documentos_expediente
                 mef = descargar_documentos_expediente(
@@ -1200,8 +1223,8 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                     avisos, secciones = [], {}
                     resultado_cache = cache_infoobras.obtener(
                         obra_id,
-                        descargar=lambda ruta, oid=obra_id: _descargar_corpus_obra(
-                            oid, ruta),
+                        descargar=lambda ruta, pend, oid=obra_id: (
+                            _descargar_corpus_obra(oid, ruta, pend)),
                     )
                     cert_ini = _fecha_iso(e.get("fecha_inicial"))
                     cert_fin = _fecha_iso(e.get("fecha_final"))
@@ -1218,8 +1241,10 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                             continue
                         esperados = datos_seccion.get("esperados") or 0
                         descargados = datos_seccion.get("descargados") or 0
+                        publicados = None
                         if nombre == "Informes de control":
                             anios = estado_cache.get("informes_anios") or []
+                            publicados = len(anios)
                             if cert_ini is not None and cert_fin is not None:
                                 inferior, superior = sorted((cert_ini.year, cert_fin.year))
                                 esperados = sum(
@@ -1231,8 +1256,21 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                             descargados = materializados.informes
                         _estado_seccion(
                             secciones, avisos, nombre, esperados, descargados)
+                        if publicados:
+                            # El inventario COMPLETO de la obra distingue «no hay
+                            # informes» de «los hay, pero de otros años» (issue #81).
+                            secciones[nombre]["publicados"] = publicados
                     base.mkdir(parents=True, exist_ok=True)
-                    ok.write_text("ok", encoding="utf-8")
+                    if resultado_cache.completa:
+                        ok.write_text("ok", encoding="utf-8")
+                    else:
+                        # Corpus con secciones caídas: NO se marca la experiencia
+                        # como terminada, para que la siguiente pasada reintente
+                        # (la caché solo re-descarga lo fallido).
+                        logger.info(
+                            "descargas job %s P%sE%s: obra %s con secciones "
+                            "pendientes de reintento (%s)", job_id, np_, ne, obra_id,
+                            ", ".join(secciones_en_error(estado_cache)))
                 if seace and not ok_seace.exists():
                     hizo_trabajo = True
                     _bajar_seace(seace, destino)

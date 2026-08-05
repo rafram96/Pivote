@@ -60,8 +60,13 @@ def test_descargar_cui_resuelve_y_baja_las_4_secciones(tmp_path, monkeypatch):
     r = descargar_cui("2418877", tmp_path / "d",
                       fetch=lambda cui, fi, ff, oid: _Obra(111, "OBRA X", aprob))
     assert r["obra_id"] == 111 and r["nombre"] == "OBRA X"
-    assert r["descargados"] == 3 and r["fallidos"] == 1 and r["error"] is None
+    # el conteo cubre TODAS las secciones: 3 del hito + 1 de la aprobación
+    assert r["descargados"] == 4 and r["fallidos"] == 1 and r["error"] is None
     assert {c[0] for c in reg} == {"hito", "informes", "cierre", "aprob"}
+    # la caché de la descarga es HERMANA del árbol entregable, nunca su hija:
+    # si viviera dentro, el ZIP por CUI empaquetaría cada documento dos veces.
+    assert not any(p.name.endswith(".cache") for p in (tmp_path / "d").rglob("*"))
+    assert (tmp_path / "d.cache").is_dir()
 
 
 def test_descargar_cui_sin_aprobacion_no_intenta_esa_descarga(tmp_path, monkeypatch):
@@ -89,3 +94,37 @@ def test_descargar_cui_seccion_caida_no_tumba_el_resto(tmp_path, monkeypatch):
     r = descargar_cui("2418877", tmp_path / "d",
                       fetch=lambda cui, fi, ff, oid: _Obra(111, "OBRA X", None))
     assert r["obra_id"] == 111 and r["descargados"] == 3 and r["error"] is None
+    # …pero el reporte YA NO la esconde: la sección caída se declara y cuenta
+    # como fallo (issue #81, R5 — antes quedaba solo en un logger.debug).
+    assert r["secciones"]["Informes de control"] == {"error": True}
+    assert r["fallidos"] == 2          # 1 documento del hito + 1 sección caída
+    assert any("Informes de control" in a for a in r["avisos"])
+
+
+def test_descargar_cui_reintenta_solo_la_seccion_caida(tmp_path, monkeypatch):
+    """La caché de la descarga no congela el error: un segundo pedido con el
+    mismo `dir_cache` rehace solo los informes y no vuelve a bajar el hito."""
+    reg = []
+    _stub_descargas(monkeypatch, reg)
+    monkeypatch.setattr(zip_infoobras, "descargar_informes_control",
+                        lambda *a, **k: (_ for _ in ()).throw(ConnectionError("caído")))
+    obra = lambda cui, fi, ff, oid: _Obra(111, "OBRA X", None)  # noqa: E731
+    primero = descargar_cui("2418877", tmp_path / "d", fetch=obra,
+                            dir_cache=tmp_path / "cache")
+    assert primero["secciones"]["Informes de control"] == {"error": True}
+
+    def informes_ok(obra_id, destino, **k):
+        reg.append(("informes-ok", obra_id))
+        carpeta = Path(destino) / "Informes de control"
+        carpeta.mkdir(parents=True, exist_ok=True)
+        (carpeta / "2020 - I-01.pdf").write_bytes(b"%PDF informe")
+        return {"encontrados": 1, "descargados": 1, "anios": [2020]}
+
+    monkeypatch.setattr(zip_infoobras, "descargar_informes_control", informes_ok)
+    segundo = descargar_cui("2418877", tmp_path / "d", fetch=obra,
+                            dir_cache=tmp_path / "cache")
+    assert segundo["secciones"]["Informes de control"]["descargados"] == 1
+    assert segundo["fallidos"] == 1          # solo el documento del hito
+    assert [c for c in reg if c[0] == "hito"] == [("hito", 111)], (
+        "la sección sana no se vuelve a descargar")
+    assert (tmp_path / "d" / "Informes de control" / "2020 - I-01.pdf").is_file()

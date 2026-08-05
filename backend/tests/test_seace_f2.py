@@ -166,6 +166,42 @@ def test_descarga_seace_escribe_notas_honestas(tmp_path):
     assert "reintentar" in (destino / notas[0]).read_text(encoding="utf-8")
 
 
+def test_notas_seace_hablan_en_frases_de_evaluador(tmp_path):
+    """Issue #81 R3: las tres notas dicen QUÉ pasó y si tiene sentido reintentar,
+    en lugar del apunte técnico que salía del `motivo` interno."""
+    casos = {
+        "sin_tipo": ("El SEACE solo publica procesos de otro tipo para esta obra "
+                     "(por ejemplo ejecución o equipamiento); el proceso que "
+                     "certifica esta experiencia no figura en los datos abiertos.",
+                     "NO_DISPONIBLE"),
+        "sin_procesos": ("Los datos abiertos del SEACE cubren contrataciones desde "
+                         "2018; esta contratación es anterior, por eso sus "
+                         "documentos no están publicados ahí.", "NO_DISPONIBLE"),
+        "fuente_no_disponible": ("La consulta a los datos abiertos del SEACE no "
+                                 "respondió en esta corrida, así que no fue posible "
+                                 "obtener este documento. Se puede reintentar.",
+                                 "ERROR"),
+    }
+    for estado, (texto, sufijo) in casos.items():
+        enr = {"1:1": {"cui": "2279396", "via": "CUI_TEXTO",
+                       "seace": {"estado": estado,
+                                 "motivo": "detalle técnico que no va a la nota"}}}
+        descargar_documentos_job(ESPEJO, enr, f"job-{estado}", tmp_path)
+        destino = carpeta_job(tmp_path, f"job-{estado}") / "descargas" / "P1_E1"
+        nota = (destino / f"BASES_INTEGRADAS_{sufijo}.txt").read_text(encoding="utf-8")
+        assert nota == texto + "\n"
+
+
+def test_nota_seace_de_descarga_fallida_invita_a_reintentar(tmp_path):
+    enr = {"1:1": {"cui": "2279396", "via": "CUI_TEXTO", "seace": _seace()}}
+    descargar_documentos_job(ESPEJO, enr, "job-falla", tmp_path,
+                             descargar_seace=lambda _url, _destino: False)
+    destino = carpeta_job(tmp_path, "job-falla") / "descargas" / "P1_E1"
+    assert (destino / "BASES_INTEGRADAS_ERROR.txt").read_text(encoding="utf-8") == (
+        "No se pudo descargar este documento en esta corrida: la fuente oficial "
+        "falló temporalmente. El proceso sí lo publica; se puede reintentar.\n")
+
+
 def test_notas_seace_llegan_al_zip_con_el_nombre_completo(tmp_path):
     # Sin el prefijo `SEACE_0…` el nombre cabe en el recorte de 38 por
     # componente del ZIP: antes salía `SEACE_01_BASES_INTEGRADAS_N~2c5e00.txt`

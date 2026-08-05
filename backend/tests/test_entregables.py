@@ -394,6 +394,37 @@ def test_indice_json_expone_los_conteos_por_experiencia(tmp_path, monkeypatch):
     assert "_grupo_obra" not in e1        # clave interna, fuera del contrato
 
 
+def test_informes_fuera_de_periodo_se_explican_igual_en_los_tres_formatos(
+        tmp_path, monkeypatch):
+    """Issue #81 R3: la obra SÍ publica informes de control, pero ninguno cae en
+    el periodo del certificado. Los tres formatos del índice dicen lo mismo, y no
+    lo confunden con «sin documentos publicados»."""
+    monkeypatch.setenv("PIVOTE_INDICE_ZIP", "txt,md,json")
+    carpeta = tmp_path / "P1_E1"
+    carpeta.mkdir()
+    (carpeta / "val.pdf").write_bytes(b"%PDF-1.4 valorizacion")
+    enr = {"1:1": {"obra": {"obra_id": 72056}, "descargas_reales": {
+        "archivos": 1,
+        "secciones": {"Informes de control": {
+            "estado": "sin_documentos", "esperados": 0, "descargados": 0,
+            "publicados": 3}},
+        "avisos": [],
+    }}}
+    salida = construir_zip_infoobras(
+        ESPEJO, {(1, 1): carpeta}, tmp_path / "fuera.zip", enriquecimiento=enr)
+    esperado = ("los informes de control publicados no corresponden al periodo "
+                "de este certificado (3 publicados, todos de otros años)")
+    with zipfile.ZipFile(salida) as zf:
+        txt = zf.read("indice.txt").decode("utf-8")
+        md = zf.read("indice.md").decode("utf-8")
+        datos = json.loads(zf.read("indice.json").decode("utf-8"))
+    assert f"SECCIÓN Informes de control: {esperado}" in txt
+    assert f"- Informes de control: {esperado}" in md
+    assert datos["experiencias"][0]["secciones_incompletas"] == [
+        {"seccion": "Informes de control", "estado": esperado}]
+    assert "0 disponibles" not in txt + md
+
+
 def test_indice_acepta_varios_formatos_a_la_vez(tmp_path, monkeypatch):
     monkeypatch.setenv("PIVOTE_INDICE_ZIP", "txt,md")
     a, b = _dos_carpetas_con_el_mismo_pdf(tmp_path)

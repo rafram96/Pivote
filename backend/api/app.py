@@ -658,6 +658,34 @@ def _confiabilidad_excel(job: pipeline.Job) -> dict:
     }
 
 
+def _forzar_reintento_cache_obra(job_id: str, n_prof: int, n_exp: int) -> tuple[str, ...]:
+    """Al resolver una revisión, deja la caché de la obra lista para reintentar.
+
+    Borrar `P{n}_E{m}/` no alcanza: si el corpus de esa obra quedó guardado en
+    `cache_obras/` con una sección caída, rematerializar lo volvería a copiar
+    igual de incompleto. Se purgan SOLO las secciones en error de la obra que
+    quedó resuelta para este ítem; las sanas se reutilizan sin volver al portal.
+    Una entrada de una obra que ya no le corresponde a ninguna experiencia queda
+    huérfana a propósito: no molesta a nadie y se va con el job (issue #81, R1).
+    """
+    try:
+        from orquestador.descargas_infoobras import purgar_secciones_en_error
+        datos = (repo.cargar_enriquecimiento(job_id) or {}).get(f"{n_prof}:{n_exp}") or {}
+        obra = datos.get("obra") if isinstance(datos.get("obra"), dict) else {}
+        obra_id = (obra or {}).get("obra_id")
+        if not obra_id:
+            return ()
+        pendientes = purgar_secciones_en_error(
+            _dir_job(job_id) / "cache_obras", obra_id)
+        if pendientes:
+            logger.info("revisión job %s item %s:%s — se reintentará %s de la obra %s",
+                        job_id, n_prof, n_exp, ", ".join(pendientes), obra_id)
+        return pendientes
+    except Exception:  # noqa: BLE001 — nunca tumbar la revisión por la caché
+        logger.exception("no se pudo purgar la caché de obra del job %s", job_id)
+        return ()
+
+
 def _resolver_revision_background(job_id: str, n_prof: int, n_exp: int, body: dict):
     """Re-ejecuta la experiencia fuera del request y deja un estado consultable."""
     with _lock_descargas(job_id):
@@ -668,6 +696,7 @@ def _resolver_revision_background(job_id: str, n_prof: int, n_exp: int, body: di
             shutil.rmtree(base / f"P{n_prof}_E{n_exp}", ignore_errors=True)
             (base / f"P{n_prof}_E{n_exp}.ok").unlink(missing_ok=True)
             (base / f"P{n_prof}_E{n_exp}.seace.ok").unlink(missing_ok=True)
+            _forzar_reintento_cache_obra(job_id, n_prof, n_exp)
             job.descargas_estado = "pendiente"
             job.revision_estado = "completada"
             job.revision_error = None
@@ -1023,7 +1052,8 @@ def _correr_descarga_cui(descarga_id: str) -> None:
                               fecha_inicio=_fecha_opt(est.get("fecha_inicio")),
                               fecha_fin=_fecha_opt(est.get("fecha_fin")))
             est.update({k: r.get(k) for k in
-                        ("obra_id", "nombre", "descargados", "fallidos", "error")})
+                        ("obra_id", "nombre", "descargados", "fallidos",
+                         "secciones", "avisos", "error")})
             if r.get("obra_id") is None:
                 est["estado"] = "error"
                 _guardar_descarga_cui(descarga_id, est)

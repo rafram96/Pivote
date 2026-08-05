@@ -306,6 +306,52 @@ def test_revision_background_persiste_error_consultable(cliente, monkeypatch):
     assert final["items_revision"][0]["resuelto"] is False
 
 
+def test_revision_deja_la_cache_de_obra_lista_para_reintentar(cliente, monkeypatch):
+    """Issue #81 R1: invalidar `P{n}_E{m}/` no basta — si el corpus de la obra
+    quedó guardado con una sección caída, la revisión debe forzar su reintento."""
+    from api import app as modulo
+    from schemas import pipeline
+
+    cid = cliente.post("/api/pivote/concursos",
+                       json={"nomenclatura": "REV-CACHE"}).json()["concurso_id"]
+    job_id = _subir(cliente, cid).json()["job_id"]
+    job = modulo.repo.cargar(job_id)
+    job.items_revision.append(pipeline.ItemRevision(
+        n_prof=1, n_exp=1, etapa=pipeline.Etapa.RESOLUCION_CUI,
+        motivo="elegir CUI", candidatos=[]))
+    modulo.repo.guardar(job)
+    modulo.repo.guardar_enriquecimiento(job_id, {"1:1": {"obra": {"obra_id": 72056}}})
+
+    entrada = modulo._dir_job(job_id) / "cache_obras" / "72056"
+    (entrada / "Informes de control").mkdir(parents=True)
+    (entrada / "Informes de control" / "resto.pdf").write_bytes(b"%PDF")
+    (entrada / "Valorizaciones").mkdir()
+    (entrada / "Valorizaciones" / "val.pdf").write_bytes(b"%PDF")
+    (entrada / ".estado.json").write_text(
+        json.dumps({"secciones": {"InfoObras": {"esperados": 1, "descargados": 1},
+                                  "Informes de control": {"error": True}}}),
+        encoding="utf-8")
+    (entrada / ".completa").write_text("ok\n", encoding="utf-8")   # marca heredada
+
+    def resolver(job_id_, n_prof, n_exp, body):
+        actualizado = modulo.repo.cargar(job_id_)
+        actualizado.items_revision[0].resuelto = True
+        modulo.repo.guardar(actualizado)
+        return actualizado
+
+    monkeypatch.setattr(modulo.motor, "resolver_revision", resolver)
+    monkeypatch.setattr(modulo, "_asegurar_descargas", lambda *_: None)
+    assert cliente.post(f"/api/pivote/jobs/{job_id}/revision",
+                        json={"n_prof": 1, "n_exp": 1, "cui": "2418877"}
+                        ).status_code == 202
+
+    assert not (entrada / ".completa").exists()
+    assert (entrada / ".parcial").is_file()
+    assert not (entrada / "Informes de control").exists()
+    assert (entrada / "Valorizaciones" / "val.pdf").is_file(), (
+        "lo sano se reutiliza: la revisión no re-descarga la obra entera")
+
+
 # ── Descarga por un solo CUI (endpoint suelto) ───────────────────────────────
 
 def test_descargar_cui_valida_entrada(cliente):
