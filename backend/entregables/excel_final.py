@@ -342,6 +342,14 @@ _CRON_LEYENDA = ("Colores: verde = la fecha declarada calza con el documento · 
                  "documento).")
 
 
+_CRON_SIN_REGLA_B = "NO APLICA — no es un expediente técnico"
+
+# Formato de fecha de los cruces: año de CUATRO dígitos. Aquí se comparan
+# periodos declarados contra documentos oficiales y un `29/05/18` obliga a
+# adivinar el siglo justo donde el año es el dato que importa.
+FMT_FECHA_LARGA = "dd/mm/yyyy"
+
+
 def _cron_dato(v) -> str:
     return _sin_jerga(v) if isinstance(v, str) and v.strip() else "—"
 
@@ -351,6 +359,57 @@ def _cron_cruce(cruces, regla) -> Optional[dict]:
         if isinstance(c, dict) and c.get("regla") == regla:
             return c
     return None
+
+
+def presentacion_cruces(e: dict, fx: Optional[dict]) -> dict:
+    """Los cruces de UNA experiencia, ya traducidos a lo que se pinta.
+
+    ⚠ FUENTE ÚNICA de la presentación: la consumen la hoja «Cronología de
+    expedientes» (vista de conjunto del Comité) **y** el bloque por profesional
+    de cada hoja P. Si un texto, una fecha o un color cambia, cambia en los dos
+    sitios a la vez — que es exactamente lo que se pidió al aprobar el híbrido.
+    Las decisiones siguen viviendo en `reglas/cruces_fechas.py`; aquí solo se
+    traducen a celdas.
+    """
+    from reglas.cruces_fechas import REGLA_INICIO, REGLA_TERMINO, RESPUESTA
+
+    fx = fx or {}
+    cruces = fx.get("cruces_fechas") or []
+    ca = _cron_cruce(cruces, REGLA_INICIO) or {}
+    cb = _cron_cruce(cruces, REGLA_TERMINO)
+    seace = fx.get("seace") if isinstance(fx.get("seace"), dict) else {}
+    proceso = seace.get("proceso") or {}
+    firma = (ca.get("fecha_fuente") or proceso.get("fecha_firma")
+             or seace.get("fecha_suscripcion"))
+    aprobacion = (cb or {}).get("fecha_fuente")
+    motivos = [x.get("motivo") for x in (ca, cb) if x and x.get("motivo")]
+    return {
+        "n_exp": e.get("n"),
+        "proyecto": fx.get("obra_nombre") or e.get("proyecto"),
+        "cui": fx.get("cui") or e.get("cui"),
+        "proceso": (proceso.get("nomenclatura") or seace.get("codigoconvocatoria")
+                    or None),
+        "inicio": fecha_excel(e.get("fecha_inicial")),
+        "fin": fecha_excel(e.get("fecha_final")),
+        "firma": fecha_excel(firma),
+        "aprobacion": fecha_excel(aprobacion),
+        "resp_a": RESPUESTA.get(ca.get("resultado"), "POR VERIFICAR"),
+        "resp_b": (RESPUESTA.get(cb.get("resultado"), "POR VERIFICAR") if cb
+                   else _CRON_SIN_REGLA_B),
+        "aplica_b": cb is not None,
+        "inferida": bool(cb and cb.get("inferida") and aprobacion),
+        "motivo": _sin_jerga(" ".join(str(m) for m in motivos)),
+    }
+
+
+def _pintar_respuesta(celda, respuesta: str, aplica: bool = True) -> None:
+    """Verde / rojo / amarillo de una respuesta de cruce (SÍ es lo bueno). El
+    «no aplica» va SIN color: amarillo significa «por verificar», y una
+    supervisión no tiene nada que verificar contra la aprobación de un
+    expediente."""
+    f = _fill_veredicto(respuesta, "pos") if aplica else None
+    if f:
+        celda.fill = f
 
 
 def _cron_proyectos(espejo: dict, fichas: dict) -> list[dict]:
@@ -396,10 +455,6 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
     comparativa, una fila por experiencia, con el periodo declarado frente a esos
     hitos y el resultado de las dos reglas en lenguaje de evaluador.
     """
-    # Vocabulario y precedencias vienen del motor de reglas: la hoja PRESENTA,
-    # no vuelve a decidir (ni redefine cómo se lee un resultado).
-    from reglas.cruces_fechas import REGLA_INICIO, REGLA_TERMINO, RESPUESTA
-
     fichas = fichas or {}
     for i, w in enumerate(_CRON_WIDTHS, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
@@ -533,43 +588,25 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
     filas = 0
     for prof in espejo.get("profesionales", []):
         for e in prof.get("experiencias", []):
-            fx = fichas.get((prof.get("n_prof"), e.get("n"))) or {}
-            cruces = fx.get("cruces_fechas") or []
-            ca = _cron_cruce(cruces, REGLA_INICIO) or {}
-            cb = _cron_cruce(cruces, REGLA_TERMINO)
-            seace = fx.get("seace") if isinstance(fx.get("seace"), dict) else {}
-            firma = (ca.get("fecha_fuente")
-                     or (seace.get("proceso") or {}).get("fecha_firma")
-                     or seace.get("fecha_suscripcion"))
-            aprobacion = (cb or {}).get("fecha_fuente")
-            resp_a = RESPUESTA.get(ca.get("resultado"), "POR VERIFICAR")
-            resp_b = (RESPUESTA.get(cb.get("resultado"), "POR VERIFICAR")
-                      if cb else "NO APLICA — no es un expediente técnico")
-            motivos = [x.get("motivo") for x in (ca, cb) if x and x.get("motivo")]
-            valores = [
-                prof.get("nombre"), e.get("n"),
-                fx.get("obra_nombre") or e.get("proyecto"),
-                fx.get("cui") or e.get("cui"),
-                fecha_excel(e.get("fecha_inicial")), fecha_excel(e.get("fecha_final")),
-                fecha_excel(firma), fecha_excel(aprobacion),
-                resp_a, resp_b, _sin_jerga(" ".join(str(m) for m in motivos)),
-            ]
+            p = presentacion_cruces(e, fichas.get((prof.get("n_prof"), e.get("n"))))
+            valores = [prof.get("nombre"), p["n_exp"], p["proyecto"], p["cui"],
+                       p["inicio"], p["fin"], p["firma"], p["aprobacion"],
+                       p["resp_a"], p["resp_b"], p["motivo"]]
             for i, v in enumerate(valores, start=1):
                 c = ws.cell(r, i, _sin_jerga(v) if isinstance(v, str) else v)
                 c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
-                if i in (5, 6, 7, 8) and isinstance(v, date):
-                    c.number_format = FMT_FECHA
-                if i in (7, 8) and v in (None, ""):
-                    c.value = "—"
-            # Verde / rojo / amarillo en las dos preguntas (SÍ es lo bueno). El
-            # «no aplica» de la regla B va SIN color: amarillo significa «por
-            # verificar», y una supervisión no tiene nada que verificar aquí.
-            for col, resp, aplica in ((9, resp_a, True), (10, resp_b, cb is not None)):
-                f = _fill_veredicto(resp, "pos") if aplica else None
-                if f:
-                    ws.cell(r, col).fill = f
+                if i in (5, 6, 7, 8):
+                    # Fecha REAL con formato de fecha; sin dato, el guion. Sin
+                    # esto la celda mostraba el `AAAA-MM-DD 00:00:00` crudo que
+                    # la auditoría marcó en el resto del libro.
+                    if isinstance(v, date):
+                        c.number_format = FMT_FECHA_LARGA
+                    elif v in (None, ""):
+                        c.value = "—"
+            _pintar_respuesta(ws.cell(r, 9), p["resp_a"])
+            _pintar_respuesta(ws.cell(r, 10), p["resp_b"], p["aplica_b"])
             # Violeta = fecha deducida (la aprobación sale del nombre del archivo).
-            if cb and cb.get("inferida") and aprobacion:
+            if p["inferida"]:
                 ws.cell(r, 8).fill = FILL_SUPUESTO
             filas += 1
             r += 1
@@ -2102,6 +2139,66 @@ def construir_hoja_profesional(
     cver.font, cver.border, cver.alignment = F_BOLD, BORDER, AL_WRAP
     cver.fill = (_fill_veredicto(veredicto, "pos") or FILL_VALOR)
     ws.row_dimensions[r].height = max(30, (-(-len(str(cver.value)) // 90)) * 14 + 4)
+
+    # ── CRUCE DE FECHAS (T-011), justo bajo la PARTE 5 ───────────────────────
+    # La hoja «Cronología de expedientes» es la vista de conjunto del Comité;
+    # este bloque es la misma verdad al lado del profesional que se está
+    # evaluando, con UNA entrada por experiencia — incluidas las que no tienen
+    # proceso publicado, que aparecen con su abstención rotulada en vez de
+    # desaparecer. Los valores, textos y colores salen de `presentacion_cruces`:
+    # una sola fuente para las dos vistas.
+    #
+    # OJO con `r`: la PARTE 5 termina escribiendo EN la fila `r` sin avanzarla
+    # (mismo detalle que documenta el bloque del factor, más abajo).
+    if prof.get("experiencias"):
+        r += 2
+        banda("CRUCE DE FECHAS CONTRA EL CONTRATO Y LA APROBACIÓN DEL EXPEDIENTE",
+              F_PARTE, FILL_PARTE, 18)
+        for ci, cf, val in [(1, 1, "N°"), (2, 6, "Proceso de referencia"),
+                            (7, 8, "Inicio declarado"), (9, 10, "Firma del contrato"),
+                            (11, 12, "Término declarado"),
+                            (13, 14, "Aprobación del expediente"),
+                            (15, 16, "¿Empezó después de firmado el contrato?"),
+                            (17, 19, "¿Terminó antes de aprobarse el expediente?")]:
+            ws.merge_cells(start_row=r, start_column=ci, end_row=r, end_column=cf)
+            c = ws.cell(r, ci, val)
+            c.font, c.fill, c.border, c.alignment = F_HEAD, FILL_HEAD, BORDER, AL_HEAD
+        ws.row_dimensions[r].height = 30
+        r += 1
+
+        for e in prof.get("experiencias", []):
+            p = presentacion_cruces(e, fichas.get((n_prof, e.get("n"))))
+            campos = [(1, 1, p["n_exp"], None), (2, 6, p["proceso"], None),
+                      (7, 8, p["inicio"], FILL_CLAUDE), (9, 10, p["firma"], None),
+                      (11, 12, p["fin"], FILL_CLAUDE), (13, 14, p["aprobacion"], None),
+                      (15, 16, p["resp_a"], None), (17, 19, p["resp_b"], None)]
+            for ci, cf, val, fill in campos:
+                if cf > ci:
+                    ws.merge_cells(start_row=r, start_column=ci, end_row=r,
+                                   end_column=cf)
+                c = ws.cell(r, ci, _sin_jerga(val) if isinstance(val, str) else val)
+                c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
+                if isinstance(val, date):
+                    c.number_format = FMT_FECHA_LARGA
+                    if fill:
+                        c.fill = fill       # amarillo = lo que declara el certificado
+                elif val in (None, ""):
+                    c.value = "—"
+            _pintar_respuesta(ws.cell(r, 15), p["resp_a"])
+            _pintar_respuesta(ws.cell(r, 17), p["resp_b"], p["aplica_b"])
+            if p["inferida"]:
+                ws.cell(r, 13).fill = FILL_SUPUESTO   # violeta = fecha deducida
+            r += 1
+            # La explicación, a todo lo ancho debajo de su experiencia: es el
+            # texto que el evaluador copia al acta, no un tooltip.
+            texto = p["motivo"] or "Sin observaciones sobre las fechas."
+            ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=19)
+            c = ws.cell(r, 2, texto)
+            c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
+            if p["resp_a"] == "POR VERIFICAR" or p["resp_b"] == "POR VERIFICAR":
+                c.fill = FILL_VALOR
+            ws.row_dimensions[r].height = max(15, (-(-len(texto) // 150)) * 13 + 3)
+            r += 1
 
     # ── Factor de evaluación, AL FINAL de la hoja (issue #32) ────────────────
     # La página del Cuadro de Factores (4.2 A — la tabla de puntaje) cierra la

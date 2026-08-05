@@ -250,8 +250,47 @@ Celda por celda, esto es lo que tiene que haber:
    o `POR VERIFICAR`, o `NO APLICA` — siempre con su explicación al lado.
 2. Ninguna celda dice `por_confirmar`, `sin_dato`, `backend`, `agent-…` ni trae
    los corchetes `⟦ ⟧`: todo está en palabras de evaluador.
-3. Las 16 hojas anteriores (CLAUDE, Base de Datos y las 14 por profesional)
-   están **exactamente como antes**. La hoja nueva es aditiva y va al final.
+3. Las fechas de `E`, `F`, `G` y `H` se ven `29/05/2018`, **nunca**
+   `2018-05-29 00:00:00`. Año de cuatro dígitos a propósito: aquí se compara
+   contra documentos oficiales y el año es el dato que importa.
+
+---
+
+## Caso 6b — el bloque por profesional, dentro de cada hoja P
+
+La hoja global es la vista de conjunto del Comité; el bloque de abajo es la
+misma verdad **al lado del profesional que se está evaluando**, con una entrada
+por experiencia. Los dos leen la misma función de presentación: si un texto o un
+color cambia, cambia en los dos a la vez.
+
+En el mismo archivo del Caso 6, abre la pestaña **`P1. Contr`** y baja hasta el
+final de la hoja. Justo **debajo de `CONCLUSIÓN DEL TIEMPO EFECTIVO`** y encima
+del recorte del factor, tiene que haber:
+
+| Fila (aprox.) | Contenido |
+|---|---|
+| `A437` | Banda gris `CRUCE DE FECHAS CONTRA EL CONTRATO Y LA APROBACIÓN DEL EXPEDIENTE` |
+| Fila `438` | Encabezados: `N°` · `Proceso de referencia` · `Inicio declarado` · `Firma del contrato` · `Término declarado` · `Aprobación del expediente` · `¿Empezó después de firmado el contrato?` · `¿Terminó antes de aprobarse el expediente?` |
+| Fila `439` | Experiencia 1: `CP-SM-9-2017-PRONIS-1` · inicio `29/05/2018` (amarillo, es lo declarado) · firma `17/04/2018` · término `15/03/2020` · aprobación `—` · **`SÍ` en verde** · `NO APLICA — no es un expediente técnico` (sin color) |
+| Fila `440` | La explicación completa, a todo lo ancho: *«El contrato del proceso se firmó el 17/04/2018 y el profesional declara haber iniciado el 29/05/2018, después de esa firma.»* |
+| Filas `441`–`442` | Lo mismo para la experiencia 2 |
+
+Y en **`P2. Jefe Superv`**, el mismo bloque con el caso contrario: las 5
+experiencias de Lucar Antonio Cabanillas Toro salen en **`POR VERIFICAR`
+amarillo**, con `Proceso de referencia` en `—` y la nota *«no se identificó el
+proceso de contratación de esta experiencia en los datos abiertos del
+Estado…»*. **Ninguna experiencia desaparece por no tener proceso publicado**:
+aparece con su abstención escrita.
+
+> Los números de fila son de la corrida del 2026-08-05 y se mueven con el
+> contenido; lo que no se mueve es la posición relativa — el bloque va siempre
+> entre la conclusión del tiempo efectivo y el recorte del factor.
+
+**Lo que NO cambió en esas hojas**: todo lo que ya había queda intacto y en el
+mismo sitio. Verificado regenerando Lircay con el código anterior (`70f39bf`) y
+con el nuevo: `CLAUDE` y `Base de Datos` con **cero celdas modificadas**, las 17
+hojas por profesional con **cero contenido preexistente perdido** — el bloque se
+añade al final y el recorte del factor baja intacto.
 
 ---
 
@@ -279,6 +318,10 @@ Y `Hojas del libro: 20`, con la de cronología al final.
 | `A13` / fila `14` | El título de la tabla comparativa y sus encabezados |
 | `A15` en adelante | Las 67 experiencias, todas en `POR VERIFICAR` |
 
+Y en cada hoja P del mismo archivo, el bloque de cruces con todas las
+experiencias de ese profesional en `POR VERIFICAR` y su nota. **Sin crash y sin
+celdas mudas**: un job sin fuentes dice qué le falta.
+
 **Nada de silencio**: la hoja existe, dice qué falta y por qué, y no insinúa que
 la propuesta esté mal.
 
@@ -291,8 +334,11 @@ venv/Scripts/python -m pytest tests/test_cruces_fechas.py -q        # desde back
 venv/Scripts/python -m pytest tests -q                              # suite completa
 ```
 
-30 pruebas nuevas, sin red. Cubren: los dos disparos, el borde «mismo mes»,
+37 pruebas nuevas, sin red. Cubren: los dos disparos, el borde «mismo mes»,
 los bordes exactos de las dos tolerancias (15/16 y 30/31 días), las cuatro
-formas de abstención, que la etapa no levante alerta cuando se abstiene, que
-la hoja aparezca con datos y sin ellos, que no haya jerga, y que las hojas del
-formato congelado salgan **celda por celda idénticas** con la hoja nueva puesta.
+formas de abstención, que la etapa no levante alerta cuando se abstiene, que la
+hoja global aparezca con datos y sin ellos, que el bloque por profesional
+aparezca con una entrada por experiencia —incluidas las abstenciones— y siempre
+**debajo** de la PARTE 5, que las fechas lleven formato de fecha en las dos
+vistas, que no haya jerga, y que las dos vistas lean **la misma** función de
+presentación.

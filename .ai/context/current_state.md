@@ -65,8 +65,17 @@ idénticas celda por celda. Un job sin fuentes genera la hoja igual, con la nota
 «Sin procesos verificables». Replay Vitarte: 31 experiencias, 9 cuadran, 0 no
 cuadran, 22 se abstienen (21 por cobertura pre-2018, 1 por identidad
 insuficiente). Comprobación manual en
-`docs/pruebas/t011-comprobacion-manual.md`. Gate: **819 passed, 25 skipped**
-(base 789/25), resolver intacto, panel sin tocar, sin despliegue.
+`docs/pruebas/t011-comprobacion-manual.md`.
+
+Rafael revisó la hoja y aprobó el **híbrido**: la vista de conjunto se conserva
+y, además, cada hoja P lleva bajo la PARTE 5 un bloque de cruces con una entrada
+por experiencia (las que no tienen proceso publicado aparecen con su abstención
+rotulada, no desaparecen). Las dos vistas leen `presentacion_cruces` — una sola
+fuente de textos, fechas y colores. `CLAUDE` y `Base de Datos` siguen
+byte-idénticas; las hojas P cambian por decisión explícita y solo por apéndice
+(cero contenido preexistente perdido, verificado contra `70f39bf` sobre Lircay).
+Gate: **826 passed, 25 skipped** (base 789/25), resolver intacto, panel sin
+tocar, sin despliegue.
 
 ## ZIP #80 resuelta: caché por obra y árbol completo por experiencia (4-ago)
 

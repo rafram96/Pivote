@@ -421,11 +421,15 @@ def _volcado(ws) -> list:
     return [(c.row, c.column, c.value) for fila in ws.iter_rows() for c in fila]
 
 
-def test_la_hoja_nueva_no_altera_las_hojas_congeladas(tmp_path):
-    """Un job SIN datos SEACE: las hojas del formato (CLAUDE, Base de Datos y
-    la del profesional) salen celda por celda idénticas a las de un libro
-    construido sin la hoja nueva; lo único que cambia es que aparece una hoja
-    más, al final."""
+def test_la_hoja_nueva_va_al_final_y_no_reordena_el_libro(tmp_path):
+    """La hoja de cronología es la ÚLTIMA del libro y no cambia el orden ni el
+    contenido de las que ya había.
+
+    Ojo con el alcance: desde el híbrido aprobado el 5-ago, las hojas por
+    profesional SÍ ganan el bloque de cruces al final de la hoja — es un
+    apéndice bajo la PARTE 5, verificado aparte
+    (`test_bloque_por_profesional_va_despues_de_la_parte_5`) y contra el libro
+    de `HEAD` sobre un job real. CLAUDE y Base de Datos no se tocan."""
     espejo = _espejo_una_experiencia(cert())
     salida = tmp_path / "final.xlsx"
     generar_excel_final(espejo, salida)
@@ -456,6 +460,165 @@ def test_regenerar_un_job_viejo_no_rompe_y_agrega_la_hoja(tmp_path):
     wb = openpyxl.load_workbook(salida)
     assert HOJA_CRONOLOGIA in wb.sheetnames
     assert enr["1:1"]["cruces_fechas"][0]["resultado"] == DISPARA
+
+
+# ── 7 · Bloque por profesional dentro de cada hoja P (híbrido) ──────────────
+
+TITULO_BLOQUE = "CRUCE DE FECHAS CONTRA EL CONTRATO Y LA APROBACIÓN DEL EXPEDIENTE"
+
+
+def _libro(espejo: dict, enriquecimiento: dict, tmp_path):
+    inyectar_cruces_fechas(espejo, enriquecimiento)
+    paral, cuis, fichas, sunat = desempaquetar_enriquecimiento(enriquecimiento)
+    salida = tmp_path / "final.xlsx"
+    generar_excel_final(espejo, salida, paral, cuis, fichas, {}, sunat, {})
+    return openpyxl.load_workbook(salida)
+
+
+def _buscar(ws, prefijo: str):
+    """(fila, celda) de la primera celda que empieza con `prefijo`, o (None, None)."""
+    for fila in ws.iter_rows():
+        for c in fila:
+            if isinstance(c.value, str) and c.value.startswith(prefijo):
+                return c.row, c
+    return None, None
+
+
+def _espejo_dos_experiencias() -> dict:
+    """Un profesional con dos experiencias: una con proceso publicado y otra sin
+    él — el caso que obliga a que la abstención se vea, y no desaparezca."""
+    espejo = _espejo_una_experiencia(cert(fecha_inicial="2021-06-01"))
+    espejo["profesionales"][0]["experiencias"].append(
+        {"n": 2, "proyecto": "Obra antigua sin proceso publicado",
+         **cert(fecha_inicial="2013-03-04", fecha_final="2014-08-30")})
+    return espejo
+
+
+def test_bloque_por_profesional_una_entrada_por_experiencia(tmp_path):
+    espejo = _espejo_dos_experiencias()
+    enr = {"1:1": {"cui": "2337618",
+                   "seace": bloque_seace(proceso(), cert(fecha_inicial="2021-06-01"))},
+           "1:2": {"cui": "2088779", "seace": {"estado": "sin_procesos",
+                                               "cui": "2088779"}}}
+    wb = _libro(espejo, enr, tmp_path)
+    ws = wb[[n for n in wb.sheetnames
+             if n not in ("CLAUDE", "Base de Datos", HOJA_CRONOLOGIA)][0]]
+    fila, _c = _buscar(ws, TITULO_BLOQUE)
+    assert fila, "el bloque de cruces no aparece en la hoja del profesional"
+
+    # Encabezados del bloque, con las dos preguntas.
+    cab = [str(c.value) for c in ws[fila + 1] if c.value]
+    assert "¿Empezó después de firmado el contrato?" in cab
+    assert "¿Terminó antes de aprobarse el expediente?" in cab
+
+    # Una entrada por experiencia (fila de datos + fila de explicación).
+    exp1, exp2 = ws[fila + 2], ws[fila + 4]
+    assert exp1[0].value == 1 and exp2[0].value == 2
+    assert exp1[14].value == "NO"              # col O · la regla A dispara
+    assert exp2[14].value == "POR VERIFICAR"   # col O · sin proceso → abstención
+
+    # La abstención se ROTULA, no desaparece.
+    nota2 = str(ws.cell(fila + 5, 2).value)
+    assert "no se identificó el proceso" in nota2 and "2018" in nota2
+
+
+def test_bloque_por_profesional_colorea_como_la_hoja_global(tmp_path):
+    espejo = _espejo_dos_experiencias()
+    enr = {"1:1": {"cui": "2337618",
+                   "seace": bloque_seace(proceso(), cert(fecha_inicial="2021-06-01"))},
+           "1:2": {"cui": "2088779", "seace": {"estado": "sin_procesos"}}}
+    wb = _libro(espejo, enr, tmp_path)
+    ws = wb[[n for n in wb.sheetnames
+             if n not in ("CLAUDE", "Base de Datos", HOJA_CRONOLOGIA)][0]]
+    fila, _c = _buscar(ws, TITULO_BLOQUE)
+    assert ws.cell(fila + 2, 15).fill.fgColor.rgb.endswith("FFC7CE")   # rojo
+    assert ws.cell(fila + 4, 15).fill.fgColor.rgb.endswith("FFF2CC")   # amarillo
+    # «No aplica» sin color: amarillo significa «por verificar».
+    assert ws.cell(fila + 2, 17).fill.fgColor.rgb in ("00000000", None)
+
+
+def test_las_fechas_llevan_formato_de_fecha_en_las_dos_vistas(tmp_path):
+    """El defecto que Rafael detectó: la celda mostraba `2018-05-29 00:00:00`.
+    Las cuatro columnas de fecha de las dos vistas llevan `dd/mm/yyyy`, con año
+    de cuatro dígitos (aquí el año ES el dato)."""
+    from datetime import datetime as _dt
+
+    espejo = _espejo_una_experiencia(cert(fecha_inicial="2021-06-01"))
+    enr = {"1:1": {"cui": "2337618",
+                   "seace": bloque_seace(proceso(), cert(fecha_inicial="2021-06-01"))}}
+    wb = _libro(espejo, enr, tmp_path)
+
+    global_ = wb[HOJA_CRONOLOGIA]
+    fila, _c = _buscar(global_, "PROFESIONAL")
+    for col in (5, 6, 7):                    # DESDE · HASTA · FIRMA
+        c = global_.cell(fila + 1, col)
+        assert isinstance(c.value, _dt), col
+        assert c.number_format == "dd/mm/yyyy", (col, c.number_format)
+
+    ws = wb[[n for n in wb.sheetnames
+             if n not in ("CLAUDE", "Base de Datos", HOJA_CRONOLOGIA)][0]]
+    fila, _c = _buscar(ws, TITULO_BLOQUE)
+    for col in (7, 9, 11):                   # inicio · firma · término
+        c = ws.cell(fila + 2, col)
+        assert isinstance(c.value, _dt), col
+        assert c.number_format == "dd/mm/yyyy", (col, c.number_format)
+
+
+def test_bloque_por_profesional_va_despues_de_la_parte_5(tmp_path):
+    """Estrictamente APENDICE: todo lo que ya había en la hoja queda arriba y
+    sin mover — el bloque nace debajo de la conclusión del tiempo efectivo."""
+    espejo = _espejo_una_experiencia(cert())
+    wb = _libro(espejo, {"1:1": {}}, tmp_path)
+    ws = wb[[n for n in wb.sheetnames
+             if n not in ("CLAUDE", "Base de Datos", HOJA_CRONOLOGIA)][0]]
+    fila_bloque, _a = _buscar(ws, TITULO_BLOQUE)
+    fila_p5, _b = _buscar(ws, "PARTE 5")
+    fila_concl, _c = _buscar(ws, "CONCLUSIÓN DEL TIEMPO EFECTIVO")
+    assert fila_p5 < fila_concl < fila_bloque
+
+
+def test_bloque_por_profesional_en_un_job_sin_datos(tmp_path):
+    """Sin SEACE ni MEF el bloque existe igual, con la abstención rotulada."""
+    espejo = _espejo_una_experiencia(cert())
+    wb = _libro(espejo, {"1:1": {"cui": "2337618"}}, tmp_path)
+    ws = wb[[n for n in wb.sheetnames
+             if n not in ("CLAUDE", "Base de Datos", HOJA_CRONOLOGIA)][0]]
+    fila, _c = _buscar(ws, TITULO_BLOQUE)
+    assert fila
+    assert ws.cell(fila + 2, 15).value == "POR VERIFICAR"
+    assert "no se identificó el proceso" in str(ws.cell(fila + 3, 2).value)
+
+
+def test_bloque_por_profesional_sin_jerga(tmp_path):
+    espejo = _espejo_una_experiencia(cert(fecha_inicial="2021-06-01"))
+    espejo["profesionales"][0]["experiencias"][0]["proyecto"] = (
+        "Obra leída por agent-propuesta-mapa ⟦crudo: dudoso⟧")
+    enr = {"1:1": {"cui": "2337618",
+                   "seace": bloque_seace(proceso(), cert(fecha_inicial="2021-06-01"))}}
+    wb = _libro(espejo, enr, tmp_path)
+    ws = wb[[n for n in wb.sheetnames
+             if n not in ("CLAUDE", "Base de Datos", HOJA_CRONOLOGIA)][0]]
+    fila, _c = _buscar(ws, TITULO_BLOQUE)
+    textos = " ".join(str(c.value) for f in ws.iter_rows(min_row=fila)
+                      for c in f if c.value is not None)
+    for prohibido in ("agent-", "⟦", "⟧", "por_confirmar", "sin_dato", "null"):
+        assert prohibido not in textos, prohibido
+
+
+def test_una_sola_fuente_para_las_dos_vistas():
+    """La hoja global y el bloque local leen `presentacion_cruces`: si un texto
+    cambia, cambia en los dos. El test lo fija llamándola directo."""
+    from entregables.excel_final import presentacion_cruces
+    c = cert(fecha_inicial="2021-06-01")
+    enr = {"1:1": {"cui": "2337618", "seace": bloque_seace(proceso(), c)}}
+    espejo = _espejo_una_experiencia(c)
+    inyectar_cruces_fechas(espejo, enr)
+    _p, _c2, fichas, _s = desempaquetar_enriquecimiento(enr)
+    p = presentacion_cruces(espejo["profesionales"][0]["experiencias"][0],
+                            fichas[(1, 1)])
+    assert p["resp_a"] == "NO" and p["aplica_b"] is False
+    assert p["firma"].isoformat() == "2021-09-24"
+    assert "no se puede prestar el servicio" in p["motivo"].lower()
 
 
 def test_inyectar_cruces_respeta_lo_ya_calculado():

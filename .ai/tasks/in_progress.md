@@ -125,8 +125,32 @@ sin la verificación MEF de expedientes y no hay ninguno que cotejar. Cero
 incoherencias de fechas en ese análisis es un RESULTADO, no un fallo de la
 herramienta: los casos 1 y 3 del documento la muestran disparando.
 
+**Extensión HÍBRIDA aprobada por Rafael el mismo día** («Sí, híbrido. Porque
+debe haber cronología por cada experiencia que hay por un profesional»): además
+de la hoja global —que se conserva como vista de conjunto del Comité— cada hoja
+P lleva, bajo la PARTE 5, un bloque **CRUCE DE FECHAS CONTRA EL CONTRATO Y LA
+APROBACIÓN DEL EXPEDIENTE** con una entrada por experiencia (proceso de
+referencia, las tres/cuatro fechas, los dos veredictos y la explicación a todo
+lo ancho). **Cero lógica duplicada**: las dos vistas leen
+`excel_final.presentacion_cruces`, que traduce a celdas lo que decide
+`reglas/cruces_fechas.py` — un texto o un color cambian en los dos sitios a la
+vez, con test que lo fija. Las experiencias sin proceso publicado aparecen con
+su abstención rotulada, nunca desaparecen. De paso se corrigió el defecto que
+Rafael detectó al revisar la hoja: las columnas de fecha nacían sin formato
+largo y mostraban `2018-05-29 00:00:00`; ahora las cuatro de la tabla global y
+las cuatro del bloque llevan `dd/mm/yyyy` (año de 4 dígitos: aquí el año ES el
+dato).
+
+**Alcance real del cambio en el libro, dicho sin adornos**: `CLAUDE` y
+`Base de Datos` quedan **byte-idénticas**; las hojas por profesional **sí
+cambian**, y por decisión explícita — el bloque es un apéndice bajo la
+conclusión del tiempo efectivo. Verificado con el método del worktree sobre
+Lircay (`371fa5a1e704`, 19 hojas, código `70f39bf` vs el nuevo): cero celdas
+modificadas en CLAUDE y Base de Datos, **cero contenido preexistente perdido en
+todo el libro**, y el recorte del factor baja intacto.
+
 **Gates**: `backend/resolucion/cui.py` intacto byte a byte → **no aplica
-golden** · suite **819 passed, 25 skipped** (línea base 789/25; +30 pruebas,
+golden** · suite **826 passed, 25 skipped** (línea base 789/25; +37 pruebas,
 cero regresiones) · cero red en pytest · `compileall` y `git diff --check`
 limpios · panel intacto (regla de contención del 5-ago).
 
