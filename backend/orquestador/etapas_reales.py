@@ -797,9 +797,11 @@ class EtapaInfoObrasReal:
         # haya devuelto obra_id: SEACE se consulta por CUI y jamás cruza de tipo.
         from resolucion.cui import es_expediente_exp
         from scraping.seace_abierto import (
-            codigo_convocatoria, doc_bases_integradas, doc_contrato_firmado,
-            seleccionar_proceso, tipo_esperado,
+            clasificar_proceso, codigo_convocatoria, doc_bases_integradas,
+            doc_contrato_firmado, seleccionar_proceso, tipo_esperado,
         )
+        from validacion.candado_seace import (
+            CONTRADICE, evaluar_candado, resumen_proceso)
         cache_seace: dict[str, object] = {}
         for _e, (np_, ne) in ctx.items_experiencia():
             k = _clave(np_, ne)
@@ -851,9 +853,12 @@ class EtapaInfoObrasReal:
                 ctx.enriquecimiento[k] = enr
                 continue
 
-            contratos = elegido.get("contracts") or []
-            contrato = contratos[0] if contratos else {}
-            periodo = contrato.get("period") or {}
+            # F5: la identidad del proceso sale de `resumen_proceso`, que abarca
+            # TODOS sus contratos. `contracts[0]` es arbitrario y puede ser una
+            # adenda de dos días (caso real CUI 2343407) — de ahí salían la
+            # «fecha de firma» y la vigencia que se muestran en el Excel.
+            resumen = resumen_proceso(elegido)
+            resumen["tipo"] = clasificar_proceso(elegido)[0]
             bases, firmado = doc_bases_integradas(elegido), doc_contrato_firmado(elegido)
             seace = {
                 "estado": "seleccionado",
@@ -864,11 +869,9 @@ class EtapaInfoObrasReal:
                 "seleccion": seleccion.get("seleccion"),
                 "ambiguo": bool(seleccion.get("ambiguo")),
                 "motivo": seleccion.get("motivo"),
-                "fecha_suscripcion": str(contrato.get("dateSigned") or "")[:10] or None,
-                "vigencia": [
-                    str(periodo.get("startDate") or "")[:10] or None,
-                    str(periodo.get("endDate") or "")[:10] or None,
-                ],
+                "fecha_suscripcion": resumen.get("fecha_firma"),
+                "vigencia": [resumen.get("vigencia_inicio"),
+                             resumen.get("vigencia_fin")],
                 "docs": {
                     "bases": {
                         "estado": "disponible" if bases else "no_disponible",
@@ -884,7 +887,31 @@ class EtapaInfoObrasReal:
                     },
                 },
             }
+            # T-004 F5 — candado de identidad: elegir el proceso por CUI+tipo NO
+            # prueba que sea el del certificado. El resumen del proceso se
+            # PERSISTE (identidad estructurada, sin PDFs) para poder re-evaluar
+            # el candado sin volver a la fuente.
+            seace["proceso"] = resumen
+            candado = evaluar_candado(resumen, {
+                "entidad_contratante": _e.get("entidad_contratante"),
+                "entidad_emisora": _e.get("entidad_emisora"),
+                "ruc_emisor": _e.get("ruc_emisor"),
+                "tipo_experiencia": tipo,
+                "fecha_inicial": _e.get("fecha_inicial"),
+                "fecha_final": _e.get("fecha_final"),
+                "monto_contrato_soles": _e.get("monto_contrato_soles"),
+            })
+            seace["candado"] = candado.como_dict()
             enr["seace"] = seace
+            if candado.resultado == CONTRADICE:
+                # Una contradicción se SEÑALA, no se esconde ni bloquea: los PDF
+                # siguen yendo al ZIP como sustento, con el rótulo que
+                # corresponde.
+                obs.append(pipeline.Observacion(
+                    codigo="SEACE", severidad=pipeline.Severidad.ADVERTENCIA,
+                    mensaje=f"los documentos del proceso encontrado para el CUI {cui} "
+                            f"no coinciden con el certificado: {candado.motivo}",
+                    origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
             if seace["ambiguo"]:
                 obs.append(pipeline.Observacion(
                     codigo="SEACE", severidad=pipeline.Severidad.ADVERTENCIA,

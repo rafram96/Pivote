@@ -98,6 +98,14 @@ _ACCION_GENERICA = "revisar esta experiencia en el panel"
 _ACCION_SIN_OBRA = "confirmar la obra o pegar el CUI correcto en el panel"
 
 
+def _rotulo_candado_seace(resultado) -> Optional[str]:
+    """Rótulo de confianza del candado SEACE (T-004 F5), con la fuente única en
+    `validacion/candado_seace.py`. Devuelve `None` para un job anterior a F5
+    (sin el campo `candado`): el bloque se dibuja como siempre y nada rompe."""
+    from validacion.candado_seace import rotulo
+    return rotulo(resultado)
+
+
 def _mayus_inicial(texto) -> str:
     """Primera letra en mayúscula SIN tocar el resto: `str.capitalize()` bajaría
     los veredictos que el motor escribe en mayúsculas ("NO CUMPLE pero…")."""
@@ -620,6 +628,10 @@ def construir_hoja_profesional(
         }
         tipo = etiquetas.get(datos.get("proceso_objeto"), datos.get("proceso_objeto") or "—")
         filas = [("Tipo de proceso", tipo)]
+        # F5 — rótulo de confianza. `None` cuando el job es anterior al candado:
+        # entonces el bloque se dibuja exactamente como antes.
+        candado = datos.get("candado") if isinstance(datos.get("candado"), dict) else {}
+        rotulo_candado = _rotulo_candado_seace(candado.get("resultado"))
         docs = datos.get("docs") or {}
         for clave, etiqueta in (("bases", "Bases Integradas"), ("contrato", "Contrato firmado")):
             disponible = (docs.get(clave) or {}).get("estado") == "disponible"
@@ -627,6 +639,11 @@ def construir_hoja_profesional(
                           if disponible else "No disponible en datos abiertos"))
         if datos.get("fecha_suscripcion"):
             filas.append(("Fecha de firma", datos["fecha_suscripcion"]))
+        if rotulo_candado:
+            filas.append(("Correspondencia con el certificado", rotulo_candado))
+        entidad = (datos.get("proceso") or {}).get("entidad_convocante")
+        if entidad:
+            filas.append(("Entidad convocante", entidad))
         for etiqueta, valor in filas:
             ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=7)
             cl = ws.cell(rr, 6, etiqueta)
@@ -634,7 +651,20 @@ def construir_hoja_profesional(
             ws.merge_cells(start_row=rr, start_column=8, end_row=rr, end_column=11)
             cv = ws.cell(rr, 8, valor)
             cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
+            # Amarillo = «por verificar» (convención vigente): solo cuando el
+            # candado NO confirmó. Un `confirmado` va sin resalte.
+            if (etiqueta == "Correspondencia con el certificado"
+                    and candado.get("resultado") != "confirmado"):
+                cv.fill = FILL_VALOR
             rr += 1
+        if rotulo_candado and candado.get("resultado") != "confirmado":
+            texto = str(candado.get("motivo") or "")
+            if texto:
+                ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+                c = ws.cell(rr, 6, texto)
+                c.font, c.fill, c.border, c.alignment = F_CELL, FILL_VALOR, BORDER, AL_WRAP
+                ws.row_dimensions[rr].height = max(15, (-(-len(texto) // 70)) * 13 + 2)
+                rr += 1
         if datos.get("ambiguo"):
             texto = ("Por confirmar — hay varios procesos del mismo tipo; se eligió "
                      "el más reciente. Verificar la carátula de los documentos del ZIP.")

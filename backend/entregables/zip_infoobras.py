@@ -823,8 +823,21 @@ def _cabecera_indice(manifiestos: bool) -> list[str]:
 _CAMPOS_INDICE_JSON = (
     "n_prof", "cargo", "n_exp", "proyecto", "documentos", "compartidos",
     "propios", "notas", "sin_documentos", "motivo", "secciones_incompletas",
-    "advertencias",
+    "advertencias", "seace",
 )
+
+
+def _linea_candado_seace(info: dict) -> Optional[str]:
+    """Rótulo de confianza de los documentos SEACE de esta experiencia (F5).
+
+    `None` cuando la experiencia no tiene proceso elegido o cuando el job es
+    ANTERIOR al candado: en ese caso el índice sale byte a byte como antes.
+    """
+    seace = info.get("seace") if isinstance(info.get("seace"), dict) else {}
+    candado = seace.get("candado") if isinstance(seace.get("candado"), dict) else {}
+    from validacion.candado_seace import rotulo
+    texto = rotulo(candado.get("resultado"))
+    return f"Documentos del proceso (SEACE): {texto}" if texto else None
 
 
 def _indice_txt(meta: dict, registros: list[dict], cabecera: list[str]) -> str:
@@ -849,6 +862,8 @@ def _indice_txt(meta: dict, registros: list[dict], cabecera: list[str]) -> str:
                 detalle = f"{r['documentos']} documento(s)"
             nota_txt = f" + {r['notas']} nota(s)" if r["notas"] else ""
             lineas.append(f"{prefijo}{detalle}{nota_txt}")
+        if r.get("seace"):
+            lineas.append(f"  {r['seace']}")
         for s in r["secciones_incompletas"]:
             lineas.append(f"  SECCIÓN {s['seccion']}: {s['estado']}")
         for aviso in r["advertencias"]:
@@ -892,6 +907,8 @@ def _indice_md(meta: dict, registros: list[dict], cabecera: list[str]) -> str:
                            f"de esta obra, {r['propios']} propios del periodo{nota}")
             else:
                 out.append(f"- **Documentos:** {r['documentos']}{nota}")
+        if r.get("seace"):
+            out.append(f"- {r['seace']}")
         for s in r["secciones_incompletas"]:
             out.append(f"- {s['seccion']}: {s['estado']}")
         for aviso in r["advertencias"]:
@@ -994,6 +1011,7 @@ def construir_zip_infoobras(
                     "documentos": 0, "compartidos": 0, "propios": 0, "notas": 0,
                     "sin_documentos": True, "motivo": None,
                     "secciones_incompletas": [], "advertencias": [],
+                    "seace": _linea_candado_seace(info),
                     "_grupo_obra": None,
                 }
                 registros.append(reg)
