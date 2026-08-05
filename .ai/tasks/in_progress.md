@@ -2,6 +2,137 @@
 
 *(Actualizar al iniciar cualquier trabajo; mover a completed.md al cerrar.)*
 
+## T-TAREA-SEACE-F5 — candado de identidad CUI↔proceso (en progreso, 2026-08-05)
+
+### Estado al cierre de la sesión del 2026-08-05 — CÓDIGO COMPLETO, FALTA SERVIDOR
+
+**Hecho** (en `demo`, sin push ni despliegue):
+
+- **`backend/validacion/candado_seace.py`** (nuevo, PURO — ni red ni disco):
+  confirmación asimétrica con veredicto ternario en
+  `enriquecimiento[…]["seace"]["candado"]`. Cinco señales: `entidad`
+  (comparador `score_match_empresa` de `scraping/sunat.py` **reutilizado**, no
+  duplicado — el de `mef.py` está afinado para nombres de OBRA y no quita
+  sufijos legales), `adjudicatario`, `objeto`, `temporal` (fuertes) y `monto`
+  (débil). Umbrales: 85 a favor / 60 en contra (zona gris 60–84 = abstención),
+  `TOLERANCIA_DIAS_FIRMA = 15` **días completos**, monto ±20%.
+- **Señal `adjudicatario`, hallazgo del Paso 0**: el RUC del emisor del
+  certificado suele ser el del **adjudicatario** del proceso (constancia de
+  terceros). Es una igualdad de RUC, no un parecido de texto — la señal más
+  contundente. **Solo suma**: su ausencia NO contradice (un consorciado emite
+  con RUC propio).
+- **Aritmética temporal día-exacta** (requisito de Rafael): nunca se trunca a
+  mes. Test del caso borde `test_temporal_mismo_mes_dias_incompatibles` (firma
+  30/01 vs inicio declarado 05/01 → 25 días → NO cuadra pese a compartir enero),
+  más los dos bordes exactos de la tolerancia (15 días sí / 16 no). **NO se
+  tocó el clamp del Paso 5** — esa mejora es tarea aparte.
+- **Cableado**: `etapas_reales.py` persiste `seace.proceso` (identidad
+  estructurada) + `seace.candado` y emite Observación ADVERTENCIA en
+  `contradice`. `excel_final.py::render_seace` y el índice del ZIP
+  (`zip_infoobras.py`, txt/md/json) muestran el rótulo. **La descarga NO se
+  bloquea**. Panel intacto (D-P1a es otra tarea).
+- **Compatibilidad**: un job sin campo `candado` genera Excel e índice
+  exactamente como antes (`rotulo()` devuelve `None`). Con test.
+- **Comprobación manual**: `backend/scripts/probar_candado_seace.py`
+  (subcomandos `caso` y `replay`, `--vivo` para red, caché en
+  `datos_pivote/referencia/seace_procesos/`) + checklist copy-paste en
+  **`docs/pruebas/f5-comprobacion-manual.md`**.
+
+**Dos defectos reales destapados y corregidos de paso:**
+
+1. La ventana del proceso salía de `contracts[0]`, y el orden de la fuente es
+   arbitrario. CUI 2343407 (Challhuahuacho/PRONIS): `contracts[0]` era un
+   registro de DOS DÍAS de 2024 y el contrato real era el segundo (2018–2020) →
+   dos experiencias legítimas salían «NO COINCIDE». Ahora la ventana abarca
+   TODOS los contratos y la firma es la más temprana; también arregla la «Fecha
+   de firma» del Excel (`seace.fecha_suscripcion`/`vigencia` derivan del
+   resumen).
+2. **Los 3 `*_ERROR.txt` de Bases Integradas del job Vitarte NO eran del host**:
+   `extension_documento` leía `format` (clave OCDS) sobre el bloque persistido,
+   que la guarda como `formato` → extensión siempre `.pdf` → la validación por
+   magia tiraba el ZIP/RAR. Corregido (acepta ambas claves). Verificado en vivo:
+   el ZIP baja 428,781 bytes y el RAR 1,515,008.
+
+**Gates**: `backend/resolucion/cui.py` intacto byte a byte → **no aplica
+golden** · suite **789 passed, 25 skipped** (línea base 757/25; +32 tests,
+cero regresiones) · cero red en pytest · `compileall` y `git diff --check`
+limpios.
+
+**Hallazgo Paso 0 (Altiplano, consulta en vivo a OCDS el 2026-08-05)**: el CUI
+2300016 publica **14 procesos y los 14 son adquisición de equipamiento
+biomédico** de EsSalud CEABE (`goods`). NO existe proceso de supervisión,
+ejecución ni expediente bajo ese CUI, con ninguna nomenclatura (la API solo
+acepta `projectID`; no hay búsqueda por texto). **El selector NO se equivoca**:
+es un `sin_tipo` legítimo, no un miss que corregir. Test que lo fija:
+`test_altiplano_sin_proceso_de_supervision`.
+
+**PENDIENTE — corrida integral en el SERVIDOR del cliente** (explícitamente
+fuera del alcance de esta sesión; no hay deploy): snapshot/punto de retorno
+previo (ADR-S007), corrida con una propuesta real y comparación del espejo
+antes/después — **solo pueden cambiar los campos `seace.*`**. Ojo: al
+redesplegar, las descargas de Bases Integradas que antes quedaban en `_ERROR`
+ahora sí bajarán (fix #2), así que el ZIP crecerá; es lo esperado.
+
+---
+id: T-TAREA-SEACE-F5
+tipo: tarea
+zona: orquestador/ (descargas_seace.py, etapas_reales.py) + scraping/ (seace_abierto.py)
+agente_origen: fable
+estado: en_progreso  # aprobada por Rafael el 2026-08-05: "apruebo F5, quiero
+#   varios tests aparte de automatizados que yo pueda comprobar" (el estado
+#   `aprobado` del historial NO se borra: queda citado aquí)
+depende_de: []
+---
+**F5 de T-004: candado de identidad CUI↔proceso + corrida integral en el
+servidor (saldo comercial S/800 del ticket T-010; 1–1.5 días). Plan aprobado
+por Rafael el 2026-08-04; NO arranca hasta presentar/cerrar la cotización
+S/2,800 con Manuel.**
+
+**Problema**: hoy el selector SEACE elige el proceso por CUI + tipo, pero nada
+confirma que el proceso elegido corresponda de verdad al certificado que se
+evalúa. Un proceso equivocado promovería Bases/Contrato de otro concurso como
+evidencia — el peor fallo posible (mismo patrón que el veto de rubro del
+resolver, ADR-013).
+
+**Diseño — confirmación asimétrica (promover exige señales; degradar es el
+default)**:
+1. Señales a cruzar ANTES de promover: (a) entidad convocante del proceso vs
+   entidad contratante/emisora del certificado (comparador de nombres de
+   empresa existente en scraping/sunat.py — reutilizar, no duplicar);
+   (b) objeto del proceso vs tipo de la experiencia (ya existe la segmentación
+   estricta expediente/supervisión/ejecución — F5 la endurece con la entidad);
+   (c) ventana temporal: la convocatoria/firma del proceso debe ser coherente
+   con el periodo del certificado (firma ≤ inicio del profesional, con
+   tolerancia); (d) monto referencial si ambos lados lo publican (señal débil,
+   solo suma — nunca veta sola).
+2. Resultado ternario en `enriquecimiento.seace.candado`:
+   `confirmado` (≥2 señales fuertes, cero contradicciones) ·
+   `por_confirmar` (señales insuficientes) · `contradice` (alguna señal
+   fuerte en contra). Solo `confirmado` presenta los documentos como
+   verificados; los otros dos usan el render "Por confirmar" que YA existe en
+   excel_final.py (render_seace) — no inventar UI nueva.
+3. La descarga NO se bloquea: los PDFs igual van al ZIP (sustento), lo que
+   cambia es el rótulo de confianza en Excel/panel/índice.
+
+**Fixtures obligatorios (de la corrida Vitarte, ya en datos_pivote):**
+- POSITIVO: Pedro Sánchez Meza (proceso correcto, bases+contrato bajados) →
+  `confirmado`.
+- NEGATIVO: Altiplano CUI 2300016 ("procesos vistos: otro" en obra 2021+) —
+  ANTES de codear, verificar a mano en CONOSCE si su proceso de supervisión
+  existe con otra nomenclatura; ese resultado define si el fixture prueba
+  `por_confirmar` o un miss del selector a corregir.
+- Reintento de las 3 descargas `_ERROR` de Vitarte (Challhuahuacho ×2,
+  La Libertad) — deben resolverse o quedar con nota honesta.
+
+**Cierre**: corrida integral en el SERVIDOR del cliente con una propuesta
+real, snapshot/punto de retorno previo (regla ADR-S007), y comparación del
+espejo antes/después (solo pueden cambiar los campos `seace.*`).
+
+**Gates**: suite completa sin regresiones; cero red en pytest (fixtures
+sintéticos para el candado); `backend/resolucion/cui.py` intacto (no aplica
+golden); los tests del candado cubren promoción, degradación y contradicción.
+
+
 - **✅ #63 CERRADA CON VALIDACIÓN VIVA (29-jul 09:19)**: re-corrida
   `8a4b468ac700` (resubir de urgente1; `resubir_job.py` arreglado al layout
   carpeta) → 13:1 = **PLAN DE CONTINGENCIA, inicio 11/11/2024** (la fecha que

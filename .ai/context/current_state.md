@@ -1,6 +1,36 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-08-04** · rama de trabajo: `demo`
+> Última actualización: **2026-08-05** · rama de trabajo: `demo`
+
+## T-004 F5: candado de identidad CUI↔proceso construido (5-ago)
+
+Elegir el proceso SEACE por CUI+tipo ya no basta para presentarlo como
+verificado. `backend/validacion/candado_seace.py` cruza cinco señales —entidad
+convocante, RUC del adjudicatario contra el emisor del certificado, objeto,
+fechas y monto— y deja un veredicto ternario en `seace.candado`: `confirmado`
+exige ≥2 señales fuertes a favor y cero en contra; una sola señal fuerte en
+contra degrada a `contradice`; todo lo demás es `por_confirmar`. La zona gris de
+similitud (60–84) se abstiene, nunca decide. La descarga NO se bloquea: los PDF
+siguen yendo al ZIP y lo único que cambia es el rótulo del Excel y del índice.
+El comparador de razones sociales es el de `scraping/sunat.py`, reutilizado.
+
+La señal temporal es **día-exacta** con tolerancia de 15 días; jamás se trunca a
+mes. El clamp del Paso 5 no se tocó.
+
+Dos defectos reales salieron a la luz y quedaron corregidos: la ventana del
+proceso se tomaba de `contracts[0]` (arbitrario — en el CUI 2343407 era una
+adenda de dos días de 2024 y marcaba «NO COINCIDE» dos experiencias legítimas),
+y los tres `*_ERROR.txt` de Bases Integradas del job Vitarte no eran caídas del
+host sino `extension_documento` leyendo `format` sobre un bloque que persiste
+`formato`; con la extensión correcta el ZIP y el RAR bajan sin problema.
+
+Hallazgo del Paso 0: el CUI 2300016 (Hospital del Altiplano) publica 14 procesos
+y los 14 son adquisición de equipamiento biomédico. No existe su proceso de
+supervisión en datos abiertos con ninguna nomenclatura — el selector acierta al
+abstenerse. Comprobación manual en `docs/pruebas/f5-comprobacion-manual.md` con
+el CLI `backend/scripts/probar_candado_seace.py`. Gate: **789 passed, 25
+skipped** (base 757/25), resolver intacto, sin golden y sin despliegue. Queda
+pendiente la corrida integral en el servidor.
 
 ## ZIP #80 resuelta: caché por obra y árbol completo por experiencia (4-ago)
 
