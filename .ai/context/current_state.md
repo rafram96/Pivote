@@ -2,6 +2,37 @@
 
 > Última actualización: **2026-08-05** · rama de trabajo: `demo`
 
+## Pulido del entregable: el Excel ya no se contradice a sí mismo (5-ago)
+
+Cuatro defectos salidos de leer celda por celda el Excel real de Vitarte
+(`7e9306a321ac`) quedaron cerrados. Un factor cuyo puntaje se retira ya no deja
+la celda muda —dice **POR CONFIRMAR**— y la NOTA de la PARTE 5 **se arma con las
+mismas celdas que se imprimen**, en vez de repetir un texto redactado antes del
+recálculo que decía «80/100» sobre una tabla que sumaba 40. La conclusión del
+profesional y su PARTE 5 dicen **una sola cifra**: la prosa del evaluador se
+conserva literal y se le antepone el total verificado, pero solo cuando la
+diferencia es demostrablemente la del conteo de bordes (el verificado mayor y
+por como mucho un día por periodo) — un recorte del Paso 5 no se explica como
+conteo de días, se abstiene. La jerga desapareció del libro: `TOTAL EFECTIVO
+VERIFICADO`, las marcas del cargo dicen en castellano qué pasa en vez de
+«candado:», y un test de cierre exige **cero** apariciones de `backend`,
+`candado:`, `espejo`, `⟦` y `agent-` en cualquier celda. Y el amarillo dejó de
+significar dos cosas: FFFF00 queda para el dato declarado / la valorización en
+periodo / separadores / encabezado CERT, y todo lo que significa «por verificar»
+usa FFF2CC, con la leyenda de las hojas P declarando por fin ese color y el
+verde. Quedan fuera por decisión explícita la leyenda de Base de Datos y los
+tres rojos.
+
+Alcance verificado regenerando el libro con `4157814` y con el código nuevo:
+**105 celdas distintas**, todas de los cuatro arreglos (14 rótulos, 22
+conclusiones, 14 leyendas, 50 fills y 5 de la PARTE 5 / saneo). Aparte,
+`avance_descargas.py` y `redescargar_documentos.py` —que siguen escritos contra
+el layout plano— **abortan** al detectar un job del layout por carpeta, con
+`--forzar` para el caso histórico: antes trabajaban en un sitio que ni el Excel
+ni el Panel miran. Gate: **865 passed, 25 skipped** (base 837/25), sin red,
+`cui.py` intacto, Panel y skill sin tocar. Comprobación manual:
+`docs/pruebas/pulido-excel-comprobacion-manual.md`.
+
 ## T-004 F5: candado de identidad CUI↔proceso construido (5-ago)
 
 Elegir el proceso SEACE por CUI+tipo ya no basta para presentarlo como

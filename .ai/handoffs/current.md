@@ -4,6 +4,37 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
+## Nota (2026-08-05, Claude) — pulido del Excel entregable
+
+Cuatro contradicciones que el evaluador veía (halladas celda por celda sobre el
+Excel real de Vitarte, `7e9306a321ac`) quedaron cerradas. Lo que un agente nuevo
+debe saber:
+
+1. **La NOTA de la PARTE 5 ya no viene del análisis**: la arma `nota_parte5()`
+   con las mismas celdas que se imprimen. Si alguien vuelve a pintar ahí un
+   texto pre-armado, reaparece la contradicción («80/100» sobre una tabla de 40).
+2. **`conciliar_conclusion()` (en `scripts/generar_excel.py`) se ABSTIENE por
+   defecto**: solo antepone la cifra verificada cuando la diferencia es la del
+   conteo de bordes (verificado mayor, y por como mucho un día por periodo). No
+   ampliarla para «explicar» recortes del Paso 5 — eso ya se explica en sus
+   propias filas y llamarlo conteo de días sería mentir.
+3. **El color del veredicto se clasifica con el texto ORIGINAL**, no con el
+   compuesto (`Builder.kv(..., valor_veredicto=…)`). Sin eso la celda pierde el
+   verde justo al arreglarla.
+4. **FFFF00 tiene UN solo significado**: dato declarado / valorización en
+   periodo / separador / encabezado CERT. Todo «por verificar» es `FILL_PEND`
+   (FFF2CC). Hay un test que recorre el libro y lo exige.
+5. **`_MARCA_NO` / `_MARCA_PEND` cambiaron de texto** (fuera «candado:»). Sus
+   consumidores las leen por símbolo (`validacion/integridad`) o por prefijo
+   (`_clasificar_veredicto`); la skill y el Panel no las matchean por literal.
+6. **`avance_descargas.py` y `redescargar_documentos.py` abortan** sobre un job
+   del layout por carpeta (`scripts/layout_legado.py`, flag `--forzar`).
+   Actualizarlos al layout vigente sigue pendiente: es mantenimiento.
+
+Gate: **865 passed, 25 skipped** (base 837), sin red, `cui.py` intacto → no
+aplica golden. Sin push. Comprobación manual:
+`docs/pruebas/pulido-excel-comprobacion-manual.md`.
+
 ## Nota (2026-08-05, Claude) — #81 (bloque R) cerrada en código
 
 Las 5 brechas de resiliencia que dejó la #80 quedaron resueltas (la 2 estaba
