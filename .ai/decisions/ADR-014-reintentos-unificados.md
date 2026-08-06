@@ -2,6 +2,9 @@
 
 - Fecha: 2026-08-05 · Estado: **aprobado, implementado** (T-REFACTOR-001)
 - Aprobó: Rafael, 2026-08-05 — *«Concuerdo con el T-REFACTOR-001»*
+- ⚠ Numeración: la rama `refactor` (congelada por ADR-S007) tiene OTRO
+  «ADR-014» (runtime durable v2). La numeración canónica es la de `demo`;
+  si `refactor` se descongela algún día, su ADR se renumera, no este.
 
 ## Contexto
 
