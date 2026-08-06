@@ -81,6 +81,71 @@ def test_eliminar_borra_tambien_las_decisiones(tmp_path):
         assert repo.cargar_decisiones("j2") == {}
 
 
+# ── arranque con Postgres caído (offline: el respaldo es opcional) ───────────
+
+# Puerto muerto: nadie escucha ahí. Es 127.0.0.1, así que el bloqueo de red
+# externa de conftest lo deja pasar (y no toca el Postgres real del 5432).
+_DSN_MUERTO = "postgresql://pivote:pivote@127.0.0.1:1/pivote"
+
+
+def test_construir_repositorio_pg_no_conecta(monkeypatch):
+    """Construirlo NO abre pool ni aplica DDL: con eso el import de app.py deja
+    de depender de que la BD esté viva."""
+    from orquestador.repositorio_pg import RepositorioPostgres
+    repo = RepositorioPostgres(_DSN_MUERTO)          # no lanza aunque no haya BD
+    assert repo._pool_abierto is None
+
+    import psycopg
+    with pytest.raises(psycopg.Error):               # recién al abrir se nota
+        repo.abrir(timeout=1)
+    assert repo._pool_abierto is None                # y no queda un pool a medias
+
+
+def test_app_arranca_aunque_postgres_este_caido(tmp_path, monkeypatch, caplog):
+    """B03: con PIVOTE_DB_URL apuntando a una BD muerta, el backend ARRANCA y
+    cae a archivos (antes la excepción subía desde el import y no arrancaba)."""
+    import importlib
+    import logging
+    from orquestador.repositorio import RepositorioConRespaldo
+
+    monkeypatch.setenv("PIVOTE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("PIVOTE_ETAPAS", "esqueleto")
+    monkeypatch.setenv("PIVOTE_DB_URL", _DSN_MUERTO)
+    monkeypatch.setenv("PIVOTE_DB_TIMEOUT_BOOT", "1")
+
+    import api.app as modulo
+    try:
+        caplog.clear()   # el `import` de arriba ya pudo ejecutar el módulo
+        with caplog.at_level(logging.WARNING):
+            importlib.reload(modulo)                  # el import no revienta
+        assert isinstance(modulo.repo, RepositorioArchivos)
+        assert not isinstance(modulo.repo, RepositorioConRespaldo)
+        # y avisa UNA vez, con las palabras que el operador necesita
+        avisos = [r for r in caplog.records if "Postgres no respondió" in r.message]
+        assert len(avisos) == 1 and "DESACTIVADO" in avisos[0].getMessage()
+        # el backend responde: el análisis vive de los archivos
+        from fastapi.testclient import TestClient
+        with TestClient(modulo.app) as cliente:
+            assert cliente.get("/api/pivote/salud").status_code == 200
+            assert cliente.get("/api/pivote/concursos").status_code == 200
+    finally:
+        monkeypatch.delenv("PIVOTE_DB_URL")
+        importlib.reload(modulo)                      # no contaminar otros tests
+
+
+def test_app_sin_db_url_sigue_siendo_solo_archivos(tmp_path, monkeypatch):
+    """Sin PIVOTE_DB_URL nada cambia: ni se importa psycopg ni se sondea nada."""
+    import importlib
+
+    monkeypatch.setenv("PIVOTE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("PIVOTE_ETAPAS", "esqueleto")
+    monkeypatch.delenv("PIVOTE_DB_URL", raising=False)
+
+    import api.app as modulo
+    importlib.reload(modulo)
+    assert isinstance(modulo.repo, RepositorioArchivos)
+
+
 # ── PostgreSQL (gateado: requiere BD alcanzable) ─────────────────────────────
 
 _DB = os.getenv("PIVOTE_TEST_DB_URL")
@@ -95,7 +160,7 @@ def repo_pg():
     with repo._pool.connection() as con:
         con.execute("DELETE FROM profesionales; DELETE FROM documentos; DELETE FROM jobs;")
     yield repo
-    repo._pool.close()
+    repo.cerrar()
 
 
 @pg

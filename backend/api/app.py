@@ -56,7 +56,25 @@ repo = RepositorioArchivos(DATA_DIR)
 if os.getenv("PIVOTE_DB_URL"):
     from orquestador.repositorio import RepositorioConRespaldo
     from orquestador.repositorio_pg import RepositorioPostgres
-    repo = RepositorioConRespaldo(repo, RepositorioPostgres(os.getenv("PIVOTE_DB_URL")))
+    # El respaldo es OPCIONAL, así que su ausencia no puede impedir arrancar:
+    # se sondea UNA vez aquí (abre el pool y aplica el DDL) con un tope de
+    # PIVOTE_DB_TIMEOUT_BOOT segundos. Si la BD no responde —el caso típico es
+    # un `compose up` que levanta Postgres y backend a la vez— se avisa una
+    # sola vez y el backend corre 100% sobre archivos, igual que la base MEF
+    # cuando su índice no está. No se avisa por request: el respaldo queda
+    # simplemente desactivado en esta corrida.
+    _respaldo_pg = RepositorioPostgres(os.getenv("PIVOTE_DB_URL"))
+    try:
+        _respaldo_pg.abrir(timeout=float(os.getenv("PIVOTE_DB_TIMEOUT_BOOT") or 5))
+    except Exception as e:  # noqa: BLE001 — cualquier fallo de la BD degrada, no tumba
+        logging.getLogger(__name__).warning(
+            "Postgres no respondió al arrancar (%s: %s). El respaldo lógico queda "
+            "DESACTIVADO en esta corrida; los análisis siguen sobre archivos, que "
+            "son la fuente de verdad. Para reactivarlo: levantar la BD y reiniciar "
+            "el backend (scripts/migrar_a_postgres.py re-sincroniza lo escrito "
+            "mientras estuvo caída).", type(e).__name__, e)
+    else:
+        repo = RepositorioConRespaldo(repo, _respaldo_pg)
 
 
 def _dir_job(job_id: str) -> Path:

@@ -34,6 +34,9 @@ def main() -> int:
     data_dir = config.data_dir()
     archivos = RepositorioArchivos(data_dir)
     pg = RepositorioPostgres(dsn)
+    # El repositorio conecta perezosamente; aquí la BD SÍ es obligatoria, así que
+    # se abre de una (y se aplica el DDL) para fallar antes de leer los archivos.
+    pg.abrir()
 
     concursos = archivos.listar_concursos()
     for c in concursos:

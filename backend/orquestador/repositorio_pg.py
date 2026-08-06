@@ -23,10 +23,16 @@ los toca este repo: viven en la carpeta del job y los administra el primario.
 Activación: PIVOTE_DB_URL en el entorno (api/app.py envuelve el repo de archivos
 con RepositorioConRespaldo). psycopg se importa perezoso para que este módulo sea
 importable en máquinas sin la lib (esta laptop corre solo con archivos).
+
+Conexión PEREZOSA (2026-08-05): construir este objeto NO toca la red. El pool y
+el DDL se abren en el primer uso (`abrir()`), no al construirlo — así un Postgres
+que todavía no responde (un `compose up` que levanta BD y backend a la vez) no
+puede tumbar el arranque de un respaldo que es, por diseño, opcional.
 """
 from __future__ import annotations
 
 import json
+import threading
 import unicodedata
 from typing import Optional
 
@@ -79,11 +85,49 @@ class RepositorioPostgres:
     mismas semánticas que RepositorioArchivos)."""
 
     def __init__(self, dsn: str):
-        # import perezoso: psycopg solo se exige donde este repo realmente corre
-        from psycopg_pool import ConnectionPool
-        self._pool = ConnectionPool(dsn, min_size=1, max_size=4, open=True)
-        with self._pool.connection() as con:
-            con.execute(_DDL)
+        # Construir NO conecta: solo guarda el DSN. Ver `abrir()`.
+        self._dsn = dsn
+        self._pool_abierto = None
+        self._lock_pool = threading.Lock()
+
+    # ── conexión perezosa ─────────────────────────────────────────────────────
+
+    def abrir(self, timeout: float = 30.0):
+        """Abre el pool y aplica el DDL. Idempotente; devuelve el pool.
+
+        Lanza si Postgres no responde dentro de `timeout` segundos — QUIÉN decide
+        que eso sea fatal es el llamador (api/app.py lo trata como respaldo
+        ausente y sigue sobre archivos; un script de migración sí querrá morir).
+
+        Se sondea con una conexión suelta ANTES de construir el pool: un
+        ConnectionPool que no logra conectar deja hilos de reintento vivos y
+        tarda segundos en cerrarse, así que solo se crea cuando la BD ya
+        respondió. El DDL viaja en esa misma sonda: se aplica en el primer uso
+        que de verdad conecta, no en el import del módulo.
+        """
+        with self._lock_pool:
+            if self._pool_abierto is not None:
+                return self._pool_abierto
+            # import perezoso: psycopg solo se exige donde este repo realmente corre
+            import psycopg
+            from psycopg_pool import ConnectionPool
+            with psycopg.connect(self._dsn, connect_timeout=max(1, int(timeout))) as con:
+                con.execute(_DDL)
+            self._pool_abierto = ConnectionPool(self._dsn, min_size=1, max_size=4,
+                                                open=True)
+            return self._pool_abierto
+
+    @property
+    def _pool(self):
+        """El pool, abriéndolo si hace falta (todas las consultas pasan por aquí)."""
+        return self.abrir()
+
+    def cerrar(self) -> None:
+        """Cierra el pool si llegó a abrirse (tests y scripts de un solo uso)."""
+        with self._lock_pool:
+            if self._pool_abierto is not None:
+                self._pool_abierto.close()
+                self._pool_abierto = None
 
     def _jsonb(self, datos):
         from psycopg.types.json import Jsonb

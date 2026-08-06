@@ -3,6 +3,75 @@
 *(Actualizar al iniciar cualquier trabajo; mover a completed.md al cerrar.)*
 
 ---
+id: T-TAREA-B03-FIX
+tipo: tarea
+zona: persistencia/ (repositorio_pg.py) + api/ (app.py)
+agente_origen: fable
+estado: aprobado  # Rafael, 2026-08-05
+depende_de: [T-SONDEO-B03, T-SONDEO-F01]
+---
+**Un Postgres caído no puede tumbar el arranque del backend.** Alcance MÍNIMO:
+el rediseño del write-path con PG caído (B01/B02) sigue siendo territorio de la
+sesión ADR-009 y NO se toca aquí.
+
+### Cerrada el 2026-08-05
+
+**El defecto**: con `PIVOTE_DB_URL` definida, `RepositorioPostgres.__init__`
+corría EN EL IMPORT de `api/app.py` — abría el pool y ejecutaba el DDL sin
+try/except. Si Postgres no respondía, el backend NO ARRANCABA, pese a que el
+respaldo es formalmente opcional (los archivos son la fuente de verdad). Era el
+único defecto capaz de morder EN el deploy desde cero, con el compose levantando
+Postgres y backend a la vez.
+
+**El arreglo**, con la base MEF como modelo de estilo (singleton perezoso +
+try/except → `base=None` → el análisis sigue):
+
+1. **Construir `RepositorioPostgres` ya no toca la red**: solo guarda el DSN.
+   El pool y el DDL se abren en `abrir()`, y `_pool` pasó a ser una propiedad
+   que llama a `abrir()` — cualquier consulta la abre sola, así que ni los
+   métodos del repositorio ni los tests gateados cambiaron de forma.
+2. **El DDL se aplica en el primer uso que de verdad conecta**, no en el import.
+   Viaja en una conexión suelta (`psycopg.connect`) que se usa como sonda ANTES
+   de construir el pool: un `ConnectionPool` que no logra conectar deja hilos de
+   reintento vivos y tarda ~5 s en cerrarse, así que el pool solo se crea cuando
+   la BD ya respondió.
+3. **`api/app.py` sondea UNA vez al arrancar** con tope
+   `PIVOTE_DB_TIMEOUT_BOOT` (default 5 s). Si la BD no responde: **un** warning
+   con lo que el operador necesita (qué quedó desactivado, que los análisis
+   siguen, cómo reactivarlo) y el repositorio se queda en archivos puros — cero
+   ruido por request, porque no se envuelve en `RepositorioConRespaldo`. Si
+   responde, todo queda exactamente como antes.
+4. `scripts/migrar_a_postgres.py` llama `pg.abrir()` explícito: ahí la BD SÍ es
+   obligatoria y debe fallar antes de leer los archivos.
+
+**Consecuencia consciente**: un Postgres que aparece DESPUÉS del arranque no se
+engancha solo; hay que reiniciar el backend (y `migrar_a_postgres.py`
+re-sincroniza lo escrito mientras tanto). Es la misma degradación explícita de
+la base MEF, y se prefiere a reintentar por escritura — que es justamente el
+costo de latencia que documenta B02 y que decide ADR-009.
+
+**Comprobación manual** (simular la BD caída y ver el backend arrancar):
+
+```
+cd backend
+PIVOTE_DB_URL=postgresql://pivote:pivote@127.0.0.1:1/pivote \
+PIVOTE_DB_TIMEOUT_BOOT=3 \
+../venv/Scripts/uvicorn api.app:app --port 8001
+```
+
+Se espera: **un** `WARNING api.app: Postgres no respondió al arrancar
+(ConnectionTimeout…) … queda DESACTIVADO …`, el servidor levantando igual y
+`GET /api/pivote/salud` respondiendo 200. Subir un análisis y verlo terminar
+confirma que opera 100% sobre archivos, sin un solo warning más. Con
+`PIVOTE_DB_URL` apuntando a una BD viva no aparece ningún warning y el respaldo
+escribe como siempre.
+
+**Gates**: suite **868 passed, 25 skipped** (línea base 865/25; +3 pruebas
+offline, cero regresiones) · los tests Postgres siguen gateados por
+`PIVOTE_TEST_DB_URL` · cero red externa en pytest (el DSN muerto es 127.0.0.1) ·
+`compileall` y `git diff --check` limpios · `cui.py`, panel y skill sin tocar.
+
+---
 id: T-TAREA-CRUCES-FECHAS
 tipo: tarea
 zona: reglas/ (cruces_fechas.py) + orquestador/ (etapas_reales.py) + entregables/ (excel_final.py, hoja nueva)
