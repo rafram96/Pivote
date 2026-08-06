@@ -2,6 +2,19 @@
 
 > Última actualización: **2026-08-05** · rama de trabajo: `demo`
 
+## ADR-009 cerrado: Postgres es OBLIGATORIO, y schema.sql ya no miente (5-ago)
+
+Rafael cerró el estatus global (**T-REFACTOR-003** + **F-SCHEMA**): PostgreSQL es
+obligatorio en el despliegue por la **base MEF** (uso principal; el respaldo
+lógico de jobs es secundario), la degradación con gracia en código se conserva a
+propósito —un PG caído no tumba nada, pero es un estado anormal— y el write-path
+bloqueante (B02) y la falta de cola de re-sincronización (B01) quedan anotados
+como deuda consciente, no como resueltos. `backend/db/schema.sql` pasó de
+esquema aspiracional incompatible a **espejo documental** de los dos DDL reales
+(`mef` primero), con un test offline que impide que vuelvan a divergir. Detalle
+en el addendum de `decisions/ADR-009-migracion-postgres-mef.md` y en
+`tasks/completed.md`.
+
 ## Deuda técnica del sondeo, saldada (5-ago)
 
 Tres tareas chicas cerradas en un tren: **B03-fix** — un Postgres caído ya no
@@ -686,7 +699,7 @@ Aparecieron al ordenar el Excel por camino (no se ven en su disposición origina
   veredictos. Advertencias COBERTURA se emiten para expedientes (no descuentan).
 - 2 casos de la auditoría con "verdad" dudosa (2195439 Tocache/Loreto,
   2064566 Cotabambas/Antabamba) — re-revisar con Manuel.
-- Divergencia schema.sql vs DDL real de Postgres (ver architecture/database.md).
+- ~~Divergencia schema.sql vs DDL real de Postgres~~ **CERRADA 5-ago** (F-SCHEMA).
 - SUNAT con error_parcial intermitente en corridas largas (portal, no bug).
 
 ## Riesgos

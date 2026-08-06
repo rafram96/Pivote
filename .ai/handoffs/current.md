@@ -4,6 +4,35 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
+## Nota (2026-08-05, Claude) — ADR-009 cerrado y schema.sql consolidado
+
+`T-REFACTOR-003` y `F-SCHEMA` quedaron cerradas. Lo que un agente nuevo debe
+saber:
+
+1. **Postgres YA NO es opcional.** Decisión de Rafael, en el addendum de
+   `decisions/ADR-009-migracion-postgres-mef.md`: obligatorio en el despliegue,
+   **por la base MEF** (uso principal); el respaldo de jobs es secundario.
+2. **Pero la degradación en código NO se tocó, y no se toca.** `BaseMef` cae al
+   índice RAM/CSV y el respaldo se desactiva con un warning (B03-fix).
+   Obligatorio operacionalmente ≠ frágil ante una caída transitoria: un PG caído
+   no tumba nada, pero es un estado ANORMAL que el operador corrige.
+3. **Lo que sigue abierto, y está escrito así en el ADR**: el write-path
+   bloqueante con PG caído a mitad de job (B02) y la ausencia de cola de
+   re-sincronización (B01). Único mitigador: `scripts/migrar_a_postgres.py` a
+   mano. No dar por resuelto lo que la decisión no resolvió.
+4. **`backend/db/schema.sql` ya no es aspiracional**: es espejo documental de
+   los DOS DDL reales (`mef` primero, luego las 3 tablas del respaldo), con las
+   vistas fantasma eliminadas. **No es fuente de verdad — el código lo es.** Si
+   cambias un DDL en el código, `tests/test_schema_sql.py` te obliga a
+   actualizar el archivo (compara texto normalizado, sin PG ni red).
+5. **Pendiente anotado, no implementado**: `healthcheck` + `depends_on` de
+   Postgres en el compose → `docs/despliegue/despliegue-runbook.md` §12.
+6. El backlog tenía **160 líneas pegadas dos veces** (B01–B06, F01, T-TAREA-003,
+   T-REFACTOR-001/002/003). Se borró una copia tras verificarlas idénticas.
+
+Gate: **870 passed, 25 skipped** (base 866), sin red ni PG real, `cui.py`
+intacto → no aplica golden. Sin push, panel y skill sin tocar.
+
 ## Nota (2026-08-05, Claude) — pulido del Excel entregable
 
 Cuatro contradicciones que el evaluador veía (halladas celda por celda sobre el

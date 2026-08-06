@@ -1,5 +1,89 @@
 # Completado (más reciente primero)
 
+## 2026-08-05
+
+---
+id: T-REFACTOR-003
+tipo: refactor
+zona: persistencia/
+agente_origen: fable
+estado: cerrada  # decisión de Rafael, 2026-08-05
+depende_de: [T-SONDEO-B01, T-SONDEO-B02, T-SONDEO-B03, T-SONDEO-B04, T-SONDEO-B05, T-SONDEO-B06]
+---
+**Cerrar ADR-009 con la evidencia del sondeo B — estatus GLOBAL de PostgreSQL.**
+Cierra también **F-SCHEMA** (unificar `db/schema.sql` con el DDL real).
+
+### Cerrada el 2026-08-05
+
+**La decisión, textual (Rafael):** «Para 003: Postgres dejó de ser opcional,
+ahora se usa para la base MEF. Se debe consolidar el schema.sql para ambos usos
+(el más importante es el uso para el MEF).»
+
+Registrada como **addendum fechado** en
+`.ai/decisions/ADR-009-migracion-postgres-mef.md` (el ADR ya declaraba PG
+obligatorio para el ETL; lo que faltaba era el estatus de sistema):
+
+1. **PG OBLIGATORIO en el despliegue** — el compose siempre lo levanta. La razón
+   es la **base MEF**, no el respaldo de jobs. Jerarquía explícita: MEF
+   principal, respaldo lógico secundario.
+2. **La degradación con gracia EN CÓDIGO se CONSERVA, deliberadamente**: `BaseMef`
+   cae al índice RAM/CSV y el respaldo se desactiva con un warning (B03-fix).
+   Obligatorio operacionalmente ≠ frágil ante una caída transitoria: un PG caído
+   no tumba nada, pero es un estado **ANORMAL** que el operador debe corregir.
+3. **Lo que NO resuelve, dicho sin adornos**: el write-path bloqueante con PG
+   caído a mitad de job (B02) y la ausencia de cola de re-sincronización (B01)
+   quedan como **deuda consciente**, con `scripts/migrar_a_postgres.py` (manual,
+   upserts, no borra huérfanos) como único mitigador.
+4. **Consecuencia de deploy anotada, NO implementada**: `healthcheck` +
+   `depends_on` de Postgres en el compose pasan al runbook
+   (`docs/despliegue/despliegue-runbook.md` §12, con su ⚠).
+
+**`backend/db/schema.sql` consolidado** (F-SCHEMA). Era un esquema aspiracional
+que nadie ejecutaba y que era estructuralmente incompatible con la realidad: 4
+tablas (`concursos`, `jobs`, `espejos`, `enriquecimientos`), columnas GENERATED,
+dos funciones y dos vistas (`base_datos`, `analisis`) que consultaban tablas que
+ningún DDL crea. Ahora es el **espejo documental fiel de los DOS DDL vivos**, con
+el **MEF primero** por decisión de Rafael:
+
+- `mef` (`scripts/actualizar_base_mef.py::_DDL_PG`): `mef.loads`,
+  `mef.investments` + 3 índices, `mef.active_load`;
+- respaldo lógico (`orquestador/repositorio_pg.py::_DDL`): `jobs`, `documentos`,
+  `profesionales` + 2 índices.
+
+Cada bloque va **verbatim** entre marcas `>>> ESPEJO … <<<`, con prosa fuera de
+las marcas explicando quién crea qué y cuándo (el código lo crea solo; el archivo
+es referencia y bootstrap manual) y la advertencia de que **el archivo NO es
+fuente de verdad**. Las vistas y tablas fantasma se eliminaron sin sustituto: los
+docs ya se habían corregido (T-TAREA-001) para dejar de listar «la vista SQL».
+
+**Guarda anti-divergencia** — `backend/tests/test_schema_sql.py`, 4 pruebas
+offline, sin PG ni red: extrae los bloques marcados, normaliza (fuera comentarios
+`--`, blancos e indentación) y los compara contra las constantes del código; una
+prueba exige que no sobre ni falte ningún bloque; otra impide que las vistas
+fantasma vuelvan a colarse como DDL. **Verificada de verdad**: cambiar un solo
+tipo en el archivo (`fila_origen INTEGER` → `BIGINT`) la hace fallar.
+**Límite documentado en el módulo**: es comparación de TEXTO — no valida que el
+SQL sea válido para PostgreSQL ni que la BD desplegada coincida; eso exige un PG
+real y esos tests siguen gateados por `PIVOTE_TEST_DB_URL`.
+
+**Coherencia documental revisada**: `.ai/architecture/database.md` (divergencia
+declarada CERRADA + estatus obligatorio), `.ai/architecture/backend.md` y
+`.ai/prompts/reviewer.md` (la vista fantasma ya no está ni en el archivo),
+`docs/backend/modelo_datos.md` (el bloque «DECISIÓN TOMADA 2026-07-01» quedó
+marcado como SUPERADO: describe un esquema que jamás se construyó) y
+`docs/despliegue/despliegue-runbook.md` §12 (persistencia real + el pendiente
+del healthcheck).
+
+**Limpieza de paso**: el backlog tenía un bloque de **160 líneas pegado dos
+veces** (B01–B06, F01, T-TAREA-003 y T-REFACTOR-001/002/003; la primera copia de
+T-REFACTOR-003 estaba truncada a media frase). Verificado byte a byte que las dos
+copias eran idénticas antes de borrar una.
+
+**Gates**: suite **870 passed, 25 skipped** (línea base 866/25; +4 pruebas
+nuevas, cero regresiones) · cero red y cero PG real en pytest ·
+`backend/resolucion/cui.py` intacto → no aplica golden · `compileall` y
+`git diff --check` limpios · panel y skill sin tocar.
+
 ## 2026-08-04
 - **Issue #80 (parcial) — rescatables del ZIP + correctivo de rumbo**: el
   almacén central SHA-256 se implementó y luego se REVIRTIÓ por decisión de
