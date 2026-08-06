@@ -619,16 +619,75 @@ id: T-REFACTOR-002
 tipo: refactor
 zona: scraping/
 agente_origen: fable
-estado: esperando_aprobacion
+estado: aprobado
 depende_de: [T-SONDEO-A06]
 ---
 **Comparador único de nombres de empresa** (`mef.py::_nombres_coinciden` vs
-`sunat.py::score_match_empresa` → un solo módulo con UNA lista de sufijos), o
-decisión documentada de mantenerlos separados si los formatos de origen lo
-justifican. Refactor con ADR nuevo; PRE-requisito: mini-golden de pares
-nombre-declarado/nombre-fuente para probar que no se mueven veredictos
-`ok/no_verificable` existentes. ⚠ Puede cambiar veredictos VISIBLES al
-evaluador → estrictamente post-deploy y con evidencia.
+`sunat.py::score_match_empresa` → un solo módulo con UNA lista de sufijos).
+
+**Decisión de Rafael (2026-08-05), textual: «Haz la opción mínima ahora y la
+doble corrida después».** La tarea queda partida en dos:
+
+### Parte 1 — opción mínima · EJECUTADA (commit `ab146a0`)
+Prelimpiado compartido de nombres, **cero cambio de criterio** en los dos
+comparadores. `etapas_reales._nombre_emisor_limpio` (que solo usaba la búsqueda
+SUNAT) pasó a `scraping/nombres_empresa.py` — puro, sin red y sin dependencias,
+para que scraping/, validacion/ y orquestador/ lo importen sin ciclos — y lo
+consumen el candado SEACE (`candado_seace.py::_senal_entidad`) y la
+verificación de expedientes (`mef.py::_nombres_coinciden`).
+Ojo al hallazgo que obligó a `variantes()` en vez de limpiar a secas: **el
+paréntesis no siempre es ruido**. En `DIESA S.R.L. (Promotora, Constructora e
+Inmobiliaria Diaz Espinoza Asociados S.R.L.)` afuera quedó la sigla y dentro
+está la razón social entera — prelimpiar hundía el parecido de 93 a 15, o sea
+un `ok` que se volvía `no_verificable`. Se puntúan AMBAS formas y gana la
+mejor → el cambio es **monótono** por construcción.
+Medición: divergencias 534 → 521 sobre 3.736 pares, y **25 → 18 en los 294
+pares 100 % reales**; cero veredictos empeorados. Tests: `test_nombres_empresa.py`
+(17 casos, suite 902 → 919 passed / 25 skipped).
+
+### Parte 2 — doble corrida · APROBADA PARA DESPUÉS (post-deploy)
+Ambos comparadores **calculan**, la divergencia se **loguea** en la traza del
+job, y **ningún veredicto se mueve** hasta medir sobre 2-3 concursos reales.
+Recién con esos datos se fija el umbral y se cambia el decisor del bloque MEF.
+Red obligatoria antes de unificar de verdad: **mini-golden de ~120 pares** en
+`backend/tests/golden/nombres_empresa.csv` (`a,b,mismo,origen`) — 60 positivos
+por RUC de los espejos de `datos_pivote/`, 30 negativos de consorcio, 15 alias
+comerciales, 10 entidades públicas de `referencia/seace_procesos/`, 5
+contratistas de `tests/fixtures/mef/`; ~1,5-2 h de armado (el generador de
+candidatos ya se escribió para el dossier; el costo es etiquetar). Criterio de
+aceptación: ≥95 % en positivos **y** ≥95 % en negativos.
+⚠ Esta parte SÍ puede cambiar veredictos VISIBLES al evaluador → estrictamente
+post-deploy y con evidencia. ADR nuevo al cerrarla.
+
+### Evidencia que NO hay que re-investigar (dossier de decisión, 2026-08-05)
+- **Divergen y mucho: 534 de 3.736 pares (14,3 %), en UNA sola dirección** — el
+  de MEF dice SÍ y el de SUNAT NO. **Cero** casos al revés: `SUNAT=SÍ` implica
+  siempre `MEF=SÍ`. Corpus: espejos+enriquecimientos de `datos_pivote/`,
+  `tests/fixtures/mef/*_contratos.json`, `referencia/seace_procesos/*.json`;
+  128 emisores reales distintos.
+- **Ninguno de los dos es el bueno.** SUNAT falla por estricto: sobre los 82
+  pares P1 con verdad clara (emisor del cert vs razón social del MISMO RUC)
+  acierta 72/82 — se le escapan `SINOHYDRO … SUCURSAL DEL PERÚ` vs `SINOHYDRO
+  CORPORATION LIMITED` (76), `CHUNG & TONG … EN LIQUIDACION` (73), `PRONIS` vs
+  `UNIDAD EJECUTORA 125 PROGRAMA NACIONAL DE INVERSIONES EN SALUD` (74). MEF
+  falla por laxo: su regla «≥2 palabras en común» hace que **cualquier par de
+  consorcios sea la misma empresa** (`CONSORCIO SUPERVISOR URPA` = `YANAHUANCA`,
+  `MUNICIPALIDAD DISTRITAL DE LUCMA` = `USQUIL`); 303 de los 509 falsos
+  positivos empiezan con «CONSORCIO …».
+- **La contradicción era visible en un MISMO Excel** (ejecutado, no supuesto):
+  `CONSORCIO HOSPITAL ABANCAY (COLESI … & JOCA …)` vs `CONSORCIO HOSPITAL
+  ABANCAY` daba `en_contra` FUERTE «son entidades distintas (46/100)» en el
+  candado y `ok` en el bloque MEF. Ese caso lo cierra la Parte 1.
+- Superficies: candado `candado_seace.py:301-302`; herencia por folio #58
+  `cui.py:2033-2034`; cruce SUNAT `etapas_reales.py:1387-1392`; bloque MEF
+  `mef.py:262` → `excel_final.py:809,1129,2336`; y **Regla B de cruces de
+  fechas**, que exige `contratista.veredicto == "ok"`
+  (`cruces_fechas.py:250-270,401`) — un falso positivo del de MEF hace comparar
+  el término declarado contra la aprobación del expediente de OTRA empresa.
+- Debilidad pre-existente registrada para la Parte 2: el de SUNAT ya puntúa 87
+  a `CONSORCIO HOSPITALARIO DE COMAS` vs `CONSORCIO HOSPITALARIO DEL CENTRO`
+  (dos consorcios distintos) sin paréntesis de por medio. El umbral 85 sobre
+  nombres de consorcio es exactamente lo que el mini-golden tiene que decidir.
 
 > `T-REFACTOR-003` (cerrar ADR-009: Postgres obligatorio vs opcional) se
 > **CERRÓ el 2026-08-05** con la decisión de Rafael — ver `completed.md` y el

@@ -3,6 +3,64 @@
 *(Actualizar al iniciar cualquier trabajo; mover a completed.md al cerrar.)*
 
 ---
+id: T-REFACTOR-002
+tipo: refactor
+zona: scraping/
+agente_origen: fable
+estado: aprobado  # Rafael, 2026-08-05: "Haz la opción mínima ahora y la doble corrida después"
+depende_de: [T-SONDEO-A06]
+---
+**Comparador único de nombres de empresa — PARTE 1 (opción mínima) cerrada el
+2026-08-05, commit `ab146a0`. La parte 2 (doble corrida) queda para post-deploy.**
+
+**Qué había**: dos comparadores respondiendo la MISMA pregunta con criterios
+distintos — `sunat.py::score_match_empresa` (fuzzy con umbral 85; lo usan el
+candado SEACE, la herencia por folio #58 y el cruce SUNAT) y
+`mef.py::_nombres_coinciden` (substring o ≥2 tokens; lo usa la verificación de
+expedientes y, a través de ella, la Regla B de cruces de fechas). Divergían en
+**534 de 3.736 pares reales (14,3 %) y siempre en la misma dirección** (MEF SÍ /
+SUNAT NO; cero al revés). Consecuencia visible: `CONSORCIO HOSPITAL ABANCAY
+(COLESI … & JOCA …)` vs `CONSORCIO HOSPITAL ABANCAY` —la misma empresa, mismo
+RUC— daba señal FUERTE «son entidades distintas (46/100)» en el candado y `ok`
+en el bloque MEF **del mismo Excel**.
+
+**Qué se hizo**: NADA de criterio. Solo la entrada. El prelimpiado que ya existía
+escondido en `etapas_reales._nombre_emisor_limpio` (quita el paréntesis con los
+miembros del consorcio y la cola «RUC …») pasó a `scraping/nombres_empresa.py`
+—puro, sin red, sin dependencias, importable desde scraping/, validacion/ y
+orquestador/ sin ciclos; mismo trato que `errores_red.py`— y lo consumen
+`candado_seace.py::_senal_entidad` y `mef.py::_nombres_coinciden`.
+
+**El hallazgo que cambió el diseño**: el paréntesis **no siempre es ruido**. En
+`DIESA S.R.L. (Promotora, Constructora e Inmobiliaria Diaz Espinoza Asociados
+S.R.L.)` afuera quedó la sigla y dentro está la razón social entera: prelimpiar a
+secas hundía el parecido de **93 a 15**, o sea un `ok` que se volvía
+`no_verificable`. Distinguir un caso del otro exige criterio nuevo, y esta tarea
+no toca criterio → `variantes()` devuelve el nombre crudo **y** el limpio, y el
+consumidor se queda con el mejor. **Monótono por construcción.**
+
+**Qué NO se tocó, a propósito**: `_elegir_match_exacto` sigue comparando la razón
+social de SUNAT sin limpiar (son denominaciones registrales, no membretes;
+limpiarlas solo podría crear empates nuevos y convertir un desempate exitoso en
+una revisión humana). `resolucion/cui.py::_emisor_compatible` intacto — el
+archivo no se tocó.
+
+**Medición sobre el corpus real** (espejos+enriquecimientos de `datos_pivote/`,
+fixtures MEF y `referencia/seace_procesos/`): divergencias **534 → 521**; en los
+294 pares con las dos puntas reales, **25 → 18**. **Cero veredictos empeorados**
+en ambos comparadores (SUNAT sí→no: 0; MEF ok→no_verificable: 0).
+
+**Gate**: `pytest backend/tests -q` → **919 passed, 25 skipped** (base 902; +17
+tests nuevos en `test_nombres_empresa.py`, **cero tests existentes modificados**).
+Sin red. `compileall` y `git diff --check` limpios. `cui.py`, panel y skill sin
+tocar. Sin push.
+
+**Pendiente (parte 2, post-deploy)**: doble corrida con log de divergencia sin
+mover veredictos + mini-golden de ~120 pares en
+`backend/tests/golden/nombres_empresa.csv`. Alcance y evidencia completa en
+`tasks/backlog.md`.
+
+---
 id: T-REFACTOR-001
 tipo: refactor
 zona: scraping/ (+ entregables/zip_infoobras.py)

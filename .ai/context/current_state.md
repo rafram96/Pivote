@@ -11,6 +11,18 @@ pasaron a un único `con_reintentos()` en `scraping/errores_red.py`, con
 6:1 no se pueda volver a escribir. Contratos externos intactos; `cui.py` sin
 tocar. Decisión y alcance en `decisions/ADR-014-reintentos-unificados.md`.
 
+## Nombres de empresa: el paréntesis del membrete ya no decide identidad (5-ago)
+
+**T-REFACTOR-002 parte 1** (opción mínima, decisión de Rafael «la mínima ahora y
+la doble corrida después»): el prelimpiado de nombres salió de
+`etapas_reales._nombre_emisor_limpio` a `scraping/nombres_empresa.py` y ahora lo
+usan también el candado SEACE y la verificación de expedientes del MEF; los dos
+comparadores conservan su criterio y se puntúan ambas formas del nombre, así que
+el cambio es monótono (ningún `ok` puede volverse `no_verificable`). Divergencias
+entre comparadores 534 → 521 sobre 3.736 pares (25 → 18 en los 294 pares 100 %
+reales). La **doble corrida** queda aprobada para post-deploy, con mini-golden de
+~120 pares como pre-requisito — evidencia completa en `tasks/backlog.md`.
+
 ## ADR-009 cerrado: Postgres es OBLIGATORIO, y schema.sql ya no miente (5-ago)
 
 Rafael cerró el estatus global (**T-REFACTOR-003** + **F-SCHEMA**): PostgreSQL es
