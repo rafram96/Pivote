@@ -494,6 +494,13 @@ def _espejo_dos_experiencias() -> dict:
     return espejo
 
 
+def _filas_etiqueta(ws, etiqueta: str, desde: int) -> list[int]:
+    """Filas (≥ desde) cuya col A es exactamente `etiqueta` — en el formato
+    vertical cada experiencia repite las mismas etiquetas."""
+    return [f[0].row for f in ws.iter_rows(min_row=desde, min_col=1, max_col=1)
+            if f[0].value == etiqueta]
+
+
 def test_bloque_por_profesional_una_entrada_por_experiencia(tmp_path):
     espejo = _espejo_dos_experiencias()
     enr = {"1:1": {"cui": "2337618",
@@ -506,20 +513,21 @@ def test_bloque_por_profesional_una_entrada_por_experiencia(tmp_path):
     fila, _c = _buscar(ws, TITULO_BLOQUE)
     assert fila, "el bloque de cruces no aparece en la hoja del profesional"
 
-    # Encabezados del bloque, con las dos preguntas.
-    cab = [str(c.value) for c in ws[fila + 1] if c.value]
-    assert "¿Empezó después de firmado el contrato?" in cab
-    assert "¿Terminó antes de aprobarse el expediente?" in cab
+    # Formato vertical: una TARJETA por experiencia, cada una con sus preguntas.
+    assert _buscar(ws, "EXPERIENCIA 1")[0] and _buscar(ws, "EXPERIENCIA 2")[0]
+    preguntas_a = _filas_etiqueta(ws, "¿Empezó después de firmado el contrato?", fila)
+    preguntas_b = _filas_etiqueta(ws, "¿Terminó antes de aprobarse el expediente?", fila)
+    assert len(preguntas_a) == 2 and len(preguntas_b) == 2
 
-    # Una entrada por experiencia (fila de datos + fila de explicación).
-    exp1, exp2 = ws[fila + 2], ws[fila + 4]
-    assert exp1[0].value == 1 and exp2[0].value == 2
-    assert exp1[14].value == "NO"              # col O · la regla A dispara
-    assert exp2[14].value == "POR VERIFICAR"   # col O · sin proceso → abstención
+    # Respuestas en la col B de cada tarjeta.
+    assert ws.cell(preguntas_a[0], 2).value == "NO"              # la regla A dispara
+    assert ws.cell(preguntas_a[1], 2).value == "POR VERIFICAR"   # sin proceso → abstención
 
-    # La abstención se ROTULA, no desaparece.
-    nota2 = str(ws.cell(fila + 5, 2).value)
-    assert "no se identificó el proceso" in nota2 and "2018" in nota2
+    # La abstención se ROTULA, no desaparece (la explicación de la tarjeta 2).
+    fila_exp2 = _buscar(ws, "EXPERIENCIA 2")[0]
+    notas = " ".join(str(f[0].value) for f in ws.iter_rows(
+        min_row=fila_exp2, min_col=1, max_col=1) if f[0].value)
+    assert "no se identificó el proceso" in notas and "2018" in notas
 
 
 def test_bloque_por_profesional_colorea_como_la_hoja_global(tmp_path):
@@ -531,10 +539,12 @@ def test_bloque_por_profesional_colorea_como_la_hoja_global(tmp_path):
     ws = wb[[n for n in wb.sheetnames
              if n not in ("CLAUDE", "Base de Datos", HOJA_CRONOLOGIA)][0]]
     fila, _c = _buscar(ws, TITULO_BLOQUE)
-    assert ws.cell(fila + 2, 15).fill.fgColor.rgb.endswith("FFC7CE")   # rojo
-    assert ws.cell(fila + 4, 15).fill.fgColor.rgb.endswith("FFF2CC")   # amarillo
+    preguntas_a = _filas_etiqueta(ws, "¿Empezó después de firmado el contrato?", fila)
+    preguntas_b = _filas_etiqueta(ws, "¿Terminó antes de aprobarse el expediente?", fila)
+    assert ws.cell(preguntas_a[0], 2).fill.fgColor.rgb.endswith("FFC7CE")   # rojo
+    assert ws.cell(preguntas_a[1], 2).fill.fgColor.rgb.endswith("FFF2CC")   # amarillo
     # «No aplica» sin color: amarillo significa «por verificar».
-    assert ws.cell(fila + 2, 17).fill.fgColor.rgb in ("00000000", None)
+    assert ws.cell(preguntas_b[0], 2).fill.fgColor.rgb in ("00000000", None)
 
 
 def test_las_fechas_llevan_formato_de_fecha_en_las_dos_vistas(tmp_path):
@@ -558,10 +568,11 @@ def test_las_fechas_llevan_formato_de_fecha_en_las_dos_vistas(tmp_path):
     ws = wb[[n for n in wb.sheetnames
              if n not in ("CLAUDE", "Base de Datos", HOJA_CRONOLOGIA)][0]]
     fila, _c = _buscar(ws, TITULO_BLOQUE)
-    for col in (7, 9, 11):                   # inicio · firma · término
-        c = ws.cell(fila + 2, col)
-        assert isinstance(c.value, _dt), col
-        assert c.number_format == "dd/mm/yyyy", (col, c.number_format)
+    for etiqueta in ("Inicio declarado", "Firma del contrato", "Término declarado"):
+        f = _filas_etiqueta(ws, etiqueta, fila)[0]
+        c = ws.cell(f, 2)
+        assert isinstance(c.value, _dt), etiqueta
+        assert c.number_format == "dd/mm/yyyy", (etiqueta, c.number_format)
 
 
 def test_bloque_por_profesional_va_despues_de_la_parte_5(tmp_path):
@@ -585,8 +596,12 @@ def test_bloque_por_profesional_en_un_job_sin_datos(tmp_path):
              if n not in ("CLAUDE", "Base de Datos", HOJA_CRONOLOGIA)][0]]
     fila, _c = _buscar(ws, TITULO_BLOQUE)
     assert fila
-    assert ws.cell(fila + 2, 15).value == "POR VERIFICAR"
-    assert "no se identificó el proceso" in str(ws.cell(fila + 3, 2).value)
+    f = _filas_etiqueta(ws, "¿Empezó después de firmado el contrato?", fila)[0]
+    assert ws.cell(f, 2).value == "POR VERIFICAR"
+    notas = " ".join(str(x[0].value) for x in ws.iter_rows(min_row=fila,
+                                                           min_col=1, max_col=1)
+                     if x[0].value)
+    assert "no se identificó el proceso" in notas
 
 
 def test_bloque_por_profesional_sin_jerga(tmp_path):

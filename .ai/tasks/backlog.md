@@ -90,21 +90,22 @@ id: T-TAREA-CRONOLOGIA-VERTICAL
 tipo: tarea
 zona: entregables/ (excel_final.py — bloque de cruces en hojas P)
 agente_origen: fable
-estado: pendiente
+estado: hecha (2026-08-06, mismo día — Rafael ordenó «empieza con el vertical»)
 depende_de: []
 ---
 **Reformatear el bloque de cruces/cronología DENTRO de las hojas por
 profesional — feedback de Rafael 2026-08-06: «lo considero complicado de leer,
-tal vez un formato vertical».**
+tal vez un formato vertical». IMPLEMENTADO: tarjeta vertical por experiencia
+(etiqueta en A, dato en B:D) en vez de la tabla ancha de 19 columnas.**
 
-Alcance: SOLO el apéndice de cruces bajo la PARTE 5 de cada hoja P (el híbrido
-de T-011). La hoja global «Cronología de expedientes» NO recibió la
-observación y no se toca. Restricciones vigentes: el formato congelado
-(CLAUDE + Base de Datos + hojas P) no cambia de orden ni contenido — solo la
-FORMA del apéndice; palabras de evaluador; convención de colores intacta
-(verde calza / rojo incoherencia / amarillo por verificar / violeta supuesto).
-Formato pendiente de diseñar con Rafael antes de implementar (propuso
-vertical: una fila por pregunta en vez de tabla ancha).
+Se preservó todo el contrato: solo el apéndice bajo la PARTE 5 cambió de FORMA
+(la hoja global «Cronología de expedientes» intacta); `presentacion_cruces`
+sigue siendo la fuente única de las dos vistas; colores idénticos (amarillo
+declarado / violeta deducida / semáforo en respuestas / «no aplica» sin
+color); abstención rotulada; fechas dd/mm/yyyy. Los 6 tests del bloque se
+reescribieron al formato vertical buscando por ETIQUETA (no coordenadas
+fijas). Gate: suite 967/25. Pendiente: validación visual de Rafael sobre el
+demo camino B v2.
 
 ---
 id: T-TAREA-OCR-REMOTO

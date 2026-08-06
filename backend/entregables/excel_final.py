@@ -2171,57 +2171,68 @@ def construir_hoja_profesional(
     # desaparecer. Los valores, textos y colores salen de `presentacion_cruces`:
     # una sola fuente para las dos vistas.
     #
+    # Formato VERTICAL (feedback de Rafael, 6-ago): una tarjeta por experiencia
+    # — etiqueta en A, dato en B:D — en vez de la tabla ancha de 19 columnas,
+    # que resultaba difícil de leer. Los colores no cambian: amarillo en lo que
+    # declara el certificado, violeta en la fecha deducida, semáforo en las
+    # respuestas (el «no aplica» va sin color).
+    #
     # OJO con `r`: la PARTE 5 termina escribiendo EN la fila `r` sin avanzarla
     # (mismo detalle que documenta el bloque del factor, más abajo).
     if prof.get("experiencias"):
         r += 2
         banda("CRUCE DE FECHAS CONTRA EL CONTRATO Y LA APROBACIÓN DEL EXPEDIENTE",
               F_PARTE, FILL_PARTE, 18)
-        for ci, cf, val in [(1, 1, "N°"), (2, 6, "Proceso de referencia"),
-                            (7, 8, "Inicio declarado"), (9, 10, "Firma del contrato"),
-                            (11, 12, "Término declarado"),
-                            (13, 14, "Aprobación del expediente"),
-                            (15, 16, "¿Empezó después de firmado el contrato?"),
-                            (17, 19, "¿Terminó antes de aprobarse el expediente?")]:
-            ws.merge_cells(start_row=r, start_column=ci, end_row=r, end_column=cf)
-            c = ws.cell(r, ci, val)
-            c.font, c.fill, c.border, c.alignment = F_HEAD, FILL_HEAD, BORDER, AL_HEAD
-        ws.row_dimensions[r].height = 30
-        r += 1
+
+        def _cf_fila(etiqueta, valor, *, fill=None):
+            """Etiqueta (A) + dato (B:D). Devuelve la celda del dato para que
+            el llamador la pinte (respuestas, fecha deducida)."""
+            nonlocal r
+            cl = ws.cell(r, 1, etiqueta)
+            cl.font, cl.border = F_BOLD, BORDER
+            cl.alignment = Alignment(vertical="top", wrap_text=True)
+            ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=4)
+            v = _sin_jerga(valor) if isinstance(valor, str) else valor
+            cv = ws.cell(r, 2, "—" if v in (None, "") else v)
+            cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
+            if isinstance(valor, date):
+                cv.number_format = FMT_FECHA_LARGA
+            if fill is not None and valor not in (None, ""):
+                cv.fill = fill
+            r += 1
+            return cv
 
         for e in prof.get("experiencias", []):
             p = presentacion_cruces(e, fichas.get((n_prof, e.get("n"))))
-            campos = [(1, 1, p["n_exp"], None), (2, 6, p["proceso"], None),
-                      (7, 8, p["inicio"], FILL_CLAUDE), (9, 10, p["firma"], None),
-                      (11, 12, p["fin"], FILL_CLAUDE), (13, 14, p["aprobacion"], None),
-                      (15, 16, p["resp_a"], None), (17, 19, p["resp_b"], None)]
-            for ci, cf, val, fill in campos:
-                if cf > ci:
-                    ws.merge_cells(start_row=r, start_column=ci, end_row=r,
-                                   end_column=cf)
-                c = ws.cell(r, ci, _sin_jerga(val) if isinstance(val, str) else val)
-                c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
-                if isinstance(val, date):
-                    c.number_format = FMT_FECHA_LARGA
-                    if fill:
-                        c.fill = fill       # amarillo = lo que declara el certificado
-                elif val in (None, ""):
-                    c.value = "—"
-            _pintar_respuesta(ws.cell(r, 15), p["resp_a"])
-            _pintar_respuesta(ws.cell(r, 17), p["resp_b"], p["aplica_b"])
-            if p["inferida"]:
-                ws.cell(r, 13).fill = FILL_SUPUESTO   # violeta = fecha deducida
+            titulo = f"EXPERIENCIA {p['n_exp']}"
+            if p["proceso"]:
+                titulo += f" · proceso {p['proceso']}"
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
+            c = ws.cell(r, 1, titulo)
+            c.font, c.fill, c.border, c.alignment = F_HEAD, FILL_HEAD, BORDER, AL_HEAD
             r += 1
-            # La explicación, a todo lo ancho debajo de su experiencia: es el
-            # texto que el evaluador copia al acta, no un tooltip.
+            _cf_fila("Inicio declarado", p["inicio"], fill=FILL_CLAUDE)
+            _cf_fila("Firma del contrato", p["firma"])
+            _pintar_respuesta(
+                _cf_fila("¿Empezó después de firmado el contrato?", p["resp_a"]),
+                p["resp_a"])
+            _cf_fila("Término declarado", p["fin"], fill=FILL_CLAUDE)
+            cap = _cf_fila("Aprobación del expediente", p["aprobacion"])
+            if p["inferida"]:
+                cap.fill = FILL_SUPUESTO   # violeta = fecha deducida
+            _pintar_respuesta(
+                _cf_fila("¿Terminó antes de aprobarse el expediente?", p["resp_b"]),
+                p["resp_b"], p["aplica_b"])
+            # La explicación, a todo lo ancho de la tarjeta: es el texto que el
+            # evaluador copia al acta, no un tooltip.
             texto = p["motivo"] or "Sin observaciones sobre las fechas."
-            ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=19)
-            c = ws.cell(r, 2, texto)
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
+            c = ws.cell(r, 1, texto)
             c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
             if p["resp_a"] == "POR VERIFICAR" or p["resp_b"] == "POR VERIFICAR":
                 c.fill = FILL_PEND
-            ws.row_dimensions[r].height = max(15, (-(-len(texto) // 150)) * 13 + 3)
-            r += 1
+            ws.row_dimensions[r].height = max(15, (-(-len(texto) // 88)) * 13 + 3)
+            r += 2      # fila en blanco entre tarjetas
 
     # ── Factor de evaluación, AL FINAL de la hoja (issue #32) ────────────────
     # La página del Cuadro de Factores (4.2 A — la tabla de puntaje) cierra la
