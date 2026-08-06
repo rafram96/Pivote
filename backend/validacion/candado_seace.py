@@ -239,23 +239,35 @@ def resumen_proceso(comp: dict) -> dict:
                "endDate": max(fines) if fines else None}
     contrato = {**contrato, "dateSigned": min(firmas) if firmas else None}
 
-    rucs: list[str] = []
+    adjudicatarios: list[dict[str, str]] = []
+
+    def agregar_adjudicatario(proveedor: dict, origen: str) -> None:
+        proveedor = proveedor or {}
+        identificador = proveedor.get("identifier") or {}
+        r = _ruc(identificador.get("id") or proveedor.get("id"))
+        if not r:
+            return
+        nombre = (_texto(proveedor.get("name"))
+                  or _texto(identificador.get("legalName")))
+        existente = next((x for x in adjudicatarios if x["ruc"] == r), None)
+        if existente:
+            # Awards/contracts suelen traer el nombre cuando `parties` no lo
+            # hace. Completar es aditivo; jamás sustituir un nombre ya leído.
+            if not existente.get("nombre") and nombre:
+                existente["nombre"] = nombre
+            return
+        adjudicatarios.append({"ruc": r, "nombre": nombre, "origen": origen})
+
     for parte in comp.get("parties") or []:
         roles = [str(r).lower() for r in (parte.get("roles") or [])]
         if "supplier" in roles:
-            r = _ruc((parte.get("identifier") or {}).get("id") or parte.get("id"))
-            if r and r not in rucs:
-                rucs.append(r)
+            agregar_adjudicatario(parte, "parties")
     for premio in comp.get("awards") or []:
         for prov in premio.get("suppliers") or []:
-            r = _ruc(prov.get("id"))
-            if r and r not in rucs:
-                rucs.append(r)
+            agregar_adjudicatario(prov, "awards")
     for c in contratos:
         for prov in c.get("suppliers") or []:
-            r = _ruc(prov.get("id"))
-            if r and r not in rucs:
-                rucs.append(r)
+            agregar_adjudicatario(prov, "contracts")
 
     # Suma de todos los contratos (mismo motivo que la ventana: `contracts[0]`
     # es arbitrario). Sin contratos, el valor referencial del tender.
@@ -265,7 +277,10 @@ def resumen_proceso(comp: dict) -> dict:
 
     return {
         "entidad_convocante": _texto((comp.get("buyer") or {}).get("name")) or None,
-        "rucs_adjudicatarios": rucs,
+        "rucs_adjudicatarios": [x["ruc"] for x in adjudicatarios],
+        # Issue #83: SUNAT necesita nombre + RUC para confrontar el emisor. La
+        # lista histórica de RUC se conserva para compatibilidad.
+        "adjudicatarios": adjudicatarios,
         "fecha_firma": (lambda f: f.isoformat() if f else None)(
             _fecha(contrato.get("dateSigned"))),
         "fecha_convocatoria": (lambda f: f.isoformat() if f else None)(
@@ -482,6 +497,33 @@ def evaluar_candado(proceso: dict, cert: dict) -> Candado:
         f"Evidencia insuficiente para dar el proceso por verificado: "
         f"{len(favor)} de {MINIMO_SENALES_CONFIRMAR} señales necesarias.",
         senales)
+
+
+def confirmado_sin_adjudicatario(candado: Candado | dict) -> bool:
+    """Gate anticircular de #83: confirma el proceso sin usar la señal cuyo
+    dato se quiere verificar.
+
+    Un candado `confirmado` por ``adjudicatario + objeto`` NO habilita que ese
+    mismo adjudicatario elija el RUC del emisor. Se exigen, como en el candado
+    principal, dos señales fuertes independientes y cero contradicciones.
+    Acepta la forma viva o la persistida para que SUNAT no tenga que reconsultar
+    SEACE ni reconstruir el certificado.
+    """
+    if isinstance(candado, Candado):
+        resultado = candado.resultado
+        senales = [s.como_dict() for s in candado.senales]
+    else:
+        candado = candado or {}
+        resultado = candado.get("resultado")
+        senales = candado.get("senales") or []
+    if resultado != CONFIRMADO:
+        return False
+    independientes = [s for s in senales if s.get("nombre") != "adjudicatario"
+                       and s.get("fuerza") == FUERTE]
+    if any(s.get("sentido") == EN_CONTRA for s in independientes):
+        return False
+    return sum(s.get("sentido") == A_FAVOR for s in independientes) \
+        >= MINIMO_SENALES_CONFIRMAR
 
 
 # ── Rótulos para los entregables (una sola fuente de verdad) ─────────────────

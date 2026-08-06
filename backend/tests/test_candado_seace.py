@@ -18,7 +18,7 @@ from entregables import (construir_zip_infoobras, desempaquetar_enriquecimiento,
                          generar_excel_final)
 from validacion.candado_seace import (
     CONFIRMADO, CONTRADICE, POR_CONFIRMAR, TOLERANCIA_DIAS_FIRMA,
-    evaluar_candado, resumen_proceso, rotulo,
+    confirmado_sin_adjudicatario, evaluar_candado, resumen_proceso, rotulo,
 )
 
 
@@ -76,6 +76,27 @@ def test_promocion_exige_dos_senales_no_una():
     c = evaluar_candado(proceso, cert_sanchez_meza())
     assert [s.nombre for s in c.a_favor] == ["objeto"]
     assert c.resultado == POR_CONFIRMAR
+
+
+def test_gate_issue83_no_cuenta_adjudicatario():
+    """El proceso puede estar confirmado por F5 y aun así NO habilitar #83 si
+    una de sus dos patas fue precisamente el RUC que #83 quiere obtener."""
+    cert = {**cert_sanchez_meza(), "entidad_contratante": None,
+            "fecha_inicial": None, "fecha_final": None}
+    c = evaluar_candado(proceso_sanchez_meza(), cert)
+    assert c.resultado == CONFIRMADO
+    assert {s.nombre for s in c.a_favor} == {"adjudicatario", "objeto"}
+    assert confirmado_sin_adjudicatario(c) is False
+    assert confirmado_sin_adjudicatario(c.como_dict()) is False
+
+
+def test_gate_issue83_acepta_dos_senales_independientes():
+    c = evaluar_candado(proceso_sanchez_meza(), {
+        **cert_sanchez_meza(), "ruc_emisor": None,
+        "entidad_contratante": "GOBIERNO REGIONAL DE JUNIN SEDE CENTRAL",
+    })
+    assert c.resultado == CONFIRMADO
+    assert confirmado_sin_adjudicatario(c) is True
 
 
 # ── 2 · Degradación por metadata incompleta ──────────────────────────────────
@@ -297,6 +318,11 @@ def test_resumen_proceso_desde_ocds():
     r = resumen_proceso(comp)
     assert r["entidad_convocante"] == "GOBIERNO REGIONAL DE JUNIN SEDE CENTRAL"
     assert r["rucs_adjudicatarios"] == ["20263373058"]     # sin el 466064
+    assert r["adjudicatarios"] == [{
+        "ruc": "20263373058",
+        "nombre": "INSTITUTO DE CONSULTORIA S.A.",
+        "origen": "parties",
+    }]
     assert r["fecha_firma"] == "2021-09-24"
     assert r["fecha_convocatoria"] == "2021-07-14"
     assert r["vigencia_inicio"] == "2021-09-25"

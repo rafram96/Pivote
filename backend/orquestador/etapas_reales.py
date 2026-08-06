@@ -1432,6 +1432,110 @@ def _elegir_match_exacto(nombre: str, matches: list) -> Optional[dict]:
     return None
 
 
+def _adjudicatarios_seace(enriquecimiento: dict) -> list[dict]:
+    """Adjudicatarios persistidos por F5, en forma apta para #83.
+
+    Los jobs anteriores solo traen ``rucs_adjudicatarios``. Se conservan como
+    fallback, pero sin nombre no pueden promover una experiencia sin RUC.
+    """
+    proceso = ((enriquecimiento.get("seace") or {}).get("proceso") or {})
+    salida: list[dict] = []
+    vistos: set[str] = set()
+    for item in proceso.get("adjudicatarios") or []:
+        ruc = (_RE_RUC.findall(str((item or {}).get("ruc") or "")) or [None])[0]
+        if ruc and ruc not in vistos:
+            vistos.add(ruc)
+            salida.append({"ruc": ruc,
+                            "nombre": str((item or {}).get("nombre") or "").strip()})
+    for valor in proceso.get("rucs_adjudicatarios") or []:
+        ruc = (_RE_RUC.findall(str(valor or "")) or [None])[0]
+        if ruc and ruc not in vistos:
+            vistos.add(ruc)
+            salida.append({"ruc": ruc, "nombre": ""})
+    return salida
+
+
+def _mejor_adjudicatario(nombre: str, adjudicatarios: list[dict]) -> tuple[Optional[dict], int]:
+    """Mejor razón social con la misma vara del candado SEACE/SUNAT.
+
+    Un empate entre RUC distintos se abstiene: el parecido no puede elegir entre
+    dos adjudicatarios. Varias formas del mismo RUC sí son una sola identidad.
+    """
+    from scraping.nombres_empresa import variantes
+    from scraping.sunat import score_match_empresa
+
+    candidatos = []
+    for item in adjudicatarios:
+        razon = str(item.get("nombre") or "").strip()
+        if not razon:
+            continue
+        score = max(score_match_empresa(a, b)
+                    for a in variantes(nombre) for b in variantes(razon))
+        candidatos.append((score, item))
+    if not candidatos:
+        return None, 0
+    mejor_score = max(x[0] for x in candidatos)
+    mejores = [x[1] for x in candidatos if x[0] == mejor_score]
+    if len({x["ruc"] for x in mejores}) != 1:
+        return None, mejor_score
+    return mejores[0], mejor_score
+
+
+def _cruzar_emisor_con_seace(enriquecimiento: dict, entidad: str,
+                              ruc_declarado: Optional[str]) -> Optional[dict]:
+    """Árbol 0–3 de #83, puro y sin consultar red.
+
+    Solo devuelve una decisión cuando el proceso fue confirmado SIN contar la
+    señal adjudicatario. El llamador decide si consulta SUNAT, conserva el flujo
+    vigente o se abstiene.
+    """
+    from validacion.candado_seace import confirmado_sin_adjudicatario
+
+    seace = enriquecimiento.get("seace") or {}
+    if not confirmado_sin_adjudicatario(seace.get("candado") or {}):
+        return None
+    adjudicatarios = _adjudicatarios_seace(enriquecimiento)
+    if not adjudicatarios:
+        return None
+    rucs = {x["ruc"] for x in adjudicatarios}
+    # Jobs F5 anteriores a #83 guardaban los RUC pero no las razones sociales.
+    # Todavía permiten confirmar una igualdad exacta; sin nombre no permiten
+    # concluir ni parecido ni contradicción, así que todo lo demás sigue igual.
+    if ruc_declarado and ruc_declarado in rucs:
+        adjud = next(x for x in adjudicatarios if x["ruc"] == ruc_declarado)
+        return {"fuente": "proceso_seace_confirmado", "score_nombre": 0,
+                "estado": "ruc_verificado", "adjudicatario": adjud,
+                "mensaje": "RUC verificado contra el proceso SEACE confirmado."}
+    if not any(x.get("nombre") for x in adjudicatarios):
+        return None
+    mejor, score = _mejor_adjudicatario(_nombre_emisor_limpio(entidad), adjudicatarios)
+    base = {"fuente": "proceso_seace_confirmado", "score_nombre": score}
+
+    if ruc_declarado:
+        if mejor and score >= 85:
+            return {**base, "estado": "integrante_adjudicatario",
+                    "adjudicatario": mejor,
+                    "mensaje": "El emisor coincide por nombre con un integrante "
+                               "del adjudicatario del proceso; se conserva su RUC declarado."}
+        return {**base, "estado": "ruc_no_coincide",
+                "adjudicatario": mejor,
+                "rucs_adjudicatarios": sorted(rucs),
+                "mensaje": "El RUC declarado no es el del adjudicatario del proceso "
+                           "y el nombre del emisor tampoco coincide."}
+
+    if mejor and score >= 85:
+        return {**base, "estado": "enriquecer", "adjudicatario": mejor,
+                "mensaje": "RUC obtenido del proceso SEACE confirmado."}
+    if score >= 60:
+        return {**base, "estado": "zona_gris", "adjudicatario": mejor,
+                "mensaje": "El adjudicatario del proceso no alcanza para confirmar "
+                           "que sea el emisor; se conserva la búsqueda SUNAT por nombre."}
+    return {**base, "estado": "emisor_no_coincide", "adjudicatario": mejor,
+            "rucs_adjudicatarios": sorted(rucs),
+            "mensaje": "El emisor del certificado no coincide con el adjudicatario "
+                       "del proceso confirmado; no se usa su RUC para consultar SUNAT."}
+
+
 def _evaluar_habido_emisor(hist, emp, e: dict, ini) -> Optional[dict]:
     """¿El emisor estaba HABIDO el día que emitió el certificado y durante la
     obra que certifica? (issue #30, punto 4).
@@ -1498,6 +1602,10 @@ class EtapaSunatReal:
             rucs_e = _RE_RUC.findall(f"{e.get('ruc_emisor') or ''} {entidad}")
             k = _clave(np_, ne)
             ini = _fecha_iso(e.get("fecha_inicial"))
+            enr = ctx.enriquecimiento.get(k) or {}
+            ruc_declarado = rucs_e[0] if rucs_e else None
+            cruce_seace = _cruzar_emisor_con_seace(
+                enr, entidad, ruc_declarado)
 
             # ¿hay un emisor verificable? Sin RUC y (sin nombre o entidad pública)
             # → no se cruza (las públicas tienen RUC pero ALT04 no aplica).
@@ -1510,6 +1618,15 @@ class EtapaSunatReal:
             ruc = via = None
             if rucs_e:
                 ruc, via = rucs_e[0], "cert"
+                if cruce_seace:
+                    estado_cruce = cruce_seace["estado"]
+                    severidad = (pipeline.Severidad.ALERTA
+                                 if estado_cruce == "ruc_no_coincide"
+                                 else pipeline.Severidad.INFO)
+                    obs.append(pipeline.Observacion(
+                        codigo="SEACE_RUC_EMISOR", severidad=severidad,
+                        mensaje=cruce_seace["mensaje"], origen=self.nombre,
+                        referencia=f"prof={np_} exp={ne}"))
             else:
                 nombre = _nombre_emisor_limpio(entidad)
                 try:
@@ -1517,14 +1634,49 @@ class EtapaSunatReal:
                 except Exception as ex:  # noqa: BLE001
                     logger.warning("SUNAT buscar %r: %r", nombre, ex)
                     matches = []
-                if len(matches) == 1:
+
+                estado_cruce = (cruce_seace or {}).get("estado")
+                if estado_cruce == "enriquecer":
+                    ruc = cruce_seace["adjudicatario"]["ruc"]
+                    via = "seace_adjudicatario"
+                    if len(matches) > 1 and any(str(m.get("ruc")) == ruc for m in matches):
+                        cruce_seace["ambiguedad_resuelta"] = len(matches)
+                    obs.append(pipeline.Observacion(
+                        codigo="SEACE_RUC_EMISOR", severidad=pipeline.Severidad.INFO,
+                        mensaje=(f"{cruce_seace['mensaje']} RUC {ruc}; la identidad "
+                                 "se confirmó sin usar al adjudicatario como señal del candado."),
+                        origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+                elif estado_cruce == "emisor_no_coincide":
+                    rev += 1
+                    bloque = {"nombre": nombre, "seace_emisor": cruce_seace}
+                    if len(matches) > 1:
+                        bloque.update({
+                            "ambiguo": len(matches),
+                            "candidatos": [{"ruc": m.get("ruc"),
+                                            "razon_social": m.get("razon_social")}
+                                           for m in matches[:5]],
+                        })
+                    elif len(matches) == 1:
+                        bloque["candidato_nombre_no_usado"] = {
+                            "ruc": matches[0].get("ruc"),
+                            "razon_social": matches[0].get("razon_social"),
+                        }
+                    else:
+                        bloque["no_encontrado"] = True
+                    enr["sunat"] = bloque
+                    ctx.enriquecimiento[k] = enr
+                    obs.append(pipeline.Observacion(
+                        codigo="SEACE_RUC_EMISOR", severidad=pipeline.Severidad.ALERTA,
+                        mensaje=cruce_seace["mensaje"], origen=self.nombre,
+                        referencia=f"prof={np_} exp={ne}"))
+                    continue
+                elif len(matches) == 1:
                     ruc, via = matches[0].get("ruc"), "nombre"
                 elif (elegido := _elegir_match_exacto(nombre, matches)):
                     # varias filas, pero solo una idéntica → desempate por nombre
                     ruc, via = elegido.get("ruc"), "nombre_exacto"
                 else:
                     rev += 1
-                    enr = ctx.enriquecimiento.get(k) or {}
                     if len(matches) > 1:
                         enr["sunat"] = {"nombre": nombre, "ambiguo": len(matches),
                                         "candidatos": [{"ruc": m.get("ruc"),
@@ -1532,13 +1684,20 @@ class EtapaSunatReal:
                                                        for m in matches[:5]]}
                     else:
                         enr["sunat"] = {"nombre": nombre, "no_encontrado": True}
+                    if cruce_seace:
+                        enr["sunat"]["seace_emisor"] = cruce_seace
                     ctx.enriquecimiento[k] = enr
                     continue
+
+                if estado_cruce == "zona_gris":
+                    obs.append(pipeline.Observacion(
+                        codigo="SEACE_RUC_EMISOR", severidad=pipeline.Severidad.INFO,
+                        mensaje=cruce_seace["mensaje"], origen=self.nombre,
+                        referencia=f"prof={np_} exp={ne}"))
 
             # Vinculación postor↔emisor — RUC del cert o el resuelto por nombre.
             vinc = sorted((set(rucs_e) | {ruc}) & postor_rucs)
             if vinc:
-                enr = ctx.enriquecimiento.get(k) or {}
                 enr["vinculacion_postor_emisor"] = True
                 ctx.enriquecimiento[k] = enr
                 obs.append(pipeline.Observacion(
@@ -1614,6 +1773,8 @@ class EtapaSunatReal:
                 "habido": habido,
                 "alt04": alt04,
             }
+            if cruce_seace:
+                enr["sunat"]["seace_emisor"] = cruce_seace
             ctx.enriquecimiento[k] = enr
             if fins and ini and fins > ini and not evidencia_previa:
                 obs.append(pipeline.Observacion(

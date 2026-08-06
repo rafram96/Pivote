@@ -1176,6 +1176,248 @@ def test_sunat_por_nombre_cuando_no_hay_ruc():
     assert "sunat" not in ctx.enriquecimiento.get("1:3", {})
 
 
+def _espejo_sunat_issue83(entidad: str, ruc: str | None = None) -> dict:
+    return {
+        "_meta": {}, "postor": {},
+        "profesionales": [{"n_prof": 1, "cargo": "ESP", "experiencias": [{
+            "n": 1, "entidad_emisora": entidad, "ruc_emisor": ruc,
+            "fecha_inicial": "2021-10-01", "fecha_final": "2023-10-11",
+        }]}],
+        "resumen_evaluacion": {"factores": []},
+    }
+
+
+def _enriquecimiento_seace_issue83(*, independiente: bool = True) -> dict:
+    senales = [
+        {"nombre": "objeto", "fuerza": "fuerte", "sentido": "a_favor",
+         "detalle": "objeto coincide"},
+        {"nombre": "adjudicatario", "fuerza": "fuerte", "sentido": "a_favor",
+         "detalle": "RUC coincide"},
+    ]
+    if independiente:
+        senales.append({"nombre": "temporal", "fuerza": "fuerte",
+                        "sentido": "a_favor", "detalle": "fechas coinciden"})
+    return {"1:1": {"seace": {
+        "estado": "seleccionado",
+        "candado": {"resultado": "confirmado", "motivo": "fixture",
+                    "senales": senales},
+        "proceso": {
+            "rucs_adjudicatarios": ["20263373058"],
+            "adjudicatarios": [{"ruc": "20263373058",
+                                 "nombre": "INSTITUTO DE CONSULTORIA S.A.",
+                                 "origen": "parties"}],
+        },
+    }}}
+
+
+def test_issue83_sin_ruc_promueve_por_proceso_confirmado_y_resuelve_ambiguo():
+    """Caso 2 ≥85: el RUC oficial gana solo después del gate independiente."""
+    from orquestador.etapas import Contexto
+    from orquestador.etapas_reales import EtapaSunatReal
+
+    consultas = []
+    matches = [
+        {"ruc": "20111111111", "razon_social": "INSTITUTO CONSULTORIA NORTE"},
+        {"ruc": "20263373058", "razon_social": "INSTITUTO DE CONSULTORIA S.A."},
+    ]
+
+    def consultar(ruc):
+        consultas.append(ruc)
+        return EmpresaFake(ruc, "INSTITUTO DE CONSULTORIA S.A.", date(2000, 1, 1))
+
+    ctx = Contexto(job=None,
+                   espejo=_espejo_sunat_issue83("INSTITUTO DE CONSULTORIA S.A."),
+                   enriquecimiento=_enriquecimiento_seace_issue83())
+    res = EtapaSunatReal(consultor=consultar, buscador=lambda _: matches,
+                         extras=SIN_EXTRAS_SUNAT).correr(ctx)
+
+    sunat = ctx.enriquecimiento["1:1"]["sunat"]
+    assert consultas == ["20263373058"]
+    assert sunat["ruc"] == "20263373058"
+    assert sunat["via"] == "seace_adjudicatario"
+    assert sunat["seace_emisor"]["ambiguedad_resuelta"] == 2
+    assert not [o for o in res.observaciones
+                if o.codigo == "SEACE_RUC_EMISOR" and o.severidad.value == "alerta"]
+
+
+def test_issue83_gate_anticircular_no_promueve():
+    """Caso 0: adjudicatario + objeto confirmaron F5, pero solo objeto es
+    independiente; SUNAT conserva exactamente su ambigüedad anterior."""
+    from orquestador.etapas import Contexto
+    from orquestador.etapas_reales import EtapaSunatReal
+
+    ctx = Contexto(job=None,
+                   espejo=_espejo_sunat_issue83("CONSORCIO SUPERVISOR"),
+                   enriquecimiento=_enriquecimiento_seace_issue83(independiente=False))
+    EtapaSunatReal(
+        consultor=lambda _: pytest.fail("no debe elegir un RUC ambiguo"),
+        buscador=lambda _: [
+            {"ruc": "20263373058", "razon_social": "INSTITUTO DE CONSULTORIA S.A."},
+            {"ruc": "20111111111", "razon_social": "OTRA EMPRESA"},
+        ], extras=SIN_EXTRAS_SUNAT,
+    ).correr(ctx)
+
+    sunat = ctx.enriquecimiento["1:1"]["sunat"]
+    assert sunat["ambiguo"] == 2
+    assert "ruc" not in sunat and "seace_emisor" not in sunat
+
+
+def test_issue83_ruc_declarado_igual_queda_verificado():
+    """Caso 1a: la igualdad exacta agrega respaldo, sin cambiar el RUC."""
+    from orquestador.etapas import Contexto
+    from orquestador.etapas_reales import EtapaSunatReal
+
+    ruc = "20263373058"
+    ctx = Contexto(job=None,
+                   espejo=_espejo_sunat_issue83("INSTITUTO DE CONSULTORIA S.A.", ruc),
+                   enriquecimiento=_enriquecimiento_seace_issue83())
+    EtapaSunatReal(
+        consultor=lambda valor: EmpresaFake(valor, "INSTITUTO DE CONSULTORIA S.A.",
+                                             date(2000, 1, 1)),
+        buscador=lambda _: [], extras=SIN_EXTRAS_SUNAT,
+    ).correr(ctx)
+
+    sunat = ctx.enriquecimiento["1:1"]["sunat"]
+    assert sunat["ruc"] == ruc and sunat["via"] == "cert"
+    assert sunat["seace_emisor"]["estado"] == "ruc_verificado"
+
+
+def test_issue83_zona_gris_conserva_busqueda_por_nombre():
+    """Caso 2, 60–84: #83 informa pero no elige; manda el flujo anterior."""
+    from orquestador.etapas import Contexto
+    from orquestador.etapas_reales import EtapaSunatReal
+
+    encontrado = "20512345678"
+    ctx = Contexto(job=None,
+                   espejo=_espejo_sunat_issue83("INSTITUTO CONSULTORIA NORTE"),
+                   enriquecimiento=_enriquecimiento_seace_issue83())
+    EtapaSunatReal(
+        consultor=lambda r: EmpresaFake(r, "INSTITUTO CONSULTORIA NORTE",
+                                        date(2000, 1, 1)),
+        buscador=lambda _: [{"ruc": encontrado,
+                             "razon_social": "INSTITUTO CONSULTORIA NORTE"}],
+        extras=SIN_EXTRAS_SUNAT,
+    ).correr(ctx)
+
+    sunat = ctx.enriquecimiento["1:1"]["sunat"]
+    assert sunat["ruc"] == encontrado and sunat["via"] == "nombre"
+    assert sunat["seace_emisor"]["estado"] == "zona_gris"
+    assert 60 <= sunat["seace_emisor"]["score_nombre"] < 85
+
+
+def test_issue83_job_f5_antiguo_sin_nombre_no_cambia_sunat():
+    """Compatibilidad: los procesos persistidos antes de #83 solo traen RUC."""
+    from orquestador.etapas import Contexto
+    from orquestador.etapas_reales import EtapaSunatReal
+
+    enriquecimiento = _enriquecimiento_seace_issue83()
+    enriquecimiento["1:1"]["seace"]["proceso"].pop("adjudicatarios")
+    ctx = Contexto(job=None,
+                   espejo=_espejo_sunat_issue83("CONSORCIO SUPERVISOR"),
+                   enriquecimiento=enriquecimiento)
+    EtapaSunatReal(
+        consultor=lambda _: pytest.fail("sin nombre no puede elegir RUC"),
+        buscador=lambda _: [
+            {"ruc": "20111111111", "razon_social": "CONSORCIO SUPERVISOR UNO"},
+            {"ruc": "20222222222", "razon_social": "CONSORCIO SUPERVISOR DOS"},
+        ], extras=SIN_EXTRAS_SUNAT,
+    ).correr(ctx)
+
+    sunat = ctx.enriquecimiento["1:1"]["sunat"]
+    assert sunat["ambiguo"] == 2 and "seace_emisor" not in sunat
+
+
+def test_issue83_ruc_distinto_pero_nombre_de_integrante_no_alerta():
+    """Caso 1b: se conserva el RUC declarado y se rotula la relación."""
+    from orquestador.etapas import Contexto
+    from orquestador.etapas_reales import EtapaSunatReal
+
+    declarado = "20512345678"
+    ctx = Contexto(job=None,
+                   espejo=_espejo_sunat_issue83(
+                       "INSTITUTO DE CONSULTORIA S.A.", declarado),
+                   enriquecimiento=_enriquecimiento_seace_issue83())
+    res = EtapaSunatReal(
+        consultor=lambda r: EmpresaFake(r, "INSTITUTO DE CONSULTORIA S.A.",
+                                        date(2000, 1, 1)),
+        buscador=lambda _: [], extras=SIN_EXTRAS_SUNAT,
+    ).correr(ctx)
+
+    sunat = ctx.enriquecimiento["1:1"]["sunat"]
+    assert sunat["ruc"] == declarado and sunat["via"] == "cert"
+    assert sunat["seace_emisor"]["estado"] == "integrante_adjudicatario"
+    assert not [o for o in res.observaciones
+                if o.codigo == "SEACE_RUC_EMISOR" and o.severidad.value == "alerta"]
+
+
+def test_issue83_ruc_declarado_ajeno_alerta_sin_reemplazar():
+    """Caso 1c: confronta el certificado; SUNAT sigue consultando lo declarado."""
+    from orquestador.etapas import Contexto
+    from orquestador.etapas_reales import EtapaSunatReal
+
+    declarado = "20512345678"
+    consultas = []
+    ctx = Contexto(job=None,
+                   espejo=_espejo_sunat_issue83("EMPRESA TOTALMENTE AJENA", declarado),
+                   enriquecimiento=_enriquecimiento_seace_issue83())
+    res = EtapaSunatReal(
+        consultor=lambda r: (consultas.append(r)
+                             or EmpresaFake(r, "EMPRESA TOTALMENTE AJENA", date(2000, 1, 1))),
+        buscador=lambda _: [], extras=SIN_EXTRAS_SUNAT,
+    ).correr(ctx)
+
+    assert consultas == [declarado]
+    assert ctx.enriquecimiento["1:1"]["sunat"]["ruc"] == declarado
+    assert ctx.enriquecimiento["1:1"]["sunat"]["seace_emisor"]["estado"] \
+        == "ruc_no_coincide"
+    assert [o for o in res.observaciones
+            if o.codigo == "SEACE_RUC_EMISOR" and o.severidad.value == "alerta"]
+
+
+def test_issue83_sin_ruc_y_nombre_ajeno_no_contamina_sunat():
+    """Caso 3: ni siquiera un único match textual puede vencer la contradicción
+    con el adjudicatario del proceso confirmado."""
+    from orquestador.etapas import Contexto
+    from orquestador.etapas_reales import EtapaSunatReal
+
+    ctx = Contexto(job=None,
+                   espejo=_espejo_sunat_issue83("EMPRESA TOTALMENTE AJENA"),
+                   enriquecimiento=_enriquecimiento_seace_issue83())
+    res = EtapaSunatReal(
+        consultor=lambda _: pytest.fail("no debe consultar el RUC contaminante"),
+        buscador=lambda _: [{"ruc": "20512345678",
+                             "razon_social": "EMPRESA TOTALMENTE AJENA"}],
+        extras=SIN_EXTRAS_SUNAT,
+    ).correr(ctx)
+
+    sunat = ctx.enriquecimiento["1:1"]["sunat"]
+    assert "ruc" not in sunat
+    assert sunat["candidato_nombre_no_usado"]["ruc"] == "20512345678"
+    assert sunat["seace_emisor"]["estado"] == "emisor_no_coincide"
+    assert [o for o in res.observaciones
+            if o.codigo == "SEACE_RUC_EMISOR" and o.severidad.value == "alerta"]
+
+
+def test_issue83_sin_proceso_pre2018_conserva_flujo_anterior():
+    """Sin metadata SEACE (incluida cobertura pre-2018), #83 es invisible."""
+    from orquestador.etapas import Contexto
+    from orquestador.etapas_reales import EtapaSunatReal
+
+    ctx = Contexto(job=None,
+                   espejo=_espejo_sunat_issue83("CONSORCIO SUPERVISOR"),
+                   enriquecimiento={})
+    EtapaSunatReal(
+        consultor=lambda _: pytest.fail("la ambigüedad no se resuelve"),
+        buscador=lambda _: [
+            {"ruc": "20111111111", "razon_social": "CONSORCIO SUPERVISOR UNO"},
+            {"ruc": "20222222222", "razon_social": "CONSORCIO SUPERVISOR DOS"},
+        ], extras=SIN_EXTRAS_SUNAT,
+    ).correr(ctx)
+
+    assert ctx.enriquecimiento["1:1"]["sunat"]["ambiguo"] == 2
+    assert "seace_emisor" not in ctx.enriquecimiento["1:1"]["sunat"]
+
+
 def test_sunat_trae_representantes_e_historico_una_vez_por_ruc():
     """Issue #30: el bloque emisor guarda los representantes legales, el histórico
     y la respuesta a '¿estaba HABIDO al emitir y durante la obra?'. Las consultas
