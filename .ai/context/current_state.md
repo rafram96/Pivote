@@ -1,6 +1,20 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-08-05** · rama de trabajo: `demo`
+> Última actualización: **2026-08-06** · rama de trabajo: `demo`
+
+## Backlog de issues consolidado: #49 + #71 → #82 (6-ago)
+
+Por orden de Rafael se cerraron **#81, #5, #27, #24** (completadas, con commit y
+evidencia) y **#25** como *not planned* (NO-GO medido, condiciones de reapertura
+en la propia issue). Después, #49 y #71 —que se pisaban— se fusionaron en la
+nueva **[#82 «Analisis Ahorro de Skill»](https://github.com/rafram96/Pivote/issues/82)**,
+que junta el diagnóstico a nivel de código de #49 (inventario de la
+implementación en sombra, medición 33/34 del divisor, conteo de prompts) con la
+línea base y el diseño de #71 (Vitarte 1.59M por agente, `/cost` USD 31.12 con
+35M cache reads, candidatos C1–C6 con numeración unificada, R0, metas y gates).
+Toda mención anterior a #49/#71 en este archivo es histórica y apunta ahora a
+#82 (= T-013 en el registro económico, ya actualizado). Quedan abiertas solo
+**#70, #50 y #82** en Pivote + PANEL#1.
 
 ## El fallo del refresco del MEF deja de ser silencioso (#24, 5-ago)
 

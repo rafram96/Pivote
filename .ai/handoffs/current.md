@@ -1,8 +1,22 @@
 # Handoff — punto de continuación
 
-> Actualizado: **2026-08-04**. Si eres un agente nuevo: lee esto completo,
+> Actualizado: **2026-08-06**. Si eres un agente nuevo: lee esto completo,
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
+
+## Nota (2026-08-06, Claude) — limpieza del backlog de GitHub
+
+Por orden de Rafael se cerraron **#81, #5, #27, #24** (completadas) y **#25**
+(*not planned*, NO-GO medido). Luego **#49 y #71 se fusionaron en la nueva
+[#82 «Analisis Ahorro de Skill»](https://github.com/rafram96/Pivote/issues/82)**
+y ambas se cerraron apuntando allí. #82 concentra: diagnóstico de código de #49
+(implementación en sombra, 33/34 del divisor, prompts medidos), baseline de #71
+(Vitarte 1.59M, `/cost` USD 31.12 / 35M cache reads), candidatos **C1–C6 con
+numeración unificada** (C6 = tiering de modelo, nacido del `/cost`), R0, metas
+ponderadas por categoría de token y gates. Es extra cotizable (= T-013 en
+`projects-list`, referencia ya actualizada a #82); no bloquea el cierre del
+contrato. Abiertas en Pivote: **#70, #50, #82** (+ PANEL#1 en el panel).
+Menciones a #49/#71 más abajo en este archivo son históricas.
 
 ## Nota (2026-08-05, Claude) — #24 cerrada e #25 medida (NO-GO)
 
