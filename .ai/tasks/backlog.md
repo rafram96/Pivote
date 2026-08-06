@@ -86,6 +86,27 @@ pytest. Gate: suite completa, `resolucion/cui.py` intacto.
 aprobó; el detalle vinculante viaja con la entrada.)*
 
 ---
+id: T-TAREA-CRONOLOGIA-VERTICAL
+tipo: tarea
+zona: entregables/ (excel_final.py — bloque de cruces en hojas P)
+agente_origen: fable
+estado: pendiente
+depende_de: []
+---
+**Reformatear el bloque de cruces/cronología DENTRO de las hojas por
+profesional — feedback de Rafael 2026-08-06: «lo considero complicado de leer,
+tal vez un formato vertical».**
+
+Alcance: SOLO el apéndice de cruces bajo la PARTE 5 de cada hoja P (el híbrido
+de T-011). La hoja global «Cronología de expedientes» NO recibió la
+observación y no se toca. Restricciones vigentes: el formato congelado
+(CLAUDE + Base de Datos + hojas P) no cambia de orden ni contenido — solo la
+FORMA del apéndice; palabras de evaluador; convención de colores intacta
+(verde calza / rojo incoherencia / amarillo por verificar / violeta supuesto).
+Formato pendiente de diseñar con Rafael antes de implementar (propuso
+vertical: una fila por pregunta en vez de tabla ancha).
+
+---
 id: T-TAREA-OCR-REMOTO
 tipo: tarea
 zona: api/ + deploy/ (Dockerfile) + skill/ (scripts/)

@@ -2,6 +2,23 @@
 
 > Última actualización: **2026-08-06** · rama de trabajo: `demo`
 
+## Camino A (expedientes) comprobado: núcleo OK, 2 huecos de enrutado (6-ago)
+
+Comprobación offline con el código real (`docs/pruebas/camino-a-expedientes-
+comprobacion.md`): la clasificación reconoce las 3 variantes (elaboración ET /
+estudio de preinversión / supervisión del ET), la verificación MEF 08-A y la
+aprobación InfoObras operan, y el gate anti-circularidad de la Regla B se
+abstiene correctamente ante contratista en discrepancia. **Los 2 huecos**
+(registrados como comentario en la #70): `tipo_esperado()` devuelve siempre
+`expediente` para toda la familia, así que estudio de preinversión y
+supervisión del ET caen en `sin_tipo` — abstención honesta, pero sin candado
+F5, sin Regla A y sin Bases/Contrato en el ZIP. El fix se decide dentro del
+diseño de #70 (toca el requisito «no cruzar de tipo»). Además quedó feedback
+de presentación de Rafael: el bloque de cruces en las hojas P es difícil de
+leer → T-TAREA-CRONOLOGIA-VERTICAL en el backlog (formato por diseñar).
+Se generaron dos Excel de demostración sintéticos (camino B y camino A, 3
+profesionales / 4 CUIs cada uno) con el generador real del backend.
+
 ## Backlog de issues consolidado: #49 + #71 → #82 (6-ago)
 
 Por orden de Rafael se cerraron **#81, #5, #27, #24** (completadas, con commit y
