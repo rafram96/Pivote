@@ -6,6 +6,7 @@
   "main": "mcp.js",
   "scripts": {
     "start": "node mcp.js",
+    "test": "node --test pruebas/",
     "probar:backend": "node probar_contra_backend.js"
   },
   "dependencies": {

@@ -370,7 +370,7 @@ def test_descargar_cui_flujo_feliz(cliente, monkeypatch):
     # el _zip_carpeta REAL lo empaqueta.
     import api.app as modulo
 
-    def fake_descargar_cui(cui, carpeta, *, fecha_inicio=None, fecha_fin=None):
+    def fake_descargar_cui(cui, carpeta, *, fecha_inicio=None, fecha_fin=None, **k):
         d = (carpeta / "Valorizaciones" / "2020-09")
         d.mkdir(parents=True, exist_ok=True)
         (d / "doc.pdf").write_bytes(b"%PDF-1.4 demo")
@@ -404,8 +404,84 @@ def test_descargar_cui_no_resuelto_marca_error_y_zip_409(cliente, monkeypatch):
                                                    "fallidos": 0, "error": "no resolvió"})
     did = cliente.post("/api/pivote/descargar-cui",
                        json={"cui": "9999999"}).json()["descarga_id"]
-    assert cliente.get(f"/api/pivote/descargar-cui/{did}").json()["estado"] == "error"
+    est = cliente.get(f"/api/pivote/descargar-cui/{did}").json()
+    assert est["estado"] == "error"
+    # el porqué se dice en castellano, no se deja adivinar por el estado
+    assert "no corresponde a ninguna obra" in est["paso"]
     assert cliente.get(f"/api/pivote/descargar-cui/{did}/zip").status_code == 409
+
+
+def test_descargar_cui_responde_al_instante_y_deja_seguimiento(cliente, monkeypatch):
+    """El POST NO espera a la descarga: contesta con el número de seguimiento y
+    el trabajo sigue atrás. (La lección del ECONNRESET con obras pesadas.)"""
+    import api.app as modulo
+    lanzadas = []
+    # se sustituye el arranque de la tarea de fondo: el POST no debe depender de ella
+    monkeypatch.setattr(modulo.BackgroundTasks, "add_task",
+                        lambda self, fn, *a, **k: lanzadas.append((fn.__name__, a)))
+
+    r = cliente.post("/api/pivote/descargar-cui", json={"cui": "2418877"})
+    assert r.status_code == 201
+    b = r.json()
+    assert b["estado"] == "en_progreso" and b["paso"].startswith("En cola")
+    assert lanzadas == [("_correr_descarga_cui", (b["descarga_id"],))]
+
+    # el estado ya es consultable aunque el trabajo no haya empezado
+    est = cliente.get(f'/api/pivote/descargar-cui/{b["descarga_id"]}').json()
+    assert est["estado"] == "en_progreso" and est["listo"] is False
+    assert est["creado_en"] and est["actualizado_en"]
+    # y el ZIP todavía no: 202 con el motivo, nunca un archivo a medias
+    z = cliente.get(f'/api/pivote/descargar-cui/{b["descarga_id"]}/zip')
+    assert z.status_code == 202 and z.json()["paso"].startswith("En cola")
+
+
+def test_descargar_cui_persiste_el_avance_tramo_a_tramo(cliente, monkeypatch):
+    """Cada tramo se escribe en disco apenas empieza: quien pollea ve avanzar
+    algo aunque una sección tarde minutos, y el estado sobrevive a un reinicio."""
+    import api.app as modulo
+    vistos = []
+
+    def fake_descargar_cui(cui, carpeta, *, progreso=None, **k):
+        for frase in ("Buscando la obra en InfoObras a partir del CUI.",
+                      "Descargando las valorizaciones y los documentos de la obra."):
+            progreso(frase)
+            # se lee del DISCO, no de la memoria del proceso
+            vistos.append(json.loads(
+                (carpeta.parent / f"{carpeta.name.split('.')[0]}.cui.json")
+                .read_text(encoding="utf-8"))["paso"])
+        carpeta.mkdir(parents=True, exist_ok=True)
+        (carpeta / "doc.pdf").write_bytes(b"%PDF-1.4 demo")
+        return {"cui": cui, "obra_id": 7, "nombre": "OBRA", "descargados": 1,
+                "fallidos": 0, "error": None}
+
+    monkeypatch.setattr(modulo, "descargar_cui", fake_descargar_cui)
+    did = cliente.post("/api/pivote/descargar-cui",
+                       json={"cui": "2418877"}).json()["descarga_id"]
+
+    assert vistos == ["Buscando la obra en InfoObras a partir del CUI.",
+                      "Descargando las valorizaciones y los documentos de la obra."]
+    est = cliente.get(f"/api/pivote/descargar-cui/{did}").json()
+    assert est["estado"] == "listas" and est["paso"] == "Listo: 1 documento(s) en el ZIP."
+
+
+def test_descargar_cui_progreso_roto_no_tumba_la_descarga(cliente, monkeypatch, tmp_path):
+    """Un contador que revienta no puede costar el corpus descargado."""
+    from entregables.zip_infoobras import descargar_cui as real
+
+    def fetch(cui, *a):
+        return type("O", (), {"obra_id": 9, "nombre": "OBRA", "aprobacion_expediente": None})()
+
+    import entregables.zip_infoobras as zi
+    monkeypatch.setattr(zi, "descargar_documentos_obra_por_hito",
+                        lambda *a, **k: {"descargados": 0, "fallidos": 0, "inventario": {}})
+    monkeypatch.setattr(zi, "descargar_informes_control", lambda *a, **k: {})
+    monkeypatch.setattr(zi, "descargar_datos_cierre", lambda *a, **k: {})
+
+    def progreso_roto(_):
+        raise RuntimeError("el que informa se cayó")
+
+    r = real("2418877", tmp_path / "docs", fetch=fetch, progreso=progreso_roto)
+    assert r["obra_id"] == 9 and r["error"] is None
 
 
 # ── Buscador de la base local del MEF ────────────────────────────────────────

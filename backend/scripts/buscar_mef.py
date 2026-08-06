@@ -62,8 +62,8 @@ def _imprimir_legible(r: dict) -> None:
             print("    " + "  ·  ".join(detalle))
     print("=" * 78)
     modo = "código exacto" if r["coincidencia"] == "codigo" else "nombre"
-    print(f'{r["total"]} resultado(s) por {modo}  ·  {r["ms"]:.0f} ms de búsqueda '
-          f'(sin contar la carga del índice).')
+    print(f'{r["total"]} resultado(s) por {modo}  ·  {r["ms"]:.0f} ms en responder '
+          f'(la primera consulta de cada corrida incluye la carga del índice).')
 
 
 def main(argv: list[str]) -> int:

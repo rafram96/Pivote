@@ -1167,6 +1167,7 @@ def descargar_cui(
     session: Optional[requests.Session] = None,
     timeout: float = 90.0,
     dir_cache: Optional[Path] = None,
+    progreso=None,
 ) -> dict:
     """Resuelve el obra_id del CUI y baja TODOS sus documentos de InfoObras a `destino/`
     con el mismo árbol que el ZIP de un análisis: valorizaciones por hito + documentos
@@ -1186,9 +1187,23 @@ def descargar_cui(
     error}`. `descargados`/`fallidos` cubren TODAS las secciones, no solo las
     valorizaciones. `fetch` es inyectable para tests; con red real usa
     `fetch_by_cui`. NO corre en tests offline salvo con `fetch` inyectado (y las
-    descargas monkeypatcheadas)."""
+    descargas monkeypatcheadas).
+
+    `progreso` es un callable opcional que recibe UNA frase en castellano por
+    tramo ("Descargando los informes de control…"). Existe porque esto tarda
+    minutos y quien espera merece saber en qué va; si falla, no se lleva la
+    descarga por delante (un contador roto no puede costar el corpus)."""
+    def _paso(mensaje: str) -> None:
+        if progreso is None:
+            return
+        try:
+            progreso(mensaje)
+        except Exception:  # noqa: BLE001 — informar el avance jamás rompe la descarga
+            logger.debug("descargar_cui %s: fallo al reportar progreso", cui)
+
     if fetch is None:
         from scraping.infoobras import fetch_by_cui as fetch
+    _paso("Buscando la obra en InfoObras a partir del CUI.")
     obra = fetch(str(cui).strip(), fecha_inicio, fecha_fin, None)
     obra_id = getattr(obra, "obra_id", None) if obra is not None else None
     if obra_id is None:
@@ -1209,6 +1224,7 @@ def descargar_cui(
 
         estado: dict = {"secciones": {}, "avisos": [], "informes_anios": []}
         if _toca("InfoObras"):
+            _paso("Descargando las valorizaciones y los documentos de la obra.")
             try:
                 r = descargar_documentos_obra_por_hito(
                     obra_id, ruta, session=sess, timeout=timeout)
@@ -1225,6 +1241,7 @@ def descargar_cui(
         if _toca("Informes de control"):
             # Se bajan TODOS y el filtro por periodo lo hace la materialización
             # (misma semántica anual inclusiva que el pipeline).
+            _paso("Descargando los informes de control de la Contraloría.")
             try:
                 control = descargar_informes_control(obra_id, ruta, session=sess) or {}
                 estado["informes_anios"] = control.get("anios") or []
@@ -1238,6 +1255,7 @@ def descargar_cui(
                 estado["avisos"].append(
                     "Informes de control: la consulta no pudo completarse.")
         if _toca("Datos de cierre"):
+            _paso("Descargando los datos de cierre de la obra.")
             try:
                 cierre = descargar_datos_cierre(obra_id, ruta, session=sess) or {}
                 estado["secciones"]["Datos de cierre"] = {
@@ -1250,6 +1268,7 @@ def descargar_cui(
                 estado["avisos"].append(
                     "Datos de cierre: la consulta no pudo completarse.")
         if aprob and _toca("Aprobación del expediente"):
+            _paso("Descargando la aprobación del expediente técnico.")
             try:
                 bajo = descargar_aprobacion_expediente(aprob, ruta, session=sess)
                 estado["secciones"]["Aprobación del expediente"] = {
@@ -1267,6 +1286,7 @@ def descargar_cui(
     cache = CacheDescargasInfoObras(raiz_cache)
     cache.recolectar_temporales()
     resultado = cache.obtener(obra_id, descargar=_bajar)
+    _paso("Ordenando los documentos descargados.")
     cache.materializar(resultado, destino,
                        fecha_ini=fecha_inicio, fecha_fin=fecha_fin)
 

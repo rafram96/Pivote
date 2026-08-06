@@ -32,10 +32,11 @@ Reglas del contrato (deliberadas, no accidentes):
 Rendimiento (medido sobre la base real, 620.985 filas / 579.481 CUIs, laptop de
 dev): un código exacto responde en ~15 ms; un nombre acotado, en decenas de ms;
 un nombre amplio como «hospital abancay» une decenas de miles de candidatos y
-tarda ~0,4-0,6 s. La respuesta incluye `ms` para que esto sea comprobable en vez
-de prometido. La PRIMERA consulta de un proceso paga además la carga perezosa
-del índice (~90 s); a partir de ahí queda en RAM. En el servidor eso lo absorbe
-el primer análisis del día.
+tarda ~0,25-0,6 s. La respuesta incluye `ms` —lo que tardó ESA llamada— para que
+esto sea comprobable en vez de prometido. Ojo: la PRIMERA consulta de un proceso
+paga además la carga perezosa del índice (~65-90 s) y su `ms` lo refleja; a
+partir de ahí el índice queda en RAM. En el servidor eso lo absorbe el primer
+análisis del día.
 """
 from __future__ import annotations
 

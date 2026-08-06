@@ -1020,9 +1020,22 @@ def descargar_zip(job_id: str, tareas: BackgroundTasks):
 # ── Descarga por un solo CUI (sin correr un análisis) ────────────────────────
 # Baja TODOS los documentos de InfoObras de una obra a partir de su CUI y los
 # entrega en un ZIP, reutilizando la misma maquinaria del ZIP de un análisis.
-# Es un "dame los papeles de esta obra" suelto. Se hace como tarea en background
-# (un CUI puede traer cientos de MB) con estado polleable, igual que las descargas
-# de un job. Estado en {descarga_id}.cui.json; documentos en {id}.cui-descargas/.
+# Es un "dame los papeles de esta obra" suelto.
+#
+# Es un TRABAJO, no un request: el POST responde 201 al instante con un
+# `descarga_id` y el trabajo sigue en background (un CUI puede traer cientos de
+# MB y varios minutos — un request largo termina en ECONNRESET del otro lado).
+# El estado vive en disco, no en memoria, así que sobrevive a un reinicio del
+# backend y se consulta por polling:
+#
+#   POST /api/pivote/descargar-cui            → {descarga_id, estado}
+#   GET  /api/pivote/descargar-cui/{id}       → {estado, paso, descargados, …}
+#   GET  /api/pivote/descargar-cui/{id}/zip   → 202 mientras prepara, 200 el ZIP
+#
+# `estado` ∈ {en_progreso, listas, error} — los mismos tres nombres que usan las
+# descargas de un job, para no tener dos vocabularios para lo mismo; `paso` es la
+# frase en castellano de lo que está ocurriendo ahora. Estado en
+# {descarga_id}.cui.json; documentos en {id}.cui-descargas/.
 
 def _fecha_opt(s) -> Optional[date]:
     """'AAAA-MM-DD' (o None/vacío) → date | None, sin reventar ante basura."""
@@ -1056,10 +1069,20 @@ def _guardar_descarga_cui(descarga_id: str, est: dict) -> None:
 def _correr_descarga_cui(descarga_id: str) -> None:
     """Background: resuelve el CUI, baja sus documentos de InfoObras y arma el ZIP.
     Serializado por `_sem_analisis` (mismo cupo que los análisis, para no saturar
-    red/disco). No relanza: deja el estado en el JSON de la descarga."""
+    red/disco). No relanza: deja el estado en el JSON de la descarga.
+
+    Cada tramo se persiste apenas empieza (`paso`), así el que pollea ve avanzar
+    algo aunque una sección tarde minutos. Mientras la descarga espera su turno
+    del semáforo el paso dice justamente eso: esperar en cola no es estar colgado."""
     est = _leer_descarga_cui(descarga_id)
     if est is None:
         return
+
+    def _anotar(mensaje: str) -> None:
+        est["paso"] = mensaje
+        est["actualizado_en"] = datetime.now(timezone.utc).isoformat()
+        _guardar_descarga_cui(descarga_id, est)
+
     with _sem_analisis:
         est = _leer_descarga_cui(descarga_id) or est
         if est.get("estado") == "listas":
@@ -1068,19 +1091,25 @@ def _correr_descarga_cui(descarga_id: str) -> None:
         try:
             r = descargar_cui(est["cui"], carpeta,
                               fecha_inicio=_fecha_opt(est.get("fecha_inicio")),
-                              fecha_fin=_fecha_opt(est.get("fecha_fin")))
+                              fecha_fin=_fecha_opt(est.get("fecha_fin")),
+                              progreso=_anotar)
             est.update({k: r.get(k) for k in
                         ("obra_id", "nombre", "descargados", "fallidos",
                          "secciones", "avisos", "error")})
             if r.get("obra_id") is None:
                 est["estado"] = "error"
+                est["paso"] = ("Ese CUI no corresponde a ninguna obra publicada "
+                               "en InfoObras.")
                 _guardar_descarga_cui(descarga_id, est)
                 logger.info("DESCARGA-CUI %s · CUI %s no resolvió", descarga_id, est["cui"])
                 return
+            _anotar("Armando el ZIP con los documentos.")
             titulo = (f"InfoObras · CUI {est['cui']} · obra {r.get('obra_id')} · "
                       f"{r.get('nombre') or ''}".strip())
             _zip_carpeta(carpeta, DATA_DIR / f"{descarga_id}.cui.zip", titulo)
             est["estado"] = "listas"
+            est["paso"] = (f"Listo: {r.get('descargados') or 0} documento(s) "
+                           f"en el ZIP.")
             _guardar_descarga_cui(descarga_id, est)
             logger.info("DESCARGA-CUI %s · CUI %s · obra %s · %d arch",
                         descarga_id, est["cui"], r.get("obra_id"), r.get("descargados", 0))
@@ -1088,6 +1117,8 @@ def _correr_descarga_cui(descarga_id: str) -> None:
             logger.exception("descarga por CUI %s falló", descarga_id)
             est["estado"] = "error"
             est["error"] = "fallo al descargar de InfoObras"
+            est["paso"] = ("La descarga se interrumpió: InfoObras no respondió "
+                           "como se esperaba. Puedes volver a pedirla.")
             _guardar_descarga_cui(descarga_id, est)
 
 
@@ -1108,14 +1139,21 @@ def descargar_cui_crear(tareas: BackgroundTasks, body: dict):
         "fecha_fin": ff.isoformat() if ff else None,
         "estado": "en_progreso", "obra_id": None, "nombre": None,
         "descargados": 0, "fallidos": 0, "error": None,
+        "paso": "En cola: esperando turno para consultar InfoObras.",
         "creado_en": datetime.now(timezone.utc).isoformat(),
+        "actualizado_en": datetime.now(timezone.utc).isoformat(),
     })
     tareas.add_task(_correr_descarga_cui, descarga_id)
-    return {"descarga_id": descarga_id, "estado": "en_progreso"}
+    # Respuesta inmediata: el trabajo recién arranca. Quien pide sigue por polling.
+    return {"descarga_id": descarga_id, "estado": "en_progreso",
+            "paso": "En cola: esperando turno para consultar InfoObras."}
 
 
 @app.get("/api/pivote/descargar-cui/{descarga_id}")
 def descargar_cui_estado(descarga_id: str):
+    """Estado de una descarga por CUI: `estado` (en_progreso/listas/error),
+    `paso` (qué está ocurriendo ahora, en castellano), cuántos documentos van y
+    qué secciones respondieron. `listo` es el atajo para "ya se puede bajar"."""
     est = _leer_descarga_cui(descarga_id)
     if est is None:
         raise HTTPException(404, "descarga no existe")
@@ -1134,6 +1172,7 @@ def descargar_cui_zip(descarga_id: str):
     if est.get("estado") != "listas" or not ruta.exists():
         return JSONResponse(status_code=202, content={
             "estado": est.get("estado"),
+            "paso": est.get("paso"),
             "mensaje": "El ZIP se está preparando: descargando los documentos de InfoObras."})
     return FileResponse(ruta, media_type="application/zip",
                         filename=f"InfoObras_CUI_{est['cui']}.zip")

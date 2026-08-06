@@ -28,6 +28,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { appendFileSync } from "node:fs";
 import { crearCliente } from "./cliente.js";
+import { textoBusqueda, textoDescargaEstado, textoDescargaIniciada } from "./textos.js";
 
 // ── Config ───────────────────────────────────────────────────────────────────
 const SERVER_URL = (process.env.SERVER_URL || "http://127.0.0.1:8001").replace(/\/$/, "");
@@ -57,6 +58,12 @@ const cli = crearCliente({
 
 function comoTexto(obj) {
   return { content: [{ type: "text", text: JSON.stringify(obj, null, 2) }] };
+}
+
+// Las tools que usa el evaluador a mano contestan en castellano, no en JSON:
+// lo que se lee en el chat tiene que entenderlo alguien que evalúa propuestas.
+function comoFrase(texto) {
+  return { content: [{ type: "text", text: texto }] };
 }
 
 // ── Servidor MCP ─────────────────────────────────────────────────────────────
@@ -111,6 +118,45 @@ server.tool(
   "Consulta el estado de un análisis subido (GET /api/pivote/jobs/{job_id}): estado, etapa actual, cuántos items requieren revisión humana, y enlaces de descarga del Excel/ZIP.",
   { job_id: z.string().describe("job_id que devolvió subir_analisis.") },
   async ({ job_id }) => comoTexto(await cli.consultarEstado(job_id))
+);
+
+// ── Consulta y descarga de una obra por su CUI ───────────────────────────────
+
+server.tool(
+  "buscar_cui",
+  "Busca el código único de inversión (CUI) de una obra por su nombre, en la base local del MEF que tiene el servidor de InfoObras. Úsala cuando el usuario pregunte «cuál es el CUI de…», «búscame el hospital de Abancay» o tenga el nombre de una obra y le falte el código. Es una consulta local: no sale a internet ni depende de portales. Devuelve los mejores candidatos con nombre, ubicación y entidad.",
+  {
+    q: z.string().describe("Nombre de la obra (o un CUI/SNIP, si ya lo tiene y quiere confirmarlo)."),
+    dpto: z.string().optional().describe("Departamento, para acotar (p.ej. «Apurímac»)."),
+    prov: z.string().optional().describe("Provincia, para acotar."),
+    dist: z.string().optional().describe("Distrito, para acotar."),
+    entidad: z.string().optional().describe("Entidad a cargo, aunque sea parcial (p.ej. «gobierno regional»)."),
+    limite: z.number().int().min(1).max(50).optional().describe("Cuántos candidatos mostrar (por defecto 10)."),
+  },
+  async (args) => comoFrase(textoBusqueda(await cli.buscarCui(args), { q: args.q }))
+);
+
+server.tool(
+  "descargar_documentos_cui",
+  "Pide al servidor que baje de InfoObras TODOS los documentos de una obra a partir de su CUI: valorizaciones, informes de control, datos de cierre y la aprobación del expediente. Úsala cuando el usuario diga «bájame los papeles/documentos de esta obra» o «descarga el CUI X». Contesta al instante con un número de seguimiento; la descarga sigue en el servidor y puede tardar minutos. Los archivos NO viajan por el chat: al terminar se entrega la dirección del ZIP.",
+  {
+    cui: z.string().describe("Código único de inversión (solo números)."),
+    fecha_inicio: z
+      .string()
+      .optional()
+      .describe("AAAA-MM-DD. Acota los informes de control al periodo de la experiencia."),
+    fecha_fin: z.string().optional().describe("AAAA-MM-DD. Fin del periodo."),
+  },
+  async (args) => comoFrase(textoDescargaIniciada(await cli.descargarPorCui(args)))
+);
+
+server.tool(
+  "consultar_descarga_cui",
+  "Consulta cómo va una descarga de documentos por CUI, con el número de seguimiento que devolvió descargar_documentos_cui. Dice en qué tramo está, cuántos documentos lleva y, cuando termina, de dónde bajar el ZIP.",
+  {
+    descarga_id: z.string().describe("Número de seguimiento que devolvió descargar_documentos_cui."),
+  },
+  async ({ descarga_id }) => comoFrase(textoDescargaEstado(await cli.consultarDescargaCui(descarga_id)))
 );
 
 // ── Arranque ─────────────────────────────────────────────────────────────────

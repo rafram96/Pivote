@@ -10,6 +10,9 @@
  *   POST /api/pivote/concursos    (JSON)      → crea  {concurso_id, …}
  *   POST /api/pivote/analizar     (multipart) → concurso_id + espejo(file) + excel(file) + origen  ⇒ {job_id}
  *   GET  /api/pivote/jobs/{id}                → estado del job
+ *   GET  /api/pivote/mef/buscar               → busca CUIs en la base local del MEF
+ *   POST /api/pivote/descargar-cui            → inicia la descarga de una obra ⇒ {descarga_id}
+ *   GET  /api/pivote/descargar-cui/{id}       → estado/avance de esa descarga
  *
  * Requiere Node 18+ (fetch, FormData, Blob, Buffer globales).
  */
@@ -124,6 +127,69 @@ export function crearCliente({ serverUrl, token = null, timeoutMs = 60000, log =
         siguiente: `consultar_estado("${job_id}")`,
         excel_url: `${base}/api/pivote/jobs/${job_id}/excel`,
         zip_url: `${base}/api/pivote/jobs/${job_id}/zip`,
+      };
+    },
+
+    /**
+     * Busca inversiones (CUI/SNIP) en la base local del MEF que sirve el backend.
+     * No sale a internet: el índice está en el servidor on-prem.
+     */
+    async buscarCui({ q, dpto = null, prov = null, dist = null, entidad = null, limite = null }) {
+      const texto = String(q ?? "").trim();
+      if (texto.length < 2) return { ok: false, error: "Escribe al menos dos letras de lo que buscas." };
+      const params = new URLSearchParams({ q: texto });
+      for (const [k, v] of Object.entries({ dpto, prov, dist, entidad })) {
+        if (v !== null && v !== undefined && String(v).trim()) params.set(k, String(v).trim());
+      }
+      if (limite) params.set("limite", String(limite));
+      const r = await pedir("GET", `/api/pivote/mef/buscar?${params.toString()}`);
+      if (!r.ok) return { ok: false, status_http: r.status, error: r.data };
+      return { ok: true, ...r.data };
+    },
+
+    /**
+     * Inicia la descarga de TODOS los documentos de InfoObras de una obra (por su
+     * CUI). Devuelve al instante un número de seguimiento: el trabajo sigue en el
+     * servidor. Los archivos NO viajan por aquí — se bajan del ZIP del backend.
+     */
+    async descargarPorCui({ cui, fecha_inicio = null, fecha_fin = null }) {
+      const codigo = String(cui ?? "").trim();
+      if (!/^\d+$/.test(codigo)) return { ok: false, error: "El CUI debe ser un número." };
+      const r = await pedir("POST", "/api/pivote/descargar-cui", {
+        json: { cui: codigo, fecha_inicio, fecha_fin },
+      });
+      if (!r.ok) return { ok: false, status_http: r.status, error: r.data };
+      const id = r.data && r.data.descarga_id;
+      return {
+        ok: true,
+        cui: codigo,
+        descarga_id: id,
+        estado: r.data.estado ?? null,
+        paso: r.data.paso ?? null,
+        zip_url: `${base}/api/pivote/descargar-cui/${id}/zip`,
+      };
+    },
+
+    /** Avance de una descarga por CUI (polling). */
+    async consultarDescargaCui(descarga_id) {
+      if (!descarga_id) return { ok: false, error: "Falta el número de seguimiento de la descarga." };
+      const id = encodeURIComponent(String(descarga_id));
+      const r = await pedir("GET", `/api/pivote/descargar-cui/${id}`);
+      if (!r.ok) return { ok: false, status_http: r.status, error: r.data };
+      const d = r.data || {};
+      return {
+        ok: true,
+        descarga_id,
+        cui: d.cui ?? null,
+        estado: d.estado ?? null,
+        listo: d.estado === "listas",
+        paso: d.paso ?? null,
+        obra_id: d.obra_id ?? null,
+        nombre: d.nombre ?? null,
+        descargados: d.descargados ?? 0,
+        fallidos: d.fallidos ?? 0,
+        avisos: Array.isArray(d.avisos) ? d.avisos : [],
+        zip_url: `${base}/api/pivote/descargar-cui/${descarga_id}/zip`,
       };
     },
 

@@ -3,6 +3,51 @@
 *(Actualizar al iniciar cualquier trabajo; mover a completed.md al cerrar.)*
 
 ---
+id: GH-27 + GH-5
+tipo: feature
+zona: resolucion/ · api/ · mcp-server/
+agente_origen: fable
+estado: implementado  # las issues las cierra Rafael al comprobar
+---
+**Buscador de la base MEF (#27) y las tools de CUI del MCP (#5) — implementados
+el 2026-08-05, commits `bd844d1` (#27) y el de #5. Sin push.**
+
+**Inventario previo, que importa porque la mitad ya existía:**
+
+- El endpoint de descarga por CUI **ya era un job asíncrono** con estado
+  persistido (`{id}.cui.json`, `en_progreso/listas/error`, POST 201 + GET estado
+  + GET zip con 202 mientras prepara). No hubo que rehacerlo. Lo único que le
+  faltaba era **avance**: entre el 201 y el final no decía nada.
+- El MCP **no** tenía `buscar_cui` ni `consultar_descarga_cui` — ni siquiera
+  como stub. Tenía cuatro tools (`probar_conexion`, `listar_concursos`,
+  `subir_analisis`, `consultar_estado`) y ninguna prueba automática (sólo
+  `probar_contra_backend.js`, que exige un backend vivo).
+
+**Qué se construyó:**
+
+1. `resolucion/busqueda_mef.py` — núcleo único de `GET /api/pivote/mef/buscar` y
+   de `scripts/buscar_mef.py`. Cuatro reglas escritas en su encabezado: código
+   exacto gana; los filtros se aplican siempre (también sobre el código) y antes
+   de cortar por `limite`; base ausente = 200 con bandera, nunca 500; `cui.py`
+   no se toca. Un texto todo-genérico («puesto de salud») no devuelve vacío
+   mudo: explica que sus palabras no discriminan (`tokens_discriminantes`, único
+   añadido a `base_mef.py`).
+2. `paso` persistido tramo a tramo en la descarga por CUI (`descargar_cui` gana
+   un callback `progreso` que no puede tumbar la descarga si revienta).
+3. Tres tools MCP + `mcp-server/textos.js` (formateadores puros, probables sin
+   stdio) + `mcp-server/pruebas/` con `node --test` (22 pruebas, `npm test`),
+   que antes no existían.
+
+**Pendiente consciente**: la promesa de «<200 ms» de la issue #27 se cumple para
+códigos (12 ms) y consultas acotadas, **no** para nombres amplios (~250-600 ms:
+el scoring recorre decenas de miles de candidatos). Bajarlo exigiría tocar
+`_MAX_CANDIDATOS` de `base_mef`, que es la ruta del resolver y no aplica golden
+→ no se tocó. La respuesta publica `ms` para que el dato esté a la vista.
+
+Gate: **949 passed, 25 skipped** (base 919) sin red; node `22 pass, 0 fail`;
+`cui.py` intacto; panel y skill sin tocar.
+
+---
 id: T-REFACTOR-002
 tipo: refactor
 zona: scraping/

@@ -2,6 +2,30 @@
 
 > Última actualización: **2026-08-05** · rama de trabajo: `demo`
 
+## La base MEF se puede consultar, y el MCP sabe buscar y descargar (5-ago)
+
+**Issues #27 y #5**, las dos aprobadas por Rafael. Un núcleo
+(`resolucion/busqueda_mef.py`) con dos bocas —`GET /api/pivote/mef/buscar` y
+`python -m scripts.buscar_mef`— saca el índice de 579.481 CUIs de dentro del
+resolver: hasta ahora nadie más podía preguntarle nada. Un código exacto gana
+sobre la búsqueda difusa; los filtros se aplican **también** al acierto por
+código y **antes** de cortar por `limite`; la base ausente responde 200 con
+`base_mef_no_disponible` (no un 500), y lo inválido de la consulta sigue siendo
+400. `resolucion/cui.py` intacto: esto es consulta, no resolución de identidad.
+
+La descarga por CUI **ya era** un trabajo asíncrono con estado en disco (eso no
+hubo que inventarlo); lo que faltaba era decir algo mientras corría, y ahora
+cada tramo se persiste apenas empieza (`paso`). El MCP ganó las tres tools que
+el cliente pidió en la reunión del 06-jul —`buscar_cui`,
+`descargar_documentos_cui`, `consultar_descarga_cui`— que contestan en
+castellano de evaluador (`mcp-server/textos.js`, con prueba que prohíbe la
+jerga) y **jamás mandan un archivo por el chat**: se devuelve la dirección del
+ZIP. Comprobación a mano en `docs/pruebas/issue5-27-comprobacion-manual.md`.
+
+Latencia medida y publicada en la respuesta (`ms`), en vez de prometida: 12 ms
+por código, ~250 ms por nombre amplio, y ~66 s la primera consulta de cada
+proceso porque carga el índice.
+
 ## Reintentos unificados (5-ago)
 
 **T-REFACTOR-001** cerrada: los 15 bucles de reintento artesanales del scraping
