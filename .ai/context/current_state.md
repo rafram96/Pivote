@@ -2,6 +2,28 @@
 
 > Última actualización: **2026-08-06** · rama de trabajo: `demo`
 
+## Idea futura T-018: explorador SEACE por CUI (6-ago)
+
+Registrada como trabajo cross-repo en Pivote #84 y Panel #2. Formatea OCDS en
+una ficha determinística y permite descargar documentos desde el Panel; no usa
+IA, no modifica análisis y no reemplaza T-016. Estado discovery, sin cotizar.
+
+## Issue #83: RUC del emisor vía adjudicatario SEACE (6-ago)
+
+Implementada y versionada localmente en `31572d3` como mejora incluida de
+T-010/F5. El proceso SEACE
+conserva nombre y RUC del adjudicatario; SUNAT puede verificar, confrontar o
+enriquecer el RUC sin circularidad y se abstiene ante zona gris. Compatibilidad
+con jobs antiguos y pre-2018 cubierta. Gate: 985 passed / 25 skipped; resolver
+CUI intacto. Falta push, despliegue verificado y cierre de la issue.
+
+## Documentación de entrega (6-ago)
+
+Está preparado el borrador en `docs/entrega-final/`: manuales de skill, Panel y
+base MEF, más setup de instalación. La guía comercial privada vive en
+`docs/comercial/` y permanece fuera de git. Corresponde revisarlos durante el
+smoke real y ajustar direcciones o capturas finales antes de entregar.
+
 ## Auditoría CIBA: privadas SUNAT + certificados multi-obra (6-ago)
 
 - Ruta privada corregida: 26/40 experiencias con RUC SUNAT inequívoco quedan

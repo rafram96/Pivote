@@ -11,6 +11,7 @@
 | [`../README.md`](../README.md) | Visión general del repositorio |
 | [`arquitectura/vision_general.md`](arquitectura/vision_general.md) | **Arquitectura de alto nivel (las 4 piezas del pivote)** |
 | [`despliegue/despliegue-runbook.md`](despliegue/despliegue-runbook.md) | **Runbook canónico de despliegue on-prem (Windows 11 + Docker)** |
+| [`entrega-final/README.md`](entrega-final/README.md) | **Paquete de manuales para usuario y administrador** |
 
 ---
 
@@ -21,6 +22,7 @@ docs/
 ├── arquitectura/       # Visión general y contratos de alto nivel
 ├── backend/            # Especificaciones técnicas y modularización del backend
 ├── despliegue/         # Runbooks y guías de instalación activa
+├── entrega-final/      # Manuales entregables para usuario y administrador
 ├── frontend/           # Especificación del Panel Web (Panel-InfoObras)
 ├── ejemplos/           # Schemas JSON de referencia y datos de prueba
 ├── html_renders/       # Artefactos visuales HTML renderizados (organizados por categoría)

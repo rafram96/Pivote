@@ -4,6 +4,40 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
+## Nota (2026-08-06, Codex) — T-018 registrada como idea cross-repo
+
+Rafael propuso convertir el JSON OCDS de SEACE en un explorador legible por CUI
+en el Panel, con procesos clasificados y descarga selectiva de bases, contrato y
+otros documentos. No duplica T-016: esta última es MCP/descarga puntual; T-018
+es contrato normalizado + superficie visual. Quedó en discovery, sin precio ni
+aprobación, en Pivote #84, Panel #2, `InfoObras/.ai/tasks/_backlog.md` y
+`projects-list` como oportunidad no sumable.
+
+## Nota (2026-08-06, Codex) — issue #83 implementada
+
+El cruce RUC emisor ↔ adjudicatario SEACE quedó implementado localmente. F5
+persiste ahora `adjudicatarios` con nombre/RUC/origen y conserva la lista
+histórica de RUC. SUNAT aplica los casos 0–3 solo si el candado tiene ≥2 señales
+fuertes independientes de `adjudicatario`: igualdad de RUC se verifica; nombre
+de integrante se rotula sin sustituir; discrepancia declarada alerta sin
+corregir; sin RUC y score ≥85 enriquece, 60–84 conserva el flujo, <60 bloquea la
+contaminación. Jobs antiguos y cobertura pre-2018 permanecen iguales. Gate:
+**985 passed, 25 skipped**, 91 focales, compileall/diff-check limpios;
+`backend/resolucion/cui.py` intacto, no aplica golden. Cambio versionado
+localmente en `31572d3`; falta push, despliegue verificado y cierre de #83.
+
+## Nota (2026-08-06, Codex) — paquete documental de entrega preparado
+
+Se creó `docs/entrega-final/` con índice, manual de la skill, manual del Panel,
+manual de uso/operación de la base MEF y setup coordinado de servidor + equipo
+del evaluador. Los documentos públicos usan marcadores de red y no contienen
+precios, secretos ni datos de concursos. La guía interna para presentar extras
+quedó en `docs/comercial/guion-presentacion-extras-entrega-final.md`, ruta
+gitignored: incluye discurso de valor, demostraciones, objeciones y el mapa
+comercial vigente, por lo que no debe commitearse. El setup refleja el compose
+actual de tres servicios (`db`, `backend`, `panel`) y el runtime vigente de
+Claude Code con skill enlazada; no revive el plugin histórico.
+
 ## Nota (2026-08-06, Codex) — privadas SUNAT y subobras visibles
 
 Se cerraron localmente los puntos 1 y 2 de la auditoría CIBA. La regla privada
