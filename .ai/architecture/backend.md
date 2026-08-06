@@ -50,7 +50,9 @@ de los DDL reales — ver `architecture/database.md`.)
 
 `PIVOTE_DATA_DIR` · `PIVOTE_DB_URL` (opcional) · `PIVOTE_ETAPAS` ·
 `PIVOTE_MAX_DESCARGAS` (vacío=todas, 0=ninguna) · `PIVOTE_VERIFICAR_MEF` ·
-`PIVOTE_FORZAR_EXPEDIENTES` (modo camino A) · `PIVOTE_MEF_MAX_DIAS`.
+`PIVOTE_FORZAR_EXPEDIENTES` (modo camino A) · `PIVOTE_MEF_DIAS_FRESCURA`
+(default 10; umbral del aviso de base MEF vencida — antes esta línea nombraba
+`PIVOTE_MEF_MAX_DIAS`, que nunca existió en el código).
 
 ## Pruebas
 

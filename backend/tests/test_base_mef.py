@@ -42,6 +42,9 @@ def test_disponible_con_fixtures(base):
         "load_id": None,
         "edad_dias": 0,
         "postgres": False,
+        "umbral_dias": 10,
+        "ultimo_refresco": None,
+        "mensaje": None,
     }
 
 

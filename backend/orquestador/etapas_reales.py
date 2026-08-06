@@ -308,6 +308,24 @@ class EtapaResolucionCuiReal:
         ok = rev = 0
         obs: list[pipeline.Observacion] = []
 
+        # Frescura de la base (issue #24): si la resolución corrió contra datos
+        # de hace semanas, el evaluador tiene que verlo en SU informe. Una obra
+        # registrada después de la última actualización buena no está en la base,
+        # y su ausencia se lee exactamente igual que un «no existe». Solo se
+        # anota cuando hay algo que decir: con la base al día no molesta. Con la
+        # base ausente tampoco: eso ya lo cuenta la degradación normal a
+        # InfoObras en vivo, y no es un dato envejecido sin avisar.
+        if base is not None:
+            try:
+                fr = base.frescura()
+                if fr["estado"] in ("stale", "invalid", "refresco_fallido") and fr["mensaje"]:
+                    obs.append(pipeline.Observacion(
+                        codigo="BASE_MEF_DESACTUALIZADA",
+                        severidad=pipeline.Severidad.ADVERTENCIA,
+                        mensaje=fr["mensaje"], origen=self.nombre))
+            except Exception:  # noqa: BLE001 — avisar jamás puede tumbar el análisis
+                pass
+
         pares = list(ctx.items_experiencia())
 
         # dato humano primero (re-disparo): CUI pegado a mano = resuelto MANUAL

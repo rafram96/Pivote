@@ -9,6 +9,11 @@ Construye una carga inmutable con:
 
 La publicación se hace con un manifest atómico. Una carga incompleta nunca
 reemplaza la última versión buena.
+
+Cada corrida —termine bien o mal— queda anotada en `bitacora.json` junto al
+manifest (`resolucion/bitacora_mef.py`). Conservar la versión anterior cuando el
+refresco falla es la garantía; que nadie se entere de que falló era el agujero
+(issue #24). El backend lee esa bitácora y avisa.
 """
 from __future__ import annotations
 
@@ -167,6 +172,12 @@ def _load_id() -> str:
     return f"{ahora}-{uuid.uuid4().hex[:8]}"
 
 
+class ActualizacionEnCurso(RuntimeError):
+    """Otra corrida tiene el lock. No es un fallo de ESTA actualización: es que no
+    llegó a empezar, así que no se anota en la bitácora — la que sí está corriendo
+    anotará su propio resultado."""
+
+
 @contextmanager
 def _bloqueo_exclusivo(dir_dest: Path):
     """Impide dos publicaciones simultáneas, también fuera del wrapper Windows."""
@@ -184,14 +195,16 @@ def _bloqueo_exclusivo(dir_dest: Path):
             try:
                 msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
             except OSError as exc:
-                raise RuntimeError("ya existe una actualización MEF en ejecución") from exc
+                raise ActualizacionEnCurso(
+                    "ya existe una actualización MEF en ejecución") from exc
             adquirido = True
         else:
             import fcntl
             try:
                 fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError as exc:
-                raise RuntimeError("ya existe una actualización MEF en ejecución") from exc
+                raise ActualizacionEnCurso(
+                    "ya existe una actualización MEF en ejecución") from exc
             adquirido = True
         yield
     finally:
@@ -642,6 +655,35 @@ def _purgar_cargas(cargas: Path, *, activo: str, retener: int) -> None:
             shutil.rmtree(ruta)
 
 
+def _con_bitacora(dir_dest: Path, tarea) -> dict:
+    """Ejecuta `tarea()` y deja SIEMPRE anotado cómo terminó (issue #24).
+
+    El fallo del refresco dejaba de existir en cuanto la consola se cerraba: la
+    versión anterior se conservaba —correcto— pero nadie se enteraba de que los
+    datos habían dejado de renovarse. Aquí queda escrito en la carpeta de la
+    base, que es lo que el backend sí puede leer y mostrar.
+
+    La corrida que ni siquiera empezó porque otra tenía el lock NO se anota: no
+    es un fallo, y pisar la última corrida buena con ella sería mentir."""
+    from resolucion import bitacora_mef
+
+    inicio = datetime.now(timezone.utc).isoformat()
+    t0 = time.perf_counter()
+    try:
+        meta = tarea()
+    except ActualizacionEnCurso:
+        raise
+    except BaseException as exc:
+        bitacora_mef.registrar_fallo(
+            dir_dest, error=exc, inicio=inicio,
+            duracion_s=time.perf_counter() - t0)
+        raise
+    bitacora_mef.registrar_exito(
+        dir_dest, meta=meta, inicio=inicio,
+        duracion_s=time.perf_counter() - t0)
+    return meta
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Actualiza la base local del MEF.")
     ap.add_argument("--desde-dir", type=Path, default=None,
@@ -654,19 +696,19 @@ def main() -> None:
     dsn = (os.getenv("PIVOTE_DB_URL") or "").strip()
     if not dsn:
         raise SystemExit("falta PIVOTE_DB_URL: PostgreSQL es obligatorio para el ETL MEF")
-    if args.desde_dir:
-        dir_csv = Path(args.desde_dir)
-        print(f"Procesando CSV locales de {dir_csv}")
-    else:
-        dir_csv = dir_dest / "tmp"
-        print(f"Descargando de {BASE_URL} a {dir_csv}")
-        _descargar(dir_csv)
+    def corrida() -> dict:
+        if args.desde_dir:
+            dir_csv = Path(args.desde_dir)
+            print(f"Procesando CSV locales de {dir_csv}")
+        else:
+            dir_csv = dir_dest / "tmp"
+            print(f"Descargando de {BASE_URL} a {dir_csv}")
+            _descargar(dir_csv)
+        load_id = _load_id()
+        with _bloqueo_exclusivo(dir_dest), CargaPostgres(dsn, load_id) as pg:
+            return _procesar(dir_csv, dir_dest, pg=pg, identificador=load_id)
 
-    load_id = _load_id()
-    with _bloqueo_exclusivo(dir_dest), CargaPostgres(dsn, load_id) as pg:
-        meta = _procesar(
-            dir_csv, dir_dest, pg=pg, identificador=load_id,
-        )
+    meta = _con_bitacora(dir_dest, corrida)
     print(
         f"\nOK · carga {meta['load_id']} · {meta['filas_total']:,} filas · "
         f"{meta['cuis_distintos']:,} CUIs · {meta['entidades']:,} entidades"

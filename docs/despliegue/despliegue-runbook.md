@@ -191,7 +191,31 @@ administrador):
 La tarea corre los domingos a las 03:00, ignora un segundo arranque simultáneo y
 guarda logs en `%ProgramData%\InfoObras\logs`. No reinicia el backend: el
 resolver detecta el nuevo `load_id`. Confirmar en `/api/pivote/salud` que
-`base_mef` tenga estado operativo, `edad_dias <= 8` y `postgres: true`.
+`base_mef` tenga `"estado": "ok"`, `edad_dias` por debajo de `umbral_dias` y
+`postgres: true`.
+
+### Que un fallo del refresco no pase inadvertido (issue #24)
+
+Los logs de `%ProgramData%` **nadie los mira**. Por eso cada corrida —termine
+bien o mal— se anota además en `bitacora.json`, dentro del volumen de datos
+(`referencia/mef/`, junto a `manifest.json`), y el backend la lee. Un refresco
+caído se ve, sin abrir logs, en tres sitios:
+
+| Dónde | Qué se ve |
+|---|---|
+| `GET /api/pivote/salud` | `base_mef` con `ok: false`, `diagnostico: stale` o `refresco_fallido`, y `mensaje` en castellano |
+| `GET /api/pivote/mef/buscar` y `python -m scripts.buscar_mef` | `base_desactualizada: true` + `aviso_frescura` sobre los resultados |
+| El análisis | observación `BASE_MEF_DESACTUALIZADA` en el job: el evaluador ve que la resolución corrió con datos de hace N días |
+
+`PIVOTE_MEF_DIAS_FRESCURA` fija el umbral (**default 10 días**): con la tarea
+semanal la base nunca pasa de 7, así que 10 tolera un domingo con retraso pero
+delata **una** semana saltada al miércoles siguiente. Con la base al día no
+aparece ningún aviso — es la condición para que se lea el día que aparezca.
+
+**Simulacro recomendado tras el despliegue**: cortar la salida a internet del
+contenedor y correr el ETL a mano; debe fallar sin tocar la base publicada, y
+`/api/pivote/salud` debe pasar a `refresco_fallido` con la causa (`[red] sin
+DNS…`).
 
 ---
 

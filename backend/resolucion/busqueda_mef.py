@@ -20,6 +20,13 @@ Reglas del contrato (deliberadas, no accidentes):
 2. **Los filtros se aplican siempre**, también sobre el acierto por código. Un
    CUI de Huánuco con `--dpto lima` devuelve cero resultados, y eso es la
    respuesta correcta, no un error.
+3bis. **Si la base está vencida, se dice en la respuesta.** `base_desactualizada`
+   + `aviso_frescura` (issue #24): quien consulta tiene derecho a saber que la
+   lista que está mirando se armó con datos de hace semanas, porque una obra
+   registrada después no va a aparecer y la ausencia se lee igual que un «no
+   existe». Van en campos aparte de `aviso`, que es para lo que el usuario
+   escribió mal.
+
 3. **La base ausente no es un error del que pregunta.** Si los artefactos no
    están instalados se responde 200 con `base_mef_no_disponible: true` y un
    aviso en castellano; jamás un traceback ni un 500. Un integrador distingue
@@ -150,7 +157,7 @@ def buscar(
 
     Devuelve siempre un dict con la misma forma:
         {q, filtros, limite, coincidencia, base_mef_no_disponible, aviso,
-         edad_dias, ms, total, resultados[]}
+         edad_dias, base_desactualizada, aviso_frescura, ms, total, resultados[]}
     Lanza `ConsultaInvalida` sólo por lo que el usuario escribió mal.
     """
     t0 = time.perf_counter()
@@ -173,6 +180,8 @@ def _buscar(q, *, dpto, prov, dist, entidad, limite, base) -> dict:
         "base_mef_no_disponible": False,
         "aviso": None,
         "edad_dias": None,
+        "base_desactualizada": False,
+        "aviso_frescura": None,
         "ms": None,
         "total": 0,
         "resultados": [],
@@ -183,7 +192,14 @@ def _buscar(q, *, dpto, prov, dist, entidad, limite, base) -> dict:
         respuesta["aviso"] = AVISO_SIN_BASE
         return respuesta
 
-    respuesta["edad_dias"] = base.edad_dias()
+    # Frescura (issue #24). Va en campos PROPIOS, no en `aviso`: «tu consulta no
+    # se puede resolver» y «lo que estás consultando puede estar incompleto» son
+    # cosas distintas y una no debe tapar a la otra. `frescura()` no toca
+    # PostgreSQL ni el índice, así que se puede pagar en cada búsqueda.
+    fr = base.frescura()
+    respuesta["edad_dias"] = fr["edad_dias"]
+    respuesta["base_desactualizada"] = fr["estado"] != "ok"
+    respuesta["aviso_frescura"] = fr["mensaje"]
 
     # 1 · código exacto (CUI o SNIP)
     if texto.isdigit():

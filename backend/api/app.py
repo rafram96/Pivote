@@ -1216,6 +1216,9 @@ def salud():
     from resolucion.base_mef import instancia as _base_mef
 
     estado_mef = _base_mef().estado_operativo()
+    # `ok: false` también cuando la base está al día pero su última actualización
+    # automática falló (`refresco_fallido`): es justo el caso que antes no se veía
+    # en ningún lado — la base sigue sirviendo, pero dejó de renovarse (issue #24).
     salud_mef = {
         "portal": "base_mef",
         "ok": estado_mef["estado"] == "ok",
@@ -1224,6 +1227,9 @@ def salud():
         "load_id": estado_mef["load_id"],
         "edad_dias": estado_mef["edad_dias"],
         "postgres": estado_mef["postgres"],
+        "umbral_dias": estado_mef["umbral_dias"],
+        "ultimo_refresco": estado_mef["ultimo_refresco"],
+        "mensaje": estado_mef["mensaje"],
     }
     # En modo NO-real (tests/esqueleto) no hay portales que sondear → operativo sin red.
     if os.getenv("PIVOTE_ETAPAS") != "real":

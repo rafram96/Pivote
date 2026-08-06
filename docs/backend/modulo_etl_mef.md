@@ -153,6 +153,55 @@ docker compose -f deploy/docker-compose.yml run --rm backend `
 El contenedor exige `PIVOTE_DB_URL` y arranca con el servicio `db`; el wrapper
 no usa `--no-deps`.
 
+### Que el fallo no sea silencioso (issue #24)
+
+Conservar la carga anterior cuando el refresco falla es la garantía de #21/#22.
+El agujero era el otro lado: nadie se enteraba. Los artefactos seguían ahí,
+`BaseMef` los cargaba sin protestar, y el resolver contestaba con datos viejos
+con la misma cara que si estuvieran frescos — una obra registrada después de la
+última corrida buena simplemente no existe, y su ausencia se lee igual que un
+«no existe» legítimo.
+
+**Registro.** `_con_bitacora()` envuelve la corrida y escribe `bitacora.json` en
+la raíz de la carpeta de la base (junto a `manifest.json`, fuera de `cargas/`
+para que la purga no se lleve la memoria). Módulo:
+`backend/resolucion/bitacora_mef.py`.
+
+| Campo | Éxito | Fallo |
+|---|---|---|
+| `ok` | `true` | `false` |
+| `inicio` / `fin` / `duracion_s` | sí | sí |
+| `load_id`, `filas_total`, `cuis_distintos`, `entidades` | sí | `null` |
+| `categoria` / `causa` | `null` | `red` \| `portal` \| `otro` + frase corta (`errores_red.clasificar()`, ADR-014) |
+
+Se guardan la última corrida, el último éxito y un historial de 20. La corrida
+que ni empieza porque otra tiene el lock (`ActualizacionEnCurso`) **no** se
+anota: no es un fallo y pisar el registro con ella sería mentir. Que la bitácora
+no se pueda escribir nunca tumba el ETL — avisa por consola y sigue.
+
+**Umbral.** `PIVOTE_MEF_DIAS_FRESCURA`, default **10 días** (`config.py`). Con la
+tarea semanal la base no pasa de 7; 10 tolera un domingo con retraso y delata una
+semana saltada al miércoles. Un valor inválido cae al default: un typo en el
+`.env` no puede apagar el aviso.
+
+**Estados** (`BaseMef.frescura()`, barato: dos archivos, sin PostgreSQL ni índice
+RAM): `missing` → `invalid` → `stale` → `refresco_fallido` → `ok`.
+`refresco_fallido` es el aviso temprano: la base todavía sirve, pero dejó de
+renovarse.
+
+**Superficies** — las que ya existían, sin vistas nuevas:
+
+- `GET /api/pivote/salud` → `base_mef` con `ok`, `diagnostico`, `edad_dias`,
+  `umbral_dias`, `ultimo_refresco`, `mensaje`;
+- `GET /api/pivote/mef/buscar` y `python -m scripts.buscar_mef` →
+  `base_desactualizada` + `aviso_frescura` (campos propios: no pisan `aviso`,
+  que es para lo que el usuario escribió mal);
+- el análisis → observación `BASE_MEF_DESACTUALIZADA` en la etapa de resolución,
+  **solo** si la base está vencida o su refresco falló.
+
+Los textos van en palabras de evaluador («las obras registradas después de esa
+fecha todavía no aparecen»), no de operador.
+
 ## 7. Fases
 
 ### F1 — núcleo serving-first

@@ -47,6 +47,11 @@ def _imprimir_legible(r: dict) -> None:
         cabecera += f"   (base del MEF actualizada hace {edad} día(s))"
     print(cabecera)
     print("=" * 78)
+    # Antes de los resultados, no después: si la base está vencida, eso cambia
+    # cómo se leen (issue #24).
+    if r.get("aviso_frescura"):
+        print(f"⚠ {r['aviso_frescura']}")
+        print("-" * 78)
 
     if not r["resultados"]:
         print(r["aviso"] or "Sin coincidencias. Prueba con menos palabras o sin filtros.")

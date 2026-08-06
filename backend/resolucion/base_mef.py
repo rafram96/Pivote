@@ -177,25 +177,61 @@ class BaseMef:
         except (OSError, ValueError, json.JSONDecodeError):
             return None
 
-    def estado_operativo(self, max_edad_dias: int = 8) -> dict:
-        """Resumen seguro para health/operación; no carga el índice RAM."""
-        disponible = self.disponible()
+    def frescura(self, max_edad_dias: Optional[int] = None) -> dict:
+        """¿Se puede confiar en que la base está al día? (issue #24)
+
+        Barato a propósito: mira dos archivos y no toca PostgreSQL ni el índice
+        RAM, para poder llamarse en cada búsqueda y en cada análisis.
+
+        Estados, de peor a mejor:
+          `missing`           — no hay base instalada;
+          `invalid`           — hay base pero no se sabe de cuándo es;
+          `stale`             — más vieja que el umbral: le faltan obras;
+          `refresco_fallido`  — todavía al día, pero la última actualización
+                                automática falló (aviso temprano: sin arreglarlo,
+                                en días esto es `stale`);
+          `ok`                — al día y con la última actualización correcta.
+        """
+        from config import dias_frescura_mef
+        from resolucion import bitacora_mef
+
+        umbral = int(max_edad_dias if max_edad_dias is not None else dias_frescura_mef())
         edad = self.edad_dias()
-        load_id = self._load_id_activo()
-        postgres_ok = self._postgres_disponible(load_id)
-        if not disponible:
+        refresco = bitacora_mef.ultima_corrida(self._dir)
+        if not self.disponible():
             estado = "missing"
         elif edad is None:
             estado = "invalid"
-        elif edad > max_edad_dias:
+        elif edad > umbral:
             estado = "stale"
+        elif refresco is not None and not refresco.get("ok"):
+            estado = "refresco_fallido"
         else:
             estado = "ok"
         return {
             "estado": estado,
-            "load_id": load_id,
             "edad_dias": edad,
-            "postgres": postgres_ok,
+            "umbral_dias": umbral,
+            "ultimo_refresco": refresco,
+            "mensaje": bitacora_mef.aviso(estado, edad_dias=edad, umbral_dias=umbral,
+                                          refresco=refresco),
+        }
+
+    def estado_operativo(self, max_edad_dias: Optional[int] = None) -> dict:
+        """Resumen seguro para health/operación; no carga el índice RAM.
+
+        Es `frescura()` + lo que cuesta una consulta a PostgreSQL (`load_id`
+        publicado). Por eso no se usa en la ruta de cada búsqueda."""
+        f = self.frescura(max_edad_dias)
+        load_id = self._load_id_activo()
+        return {
+            "estado": f["estado"],
+            "load_id": load_id,
+            "edad_dias": f["edad_dias"],
+            "postgres": self._postgres_disponible(load_id),
+            "umbral_dias": f["umbral_dias"],
+            "ultimo_refresco": f["ultimo_refresco"],
+            "mensaje": f["mensaje"],
         }
 
     # ── carga ────────────────────────────────────────────────────────────────
