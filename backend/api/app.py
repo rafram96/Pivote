@@ -1139,6 +1139,33 @@ def descargar_cui_zip(descarga_id: str):
                         filename=f"InfoObras_CUI_{est['cui']}.zip")
 
 
+# ── Buscador de la base local del MEF ────────────────────────────────────────
+
+@app.get("/api/pivote/mef/buscar")
+def buscar_en_base_mef(q: str = "", dpto: str = "", prov: str = "", dist: str = "",
+                       entidad: str = "", limite: int = 10):
+    """Busca inversiones (CUI/SNIP) en la base local del MEF, sin salir a la red.
+
+    `q` es el nombre de la obra o directamente un CUI/SNIP; `dpto`/`prov`/`dist`/
+    `entidad` acotan por coincidencia parcial; `limite` corta la lista (1..50).
+
+    Contrato de fallo, a propósito:
+      · 400 si lo que se pidió no se puede buscar (texto muy corto, límite fuera
+        de rango) — es un error de quien pregunta.
+      · **200 con `base_mef_no_disponible: true`** si la base no está instalada
+        en el equipo. No es un fallo del servicio: es que no hay dónde buscar, y
+        el integrador debe distinguirlo de «no hay resultados» mirando la
+        bandera, no la lista vacía. Nunca un 500 ni un traceback.
+    """
+    from resolucion.busqueda_mef import ConsultaInvalida, buscar
+
+    try:
+        return buscar(q, dpto=dpto, prov=prov, dist=dist, entidad=entidad,
+                      limite=limite)
+    except ConsultaInvalida as e:
+        raise HTTPException(400, str(e)) from None
+
+
 # ── Salud de portales ────────────────────────────────────────────────────────
 
 _SALUD_CACHE: dict = {"ts": 0.0, "data": None}

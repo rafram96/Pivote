@@ -37,6 +37,26 @@ def bloquear_red_externa(monkeypatch):
 
 
 @pytest.fixture
+def dir_mef_mini(tmp_path) -> Path:
+    """Carpeta temporal con los fixtures mini del MEF bajo los nombres canónicos
+    que espera `BaseMef` (24 filas inventadas pero realistas, sin red). La usan
+    los tests del buscador y los del endpoint."""
+    import json
+    import shutil
+    from datetime import date
+
+    fix = BACKEND / "tests" / "fixtures" / "mef"
+    destino = tmp_path / "mef"
+    destino.mkdir()
+    shutil.copy(fix / "mef_mini.csv.gz", destino / "inversiones.csv.gz")
+    shutil.copy(fix / "entidades_mini.csv", destino / "entidades_publicas.csv")
+    (destino / "metadata.json").write_text(
+        json.dumps({"fecha": date.today().isoformat(), "cuis_distintos": 23}),
+        encoding="utf-8")
+    return destino
+
+
+@pytest.fixture
 def dump_sunat():
     """Carga un dump HTML de SUNAT por nombre; salta el test si no existe."""
     def _cargar(nombre: str) -> str:

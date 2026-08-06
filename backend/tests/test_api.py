@@ -408,6 +408,61 @@ def test_descargar_cui_no_resuelto_marca_error_y_zip_409(cliente, monkeypatch):
     assert cliente.get(f"/api/pivote/descargar-cui/{did}/zip").status_code == 409
 
 
+# ── Buscador de la base local del MEF ────────────────────────────────────────
+
+@pytest.fixture()
+def con_base_mini(dir_mef_mini, monkeypatch):
+    """El endpoint busca contra los fixtures mini, no contra la base real de la
+    máquina (medio millón de filas y resultados dependientes del equipo)."""
+    from resolucion import base_mef, busqueda_mef
+    monkeypatch.setattr(busqueda_mef, "_base_por_defecto",
+                        lambda: base_mef.BaseMef(dir_mef_mini))
+
+
+def test_mef_buscar_por_nombre(cliente, con_base_mini):
+    r = cliente.get("/api/pivote/mef/buscar", params={"q": "hospital regional"})
+    assert r.status_code == 200
+    b = r.json()
+    assert b["base_mef_no_disponible"] is False
+    assert {x["cui"] for x in b["resultados"]} == {"2200145", "2366120"}
+    assert b["resultados"][0]["ubicacion"] and b["resultados"][0]["entidad"]
+
+
+def test_mef_buscar_con_filtros_y_limite(cliente, con_base_mini):
+    r = cliente.get("/api/pivote/mef/buscar",
+                    params={"q": "hospital regional", "dpto": "huanuco", "limite": 1})
+    assert r.status_code == 200
+    b = r.json()
+    assert b["total"] == 1 and b["resultados"][0]["cui"] == "2366120"
+
+
+def test_mef_buscar_por_cui(cliente, con_base_mini):
+    b = cliente.get("/api/pivote/mef/buscar", params={"q": "2200145"}).json()
+    assert b["coincidencia"] == "codigo" and b["resultados"][0]["cui"] == "2200145"
+
+
+def test_mef_buscar_valida_entrada(cliente, con_base_mini):
+    assert cliente.get("/api/pivote/mef/buscar", params={"q": "a"}).status_code == 400
+    assert cliente.get("/api/pivote/mef/buscar").status_code == 400
+    assert cliente.get("/api/pivote/mef/buscar",
+                       params={"q": "hospital", "limite": 999}).status_code == 400
+
+
+def test_mef_buscar_sin_base_responde_200_con_bandera(cliente, tmp_path, monkeypatch):
+    """La base ausente NO es un 500 ni un traceback: 200 con bandera y aviso,
+    para que el integrador distinga «no hay base» de «no hay resultados»."""
+    from resolucion import base_mef, busqueda_mef
+    vacia = tmp_path / "sin_mef"
+    vacia.mkdir()
+    monkeypatch.setattr(busqueda_mef, "_base_por_defecto",
+                        lambda: base_mef.BaseMef(vacia))
+    r = cliente.get("/api/pivote/mef/buscar", params={"q": "hospital regional"})
+    assert r.status_code == 200
+    b = r.json()
+    assert b["base_mef_no_disponible"] is True
+    assert b["resultados"] == [] and b["aviso"]
+
+
 # ── Progreso del análisis (barra del panel) ──────────────────────────────────
 
 def test_progreso_endpoint_job_terminado(cliente):

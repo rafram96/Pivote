@@ -77,6 +77,14 @@ def _tokens(nombre_norm: str) -> list[str]:
     return [t for t in nombre_norm.split() if len(t) > 2 and t not in _STOP]
 
 
+def tokens_discriminantes(texto: str) -> list[str]:
+    """Palabras del texto con las que el índice PUEDE buscar (las demás son
+    comunes a decenas de miles de nombres y no acotan nada). Si sale vacía, la
+    consulta es demasiado genérica y no hay nada que buscar — quien pregunta
+    merece saberlo en vez de recibir una lista vacía sin explicación."""
+    return _tokens(_limpiar(texto))
+
+
 class BaseMef:
     """Base de inversiones cargada en memoria (carga perezosa)."""
 
