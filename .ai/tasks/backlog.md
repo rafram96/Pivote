@@ -336,8 +336,13 @@ depende_de: []
     - [ ] `T-ETL-009` (#25): Engine de búsqueda paralela N profesionales (SQL + Python Scoring).
 - [ ] Camino A: no descargar ni pintar secciones de obra (valorizaciones,
   cronograma) en expedientes; silenciar advertencias COBERTURA para expedientes.
-- [ ] Re-revisar con el cliente los 2 casos de verdad auditada dudosa:
-  2195439 (Tocache vs Loreto) y 2064566 (Cotabambas vs Antabamba).
+- [x] ~~Re-revisar con el cliente los 2 casos de verdad auditada dudosa:
+  2195439 (Tocache vs Loreto) y 2064566 (Cotabambas vs Antabamba).~~
+  **CERRADO por decisión de Rafael (2026-08-05: «Mátalos, ya no importan»)**:
+  su propósito era corregir el banco de verdades auditadas, y ese corpus ya no
+  existe (mismo destino que la exención ruc_match). Si alguna de esas dos obras
+  reaparece en un análisis real, el flujo actual la atrapa solo: cae en
+  «Por confirmar» y decide un humano. No reabrir.
 - [x] ~~Unificar `backend/db/schema.sql` con el DDL real de `repositorio_pg.py`
   (o marcar schema.sql como documental).~~ **HECHO 2026-08-05** (F-SCHEMA, con
   T-REFACTOR-003): es espejo documental de los DOS DDL reales (`mef` primero) y
