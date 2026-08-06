@@ -610,22 +610,9 @@ optimización sin cambio semántico → tarea. Criterio: golden idéntica
 (mal-resueltos y transiciones sin cambios) + pytest verde.
 ⚠ Mismo riesgo deploy que T-TAREA-002.
 
----
-id: T-REFACTOR-001
-tipo: refactor
-zona: scraping/
-agente_origen: fable
-estado: esperando_aprobacion
-depende_de: [T-SONDEO-A03]
----
-**Unificar reintentos/backoff y semántica de fallo en scraping**: helper único
-`con_reintentos()` en `errores_red.py` (lineal/exponencial parametrizable,
-log SIEMPRE con `corto()`), y señal de fallo consistente (`PortalNoResponde`
-≠ vacío) en los tres módulos. Es refactor con ADR NUEVO (ADR-010) al
-ejecutarse: hubo alternativa real (status quo: cada portal su dialecto) y un
-agente nuevo repetiría el error vacío≠caído que ya costó el caso 6:1
-(recurring_patterns.md). Criterio: pytest + golden sin cambios + revisar que
-ningún caller dependa del dialecto viejo (`[]`/`None`). Post-deploy.
+> `T-REFACTOR-001` (reintentos y semántica de fallo unificados) se **aprobó y
+> ejecutó el 2026-08-05** — ver `in_progress.md` y
+> `.ai/decisions/ADR-014-reintentos-unificados.md`.
 
 ---
 id: T-REFACTOR-002

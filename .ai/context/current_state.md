@@ -2,6 +2,15 @@
 
 > Última actualización: **2026-08-05** · rama de trabajo: `demo`
 
+## Reintentos unificados (5-ago)
+
+**T-REFACTOR-001** cerrada: los 15 bucles de reintento artesanales del scraping
+pasaron a un único `con_reintentos()` en `scraping/errores_red.py`, con
+`Resultado.respondio` separando «respondió vacío» (dato) de «no respondió»
+(incógnita) — y `Resultado.__bool__` lanza `TypeError` para que el error del caso
+6:1 no se pueda volver a escribir. Contratos externos intactos; `cui.py` sin
+tocar. Decisión y alcance en `decisions/ADR-014-reintentos-unificados.md`.
+
 ## ADR-009 cerrado: Postgres es OBLIGATORIO, y schema.sql ya no miente (5-ago)
 
 Rafael cerró el estatus global (**T-REFACTOR-003** + **F-SCHEMA**): PostgreSQL es

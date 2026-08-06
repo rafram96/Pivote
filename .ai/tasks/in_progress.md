@@ -3,6 +3,53 @@
 *(Actualizar al iniciar cualquier trabajo; mover a completed.md al cerrar.)*
 
 ---
+id: T-REFACTOR-001
+tipo: refactor
+zona: scraping/ (+ entregables/zip_infoobras.py)
+agente_origen: fable
+estado: aprobado  # Rafael, 2026-08-05: "Concuerdo con el T-REFACTOR-001"
+depende_de: [T-SONDEO-A03]
+---
+**Unificar reintentos/backoff y semántica de fallo en scraping.**
+
+### Cerrada el 2026-08-05 — decisión en `decisions/ADR-014-reintentos-unificados.md`
+
+**Qué había**: **15 bucles de reintento artesanales** en 7 módulos, con 4
+fórmulas de backoff, 3 formas de jitter y **6 valores de retorno para el mismo
+evento** («el portal no respondió»): excepción, `None`, `[]`, `False`,
+`{encontrados: 0}` y un dataclass. Cada llamador tenía que conocer el dialecto de
+su fuente, y confundir «vacío» con «caído» ya costó el caso 6:1.
+
+**Qué se hizo**: un solo `con_reintentos()` en `scraping/errores_red.py` —
+`Politica(intentos, base, modo, jitter, tope)` + clasificación única con
+`corto()` + `Resultado(respondio, valor, error, intentos)`. La distinción
+vacío-vs-caído es **mecánica, no de disciplina**: `Resultado.__bool__` lanza
+`TypeError`, así que `if res:` —el error del 6:1 en una línea— explota con un
+mensaje que la explica. Se migraron **13 bucles en 6 módulos** (`infoobras`,
+`mef`, `sunat`, `seace_abierto`, `renipress`, `zip_infoobras`) **sin tocar un
+solo contrato externo**: cada función traduce el `Resultado` a lo que ya
+devolvía. Los contadores por hilo del ZIP entraron por el gancho
+`al_reintentar`.
+
+**Qué NO se migró, a propósito** (detalle y porqué en el ADR §Pendientes
+conscientes): `resolucion/cui.py::_Infra._query` —**el archivo quedó intacto**,
+no aplica golden y su `warning` con la excepción cruda es traza forense—; el
+reintento del `codigoObra` faltante de `fetch_by_cui` (no es red: el dato vino
+incompleto); las conflaciones vacío=caído de `obtener_informes_control` y
+`descargar_datos_cierre` (cambiar su retorno mueve lo que ve el índice del ZIP:
+es tarea de producto); y los retries de disco/CLI/orquestación fuera de
+`scraping/`.
+
+**Un cambio declarado**: `mef._get` y `seace_abierto._get` hacían
+`kw.pop("timeout")` dentro del bucle y perdían el timeout del llamador a partir
+del 2º intento. Ahora rige en todos. Ningún llamador vivo pasa `timeout` ahí.
+
+**Gate**: `pytest backend/tests -q` → **902 passed, 25 skipped** (base 870;
++32 tests nuevos, **cero tests existentes modificados** — ése fue el criterio de
+que la semántica no se movió). Sin red y sin dormir. `compileall` y
+`git diff --check` limpios. `cui.py`, panel y skill sin tocar. Sin push.
+
+---
 id: T-TAREA-002
 tipo: tarea
 zona: scraping/ (infoobras.py)
