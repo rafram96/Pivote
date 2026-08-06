@@ -3,6 +3,56 @@
 *(Actualizar al iniciar cualquier trabajo; mover a completed.md al cerrar.)*
 
 ---
+id: T-TAREA-002
+tipo: tarea
+zona: scraping/ (infoobras.py)
+agente_origen: fable
+estado: aprobado  # Rafael, 2026-08-05
+depende_de: [T-SONDEO-A01]
+---
+**Eliminar el resolver legacy muerto de `backend/scraping/infoobras.py`.**
+
+### Cerrada el 2026-08-05
+
+**Qué era**: **483 líneas** (1347–1829, el final del archivo salvo `sondear`)
+con un **SEGUNDO resolver de CUI por nombre**, anterior a `resolucion/cui.py`:
+`buscar_obras_por_nombre`, `verificar_profesional_en_obra` +
+`VerificacionProfesional`, `buscar_obra_por_certificado` + `ObraCandidata`,
+`_score_candidata`, `_extraer_palabras_clave`, `_jaccard`, `_normalizar_tokens`.
+Puntuaba con Jaccard, aceptaba desde `min_score=15.0` y ante ambigüedad
+**«aún así retornamos el mejor»** — exactamente el sobre-compromiso que ADR-005
+eliminó. El riesgo no era que corriera (no corría): era que una sesión futura lo
+encontrara y lo usara creyendo que es el resolver.
+
+**Cero callers, verificado antes de borrar** con grep del repo completo
+(`backend/`, `skill/`, `tests/`, `tools/`, `scripts/`, `docs/`). La única
+importación viva del nombre está en `tools/demos/demo_server.py`, y apunta al
+**otro repo** (`src.scraping.infoobras` de `Alpamayo-InfoObras`, cargado por
+`sys.path.insert`): no toca este archivo.
+
+**Lo que NO se movió**, porque `resolucion/cui.py` lo importa diferido desde
+`scraping.infoobras`: `BASE_MAPA`, `_crear_session`, `coincide_codigo`,
+`_extraer_datos_ejecucion`, `_procesar_avances`, `seleccionar_obra`. Verificado
+tras el borrado que los 6 —más `fetch_by_cui`, `_buscar_por_cui`, `sondear`,
+`elegir_obra_raw`, `periodos_inactividad`,
+`parsear_aprobacion_expediente`— siguen resolviéndose desde el módulo: la
+superficie pública que los tests monkeypatchean quedó idéntica salvo lo borrado.
+
+**Arrastres**: se fueron con el código sus dos únicas pruebas
+(`test_extraer_palabras_clave_obra_hospitalaria`,
+`test_normalizar_tokens_y_jaccard` en `tests/test_infoobras_parsing.py`), con
+una nota en su lugar apuntando a dónde vive hoy la desambiguación por nombre. Y
+`docs/backend/analisis_tamanio_y_modularizacion.md` planeaba un
+`verificacion.py` para ese bloque en el PR 5 de la modularización: la ficha del
+PR ahora dice 1,358 líneas y por qué el submódulo ya no tiene qué albergar.
+
+**Gates**: suite **866 passed, 25 skipped** — la línea base de esta sesión eran
+868 (865 + las 3 de B03) y bajan exactamente las 2 pruebas del código borrado:
+cero regresiones · `import scraping.infoobras` y `import resolucion.cui`
+limpios · `compileall` y `git diff --check` limpios · `cui.py` sin tocar en esta
+tarea (no aplica golden) · panel y skill sin tocar.
+
+---
 id: T-TAREA-001
 tipo: tarea
 zona: otro (prosa de backend/scraping, backend/resolucion, backend/schemas y .ai/)

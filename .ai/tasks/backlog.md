@@ -591,24 +591,6 @@ y B01/B02 (fallos de persistencia) son el mismo tema transversal
 ## Plan propuesto (fable, 2026-07-23) — TODO esperando aprobación del desarrollador
 
 ---
-id: T-TAREA-002
-tipo: tarea
-zona: scraping/
-agente_origen: fable
-estado: esperando_aprobacion
-depende_de: [T-SONDEO-A01]
----
-**Eliminar el resolver legacy muerto de `infoobras.py`** (~480 líneas,
-1347-1828: `buscar_obras_por_nombre`, `verificar_profesional_en_obra`,
-`buscar_obra_por_certificado` + helpers). Sin callers (verificado). 3
-preguntas: el porqué ya vive en ADR-002…005 (el ADR que impide reconstruir un
-resolver por nombre en scraping YA existe); borrar código muerto no es
-decisión nueva; git conserva la historia → tarea, no refactor ni ADR.
-Criterio: pytest verde + golden intacta (sin callers no debe moverse nada).
-⚠ Riesgo deploy: toca código que el deploy pausado va a shipear — ejecutar
-DESPUÉS del deploy validado, o aceptar re-validación.
-
----
 id: T-TAREA-003
 tipo: tarea
 zona: resolucion/
@@ -767,24 +749,6 @@ y B01/B02 (fallos de persistencia) son el mismo tema transversal
 «fallo silencioso vs señal explícita» en capas distintas.
 
 ## Plan propuesto (fable, 2026-07-23) — TODO esperando aprobación del desarrollador
-
----
-id: T-TAREA-002
-tipo: tarea
-zona: scraping/
-agente_origen: fable
-estado: esperando_aprobacion
-depende_de: [T-SONDEO-A01]
----
-**Eliminar el resolver legacy muerto de `infoobras.py`** (~480 líneas,
-1347-1828: `buscar_obras_por_nombre`, `verificar_profesional_en_obra`,
-`buscar_obra_por_certificado` + helpers). Sin callers (verificado). 3
-preguntas: el porqué ya vive en ADR-002…005 (el ADR que impide reconstruir un
-resolver por nombre en scraping YA existe); borrar código muerto no es
-decisión nueva; git conserva la historia → tarea, no refactor ni ADR.
-Criterio: pytest verde + golden intacta (sin callers no debe moverse nada).
-⚠ Riesgo deploy: toca código que el deploy pausado va a shipear — ejecutar
-DESPUÉS del deploy validado, o aceptar re-validación.
 
 ---
 id: T-TAREA-003

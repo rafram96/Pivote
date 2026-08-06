@@ -182,27 +182,9 @@ def test_periodos_suspension_usa_fecha_exacta_de_paralizacion():
     assert periodos[0][0] == date(2023, 3, 17)
 
 
-# ── Desambiguación por nombre (insumo de la resolución de CUI) ──────────────
-
-def test_extraer_palabras_clave_obra_hospitalaria():
-    nombre = (
-        "MEJORAMIENTO DE LA CAPACIDAD RESOLUTIVA DE LOS SERVICIOS DE SALUD "
-        "DEL HOSPITAL REGIONAL HERMILIO VALDIZAN DE HUANUCO, NIVEL II-1"
-    )
-    queries = infoobras._extraer_palabras_clave(nombre)
-
-    assert queries, "debe producir al menos un fragmento de búsqueda"
-    # El marcador de establecimiento + nombre propio debe estar en los fragmentos
-    assert any("HERMILIO VALDIZAN" in q.upper() for q in queries)
-
-
-def test_normalizar_tokens_y_jaccard():
-    a = "Hospital Regional Hermilio Valdizan de Huanuco"
-    b = "HOSPITAL REGIONAL HERMILIO VALDIZÁN DE HUÁNUCO"
-    assert infoobras._jaccard(a, b) >= 0.9  # acentos/case no separan
-
-    c = "Centro de Salud de Pichari"
-    assert infoobras._jaccard(a, c) < 0.5
+# (Aquí vivían dos pruebas de `_extraer_palabras_clave` y `_jaccard`, helpers del
+# resolver legacy por nombre que este módulo ya no tiene: la desambiguación por
+# nombre es de `resolucion/cui.py` y se prueba en `tests/test_resolucion_*.py`.)
 
 
 # ── Huecos de valorización (obra parada sin estado "Paralizado") ─────────────

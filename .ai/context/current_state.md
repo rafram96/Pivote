@@ -2,6 +2,21 @@
 
 > Última actualización: **2026-08-05** · rama de trabajo: `demo`
 
+## Deuda técnica del sondeo, saldada (5-ago)
+
+Tres tareas chicas cerradas en un tren: **B03-fix** — un Postgres caído ya no
+impide arrancar el backend (el pool y el DDL se abren en el primer uso, no en el
+import de `app.py`; si la BD no responde queda UN warning y se opera 100% sobre
+archivos); **T-TAREA-001** — saneo documental de la zona backend (el README de
+`scraping/` era el de otra carpeta y daba ALT-12 por viva, la cabecera de
+`cui.py` describía el resolver del prototipo, y «la vista SQL» que dos docs
+listaban como consumidor del contrato no existe en ninguna BD real); y
+**T-TAREA-002** — borradas las 483 líneas del segundo resolver de CUI por nombre
+que dormía al final de `scraping/infoobras.py` (`min_score=15.0` y «aún así
+retornamos el mejor», sin un solo caller). Gate: **866 passed, 25 skipped**
+(base 865 + 3 pruebas nuevas de B03 − 2 que se fueron con el código borrado).
+Detalle en `tasks/in_progress.md`.
+
 ## Pulido del entregable: el Excel ya no se contradice a sí mismo (5-ago)
 
 Cuatro defectos salidos de leer celda por celda el Excel real de Vitarte

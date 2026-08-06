@@ -286,7 +286,13 @@ Verificación: V1 + V4.
 
 ---
 
-### PR 5 — `scraping/infoobras.py` (1,841 → paquete) · ~1.5 d · riesgo alto
+### PR 5 — `scraping/infoobras.py` (1,358 → paquete) · ~1.5 d · riesgo alto
+
+> Medía 1,841 cuando se escribió este plan. **T-TAREA-002 (2026-08-05) borró las
+> 483 líneas finales**: eran un segundo resolver de CUI por nombre, anterior a
+> `resolucion/cui.py` y sin ningún caller. Los números de línea de abajo son de
+> aquel corte; la partición sigue valiendo, pero el archivo `verificacion.py`
+> que se planeaba ya no tiene contenido que albergar.
 
 Las 14 dataclasses salen solas; el resto arrastra el ciclo con `cui.py`.
 
@@ -300,9 +306,10 @@ backend/scraping/infoobras/   # el módulo se convierte en paquete; __init__.py 
 │                   # _huecos_de_valorizacion, periodos_inactividad (837-951)
 ├── seleccion.py    # _estado_obra, _ventana_obra, coincide_codigo, _cod_obra,
 │                   # seleccionar_obra, elegir_obra_raw (952-1094)
-├── expediente.py   # _url_a_item, parsear_aprobacion_expediente, _fetch_aprobacion_expediente (1095-1164)
-└── verificacion.py # buscar_obras_por_nombre + scoring Jaccard (1347-final)
+└── expediente.py   # _url_a_item, parsear_aprobacion_expediente, _fetch_aprobacion_expediente (1095-1164)
 ```
+
+(`sondear` se queda en la fachada: lo consume `/salud`.)
 
 **Restricciones duras**:
 - `fetch_by_cui` (1165-1346) **vive en el `__init__.py` del paquete** (misma mecánica que PR 4: el nombre público es el del módulo, la fachada es el `__init__`) — `test_infoobras_parsing.py:524-531` parchea `_crear_session` y `_buscar_por_cui` sobre el módulo, y como `fetch_by_cui` los resuelve en los globals del `__init__`, el patch sigue funcionando (R1).
