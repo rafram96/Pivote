@@ -1,11 +1,16 @@
 """Re-descarga TODOS los documentos InfoObras de un job ya analizado y rearma el
 ZIP. Reusa los `obra_id` del enriquecimiento (NO re-resuelve CUIs ni SUNAT).
 
+⚠ FORMATO DE DATOS ANTERIOR — este script escribe en `<job>.descargas/` y
+`<job>.infoobras.zip`, el layout previo a la carpeta por job. Sobre un job del
+formato vigente se detiene solo (ver `scripts/layout_legado.py`), porque dejaría
+los documentos donde ni el Excel ni el Panel los buscan; `--forzar` lo salta.
+
 Resumible: salta las experiencias cuya carpeta ya tiene archivos, y continúa
 ante caídas del portal (registra el fallo y sigue). Útil tras quitar el límite
 de descargas (PIVOTE_MAX_DESCARGAS) para completar el ZIP de un job viejo.
 
-Uso:   python -m scripts.redescargar_documentos <job_id>
+Uso:   python -m scripts.redescargar_documentos <job_id> [--forzar]
 """
 from __future__ import annotations
 
@@ -26,6 +31,9 @@ from entregables.zip_infoobras import (  # noqa: E402
     descargar_informes_control,
 )
 from scraping.infoobras import _crear_session  # noqa: E402
+from scripts.layout_legado import (  # noqa: E402
+    exigir_layout_plano, extraer_forzar,
+)
 
 
 def _n_archivos(d: Path) -> int:
@@ -54,8 +62,9 @@ def _periodos_exp(espejo: dict) -> dict[tuple[int, int], tuple]:
     return out
 
 
-def main(job_id: str) -> None:
+def main(job_id: str, forzar: bool = False) -> None:
     dd = Path(os.getenv("PIVOTE_DATA_DIR", "datos_pivote"))
+    exigir_layout_plano(dd, job_id, forzar)
     espejo = json.loads((dd / f"{job_id}.espejo.json").read_text(encoding="utf-8"))
     enr = json.loads((dd / f"{job_id}.enriquecimiento.json").read_text(encoding="utf-8"))
     base_desc = dd / f"{job_id}.descargas"
@@ -116,7 +125,8 @@ def main(job_id: str) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("uso: python -m scripts.redescargar_documentos <job_id>")
+    _argv, _forzar = extraer_forzar(sys.argv[1:])
+    if not _argv:
+        print("uso: python -m scripts.redescargar_documentos <job_id> [--forzar]")
         sys.exit(2)
-    main(sys.argv[1])
+    main(_argv[0], _forzar)

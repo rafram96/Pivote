@@ -1,10 +1,15 @@
 """Avance de las descargas InfoObras de un job + ETA aproximado.
 
+⚠ FORMATO DE DATOS ANTERIOR — este script lee los artefactos sueltos en la raíz
+(`<job>.espejo.json`, `<job>.descargas/`), el layout previo a la carpeta por job.
+Sobre un job del formato vigente se detiene solo (ver `scripts/layout_legado.py`);
+`--forzar` lo salta.
+
 La barra del panel cuenta etapas (8), así que se queda clavada en ~38% durante
 toda la fase de descargas (que es la más larga). Este script mide el avance real
 por experiencias: cuántas obras ya se bajaron y cuántas faltan.
 
-Uso:  python scripts/avance_descargas.py <job_id>
+Uso:  python scripts/avance_descargas.py <job_id> [--forzar]
 """
 import json
 import os
@@ -12,6 +17,12 @@ import sys
 import time
 
 import requests
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from scripts.layout_legado import (  # noqa: E402
+    exigir_layout_plano, extraer_forzar,
+)
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")  # consola Windows sin -X utf8
@@ -22,10 +33,12 @@ API = os.environ.get("PIVOTE_API", "http://127.0.0.1:8001")
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        sys.exit("uso: python scripts/avance_descargas.py <job_id>")
-    job = sys.argv[1]
+    argv, forzar = extraer_forzar(sys.argv[1:])
+    if not argv:
+        sys.exit("uso: python scripts/avance_descargas.py <job_id> [--forzar]")
+    job = argv[0]
     base = os.path.join(os.path.dirname(__file__), "..", "datos_pivote")
+    exigir_layout_plano(base, job, forzar)
     desc = os.path.join(base, f"{job}.descargas")
 
     esp = json.load(open(os.path.join(base, f"{job}.espejo.json"), encoding="utf-8"))
