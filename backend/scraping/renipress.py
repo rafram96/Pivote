@@ -16,6 +16,8 @@ from typing import Any, Callable, Literal
 
 import requests
 
+from scraping.errores_red import LINEAL, Politica, con_reintentos
+
 logger = logging.getLogger(__name__)
 
 _BASE_PREDETERMINADA = (
@@ -183,20 +185,25 @@ class ClienteRENIPRESS:
             raise ValueError("max_filas debe estar entre 1 y 500")
 
         tipo = _tipo_consulta(termino)
-        for intento in range(1, self._reintentos + 1):
-            try:
-                return self._buscar_una_vez(
-                    termino, tipo, solo_activos, max_filas, intento
-                )
-            except (requests.RequestException, ValueError, json.JSONDecodeError) as exc:
-                logger.warning(
-                    "RENIPRESS intento %d/%d falló: %s",
-                    intento,
-                    self._reintentos,
-                    exc,
-                )
-                if intento < self._reintentos:
-                    self._dormir(1.5 * intento)
+        cuenta = {"n": 0}
+
+        def _consultar() -> ResultadoRENIPRESS:
+            cuenta["n"] += 1
+            return self._buscar_una_vez(
+                termino, tipo, solo_activos, max_filas, cuenta["n"]
+            )
+
+        res = con_reintentos(
+            _consultar,
+            politica=Politica(intentos=self._reintentos, base=1.5, modo=LINEAL),
+            etiqueta=f"RENIPRESS {tipo}",
+            excepciones=(requests.RequestException, ValueError, json.JSONDecodeError),
+            dormir=self._dormir,
+            log=logger,
+            nivel=logging.WARNING,   # RENIPRESS avisaba en WARNING; se conserva
+        )
+        if res.respondio:
+            return res.valor        # incluye la búsqueda sana SIN resultados
 
         return ResultadoRENIPRESS(
             estado="portal_no_disponible",

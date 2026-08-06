@@ -27,7 +27,6 @@ import html as html_module
 import json
 import logging
 import os
-import random
 import re
 import secrets
 import ssl
@@ -39,6 +38,10 @@ from typing import Any, Optional
 
 import requests
 from requests.adapters import HTTPAdapter
+
+from scraping.errores_red import (
+    EXPONENCIAL, Politica, RespuestaTransitoria, con_reintentos,
+)
 
 try:
     from urllib3.util.ssl_ import create_urllib3_context
@@ -146,27 +149,27 @@ def _request_with_retry(
       - Timeout
       - HTTP 5xx
     """
-    last_exc: Optional[Exception] = None
-    for intento in range(SUNAT_MAX_RETRIES):
-        try:
-            r = session.request(method, url, timeout=timeout, **kwargs)
-            if r.status_code < 500:
-                return r
-            last_exc = Exception(f"HTTP {r.status_code}")
-        except (requests.ConnectionError, requests.Timeout) as exc:
-            last_exc = exc
+    def _pedir() -> requests.Response:
+        r = session.request(method, url, timeout=timeout, **kwargs)
+        if r.status_code < 500:
+            return r                     # 2xx/3xx/4xx → respuesta, la lee el llamador
+        raise RespuestaTransitoria(f"HTTP {r.status_code}")
 
-        if intento < SUNAT_MAX_RETRIES - 1:
-            # Backoff exponencial con jitter: 0.5s → 1s → 2s + 0..0.3s random
-            delay = SUNAT_RETRY_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.3)
-            logger.debug(
-                "SUNAT %s intento %d/%d fallo (%s), reintentando en %.1fs",
-                description, intento + 1, SUNAT_MAX_RETRIES, last_exc, delay,
-            )
-            time.sleep(delay)
-
+    # Backoff exponencial con jitter: 0.5s → 1s → 2s + 0..0.3s random. La política
+    # se arma acá (no a nivel de módulo) para que siga leyendo las constantes de
+    # entorno tal como estaban.
+    res = con_reintentos(
+        _pedir,
+        politica=Politica(intentos=SUNAT_MAX_RETRIES, base=SUNAT_RETRY_BASE_DELAY,
+                          modo=EXPONENCIAL, jitter=0.3),
+        etiqueta=f"SUNAT {description}",
+        excepciones=(requests.ConnectionError, requests.Timeout, RespuestaTransitoria),
+        log=logger,
+    )
+    if res.respondio:
+        return res.valor
     logger.warning("SUNAT %s fallo tras %d intentos: %s",
-                   description, SUNAT_MAX_RETRIES, last_exc)
+                   description, res.intentos, res.error)
     return None
 
 # Etiquetas del HTML de detalle SUNAT. Cada una tiene un patrón:

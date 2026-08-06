@@ -20,16 +20,18 @@ import hashlib
 import json
 import logging
 import os
-import random
 import re
 import threading
-import time
+import time   # el backoff duerme en errores_red, pero los tests parchean `z.time.sleep`
 import zipfile
 from datetime import date
 from pathlib import Path
 from typing import Any, Optional
 
-from scraping.errores_red import clasificar, corto
+from scraping.errores_red import (
+    EXPONENCIAL, Politica, RespuestaTransitoria, clasificar, con_reintentos, corto,
+    permanente,
+)
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import requests
@@ -41,6 +43,13 @@ logger = logging.getLogger(__name__)
 # esos sustentos (los más importantes) se perdían en silencio del ZIP.
 _DL_RETRIES = int(os.getenv("INFOOBRAS_DOWNLOAD_RETRIES", "3"))
 _DL_BASE_DELAY = float(os.getenv("INFOOBRAS_DOWNLOAD_BASE_DELAY", "1.0"))
+
+
+def _politica(intentos: int) -> Politica:
+    """Reintentos de descarga (ADR-014): exponencial 1s, 2s + jitter 0-0.5s —
+    la misma temporización que tenían los cinco bucles artesanales."""
+    return Politica(intentos=max(1, intentos), base=_DL_BASE_DELAY,
+                    modo=EXPONENCIAL, jitter=0.5)
 
 # Contador de reintentos de descarga, por HILO: la etapa InfoObras corre en su
 # propio hilo del pool y descarga sincrónicamente, así que `reset` al inicio y
@@ -276,11 +285,11 @@ def _descargar_a_carpeta(
         "contentType": "application/pdf" if ext == "pdf" else "application/octet-stream",
         "extension": "." + ext,
     }
-    for intento in range(max(1, intentos)):
+    def _bajar() -> bool:
         try:
             with sess.get(DESCARGA, params=params, timeout=timeout, stream=True) as resp:
                 if resp.status_code >= 500:
-                    raise OSError(f"HTTP {resp.status_code}")   # transitorio → reintentar
+                    raise RespuestaTransitoria(f"HTTP {resp.status_code}")  # → reintentar
                 if resp.status_code != 200:
                     _registrar_fallo(OSError(f"HTTP {resp.status_code}"), it["nombre"])
                     return False                                 # 4xx → no disponible
@@ -293,27 +302,32 @@ def _descargar_a_carpeta(
                             n += len(chunk)
                 cl = resp.headers.get("Content-Length")
                 if cl and cl.isdigit() and n < int(cl):
-                    raise OSError(f"descarga incompleta {n}/{cl} bytes")
+                    raise RespuestaTransitoria(f"descarga incompleta {n}/{cl} bytes")
                 if n == 0:
-                    raise OSError("respuesta vacía")
+                    raise RespuestaTransitoria("respuesta vacía")
             os.replace(_wlong(tmp), _wlong(destino))
             return True
-        except (requests.RequestException, OSError) as e:
+        except (requests.RequestException, OSError):
             try:
                 os.remove(_wlong(tmp))
             except OSError:
                 pass
-            if intento < intentos - 1:
-                descargas_stats()["reintentos"] += 1
-                cat, msg = clasificar(e)
-                delay = _DL_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.5)
-                logger.debug("InfoObras descarga «%s» %d/%d: [%s] %s — reintento %.1fs",
-                             it["nombre"], intento + 1, intentos, cat, msg, delay)
-                time.sleep(delay)
-            else:
-                cat, msg = _registrar_fallo(e, it["nombre"])
-                logger.warning("InfoObras ✗ «%s»: [%s] %s (tras %d intentos)",
-                               it["nombre"], cat, msg, intentos)
+            raise
+
+    def _contar(_intento, _err) -> None:
+        # el contador por hilo alimenta el índice del entregable: vive dentro del
+        # bucle, así que viaja como gancho del helper.
+        descargas_stats()["reintentos"] += 1
+
+    res = con_reintentos(_bajar, politica=_politica(intentos),
+                         etiqueta=f"InfoObras descarga «{it['nombre']}»",
+                         excepciones=(requests.RequestException, OSError),
+                         al_reintentar=_contar, log=logger)
+    if res.respondio:
+        return res.valor
+    cat, msg = _registrar_fallo(res.error, it["nombre"])
+    logger.warning("InfoObras ✗ «%s»: [%s] %s (tras %d intentos)",
+                   it["nombre"], cat, msg, res.intentos)
     return False
 
 
@@ -332,23 +346,21 @@ def _get_inventario(
     permanente (relanza de inmediato). Si agota los intentos, relanza el último
     error para que el llamador lo trate como obra no disponible.
     """
-    ultima: Optional[Exception] = None
-    for intento in range(max(1, intentos)):
-        try:
-            r = sess.get(PAGINA, params={"obraId": obra_id}, timeout=timeout)
-        except (requests.ConnectionError, requests.Timeout) as e:
-            ultima = e
-        else:
-            if r.status_code < 500:
-                r.raise_for_status()   # 2xx → no-op · 4xx → error permanente
-                return r.text
-            ultima = requests.HTTPError(f"HTTP {r.status_code}", response=r)
-        if intento < intentos - 1:
-            delay = _DL_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.5)
-            logger.debug("InfoObras inventario obra %s %d/%d: %s — reintento %.1fs",
-                         obra_id, intento + 1, intentos, corto(ultima), delay)
-            time.sleep(delay)
-    raise ultima or requests.HTTPError("inventario no disponible")
+    def _pedir() -> str:
+        r = sess.get(PAGINA, params={"obraId": obra_id}, timeout=timeout)
+        if r.status_code >= 500:
+            raise RespuestaTransitoria(f"HTTP {r.status_code}")
+        with permanente():
+            r.raise_for_status()       # 2xx → no-op · 4xx → error permanente
+        return r.text
+
+    res = con_reintentos(_pedir, politica=_politica(intentos),
+                         etiqueta=f"InfoObras inventario obra {obra_id}",
+                         excepciones=(requests.ConnectionError, requests.Timeout,
+                                      RespuestaTransitoria),
+                         log=logger)
+    res.relanzar(requests.HTTPError("inventario no disponible"))
+    return res.valor
 
 
 def descargar_documentos_obra(
@@ -457,29 +469,32 @@ def obtener_informes_control(
     """Lista los informes de control de una obra (parsea `var lInformeControl`).
     Cada item: {Codigo, Anio, NroInforme, TituloInforme, TipoServicio,
     FechaEmision, FechaPublicacion, RutaInforme, RutaPublicacion}. [] si no hay."""
-    ultima: Optional[Exception] = None
-    for intento in range(max(1, intentos)):
-        try:
-            r = sess.get(INFORME_CONTROL, params={"obraId": obra_id}, timeout=timeout)
-        except (requests.ConnectionError, requests.Timeout) as e:
-            ultima = e
-        else:
-            if r.status_code == 200:
-                m = re.search(r"var\s+lInformeControl\s*=\s*(\[.*?\])\s*;", r.text, re.S)
-                if not m:
-                    return []
-                try:
-                    return json.loads(m.group(1))
-                except json.JSONDecodeError:
-                    logger.warning("InfoObras: lInformeControl no parseable (obra %s)", obra_id)
-                    return []
-            if r.status_code < 500:
-                return []   # 4xx → no hay página de informes
-            ultima = requests.HTTPError(f"HTTP {r.status_code}")
-        if intento < intentos - 1:
-            time.sleep(_DL_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.5))
-    logger.debug("InfoObras informes obra %s: %s", obra_id, corto(ultima))
-    return []
+    def _pedir() -> list[dict]:
+        r = sess.get(INFORME_CONTROL, params={"obraId": obra_id}, timeout=timeout)
+        if r.status_code == 200:
+            m = re.search(r"var\s+lInformeControl\s*=\s*(\[.*?\])\s*;", r.text, re.S)
+            if not m:
+                return []
+            try:
+                return json.loads(m.group(1))
+            except json.JSONDecodeError:
+                logger.warning("InfoObras: lInformeControl no parseable (obra %s)", obra_id)
+                return []
+        if r.status_code < 500:
+            return []       # 4xx → no hay página de informes
+        raise RespuestaTransitoria(f"HTTP {r.status_code}")
+
+    res = con_reintentos(_pedir, politica=_politica(intentos),
+                         etiqueta=f"InfoObras informes obra {obra_id}",
+                         excepciones=(requests.ConnectionError, requests.Timeout,
+                                      RespuestaTransitoria),
+                         log=logger)
+    if not res.respondio:
+        # ⚠ conflación heredada: el llamador no distingue «no hay informes» de
+        # «el portal no respondió». Se conserva porque cambiar el retorno mueve
+        # lo que ve el índice del ZIP (ADR-014 §Pendientes conscientes).
+        logger.debug("InfoObras informes obra %s: %s", obra_id, corto(res.error))
+    return res.valor_o([])
 
 
 def informes_relevantes(
@@ -506,11 +521,12 @@ def _descargar_url(sess: requests.Session, url: str, destino: Path, *,
     """Descarga directa de una URL (PDF de Contraloría) con streaming + reintentos."""
     destino = Path(destino)
     tmp = destino.with_name(destino.name + ".part")
-    for intento in range(max(1, intentos)):
+
+    def _bajar() -> bool:
         try:
             with sess.get(url, timeout=timeout, stream=True) as resp:
                 if resp.status_code >= 500:
-                    raise OSError(f"HTTP {resp.status_code}")
+                    raise RespuestaTransitoria(f"HTTP {resp.status_code}")
                 if resp.status_code != 200:
                     _registrar_fallo(OSError(f"HTTP {resp.status_code}"), destino.name)
                     return False
@@ -522,20 +538,24 @@ def _descargar_url(sess: requests.Session, url: str, destino: Path, *,
                             f.write(chunk)
                             n += len(chunk)
                 if n == 0:
-                    raise OSError("respuesta vacía")
+                    raise RespuestaTransitoria("respuesta vacía")
             os.replace(_wlong(tmp), _wlong(destino))
             return True
-        except (requests.RequestException, OSError) as e:
+        except (requests.RequestException, OSError):
             try:
                 os.remove(_wlong(tmp))
             except OSError:
                 pass
-            if intento < intentos - 1:
-                time.sleep(_DL_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.5))
-            else:
-                _registrar_fallo(e, destino.name)
-                logger.debug("InfoObras informe (control) falló: %s", corto(e))
-    return False
+            raise
+
+    res = con_reintentos(_bajar, politica=_politica(intentos),
+                         etiqueta=f"InfoObras informe (control) {destino.name}",
+                         excepciones=(requests.RequestException, OSError),
+                         log=logger)
+    if not res.respondio:
+        _registrar_fallo(res.error, destino.name)
+        logger.debug("InfoObras informe (control) falló: %s", corto(res.error))
+    return res.valor_o(False)
 
 
 def descargar_informes_control(
@@ -621,24 +641,26 @@ def descargar_datos_cierre(
         "User-Agent",
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
     )
-    html = ""
-    ultima: Optional[Exception] = None
-    for intento in range(max(1, intentos)):
-        try:
-            r = sess.get(DATOS_CIERRE, params={"obraId": obra_id}, timeout=timeout)
-        except (requests.ConnectionError, requests.Timeout) as e:
-            ultima = e
-        else:
-            if r.status_code == 200:
-                html = r.text
-                break
-            if r.status_code < 500:
-                return {"encontrados": 0, "descargados": 0}   # 4xx → sin página de cierre
-            ultima = requests.HTTPError(f"HTTP {r.status_code}")
-        if intento < intentos - 1:
-            time.sleep(_DL_BASE_DELAY * (2 ** intento) + random.uniform(0, 0.5))
+    def _pedir() -> Optional[str]:
+        r = sess.get(DATOS_CIERRE, params={"obraId": obra_id}, timeout=timeout)
+        if r.status_code == 200:
+            return r.text
+        if r.status_code < 500:
+            return None      # 4xx → respuesta: no hay página de cierre
+        raise RespuestaTransitoria(f"HTTP {r.status_code}")
+
+    res = con_reintentos(_pedir, politica=_politica(intentos),
+                         etiqueta=f"InfoObras datos de cierre obra {obra_id}",
+                         excepciones=(requests.ConnectionError, requests.Timeout,
+                                      RespuestaTransitoria),
+                         log=logger)
+    html = res.valor_o(None)
     if not html:
-        logger.debug("InfoObras datos de cierre obra %s: %s", obra_id, corto(ultima))
+        # ⚠ misma conflación heredada que `obtener_informes_control`: el {0,0} no
+        # distingue «sin cierre» de «portal caído» (ADR-014 §Pendientes).
+        if not res.respondio:
+            logger.debug("InfoObras datos de cierre obra %s: %s",
+                         obra_id, corto(res.error))
         return {"encontrados": 0, "descargados": 0}
 
     items = _items_descarga(html)

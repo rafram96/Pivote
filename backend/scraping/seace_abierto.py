@@ -28,13 +28,17 @@ import json
 import logging
 import os
 import re
-import time
+import time   # el backoff duerme en errores_red; se deja para parchear `.time.sleep`
 import unicodedata
 from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
 import requests
+
+from scraping.errores_red import (
+    LINEAL, Politica, RespuestaTransitoria, con_reintentos, corto,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +61,8 @@ _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/144 Safari/537.36")
 _RETRIES = 3
 _BACKOFF = 1.5
+# Reintentos de datos abiertos (ADR-014): lineal 1.5s, 3.0s, como estaba.
+_POLITICA = Politica(intentos=_RETRIES, base=_BACKOFF, modo=LINEAL)
 # Los certificados de conosce/oece fallan en cadenas estrictas (verificado en
 # las sondas) → verify=False como en aquellas, silenciando SOLO ese warning.
 import urllib3  # noqa: E402
@@ -77,19 +83,20 @@ def crear_session(session: Optional[requests.Session] = None) -> requests.Sessio
 
 def _get(session: requests.Session, url: str, **kw) -> Optional[requests.Response]:
     """GET con reintentos + backoff. None si el portal no respondió (nunca lanza)."""
-    for intento in range(_RETRIES):
-        try:
-            r = session.get(url, timeout=kw.pop("timeout", 45), verify=False, **kw)
-            if r.status_code == 200:
-                return r
-            if r.status_code == 404:
-                return r          # 404 es respuesta, no caída: el llamador decide
-            raise OSError(f"HTTP {r.status_code}")
-        except Exception as e:  # noqa: BLE001
-            if intento == _RETRIES - 1:
-                logger.warning("SEACE abierto: %s no respondió (%s)", url[:80], e)
-                return None
-            time.sleep(_BACKOFF * (intento + 1))
+    timeout = kw.pop("timeout", 45)      # una sola vez: antes el pop vivía dentro
+                                         # del bucle y el 2º intento perdía el valor
+
+    def _pedir() -> requests.Response:
+        r = session.get(url, timeout=timeout, verify=False, **kw)
+        if r.status_code == 200 or r.status_code == 404:
+            return r              # 404 es respuesta, no caída: el llamador decide
+        raise RespuestaTransitoria(f"HTTP {r.status_code}")
+
+    res = con_reintentos(_pedir, politica=_POLITICA,
+                         etiqueta=f"SEACE abierto {url[:80]}", log=logger)
+    if res.respondio:
+        return res.valor
+    logger.warning("SEACE abierto: %s no respondió (%s)", url[:80], corto(res.error))
     return None
 
 
@@ -344,12 +351,13 @@ def descargar_archivo(url: str, destino, session: Optional[requests.Session] = N
     destino = Path(destino)
     destino.parent.mkdir(parents=True, exist_ok=True)
     tmp = destino.with_name(destino.name + ".part")
-    for intento in range(_RETRIES):
+
+    def _bajar() -> bool:
         try:
             with s.get(url, timeout=timeout, stream=True, verify=False,
                        allow_redirects=True, headers=headers_extra) as r:
                 if r.status_code != 200:
-                    raise OSError(f"HTTP {r.status_code}")
+                    raise RespuestaTransitoria(f"HTTP {r.status_code}")
                 with open(tmp, "wb") as f:
                     primeros = b""
                     for chunk in r.iter_content(1 << 16):
@@ -364,15 +372,19 @@ def descargar_archivo(url: str, destino, session: Optional[requests.Session] = N
             )
             if not valido:
                 tmp.unlink(missing_ok=True)
-                return False
+                return False      # respondió algo que no es el archivo → no reintentar
             os.replace(tmp, destino)
             return True
-        except Exception as e:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — se relanza tras limpiar el parcial
             tmp.unlink(missing_ok=True)
-            if intento == _RETRIES - 1:
-                logger.warning("SEACE abierto: descarga falló (%s) — %s", destino.name, e)
-                return False
-            time.sleep(_BACKOFF * (intento + 1))
+            raise
+
+    res = con_reintentos(_bajar, politica=_POLITICA,
+                         etiqueta=f"SEACE descarga {destino.name}", log=logger)
+    if res.respondio:
+        return res.valor
+    logger.warning("SEACE abierto: descarga falló (%s) — %s",
+                   destino.name, corto(res.error))
     return False
 
 

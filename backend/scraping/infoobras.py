@@ -25,7 +25,11 @@ from typing import Callable, Optional
 
 import requests
 
-from scraping.errores_red import corto
+from scraping.errores_red import LINEAL, Politica, con_reintentos, corto, reintentar
+
+# Reintentos de las tres consultas al portal (ADR-014): la temporización es la
+# que ya tenían los bucles artesanales — 1.5s, 3.0s entre intentos.
+_POLITICA = Politica(intentos=3, base=1.5, modo=LINEAL)
 
 logger = logging.getLogger(__name__)
 
@@ -272,17 +276,16 @@ def _crear_session() -> requests.Session:
     devolviendo None aunque la obra existiera."""
     s = requests.Session()
     s.headers.update(HEADERS)
-    ultimo_err: Optional[Exception] = None
-    for intento in range(3):
-        try:
-            s.get(f"{BASE_WEB}/", timeout=10)
-            return s
-        except requests.RequestException as e:
-            ultimo_err = e
-            logger.debug("InfoObras: warmup intento %d/3: %s", intento + 1, corto(e))
-            if intento < 2:
-                time.sleep(1.5 * (intento + 1))
-    raise ultimo_err
+
+    def _calentar() -> requests.Session:
+        s.get(f"{BASE_WEB}/", timeout=10)
+        return s
+
+    res = con_reintentos(_calentar, politica=_POLITICA,
+                         etiqueta="InfoObras warmup",
+                         excepciones=(requests.RequestException,), log=logger)
+    res.relanzar()          # nunca contestó → propaga, como antes
+    return res.valor
 
 
 def _buscar_por_cui(session: requests.Session, cui: str) -> list[dict]:
@@ -312,20 +315,10 @@ def _buscar_por_cui(session: requests.Session, cui: str) -> list[dict]:
     # resultado vacío, con backoff. Solo se concluye "no está" si sigue vacío tras
     # agotar los intentos. (Antes solo reintentaba en excepción → un 200-vacío
     # daba "sin candidato fiable" para un CUI que sí existe; resolución no estable.)
-    ultimo_err: Optional[Exception] = None
-    hubo_respuesta = False
-    for intento in range(3):
-        try:
-            r = session.post(url, params=query, timeout=15)
-            r.raise_for_status()
-            data = r.json()
-        except requests.RequestException as e:
-            ultimo_err = e
-            logger.debug("InfoObras: búsqueda CUI %s intento %d/3: %s", cui, intento + 1, corto(e))
-            if intento < 2:
-                time.sleep(1.5 * (intento + 1))
-            continue
-        hubo_respuesta = True
+    def _consultar() -> list[dict]:
+        r = session.post(url, params=query, timeout=15)
+        r.raise_for_status()
+        data = r.json()
         result = data.get("Result", data)
         if isinstance(result, list):
             obras = result
@@ -338,14 +331,15 @@ def _buscar_por_cui(session: requests.Session, cui: str) -> list[dict]:
         encontradas = [o for o in obras if coincide_codigo(o, cui)]
         if encontradas:
             return encontradas
-        # 200 pero vacío para un código específico: casi siempre es hipo del portal.
-        if intento < 2:
-            logger.debug("InfoObras: búsqueda CUI %s intento %d/3: 200 vacío — reintento",
-                         cui, intento + 1)
-            time.sleep(1.5 * (intento + 1))
-    if not hubo_respuesta:
-        raise ultimo_err           # siempre falló la red → relanzar (como antes)
-    return []                       # respondió pero vacío tras reintentar → no está
+        # 200 pero vacío para un código específico: casi siempre es hipo del
+        # portal → reintentar; si sigue vacío al agotar, el vacío ES el dato.
+        return reintentar([])
+
+    res = con_reintentos(_consultar, politica=_POLITICA,
+                         etiqueta=f"InfoObras búsqueda CUI {cui}",
+                         excepciones=(requests.RequestException,), log=logger)
+    res.relanzar()          # siempre falló la red → relanzar (como antes)
+    return res.valor        # contestó: la lista (vacía = no está)
 
 
 def _parse_js_vars(html: str) -> dict[str, list]:
@@ -414,8 +408,8 @@ def _extraer_datos_ejecucion(session: requests.Session, obra_id: int) -> dict[st
     veían tablas de valorización vacías al azar entre corridas).
     """
     url = f"{BASE_WEB}/Mapa/DatosEjecucion"
-    ultimo_err: Optional[Exception] = None
-    for intento in range(3):
+
+    def _bajar() -> dict[str, list]:
         session.headers["Accept"] = "text/html,*/*"
         try:
             r = session.get(url, params={"ObraId": obra_id}, timeout=30)
@@ -427,15 +421,14 @@ def _extraer_datos_ejecucion(session: requests.Session, obra_id: int) -> dict[st
             variables["_contratistas_html"] = _parsear_contratistas_html(r.text)
             variables["_supervisores_html"] = _parsear_supervisores_html(r.text)
             return variables
-        except requests.RequestException as e:
-            ultimo_err = e
-            logger.debug("InfoObras: DatosEjecucion ObraId %s intento %d/3: %s",
-                         obra_id, intento + 1, corto(e))
-            if intento < 2:
-                time.sleep(1.5 * (intento + 1))
         finally:
             session.headers["Accept"] = "application/json, text/javascript, */*; q=0.01"
-    raise ultimo_err
+
+    res = con_reintentos(_bajar, politica=_POLITICA,
+                         etiqueta=f"InfoObras DatosEjecucion obra {obra_id}",
+                         excepciones=(requests.RequestException,), log=logger)
+    res.relanzar()
+    return res.valor
 
 
 def _extraer_datos_preparacion(session: requests.Session, obra_id: int) -> dict[str, list]:

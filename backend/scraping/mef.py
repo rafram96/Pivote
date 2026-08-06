@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
-import time
+import time   # el backoff duerme en errores_red; se deja para parchear `mef.time.sleep`
 from datetime import date, datetime
 from html import unescape
 from typing import Optional
@@ -24,7 +24,9 @@ from urllib.parse import urljoin
 
 import requests
 
-from scraping.errores_red import corto
+from scraping.errores_red import (
+    EXPONENCIAL, Politica, RespuestaTransitoria, con_reintentos, corto,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,9 @@ _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/124 Safari/537.36")
 _RETRIES = 3
 _BACKOFF = 1.5
+# Reintentos del portal MEF (ADR-014): misma temporización de siempre —
+# exponencial 1.5s, 3.0s entre intentos.
+_POLITICA = Politica(intentos=_RETRIES, base=_BACKOFF, modo=EXPONENCIAL)
 
 _RE_TAG = re.compile(r"<[^>]+>")
 _RE_WS = re.compile(r"\s+")
@@ -294,20 +299,28 @@ def crear_session(session: Optional[requests.Session] = None) -> requests.Sessio
 
 
 def _get(session: requests.Session, url: str, **kw) -> Optional[requests.Response]:
-    """GET/POST con reintentos + backoff. None si el portal no respondió."""
+    """GET/POST con reintentos + backoff. None si el portal no respondió.
+
+    ⚠ El `None` de esta función tapa dos cosas distintas (4xx = no existe · portal
+    caído). Se conserva porque es el contrato que consumen sus llamadores; adentro
+    la distinción sí existe (`Resultado.respondio`)."""
     metodo = kw.pop("metodo", "GET")
-    for intento in range(_RETRIES):
-        try:
-            r = session.request(metodo, url, timeout=kw.pop("timeout", 30), **kw)
-            if r.status_code == 200:
-                return r
-            if r.status_code < 500:
-                return None   # 4xx → no existe/entrada inválida
-        except requests.RequestException as e:
-            logger.debug("MEF %s %s intento %d/%d: %s", metodo, url[-40:], intento + 1, _RETRIES, corto(e))
-        if intento < _RETRIES - 1:
-            time.sleep(_BACKOFF * (2 ** intento))
-    return None
+    timeout = kw.pop("timeout", 30)      # una sola vez: antes el pop vivía dentro
+                                         # del bucle y el 2º intento perdía el valor
+
+    def _pedir() -> Optional[requests.Response]:
+        r = session.request(metodo, url, timeout=timeout, **kw)
+        if r.status_code == 200:
+            return r
+        if r.status_code < 500:
+            return None                  # 4xx → respuesta: no existe/entrada inválida
+        raise RespuestaTransitoria(f"HTTP {r.status_code}")
+
+    res = con_reintentos(_pedir, politica=_POLITICA,
+                         etiqueta=f"MEF {metodo} {url[-40:]}",
+                         excepciones=(requests.RequestException, RespuestaTransitoria),
+                         log=logger)
+    return res.valor_o(None)
 
 
 def fetch_ficha_08a(cui, session: Optional[requests.Session] = None) -> Optional[str]:
@@ -337,13 +350,14 @@ def descargar_pdf(session: requests.Session, url: str, destino, *, timeout: floa
     from pathlib import Path
     destino = Path(destino)
     tmp = destino.with_name(destino.name + ".part")
-    for intento in range(_RETRIES):
+
+    def _bajar() -> bool:
         try:
             with session.get(url, timeout=timeout, stream=True) as r:
                 if r.status_code >= 500:
-                    raise OSError(f"HTTP {r.status_code}")
+                    raise RespuestaTransitoria(f"HTTP {r.status_code}")
                 if r.status_code != 200:
-                    return False
+                    return False         # 4xx → respuesta: el documento no está
                 os.makedirs(destino.parent, exist_ok=True)
                 n = 0
                 with open(tmp, "wb") as f:
@@ -352,19 +366,23 @@ def descargar_pdf(session: requests.Session, url: str, destino, *, timeout: floa
                             f.write(chunk)
                             n += len(chunk)
                 if n == 0:
-                    raise OSError("respuesta vacía")
+                    raise RespuestaTransitoria("respuesta vacía")
             os.replace(tmp, destino)
             return True
-        except (requests.RequestException, OSError) as e:
+        except (requests.RequestException, OSError):
             try:
                 os.remove(tmp)
             except OSError:
                 pass
-            if intento < _RETRIES - 1:
-                time.sleep(_BACKOFF * (2 ** intento))
-            else:
-                logger.debug("MEF descarga %s: %s", url[-40:], corto(e))
-    return False
+            raise
+
+    res = con_reintentos(_bajar, politica=_POLITICA,
+                         etiqueta=f"MEF descarga {url[-40:]}",
+                         excepciones=(requests.RequestException, OSError),
+                         log=logger)
+    if not res.respondio:
+        logger.debug("MEF descarga %s: %s", url[-40:], corto(res.error))
+    return res.valor_o(False)
 
 
 def _nombre_archivo(base: str, ext: str = "pdf") -> str:
