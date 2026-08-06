@@ -433,6 +433,75 @@ def test_cobertura_baja_marca_revision(tmp_path):
     assert len(obs_cob) == 1
 
 
+def test_expediente_anterior_a_valorizaciones_no_marca_cobertura(tmp_path):
+    """El expediente precede a la construcción: ese desfase no es una revisión."""
+    espejo = {
+        "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
+        "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N",
+             "requisitos": {"tipo_experiencia": "mínimo 1 año"},
+             "experiencias": [
+                 {"n": 1,
+                  "proyecto": "Elaboración del Expediente Técnico: Centro de Salud Pillco Marca",
+                  "cui": "2418877", "fecha_inicial": "2016-01-01",
+                  "fecha_final": "2016-12-31", "folio": "1"},
+             ]},
+        ],
+        "resumen_evaluacion": {"factores": []},
+    }
+
+    def fetcher_obra_posterior(cui):
+        return ObraFake(111, "OBRA", avances=_meses((2021, 1), (2022, 12)))
+
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
+                                fetcher_infoobras=fetcher_obra_posterior,
+                                consultor_sunat=lambda r: None,
+                                descargar=lambda *a, **k: None), repo)
+    job = motor.correr(motor.crear_job(espejo).job_id)
+
+    enr = repo.cargar_enriquecimiento(job.job_id)
+    assert "cobertura_baja" not in enr["1:1"]
+    assert not [it for it in job.items_revision
+                if it.n_exp == 1 and it.etapa == Etapa.INFOOBRAS and not it.resuelto]
+    assert not [o for e in job.etapas for o in e.observaciones
+                if o.codigo == "COBERTURA"]
+
+
+def test_expediente_no_descuenta_paralizaciones_de_la_construccion(tmp_path):
+    espejo = {
+        "_meta": {"analisis_id": "x", "concurso": "c", "postor": "p"},
+        "postor": {},
+        "profesionales": [
+            {"n_prof": 1, "cargo": "ESP", "nombre": "N",
+             "requisitos": {"tipo_experiencia": "mínimo 1 año"},
+             "experiencias": [
+                 {"n": 1,
+                  "proyecto": "Supervisión del Expediente Técnico: Hospital Central",
+                  "cui": "2418877", "fecha_inicial": "2021-01-01",
+                  "fecha_final": "2021-12-31", "folio": "1"},
+             ]},
+        ],
+        "resumen_evaluacion": {"factores": []},
+    }
+
+    def fetcher_construccion_paralizada(cui):
+        avances = [AvanceFake(2021, mes, "Paralizado") for mes in range(1, 13)]
+        return ObraFake(111, "OBRA", avances=avances)
+
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
+                                fetcher_infoobras=fetcher_construccion_paralizada,
+                                consultor_sunat=lambda r: None,
+                                descargar=lambda *a, **k: None), repo)
+    job = motor.correr(motor.crear_job(espejo).job_id)
+
+    enr = repo.cargar_enriquecimiento(job.job_id)
+    assert enr["1:1"]["paralizaciones"] == []
+    assert enr["prof:1"]["dias_efectivos"] == 365
+
+
 def test_infoobras_segunda_pasada_recupera_obra_transitoria(tmp_path):
     """Una obra cae por flakiness en la 1ra pasada y responde en la 2da → debe
     quedar OK con sus valorizaciones, sin marcarse como error de InfoObras."""

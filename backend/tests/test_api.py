@@ -111,6 +111,30 @@ def test_flujo_completo_de_la_demo(cliente):
     assert any(n.endswith("SIN_DOCUMENTOS.txt") for n in zf.namelist())
 
 
+def test_espejo_expone_desglose_multiobra(cliente):
+    import api.app as modulo
+    from schemas import pipeline
+
+    job = pipeline.Job(job_id="j-multiobra", analisis_id="a")
+    modulo.repo.guardar(job)
+    modulo.repo.guardar_espejo(job.job_id, {
+        "profesionales": [{"n_prof": 1, "cargo": "ARQUITECTO", "nombre": "N",
+                            "experiencias": [{"n": 1, "proyecto": "DOS OBRAS"}]}],
+    })
+    sub_obras = [
+        {"proyecto": "OBRA A", "cui": "1234567", "estado": "resuelto", "via": "CUI"},
+        {"proyecto": "OBRA B", "cui": None, "estado": "revision", "via": "NOMBRE"},
+    ]
+    modulo.repo.guardar_enriquecimiento(job.job_id, {
+        "1:1": {"via": "MULTI_OBRA", "multi_rubro": True, "sub_obras": sub_obras},
+    })
+
+    experiencia = cliente.get(f"/api/pivote/jobs/{job.job_id}/espejo").json()[
+        "profesionales"][0]["experiencias"][0]
+    assert experiencia["sub_obras"] == sub_obras
+    assert experiencia["multi_rubro"] is True
+
+
 def test_espejo_invalido_rechazado_con_errores_claros(cliente):
     cid = cliente.post("/api/pivote/concursos", json={"nomenclatura": "X"}).json()["concurso_id"]
     roto = {"_meta": {"analisis_id": "x"}, "postor": {}, "profesionales": []}

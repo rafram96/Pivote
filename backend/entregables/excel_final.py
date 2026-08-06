@@ -132,6 +132,53 @@ def _motivo_accion(v) -> tuple[str, Optional[str]]:
     return str(v or ""), None
 
 
+def _es_ruta_privada(v) -> bool:
+    """La marca identifica la ruta privada, esté resuelta o pendiente SUNAT."""
+    motivo, _ = _motivo_accion(v)
+    return motivo.startswith(("[PRIVADA]", "[PRIVADA_PENDIENTE]"))
+
+
+def _es_privada_pendiente(v) -> bool:
+    motivo, _ = _motivo_accion(v)
+    return motivo.startswith("[PRIVADA_PENDIENTE]")
+
+
+def _es_revision_efectiva(v) -> bool:
+    """Solo una privada con RUC SUNAT identificado deja de ser provisional."""
+    return bool(v) and (not _es_ruta_privada(v) or _es_privada_pendiente(v))
+
+
+def completar_revisiones_privadas(revisiones: dict, enriquecimiento: Optional[dict]) -> dict:
+    """Añade la ruta privada al mapa del Excel y distingue SUNAT verificado.
+
+    La identificación mínima es un RUC inequívoco. Un nombre sin coincidencia o
+    con varios candidatos conserva los días como provisionales y recibe una
+    etiqueta explícita; no se convierte silenciosamente en un fallo de backend.
+    """
+    for clave, datos in (enriquecimiento or {}).items():
+        if (not isinstance(datos, dict)
+                or str(datos.get("via") or "").upper() != "PRIVADA"
+                or ":" not in clave or clave.startswith("prof:")):
+            continue
+        np_, ne = (int(x) for x in clave.split(":"))
+        if (np_, ne) in revisiones:
+            continue
+        sunat = datos.get("sunat") or {}
+        if sunat.get("ruc"):
+            revisiones[(np_, ne)] = "[PRIVADA]"
+        elif sunat.get("ambiguo"):
+            revisiones[(np_, ne)] = (
+                "[PRIVADA_PENDIENTE] SUNAT devolvió varias coincidencias para el emisor",
+                "confirmar el RUC correcto entre los candidatos de SUNAT y revisar el certificado",
+            )
+        else:
+            revisiones[(np_, ne)] = (
+                "[PRIVADA_PENDIENTE] SUNAT no pudo identificar al emisor privado",
+                "confirmar la razón social o el RUC en el certificado y reintentar SUNAT",
+            )
+    return revisiones
+
+
 def _mes_en_rango(anio: int, mes: int, ini: Optional[date], fin: Optional[date]) -> bool:
     """True si el mes (anio, mes) solapa con el periodo del certificado [ini, fin]."""
     if not (ini and fin and anio and mes):
@@ -243,7 +290,8 @@ _BD_WIDTHS = [34, 8, 26, 18, 7, 32, 44, 10, 14, 24, 20, 12, 12, 12, 10,
 _BD_VERDICTS = {20: "pos", 21: "neg", 23: "neg", 24: "pos"}
 
 
-def construir_hoja_base_datos(ws, espejo: dict, cuis: Optional[dict] = None) -> int:
+def construir_hoja_base_datos(ws, espejo: dict, cuis: Optional[dict] = None,
+                              revisiones: Optional[dict] = None) -> int:
     """Construye la hoja "Base de Datos". Devuelve el nº de filas de datos."""
     for i, w in enumerate(_BD_WIDTHS, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
@@ -254,11 +302,23 @@ def construir_hoja_base_datos(ws, espejo: dict, cuis: Optional[dict] = None) -> 
     ws.row_dimensions[1].height = 30
 
     cuis = cuis or {}
+    revisiones = revisiones or {}
     r = 2
     for idx, prof in enumerate(espejo.get("profesionales", [])):
         fill = PatternFill("solid", fgColor=_PALETA_PROF[idx % len(_PALETA_PROF)])
         for e in prof.get("experiencias", []):
             sup = set(prof.get("supuestos") or []) | set(e.get("supuestos") or [])
+            privada = _es_ruta_privada(
+                revisiones.get((prof.get("n_prof"), e.get("n"))))
+            observaciones = e.get("observaciones")
+            if privada:
+                pendiente = _es_privada_pendiente(
+                    revisiones.get((prof.get("n_prof"), e.get("n"))))
+                ruta = (("REVISIÓN — RUTA PRIVADA / SUNAT PENDIENTE. " if pendiente
+                         else "OBRA PRIVADA — SUNAT IDENTIFICADO. ")
+                        + "InfoObras, MEF y SEACE no aplican. La ruta de "
+                          "verificación es SUNAT y la revisión documental del certificado.")
+                observaciones = f"{ruta} · {observaciones}" if observaciones else ruta
             valores = [
                 prof.get("cargo"), prof.get("n_prof"), prof.get("nombre"),
                 prof.get("colegiatura"), e.get("n"), e.get("entidad_emisora"),
@@ -271,7 +331,7 @@ def construir_hoja_base_datos(ws, espejo: dict, cuis: Optional[dict] = None) -> 
                                                if e.get("anterior_colegiatura") not in (None, "")
                                                else "POR VERIFICAR"),
                 e.get("incluye_covid"), e.get("traslape"), e.get("tipo_obra_valido"),
-                e.get("observaciones"),
+                observaciones,
             ]
             # #55: las celdas las lee el evaluador — la jerga interna (⟦crudo⟧,
             # agent-*, campos del schema) se reescribe igual que en la hoja CLAUDE
@@ -379,6 +439,23 @@ def presentacion_cruces(e: dict, fx: Optional[dict]) -> dict:
     from reglas.cruces_fechas import REGLA_INICIO, REGLA_TERMINO, RESPUESTA
 
     fx = fx or {}
+    if str(fx.get("via") or "").upper() == "PRIVADA":
+        pendiente = bool(fx.get("privada_pendiente"))
+        rotulo = ("REVISIÓN — RUTA PRIVADA / SUNAT PENDIENTE" if pendiente
+                  else "NO APLICA — OBRA PRIVADA")
+        return {
+            "n_exp": e.get("n"), "proyecto": e.get("proyecto"), "cui": None,
+            "proceso": None, "inicio": fecha_excel(e.get("fecha_inicial")),
+            "fin": fecha_excel(e.get("fecha_final")), "firma": None,
+            "aprobacion": None, "resp_a": rotulo,
+            "resp_b": rotulo, "aplica_b": False,
+            "inferida": False,
+            "motivo": (("SUNAT aún no identificó inequívocamente al emisor. "
+                        if pendiente else "") +
+                       "InfoObras, MEF y SEACE no aplican. La ruta de "
+                       "verificación es SUNAT y la revisión documental del "
+                       "certificado."),
+        }
     cruces = fx.get("cruces_fechas") or []
     ca = _cron_cruce(cruces, REGLA_INICIO) or {}
     cb = _cron_cruce(cruces, REGLA_TERMINO)
@@ -436,7 +513,9 @@ def _cron_proyectos(espejo: dict, fichas: dict) -> list[dict]:
                 orden.append(clave)
                 por_clave[clave] = {"cui": cui, "nombre": nombre, "seace": None,
                                     "aprobacion": None, "verificacion": None,
-                                    "modificaciones": [], "experiencias": 0}
+                                    "modificaciones": [], "experiencias": 0,
+                                    "via": fx.get("via"),
+                                    "privada_pendiente": fx.get("privada_pendiente")}
             bloque = por_clave[clave]
             bloque["experiencias"] += 1
             bloque["nombre"] = bloque["nombre"] or nombre
@@ -547,6 +626,12 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
             if rot:
                 campo("¿El proceso corresponde a este certificado?", rot,
                       None if candado.get("resultado") == "confirmado" else FILL_PEND)
+        elif str(p.get("via") or "").upper() == "PRIVADA":
+            campo("Proceso de contratación",
+                  ("REVISIÓN — RUTA PRIVADA / SUNAT PENDIENTE" if
+                   p.get("privada_pendiente") else
+                   "NO APLICA — obra privada; la ruta es SUNAT y revisión documental"),
+                  FILL_PEND if p.get("privada_pendiente") else None)
         else:
             campo("Proceso de contratación",
                   "No figura en los datos abiertos del Estado (cobertura desde 2018)",
@@ -1017,16 +1102,29 @@ def construir_hoja_profesional(
         especial "[PRIVADA]" pinta el bloque de cliente/obra privada (no es
         revisión: InfoObras no registra obra privada; el respaldo es el certificado)."""
         rr = top
+        if str(motivo).startswith("[PRIVADA_PENDIENTE]"):
+            detalle = str(motivo).removeprefix("[PRIVADA_PENDIENTE]").strip()
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=10)
+            c = ws.cell(rr, 6, "REVISIÓN — RUTA PRIVADA / SUNAT PENDIENTE")
+            c.font, c.fill, c.alignment = F_AVISO, FILL_AVISO, AL_HEAD
+            rr += 1
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr + 3, end_column=10)
+            c = ws.cell(rr, 6, f"{_mayus_inicial(detalle)}.\n\nAcción: "
+                               f"{accion or _ACCION_GENERICA}.")
+            c.font, c.fill, c.border, c.alignment = F_CELL, FILL_AVISO, BORDER, AL_WRAP
+            rr += 4
+            return rr - 1
         if str(motivo).startswith("[PRIVADA]"):
             ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=10)
             c = ws.cell(rr, 6, "OBRA / CLIENTE PRIVADO")
             c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
             rr += 1
             ws.merge_cells(start_row=rr, start_column=6, end_row=rr + 3, end_column=10)
-            c = ws.cell(rr, 6, "Experiencia con cliente/obra privada: InfoObras solo "
-                               "registra obra pública, por lo que no hay cruce de "
-                               "valorizaciones.\n\nEl respaldo es el certificado "
-                               "presentado (verificación documental del evaluador).")
+            c = ws.cell(rr, 6, "Experiencia con cliente/obra privada: InfoObras, MEF "
+                               "y SEACE no aplican, por lo que no hay búsqueda de CUI "
+                               "ni cruce de valorizaciones.\n\nLa ruta de verificación "
+                               "es SUNAT y la revisión documental del certificado "
+                               "presentado.")
             c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
             rr += 4
             return rr - 1
@@ -1806,7 +1904,8 @@ def construir_hoja_profesional(
                 clamp.append((ci, cf))
         tramos = restar_paralizaciones((ini, fin), clamp)
         efectivo = sum(dias_inclusivos(a, b) for a, b in tramos)
-        if revisiones.get((n_prof, n_exp)):
+        revision = revisiones.get((n_prof, n_exp))
+        if _es_revision_efectiva(revision):
             return dias_inclusivos(ini, fin), f"{efectivo} PROVISIONAL", clamp
         return dias_inclusivos(ini, fin), efectivo, clamp
 
@@ -1880,7 +1979,7 @@ def construir_hoja_profesional(
     for e in prof.get("experiencias", []):
         n_exp = e.get("n")
         rev = revisiones.get((n_prof, n_exp))
-        en_revision = bool(rev)
+        en_revision = _es_revision_efectiva(rev)
         ini, fin = _fecha_iso(e.get("fecha_inicial")), _fecha_iso(e.get("fecha_final"))
         fx = fichas.get((n_prof, n_exp))
         # CUI resuelto por el backend (etapa InfoObras); si no, el del espejo
@@ -2130,8 +2229,11 @@ def construir_hoja_profesional(
     if res5 and res5.dias_traslape:
         _p5_tot("(−) Traslapes entre experiencias (ALT11)", None, res5.dias_traslape, FILL_BACKEND)
     _dias_ef = res5.dias_efectivos if res5 else _se
-    _hay_revision = any(revisiones.get((n_prof, e.get("n")))
-                        for e in prof.get("experiencias", []))
+    _hay_revision = any(
+        _es_revision_efectiva(rev)
+        for e in prof.get("experiencias", [])
+        if (rev := revisiones.get((n_prof, e.get("n"))))
+    )
     _p5_tot("DÍAS PROVISIONALES DEL PROFESIONAL — POR VERIFICAR" if _hay_revision
             else "DÍAS EFECTIVOS DEL PROFESIONAL", None, _dias_ef,
             FILL_PEND if _hay_revision else FILL_EFECTIVO)
@@ -2304,7 +2406,8 @@ def generar_excel_final(
     ws.title = "CLAUDE"
     construir_hoja_evaluacion(ws, espejo, confiabilidad=confiabilidad)
 
-    construir_hoja_base_datos(wb.create_sheet("Base de Datos"), espejo, cuis)
+    construir_hoja_base_datos(wb.create_sheet("Base de Datos"), espejo, cuis,
+                              revisiones)
 
     for prof in espejo.get("profesionales", []):
         nombre = etiqueta_hoja(prof.get("n_prof", 0), prof.get("cargo", ""))
@@ -2314,7 +2417,14 @@ def generar_excel_final(
 
     # T-011 · hoja ADITIVA, al final: el formato congelado (CLAUDE + Base de
     # Datos + una por profesional) conserva su orden y su contenido exactos.
-    construir_hoja_cronologia(wb.create_sheet(HOJA_CRONOLOGIA), espejo, fichas)
+    fichas_crono = dict(fichas)
+    for clave, revision in revisiones.items():
+        if _es_ruta_privada(revision):
+            fichas_crono[clave] = {**(fichas_crono.get(clave) or {}),
+                                   "via": "PRIVADA",
+                                   "privada_pendiente": _es_privada_pendiente(revision)}
+    construir_hoja_cronologia(wb.create_sheet(HOJA_CRONOLOGIA), espejo,
+                              fichas_crono)
 
     salida.parent.mkdir(parents=True, exist_ok=True)
     wb.save(salida)
@@ -2344,7 +2454,8 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
         if (enr.get("obra_ficha") or enr.get("valorizaciones")
                 or enr.get("representante_obra") or enr.get("aprobacion_expediente")
                 or enr.get("verificacion_expediente") or enr.get("seace")
-                or enr.get("descargas_reales") or enr.get("cruces_fechas")):
+                or enr.get("descargas_reales") or enr.get("cruces_fechas")
+                or str(enr.get("via") or "").upper() == "PRIVADA"):
             # `obra_ficha` NO trae el nombre (solo código/CUI/estado/monto/fechas);
             # el nombre viaja suelto en `obra_nombre` (o en `obra.nombre_obra`) y sin
             # esta línea nunca llegaba al Excel — el evaluador no podía ver con qué
@@ -2360,6 +2471,7 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                                  "verificacion_expediente": enr.get("verificacion_expediente"),
                                  "seace": enr.get("seace"),
                                  "descargas_reales": enr.get("descargas_reales"),
+                                 "via": enr.get("via"),
                                  # T-011: los cruces de fechas de la etapa REGLAS.
                                  # Viajan dentro de `fichas` (y no como argumento
                                  # nuevo) para no cambiar la firma de

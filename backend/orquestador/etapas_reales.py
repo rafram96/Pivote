@@ -32,7 +32,8 @@ from resolucion import (ConsultaInfoObras, resolver_con_dedup, resolver_obras,
                         rubros_mixtos)
 from resolucion.cui import establecimiento, rubros_de
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
-from entregables import desempaquetar_enriquecimiento, generar_excel_final, mapear_certificados
+from entregables import (completar_revisiones_privadas, desempaquetar_enriquecimiento,
+                         generar_excel_final, mapear_certificados)
 from .etapas import Contexto, EtapaIngesta, EtapaStub
 from .repositorio import carpeta_job
 
@@ -564,7 +565,11 @@ class EtapaInfoObrasReal:
             _aprob_exp = getattr(obra, "aprobacion_expediente", None)
             _es_exped = self.forzar_expedientes or es_expediente_exp(_e)
             es_exp_aprobado = (not _avances and _aprob_exp is not None and _es_exped)
-            periodos = periodos_inactividad(getattr(obra, "avances", []) or [])
+            # Las paralizaciones pertenecen a la EJECUCIÓN física. Un expediente
+            # se verifica con contrato/aprobación y nunca hereda días parados de
+            # una construcción posterior o simultánea.
+            periodos = ([] if _es_exped else
+                        periodos_inactividad(getattr(obra, "avances", []) or []))
             enr["paralizaciones"] = [
                 {"inicio": p["inicio"].isoformat(), "fin": p["fin"].isoformat(),
                  "tipo": p["tipo"]} for p in periodos
@@ -648,7 +653,8 @@ class EtapaInfoObrasReal:
             _inicio_obra = getattr(obra, "fecha_inicio", None)
             cob = _cobertura_cert(
                 getattr(obra, "avances", []) or [], cert_ini, cert_fin, _inicio_obra)
-            if not es_exp_aprobado and cob is not None and cob < _COBERTURA_MIN:
+            if not (es_exp_aprobado or _es_exped) \
+                    and cob is not None and cob < _COBERTURA_MIN:
                 pct = round(cob * 100)
                 # La etapa REGLAS necesita saberlo: si el clamp deja al profesional
                 # bajo el mínimo POR una cobertura casi nula, el NO CUMPLE no puede
@@ -2059,11 +2065,7 @@ class EtapaExcelReal:
                                       (it.motivo, it.accion_sugerida))
         # experiencias PRIVADAS → bloque propio en el Excel (no es "revisión": el
         # respaldo es el certificado; InfoObras no registra obra privada).
-        for k, e in ctx.enriquecimiento.items():
-            if isinstance(e, dict) and str(e.get("via") or "").upper() == "PRIVADA" \
-                    and ":" in k and not k.startswith("prof:"):
-                np_, ne = (int(x) for x in k.split(":"))
-                revisiones.setdefault((np_, ne), "[PRIVADA]")
+        completar_revisiones_privadas(revisiones, ctx.enriquecimiento)
         ruta = carpeta_job(self.dir_salida, ctx.job.job_id) / "final.xlsx"
         if ruta.exists():
             ruta.unlink()  # regenerar (re-disparo tras revisión humana)

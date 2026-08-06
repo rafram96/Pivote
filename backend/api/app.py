@@ -34,8 +34,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
 
 from entregables import (
-    construir_zip_infoobras, descargar_cui, generar_excel_final, mapear_certificados,
-    regenerar_excel_final, _zip_carpeta,
+    completar_revisiones_privadas, construir_zip_infoobras, descargar_cui,
+    generar_excel_final, mapear_certificados, regenerar_excel_final, _zip_carpeta,
 )
 from orquestador import Motor, RepositorioArchivos, etapas_esqueleto, etapas_reales
 from orquestador.progreso import REGISTRO
@@ -266,12 +266,7 @@ def _asegurar_descargas(job_id: str) -> None:
                 (it.n_prof, it.n_exp): (it.motivo, it.accion_sugerida)
                 for it in job.items_revision if not it.resuelto
             }
-            for clave, datos in enr.items():
-                if (isinstance(datos, dict)
-                        and str(datos.get("via") or "").upper() == "PRIVADA"
-                        and ":" in clave and not clave.startswith("prof:")):
-                    np_, ne = (int(x) for x in clave.split(":"))
-                    revisiones.setdefault((np_, ne), "[PRIVADA]")
+            completar_revisiones_privadas(revisiones, enr)
             regenerar_excel_final(
                 espejo, enr, _dir_job(job_id) / "final.xlsx", revisiones,
                 mapear_certificados(DATA_DIR, job_id),
@@ -857,6 +852,8 @@ def extraccion(job_id: str):
                 d["representante_obra"] = ev.get("representante_obra")
                 d["sunat"] = ev.get("sunat")
                 d["verificacion_expediente"] = ev.get("verificacion_expediente")
+                d["sub_obras"] = ev.get("sub_obras")
+                d["multi_rubro"] = ev.get("multi_rubro")
             experiencias.append(d)
         profesionales.append({
             "n_prof": np_,
@@ -972,11 +969,16 @@ def descargar_excel(job_id: str):
     espejo = _espejo_o_404(job_id)
     ruta = _dir_job(job_id) / "final.xlsx"
     if not ruta.exists():
-        # Las paralizaciones reales las inyecta la etapa de InfoObras; sin
-        # ellas el Excel sale con brutos = efectivos (y se regenera después).
-        generar_excel_final(espejo, ruta,
-                            certificados=mapear_certificados(DATA_DIR, job_id),
-                            confiabilidad=_confiabilidad_excel(job))
+        enr = repo.cargar_enriquecimiento(job_id) or {}
+        revisiones = {
+            (it.n_prof, it.n_exp): (it.motivo, it.accion_sugerida)
+            for it in job.items_revision if not it.resuelto and it.n_exp is not None
+        }
+        completar_revisiones_privadas(revisiones, enr)
+        regenerar_excel_final(
+            espejo, enr, ruta, revisiones, mapear_certificados(DATA_DIR, job_id),
+            confiabilidad=_confiabilidad_excel(job),
+        )
         job.excel_final = f"/api/pivote/jobs/{job_id}/excel"
         repo.guardar(job)
     return FileResponse(

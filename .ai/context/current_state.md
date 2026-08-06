@@ -2,6 +2,29 @@
 
 > Última actualización: **2026-08-06** · rama de trabajo: `demo`
 
+## Auditoría CIBA: privadas SUNAT + certificados multi-obra (6-ago)
+
+- Ruta privada corregida: 26/40 experiencias con RUC SUNAT inequívoco quedan
+  efectivas; 14/40 quedan provisionales y explícitamente etiquetadas como
+  revisión privada/SUNAT pendiente.
+- Excel real `41a442cdcd81` regenerado solo desde `espejo.json`,
+  `enriquecimiento.json` y certificados ya descargados: 12 hojas, 129 imágenes.
+- API del espejo ampliada con `sub_obras` y `multi_rubro`; Panel implementado y
+  compilado. PANEL#1 pendiente únicamente de publicar cambios y desplegar.
+- Gate local: 974 passed, 25 skipped; build Next.js aprobado; resolver intacto.
+
+## Camino mixto: expedientes públicos y obras privadas ya no parecen fallos (6-ago)
+
+Corregido el cruce que todavía enviaba expedientes a revisión cuando sus fechas
+precedían las valorizaciones de la construcción: el camino A ya no hereda ni
+`cobertura_baja` ni paralizaciones de la ejecución física. La marca `PRIVADA`
+con RUC SUNAT inequívoco dejó de convertir los días en provisionales: es una
+ruta distinta de verificación, visible en Base de Datos, hojas profesionales y
+Cronología como «InfoObras/MEF/SEACE no aplican; SUNAT + certificado». Sin RUC
+único se usa `PRIVADA_PENDIENTE` y el tiempo es provisional. El resolver CUI quedó
+intacto; la clasificación auditada de la corrida real permaneció en su job
+gitignored y no entró al repo. Gate: **971 passed, 25 skipped**.
+
 ## Camino A (expedientes) comprobado: núcleo OK, 2 huecos de enrutado (6-ago)
 
 Comprobación offline con el código real (`docs/pruebas/camino-a-expedientes-
@@ -802,7 +825,8 @@ Aparecieron al ordenar el Excel por camino (no se ven en su disposición origina
   inferior ni puntaje de precio. Pedírselas a Manuel.
 - Corridas camino A: aún se **descargan y pintan** secciones de obra
   (valorizaciones ~805 archivos) en expedientes — cosmético/pesado, no afecta
-  veredictos. Advertencias COBERTURA se emiten para expedientes (no descuentan).
+  veredictos. Ya no generan cobertura baja ni descuentan paralizaciones de la
+  construcción; filtrar esas descargas sigue siendo la deuda pendiente.
 - 2 casos de la auditoría con "verdad" dudosa (2195439 Tocache/Loreto,
   2064566 Cotabambas/Antabamba) — re-revisar con Manuel.
 - ~~Divergencia schema.sql vs DDL real de Postgres~~ **CERRADA 5-ago** (F-SCHEMA).

@@ -4,6 +4,41 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
+## Nota (2026-08-06, Codex) — privadas SUNAT y subobras visibles
+
+Se cerraron localmente los puntos 1 y 2 de la auditoría CIBA. La regla privada
+ahora exige un RUC SUNAT inequívoco para considerar efectivo el tiempo: sin
+coincidencia o con varias coincidencias el Excel rotula **«REVISIÓN — RUTA
+PRIVADA / SUNAT PENDIENTE»** y conserva los días como provisionales. La misma
+clasificación alimenta la corrida normal, la regeneración posterior a descargas
+y el endpoint `/excel`; no hay tres implementaciones divergentes. Replay real
+`41a442cdcd81`: **40 privadas = 26 identificadas + 14 pendientes** (11 sin
+coincidencia, 3 ambiguas), 12 hojas y 129 imágenes conservadas. Los tres Excel
+corregidos son byte a byte idénticos; respaldo previo en
+`backend/datos_pivote/41a442cdcd81/backups/pre-privadas-sunat-20260806-140726/`
+(todo gitignored).
+
+El contrato `GET /api/pivote/jobs/{id}/espejo` expone además `sub_obras` y
+`multi_rubro`. El Panel muestra el resumen «N de M obras identificadas», nombre,
+CUI, estado, vía, decisión y advertencia de rubros mixtos. Gate: **974 passed,
+25 skipped** en backend y `next build` productivo aprobado. Resolver CUI
+intacto, por lo que no aplica golden. Cambios todavía locales, sin push ni
+deploy; PANEL#1 debe cerrarse recién al publicar ambos repos.
+
+## Nota (2026-08-06, Codex) — ruta privada explícita y cobertura de expedientes
+
+En un concurso mixto apareció una contradicción del camino A: el clamp externo
+ya excluía expedientes, pero `cobertura_baja` y las paralizaciones internas de
+la construcción todavía podían llegar a REGLAS. Se cerraron ambas puertas:
+elaboración/supervisión de expediente se verifica por contrato/aprobación, no
+por valorizaciones de la ejecución. Además `[PRIVADA]` con RUC SUNAT inequívoco
+ya no significa revisión provisional: el Excel la rotula en Base de Datos, hoja
+P y Cronología como ruta SUNAT + certificado, declarando que
+InfoObras/MEF/SEACE no aplican. Sin RUC único se usa `[PRIVADA_PENDIENTE]` y el
+tiempo sí es provisional. Resolver
+intacto (sin golden); **971 passed, 25 skipped**. El replay real y sus respaldos
+siguen únicamente en `backend/datos_pivote/` (gitignored).
+
 ## Nota (2026-08-06, Claude) — limpieza del backlog de GitHub
 
 Por orden de Rafael se cerraron **#81, #5, #27, #24** (completadas) y **#25**

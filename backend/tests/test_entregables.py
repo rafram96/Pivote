@@ -895,6 +895,60 @@ def test_sin_obra_el_aviso_de_revision_sigue_siendo_el_bloque_completo(tmp_path)
     assert "OBRA EN INFOOBRAS" not in texto
 
 
+def test_privada_es_ruta_sunat_y_no_revision_provisional(tmp_path):
+    revisiones = {(1, 1): "[PRIVADA]"}
+    salida = generar_excel_final(_ESPEJO_1EXP, tmp_path / "privada.xlsx",
+                                 revisiones=revisiones)
+    texto_prof = _texto(_hoja_de(salida, 1, "JEFE"))
+    assert "OBRA / CLIENTE PRIVADO" in texto_prof
+    assert "InfoObras, MEF y SEACE no aplican" in texto_prof
+    assert "La ruta de verificación es SUNAT" in texto_prof
+    assert "PROVISIONAL — POR VERIFICAR" not in texto_prof
+    assert "DÍAS PROVISIONALES DEL PROFESIONAL" not in texto_prof
+
+    wb = openpyxl.load_workbook(salida, data_only=True)
+    observaciones = wb["Base de Datos"].cell(2, 25).value
+    assert "OBRA PRIVADA" in observaciones
+    assert "SUNAT y la revisión documental" in observaciones
+
+    texto_crono = _texto(wb["Cronología de expedientes"])
+    assert "NO APLICA — OBRA PRIVADA" in texto_crono
+    assert "La ruta de verificación es SUNAT" in texto_crono
+
+
+def test_privada_sin_ruc_sunat_queda_etiquetada_y_provisional(tmp_path):
+    from entregables import completar_revisiones_privadas
+
+    revisiones = completar_revisiones_privadas({}, {
+        "1:1": {"via": "PRIVADA", "sunat": {"no_encontrado": True}},
+    })
+    salida = generar_excel_final(_ESPEJO_1EXP, tmp_path / "privada_pendiente.xlsx",
+                                 revisiones=revisiones)
+    texto_prof = _texto(_hoja_de(salida, 1, "JEFE"))
+    assert "REVISIÓN — RUTA PRIVADA / SUNAT PENDIENTE" in texto_prof
+    assert "PROVISIONAL — POR VERIFICAR" in texto_prof
+    assert "DÍAS PROVISIONALES DEL PROFESIONAL" in texto_prof
+
+    wb = openpyxl.load_workbook(salida, data_only=True)
+    assert "REVISIÓN — RUTA PRIVADA / SUNAT PENDIENTE" in (
+        wb["Base de Datos"].cell(2, 25).value)
+    assert "REVISIÓN — RUTA PRIVADA / SUNAT PENDIENTE" in _texto(
+        wb["Cronología de expedientes"])
+
+
+def test_clasificacion_privada_exige_ruc_sunat_inequivoco():
+    from entregables import completar_revisiones_privadas
+
+    revisiones = completar_revisiones_privadas({}, {
+        "1:1": {"via": "PRIVADA", "sunat": {"ruc": "20123456789"}},
+        "1:2": {"via": "PRIVADA", "sunat": {"no_encontrado": True}},
+        "1:3": {"via": "PRIVADA", "sunat": {"ambiguo": 2}},
+    })
+    assert revisiones[(1, 1)] == "[PRIVADA]"
+    assert revisiones[(1, 2)][0].startswith("[PRIVADA_PENDIENTE]")
+    assert revisiones[(1, 3)][0].startswith("[PRIVADA_PENDIENTE]")
+
+
 def test_sin_obra_el_bloque_usa_la_accion_del_item_si_la_trae(tmp_path):
     """…pero si el item trae su propia acción, manda la del item."""
     revisiones = {(1, 1): ("no se pudo verificar en InfoObras — veredicto provisional",
