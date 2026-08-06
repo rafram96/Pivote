@@ -328,12 +328,17 @@ golden); los tests del candado cubren promoción, degradación y contradicción.
   se reemplazó por el re-consolidado (backup `espejo.pre-fix-oferta.json`) y
   `final.xlsx` se regeneró SIN re-scrapear: oferta completa
   16,670,989.88 / 15,003,890.90 / 15,003,890.90.
-- **Hallazgos nuevos SIN issue aún**: (a) `funciones_similares` 62/62 null en
-  urgente1 → la 2ª puerta del candado #31 quedó inerte (¿certs sin funciones
-  o agente no las busca?); (b) celdas de abstención en blanco sin rótulo
-  (escribir "POR VERIFICAR" en celda — familia #55); (c) exención ruc_match
-  (golden ancha) sigue sin issue. Cola visible: #55; #54, #57, #19 y #42
-  quedaron cerradas el 2-ago. El diseño expediente/obra sigue en #70.
+- **Hallazgos sin issue — CERRADOS por decisión de Rafael (2026-08-05)**:
+  (a) `funciones_similares` 62/62 null → SE DEJA COMO ESTÁ ("no cambia nada"):
+  la 2ª puerta del candado #31 queda inerte a sabiendas; la evidencia de
+  Vitarte sugiere que las constancias describen COMPONENTES de obra, no
+  funciones de la persona — no abrir issue ni diagnóstico salvo que un caso
+  real lo haga necesario. (c) exención ruc_match: OBSOLETA — la golden ancha
+  ya no existe (corpus perdido, ver memoria golden-cui-corpus-perdido); no
+  registrar ni resucitar. (b) celdas de abstención → absorbido por el residuo
+  verificado de D-P1b en el backlog cross-repo (5-ago).
+  Cola visible: #55; #54, #57, #19 y #42 cerradas el 2-ago. El diseño
+  expediente/obra sigue en #70.
 - **SIGUIENTE ACCIÓN GRANDE: redeploy del server del cliente** — `demo` acumula
   TODO el ciclo (#45-#62) y Manuel sigue viendo el código del 26-jul.
 
