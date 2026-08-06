@@ -14,7 +14,8 @@ Vas a revisar un cambio antes de aprobarlo. Checklist en orden de gravedad:
 4. **Contrato**: cambios en el dict del resolver o el espejo deben ser
    aditivos; verifica los 3 consumidores (etapas_reales, excel_final,
    zip_infoobras) y el vocabulario cerrado de `via`. (No hay un cuarto: la
-   «vista SQL» solo existe en el `db/schema.sql` aspiracional.)
+   «vista SQL» nunca existió, y desde el 2026-08-05 tampoco está en
+   `db/schema.sql`.)
 5. **Convenciones**: español; sin deps nuevas; comentarios = restricciones, no
    narración; commits con porqué; `git add` con rutas explícitas; nada de
    datos del cliente en el diff.

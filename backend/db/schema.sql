@@ -1,164 +1,209 @@
 -- ============================================================================
--- Esquema PostgreSQL del pivote InfoObras — versión BÁSICA acordada (2026-06-25)
--- con vistas que entregan el valor del "modelo completo" sin su costo.
+-- Esquema PostgreSQL del pivote InfoObras — ESPEJO DOCUMENTAL de los DDL reales
 --
--- Diseño (híbrido de las opciones de docs/backend/modelo_datos.md):
---   · 4 tablas JSONB que ESPEJAN la interfaz `Repositorio` (concursos, jobs,
---     espejos, enriquecimientos) → `RepositorioPostgres` es un mapeo 1:1 de
---     blobs, sin lógica de explosión en Python (~0.5 d de cableado).
---   · Columnas GENERADAS sobre el JSONB para lo que se filtra/lista (estado,
---     nomenclatura, postor, fechas) → índices reales sin duplicar datos.
---   · La hoja "Base de Datos" (1 fila = 1 experiencia, 25 columnas) es una
---     VISTA que explota el JSONB con LATERAL → buscable/exportable por SQL,
---     siempre consistente con el espejo, cero ETL.
+-- ⚠ ESTE ARCHIVO NO ES FUENTE DE VERDAD. El código lo es.
+--    Lo que existe en una BD viva es lo que crean los dos módulos de abajo, y
+--    cada uno lo hace solo, sin leer este archivo. Aquí está para poder LEER el
+--    esquema completo de un vistazo y para levantarlo a mano (bootstrap,
+--    inspección, `pg_dump` de referencia). Si el código y este archivo
+--    discrepan, el que miente es este archivo — y hay un test que lo impide:
+--    `backend/tests/test_schema_sql.py` compara los bloques marcados
+--    `>>> ESPEJO` contra las constantes del código, normalizados.
 --
--- Los BINARIOS (xlsx, ZIP, PDFs de certs y descargas) NO van a la BD: siguen
--- en disco/volumen (`PIVOTE_DATA_DIR`); la BD guarda metadatos y JSON.
+-- Contexto de la decisión (ADR-009, addendum del 2026-08-05): PostgreSQL es
+-- OBLIGATORIO en el despliegue, y su uso PRINCIPAL es la base MEF —por eso el
+-- schema `mef` va primero—; el respaldo lógico de jobs es el uso secundario.
+-- Ambos degradan con gracia si la BD no responde (red de seguridad ante una
+-- caída transitoria, NO un modo de operación aceptable).
 --
--- Uso:  psql -U infoobras -d infoobras -f schema.sql   (idempotente)
+-- Los BINARIOS (xlsx, ZIP, PDFs de certs y descargas) NO van a la BD: viven en
+-- disco (`PIVOTE_DATA_DIR`). La BD guarda metadatos y JSON.
+--
+-- Uso manual:  psql -U pivote -d pivote -f schema.sql   (todo es idempotente)
 -- ============================================================================
 
--- ── Helpers de cast seguro (el JSON puede traer null/texto sucio) ───────────
-CREATE OR REPLACE FUNCTION fecha_segura(t text) RETURNS date
-LANGUAGE sql IMMUTABLE RETURNS NULL ON NULL INPUT AS $$
-  SELECT CASE WHEN t ~ '^\d{4}-\d{2}-\d{2}' THEN substring(t, 1, 10)::date END
-$$;
 
-CREATE OR REPLACE FUNCTION numero_seguro(t text) RETURNS numeric
-LANGUAGE sql IMMUTABLE RETURNS NULL ON NULL INPUT AS $$
-  SELECT CASE WHEN t ~ '^-?\d+(\.\d+)?$' THEN t::numeric END
-$$;
+-- ############################################################################
+-- 1 · SCHEMA `mef` — ficha enriquecida del ETL de Datos Abiertos  [PRINCIPAL]
+-- ############################################################################
+--
+-- QUIÉN lo crea: `backend/scripts/actualizar_base_mef.py` (constante `_DDL_PG`).
+-- CUÁNDO: al iniciar una carga del ETL, contra la conexión de la carga.
+-- POR QUÉ existe: el resolver de CUI busca por nombre en el índice RAM
+--   (`inversiones.csv.gz`, ADR-002) y, una vez que tiene un CUI/SNIP candidato,
+--   consulta AQUÍ la ficha completa por `(load_id, CUI/SNIP)` para contrastar
+--   rubro, entidad, ubicación y montos. Sin PG esa ficha no existe: `BaseMef`
+--   degrada al gzip y el análisis sigue, más ciego.
+-- CARGAS: `mef.loads` versiona cada corrida; `mef.investments` guarda sus filas
+--   (PK compuesta con `load_id`, así que las cargas conviven); `mef.active_load`
+--   es un puntero singleton a la publicada. Los artefactos de disco comparten el
+--   `load_id`, y el resolver lo toma del manifest → nunca mezcla el índice RAM
+--   de una versión con fichas de otra.
+-- VOLUMEN real medido (corte 26-jul): 620,985 filas, tabla+índices 719.3 MB.
 
--- ── 1 · concursos — cabecera del concurso (1:N con jobs) ────────────────────
-CREATE TABLE IF NOT EXISTS concursos (
-  concurso_id    text PRIMARY KEY,
-  datos          jsonb NOT NULL,          -- el .concurso.json tal cual
-  nomenclatura   text GENERATED ALWAYS AS (datos->>'nomenclatura') STORED,
-  creado_en      timestamptz NOT NULL DEFAULT now(),
-  actualizado_en timestamptz NOT NULL DEFAULT now()
+-- >>> ESPEJO: backend/scripts/actualizar_base_mef.py :: _DDL_PG >>>
+CREATE SCHEMA IF NOT EXISTS mef;
+CREATE TABLE IF NOT EXISTS mef.loads (
+    load_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL CHECK (status IN ('loading', 'validated', 'published', 'failed')),
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at TIMESTAMPTZ,
+    metadata JSONB
 );
-COMMENT ON TABLE concursos IS 'Cabecera del concurso (blob JSONB, espejo de guardar_concurso)';
+CREATE TABLE IF NOT EXISTS mef.investments (
+    load_id TEXT NOT NULL REFERENCES mef.loads(load_id) ON DELETE CASCADE,
+    identity_key TEXT NOT NULL,
+    cui TEXT,
+    snip TEXT,
+    nombre TEXT NOT NULL,
+    nombre_norm TEXT NOT NULL,
+    estado_dataset TEXT NOT NULL,
+    estado TEXT,
+    situacion TEXT,
+    entidad TEXT,
+    entidad_norm TEXT,
+    ubigeo TEXT,
+    dpto TEXT,
+    prov TEXT,
+    dist TEXT,
+    nivel TEXT,
+    sector TEXT,
+    funcion TEXT,
+    tipo_inversion TEXT,
+    tipologia TEXT,
+    modalidad TEXT,
+    monto_viable NUMERIC(18,2),
+    costo_actualizado NUMERIC(18,2),
+    fecha_registro TEXT,
+    fecha_viabilidad TEXT,
+    expediente_tecnico TEXT,
+    opmi TEXT,
+    uf TEXT,
+    uei TEXT,
+    uep TEXT,
+    fuente TEXT NOT NULL,
+    fila_origen INTEGER NOT NULL,
+    PRIMARY KEY (load_id, identity_key)
+);
+CREATE INDEX IF NOT EXISTS mef_investments_cui_idx
+    ON mef.investments(load_id, cui) WHERE cui <> '';
+CREATE INDEX IF NOT EXISTS mef_investments_snip_idx
+    ON mef.investments(load_id, snip) WHERE snip <> '';
+CREATE INDEX IF NOT EXISTS mef_investments_entidad_idx
+    ON mef.investments(load_id, entidad_norm);
+CREATE TABLE IF NOT EXISTS mef.active_load (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+    load_id TEXT NOT NULL REFERENCES mef.loads(load_id),
+    published_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- <<< FIN ESPEJO <<<
 
--- ── 2 · jobs — el registro del análisis (cabecera liviana) ──────────────────
+-- Notas de lectura del schema `mef` (no son DDL):
+--   · `identity_key` es la identidad de la fila (CUI si lo hay, si no el SNIP):
+--     el ETL reconcilia el total de identidades antes de marcar `validated`.
+--   · `estado_dataset` distingue ACTIVO / CERRADA / DESACTIVADA — es señal de
+--     DESEMPATE del resolver, jamás filtro (hay verdades auditadas que viven en
+--     filas DESACTIVADA: un CUI reformulado y un certificado que cita al viejo).
+--   · `nombre_norm` / `entidad_norm` se normalizan en Python (mayúsculas, sin
+--     tildes) — no hay `pg_trgm` ni `unaccent` y no se añaden sin ADR.
+--   · Las fechas viajan como TEXT a propósito: el origen es CSV heterogéneo y
+--     castearlas en la carga perdería filas.
+--   · Las coordenadas se excluyen (decisión de la ficha v1, ADR-009).
+--
+-- Publicación de una carga (`actualizar_base_mef.py`), en orden:
+--   1. staging en disco (gzip, catálogo, metadata);
+--   2. COPY a `mef.investments` + reconciliación de identidades;
+--   3. `mef.loads.status = 'validated'`;
+--   4. manifest de disco por `os.replace`;
+--   5. `mef.active_load` en una transacción.
+-- Retención: se conservan las 2 últimas cargas (`RETENER_CARGAS`).
+
+
+-- ############################################################################
+-- 2 · Respaldo lógico del orquestador (3 tablas)              [SECUNDARIO]
+-- ############################################################################
+--
+-- QUIÉN lo crea: `backend/orquestador/repositorio_pg.py` (constante `_DDL`).
+-- CUÁNDO: en el PRIMER USO que de verdad conecta (`RepositorioPostgres.abrir()`,
+--   conexión perezosa desde el 2026-08-05) — NO en el import de `api/app.py`.
+--   Si Postgres no responde al arrancar, queda UN warning, el respaldo se
+--   desactiva en esa corrida y el backend opera 100% sobre archivos.
+-- POR QUÉ existe: NO reemplaza a los archivos. Cada job es una carpeta en
+--   `PIVOTE_DATA_DIR` y esa es la fuente de verdad; estas tablas la espejan vía
+--   `RepositorioConRespaldo` (write-through best-effort) para tener respaldo
+--   restaurable, copia consultable por SQL y la búsqueda global del panel.
+-- DEUDA CONOCIDA (ADR-009 addendum, sondeos B01/B02): el write-through no tiene
+--   cola de re-sincronización ni marca de desincronizado, y con PG caído a
+--   mitad de job cada escritura bloquea hasta el timeout del pool. El único
+--   mitigador es correr `backend/scripts/migrar_a_postgres.py` A MANO (upserts;
+--   no borra filas huérfanas de un `eliminar()` perdido).
+
+-- >>> ESPEJO: backend/orquestador/repositorio_pg.py :: _DDL >>>
 CREATE TABLE IF NOT EXISTS jobs (
-  job_id           text PRIMARY KEY,
-  concurso_id      text REFERENCES concursos(concurso_id) ON DELETE CASCADE,
-  datos            jsonb NOT NULL,        -- el .job.json tal cual (etapas, items_revision…)
-  estado           text GENERATED ALWAYS AS (datos->>'estado') STORED,
-  descargas_estado text GENERATED ALWAYS AS (datos->>'descargas_estado') STORED,
-  postor           text GENERATED ALWAYS AS (datos->>'postor') STORED,
-  origen           text GENERATED ALWAYS AS (datos->>'origen') STORED,
-  creado_en        timestamptz NOT NULL DEFAULT now(),
-  actualizado_en   timestamptz NOT NULL DEFAULT now()
+    job_id          text PRIMARY KEY,
+    concurso_id     text,
+    estado          text,
+    datos           jsonb NOT NULL,
+    creado_en       timestamptz,
+    actualizado_en  timestamptz
 );
-COMMENT ON TABLE jobs IS 'Job del pipeline (blob JSONB, espejo de guardar/cargar/listar). El repo rellena concurso_id desde datos al guardar';
+CREATE INDEX IF NOT EXISTS jobs_concurso_idx ON jobs (concurso_id);
+CREATE INDEX IF NOT EXISTS jobs_estado_idx   ON jobs (estado);
 
--- ── 3 · espejos — el JSON espejo de la skill (el dato fuente) ────────────────
-CREATE TABLE IF NOT EXISTS espejos (
-  job_id         text PRIMARY KEY REFERENCES jobs(job_id) ON DELETE CASCADE,
-  datos          jsonb NOT NULL,          -- el .espejo.json completo (v1.2.0)
-  actualizado_en timestamptz NOT NULL DEFAULT now()
+CREATE TABLE IF NOT EXISTS documentos (
+    clave           text NOT NULL,
+    tipo            text NOT NULL,
+    datos           jsonb NOT NULL,
+    actualizado_en  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (clave, tipo)
 );
-COMMENT ON TABLE espejos IS 'JSON espejo v1.2.0 producido por la skill (blob, espejo de guardar_espejo)';
 
--- ── 4 · enriquecimientos — lo que el backend agrega por experiencia ─────────
-CREATE TABLE IF NOT EXISTS enriquecimientos (
-  job_id         text PRIMARY KEY REFERENCES jobs(job_id) ON DELETE CASCADE,
-  datos          jsonb NOT NULL,          -- {"n_prof:n_exp": {cui, via, obra, paralizaciones, valorizaciones, …}}
-  actualizado_en timestamptz NOT NULL DEFAULT now()
+CREATE TABLE IF NOT EXISTS profesionales (
+    job_id           text NOT NULL,
+    n_prof           int  NOT NULL,
+    nombre           text,
+    colegiatura      text,
+    cargo            text,
+    nombre_norm      text,
+    colegiatura_norm text,
+    cargo_norm       text,
+    datos            jsonb NOT NULL,
+    PRIMARY KEY (job_id, n_prof)
 );
-COMMENT ON TABLE enriquecimientos IS 'Enriquecimiento por experiencia, clave "n_prof:n_exp" (espejo de guardar_enriquecimiento)';
+CREATE INDEX IF NOT EXISTS profesionales_nombre_idx ON profesionales (nombre_norm);
+-- <<< FIN ESPEJO <<<
 
--- ── Índices (lo que el panel filtra/lista; a esta escala, pocos y baratos) ──
-CREATE INDEX IF NOT EXISTS jobs_concurso_idx  ON jobs (concurso_id);
-CREATE INDEX IF NOT EXISTS jobs_estado_idx    ON jobs (estado);
-CREATE INDEX IF NOT EXISTS jobs_creado_idx    ON jobs (creado_en DESC);
-CREATE INDEX IF NOT EXISTS concursos_nom_idx  ON concursos (lower(nomenclatura));
+-- Notas de lectura del respaldo lógico (no son DDL):
+--   · `jobs.concurso_id` y `jobs.estado` son columnas PLANAS que Python rellena
+--     desde el blob al guardar (no son GENERATED). Son los DOS únicos filtros
+--     reales del sistema: listar por concurso y reanudar `en_proceso` al
+--     arrancar. Todo lo demás se lee del JSONB `datos`.
+--   · `documentos` es un almacén JSONB genérico por `(clave, tipo)`: un mismo
+--     `job_id` tiene filas `espejo`, `enriquecimiento` y `decisiones`, y el
+--     `concurso_id` tiene su fila `concurso`. No hay una tabla por documento.
+--   · `profesionales` es un índice DERIVADO del espejo, no un dato original: se
+--     regenera entero (DELETE + INSERT en una transacción) cada vez que se
+--     guarda el espejo del job. Las columnas `*_norm` se normalizan en Python
+--     para poder buscar con un LIKE indexable, sin extensiones de PG.
+--   · `buscar_profesionales()` es el ÚNICO consumidor que LEE de PostgreSQL
+--     (sondeo B05); todas las demás lecturas van a archivos.
+--   · `eliminar(job_id)` borra en las 3 tablas; los binarios los borra el
+--     repositorio primario (archivos).
+
 
 -- ============================================================================
--- VISTA base_datos — la hoja "Base de Datos" del Excel (1 fila = 1 experiencia,
--- las 25 columnas + lo enriquecido). Explota el espejo con LATERAL y hace join
--- del enriquecimiento por la clave "n_prof:n_exp". Siempre al día con el blob.
---   · buscar a una persona ENTRE concursos:  WHERE profesional ILIKE '%…%'
---   · cruzar por obra:                        WHERE cui = '…'
---   · exportar la hoja:                       SELECT * WHERE job_id = '…'
+-- Lo que este archivo YA NO declara, y por qué
+-- ----------------------------------------------------------------------------
+-- Hasta el 2026-08-05 aquí vivía un esquema ASPIRACIONAL que nadie ejecutaba:
+-- tablas `concursos`, `espejos` y `enriquecimientos`, columnas GENERATED, las
+-- funciones `fecha_segura`/`numero_seguro` y dos vistas (`base_datos`,
+-- `analisis`) que consultaban tablas que ningún DDL real crea. Aplicarlo sobre
+-- una BD viva levantaba un esquema paralelo muerto, y sus vistas no funcionaban
+-- contra las tablas reales (sondeo B04).
+--
+-- Se eliminó por decisión explícita, no por olvido: la documentación del
+-- proyecto ya se corrigió (T-TAREA-001) para dejar de listar «la vista SQL»
+-- como consumidor del contrato del resolver — esa vista nunca existió en
+-- ninguna BD real. Si alguna vez se quiere una vista que explote el espejo,
+-- entra por ADR y por el código, no reapareciendo aquí.
 -- ============================================================================
-CREATE OR REPLACE VIEW base_datos AS
-SELECT
-  e.job_id,
-  j.concurso_id,
-  j.postor,
-  -- profesional (denormalizado, como en la hoja)
-  (prof->>'cargo')                                   AS cargo_postula,
-  (prof->>'n_prof')::int                             AS n_prof,
-  (prof->>'nombre')                                  AS profesional,
-  (prof->>'colegiatura')                             AS colegiatura,
-  numero_seguro(prof->>'cargo_bases_num')::int       AS cargo_bases_num,
-  (prof->>'cargo_bases_nombre')                      AS cargo_bases_nombre,
-  (prof->>'cumple')                                  AS cumple_profesional,
-  -- experiencia (las columnas de la hoja)
-  (exp->>'n')::int                                   AS n_exp,
-  (exp->>'entidad_emisora')                          AS entidad_emisora,
-  (exp->>'proyecto')                                 AS proyecto,
-  COALESCE(enr_e->>'cui', exp->>'cui')               AS cui,   -- el resuelto pisa al citado
-  (exp->>'tipo_documento')                           AS tipo_doc,
-  (exp->>'nombre_emisor')                            AS nombre_emisor,
-  (exp->>'cargo_emisor')                             AS cargo_emisor,
-  fecha_segura(exp->>'fecha_inicial')                AS fecha_inicial,
-  fecha_segura(exp->>'fecha_final')                  AS fecha_final,
-  fecha_segura(exp->>'fecha_emision')                AS fecha_emision,
-  (exp->>'folio')                                    AS folio,
-  numero_seguro(exp->>'dias')                        AS dias,
-  numero_seguro(exp->>'meses')                       AS meses,
-  numero_seguro(exp->>'anios')                       AS anios,
-  (exp->>'cargo_ocupado')                            AS cargo_ocupado,
-  (exp->>'cargo_bases_valido')                       AS cargo_en_bases,
-  (exp->>'anterior_colegiatura')                     AS ant_colegiatura,
-  (exp->>'incluye_covid')                            AS incluye_covid,
-  (exp->>'traslape')                                 AS traslape,
-  (exp->>'tipo_obra_valido')                         AS tipo_obra_solicitado,
-  (exp->>'observaciones')                            AS observaciones,
-  -- enriquecido por el backend (join por "n_prof:n_exp")
-  (enr_e->>'via')                                    AS cui_via,
-  (enr_e->>'codigo_infoobras')                       AS codigo_infoobras,
-  (enr_e->>'obra_nombre')                            AS obra_infoobras,
-  (enr_e->'obra')                                    AS obra,            -- jsonb
-  (enr_e->'paralizaciones')                          AS paralizaciones,  -- jsonb
-  (enr_e->'valorizaciones')                          AS valorizaciones,  -- jsonb
-  (enr_e->'candidatos')                              AS candidatos,      -- jsonb (alternativas del resolver)
-  (exp->'_backend')                                  AS backend,         -- jsonb
-  exp                                                AS raw              -- la experiencia cruda (auditoría)
-FROM espejos e
-JOIN jobs j USING (job_id)
-CROSS JOIN LATERAL jsonb_array_elements(e.datos->'profesionales') AS prof
-CROSS JOIN LATERAL jsonb_array_elements(prof->'experiencias')     AS exp
-LEFT JOIN enriquecimientos en USING (job_id)
-CROSS JOIN LATERAL (
-  SELECT en.datos -> ((prof->>'n_prof') || ':' || (exp->>'n'))
-) AS enr(enr_e);
-
-COMMENT ON VIEW base_datos IS 'La hoja "Base de Datos" (1 fila = 1 experiencia) explotada del espejo + enriquecimiento. Sin ETL: siempre consistente con los blobs';
-
--- ── VISTA analisis — la cabecera para el histórico del panel ─────────────────
-CREATE OR REPLACE VIEW analisis AS
-SELECT
-  j.job_id,
-  j.concurso_id,
-  c.nomenclatura                                     AS concurso,
-  j.postor,
-  j.estado,
-  j.descargas_estado,
-  j.origen,
-  fecha_segura(c.datos->>'fecha_presentacion')       AS fecha_ofertas,
-  j.creado_en,
-  (e.datos->'resumen_evaluacion')                    AS resumen,        -- jsonb (factores + puntaje)
-  (j.datos->'observaciones')                         AS observaciones,  -- jsonb (alertas)
-  (e.datos->'postor')                                AS postor_data,    -- jsonb (oferta, consorciados)
-  (SELECT count(*)
-     FROM jsonb_array_elements(coalesce(j.datos->'items_revision', '[]'::jsonb)) it
-    WHERE NOT coalesce((it->>'resuelto')::boolean, false)) AS pendientes_revision
-FROM jobs j
-LEFT JOIN concursos c USING (concurso_id)
-LEFT JOIN espejos   e USING (job_id);
-
-COMMENT ON VIEW analisis IS 'Cabecera de cada análisis para el histórico filtrable del panel';

@@ -155,6 +155,23 @@ grandes; la BD solo guarda metadatos y referencias.
 
 ---
 
+## ⛔ SUPERADO (2026-08-05) — lo de abajo NUNCA se construyó
+
+> **Este bloque es HISTÓRICO. No describe ninguna BD real.** El esquema híbrido
+> de 4 tablas + vistas se escribió en `backend/db/schema.sql` y **jamás llegó al
+> código**: `RepositorioPostgres` se cableó con OTRO diseño (3 tablas: `jobs`,
+> `documentos` JSONB genérico, `profesionales`), y las vistas `base_datos` /
+> `analisis` no existen en ninguna base que el sistema levante (sondeo B04).
+>
+> `db/schema.sql` se reescribió el 2026-08-05 como **espejo documental** de los
+> DOS DDL que sí corren —el schema `mef` del ETL (uso principal) y las 3 tablas
+> del respaldo lógico—, con un test offline que impide que vuelvan a divergir.
+> Ver `.ai/decisions/ADR-009-migracion-postgres-mef.md` (addendum) y
+> `.ai/architecture/database.md`.
+>
+> Se conserva lo de abajo porque documenta el análisis de opciones de la época,
+> no porque describa el sistema.
+
 ## ✅ DECISIÓN TOMADA (2026-07-01): esquema HÍBRIDO — ver `backend/db/schema.sql`
 > El esquema quedó **diseñado, escrito y VALIDADO** contra un Postgres 16 real
 > (Docker efímero con un job real: la vista devolvió las 19 experiencias con

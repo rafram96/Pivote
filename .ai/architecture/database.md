@@ -7,9 +7,25 @@ Cada job es una **carpeta** en `PIVOTE_DATA_DIR` (local: `backend/datos_pivote/`
 `claude.xlsx`, `final.xlsx`, `certs/`, `descargas/`, `infoobras.zip` (lazy).
 Escritura atómica (`_escribir_atomico`).
 
-## PostgreSQL = respaldo lógico OPCIONAL
+## PostgreSQL = OBLIGATORIO en el despliegue (ADR-009, addendum 2026-08-05)
 
-Solo si `PIVOTE_DB_URL` está definida (`RepositorioConRespaldo`, write-through
+Rafael cerró el estatus global el 2026-08-05: **PostgreSQL es obligatorio** —el
+compose siempre lo levanta— y su uso **principal** es la **base MEF** (la ficha
+enriquecida por `(load_id, CUI/SNIP)` vive solo ahí). El respaldo lógico de jobs
+es el uso **secundario**: los archivos siguen siendo la fuente de verdad.
+
+La degradación con gracia EN CÓDIGO se conserva a propósito: un PG caído no
+tumba nada, pero es un estado **anormal** que el operador debe corregir.
+
+Deuda consciente, anotada en el ADR y no resuelta por la decisión: el
+write-through bloquea hasta el timeout del pool si PG cae a mitad de job (B02) y
+no hay cola de re-sincronización ni marca de desincronizado (B01). Mitigador
+único: `backend/scripts/migrar_a_postgres.py` a mano (upserts; no borra
+huérfanos).
+
+## Respaldo lógico de jobs (uso secundario)
+
+Se activa con `PIVOTE_DB_URL` (`RepositorioConRespaldo`, write-through
 best-effort: si PG cae, se loguea y se sigue). Re-sync completo:
 `backend/scripts/migrar_a_postgres.py`.
 
@@ -19,15 +35,23 @@ warning y el backend arranca sobre archivos puros — el respaldo queda desactiv
 en esa corrida y se reengancha reiniciando. Antes la construcción del repositorio
 corría en el import y una BD caída impedía arrancar.
 
-⚠ **Dos esquemas divergen** (decisión pendiente de unificar):
-- DDL **real** (se aplica en el primer uso que conecta): embebido en
-  `orquestador/repositorio_pg.py` — 3 tablas: `jobs`, `documentos` (JSONB),
-  `profesionales` (columnas `*_norm` para LIKE, sin extensiones de PG).
-- `backend/db/schema.sql`: diseño aspiracional (4 tablas JSONB + vistas
-  `base_datos` y `analisis`). **No lo ejecuta nadie**, y es estructuralmente
-  incompatible con el DDL real: sus vistas referencian tablas (`espejos`,
-  `enriquecimientos`) que el DDL nunca crea. Aplicarlo sobre una BD real
-  levantaría un esquema paralelo muerto.
+✅ **Divergencia CERRADA el 2026-08-05** (F-SCHEMA, en el mismo acto que
+T-REFACTOR-003). Hay **dos DDL vivos**, y ninguno lee un archivo:
+- **schema `mef`** (uso principal) — embebido en
+  `scripts/actualizar_base_mef.py` (`_DDL_PG`), se aplica al iniciar una carga
+  del ETL: `mef.loads`, `mef.investments` (+3 índices), `mef.active_load`.
+- **respaldo lógico** (uso secundario) — embebido en
+  `orquestador/repositorio_pg.py` (`_DDL`), se aplica en el primer uso que
+  conecta: 3 tablas `jobs`, `documentos` (JSONB), `profesionales` (columnas
+  `*_norm` para LIKE, sin extensiones de PG).
+
+`backend/db/schema.sql` es ahora el **espejo documental fiel** de ambos, con el
+MEF primero. **No es fuente de verdad** (el código lo es) y nadie lo ejecuta en
+el arranque: sirve para leer el esquema completo y para bootstrap manual. Las
+tablas y vistas aspiracionales (`concursos`, `espejos`, `enriquecimientos`,
+`base_datos`, `analisis`) se eliminaron: nunca existieron en una BD real.
+`backend/tests/test_schema_sql.py` compara el archivo contra los DDL del código
+(texto normalizado, sin PG ni red) para que no vuelvan a divergir.
 
 Tip local: la laptop tiene un Postgres de Windows ocupando el 5432 → usar
 **55432** para pruebas.

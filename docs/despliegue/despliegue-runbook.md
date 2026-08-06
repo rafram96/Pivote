@@ -209,12 +209,24 @@ resolver detecta el nuevo `load_id`. Confirmar en `/api/pivote/salud` que
 
 ---
 
-## 12 · Persistencia: archivos vs Postgres (A5)
-Hoy el backend persiste en **archivos** (volumen `datos_pivote`) — el compose ya funciona
-así y **para la prueba alcanza**. El contrato contempla Postgres: el **esquema ya está
-diseñado y validado** (`backend/db/schema.sql` — 4 tablas JSONB + vistas `base_datos`/
-`analisis`). Falta cablear `RepositorioPostgres` (blobs 1:1), descomentar el servicio
-`db` del compose + `DATABASE_URL`, y el backfill. Ver `pendientes.md` (A5).
+## 12 · Persistencia: archivos + Postgres (A5) — actualizado 2026-08-05
+Los **archivos son la fuente de verdad** (volumen `datos_pivote`) y lo siguen siendo.
+Lo que cambió: **Postgres dejó de ser opcional** (ADR-009, addendum del 2026-08-05).
+El compose debe levantarlo siempre, y no por el respaldo de jobs sino por la **base
+MEF**: la ficha enriquecida por `(load_id, CUI/SNIP)` vive solo ahí.
+
+- `RepositorioPostgres` **ya está cableado** (3 tablas: `jobs`, `documentos` JSONB,
+  `profesionales`), se activa con `PIVOTE_DB_URL` y aplica su DDL en el primer uso.
+- El schema `mef` lo crea el ETL (`backend/scripts/actualizar_base_mef.py`).
+- `backend/db/schema.sql` es el **espejo documental** de ambos DDL (referencia y
+  bootstrap manual); no lo ejecuta nadie en el arranque.
+- Backfill / re-sincronización manual: `backend/scripts/migrar_a_postgres.py`.
+
+⚠ **PENDIENTE de este runbook**: añadir `healthcheck` + `depends_on` de Postgres al
+compose. Con PG obligatorio, el backend no debe ganarle la carrera de arranque a la BD
+y quedarse sin respaldo por una conexión rechazada (hoy solo deja UN warning y sigue
+sobre archivos — degradación correcta, pero es un estado anormal). Ver `pendientes.md`
+(A5) y el addendum de ADR-009.
 
 ---
 

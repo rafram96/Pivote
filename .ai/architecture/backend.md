@@ -42,8 +42,9 @@ NO añadir pandas/duckdb/sqlalchemy/SQLite sin ADR.
 Contrato de retorno `{estado, cui, via, decision, candidatos, obra}` acoplado en
 etapas_reales, excel_final y zip_infoobras — cambios solo ADITIVOS.
 (Antes esta línea listaba «la vista SQL» como cuarto consumidor: no existe. Las
-vistas `base_datos`/`analisis` viven solo en el `db/schema.sql` aspiracional,
-que ninguna BD real ejecuta — ver `architecture/database.md`.)
+vistas `base_datos`/`analisis` vivían solo en el `db/schema.sql` aspiracional y
+se **eliminaron** el 2026-08-05, cuando ese archivo pasó a ser espejo documental
+de los DDL reales — ver `architecture/database.md`.)
 
 ## Configuración (env `PIVOTE_*`, leída en el punto de uso)
 
