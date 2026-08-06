@@ -40,7 +40,10 @@ NO añadir pandas/duckdb/sqlalchemy/SQLite sin ADR.
 
 ⚠ El solape de fechas declaradas NO participa en la selección (ADR-003).
 Contrato de retorno `{estado, cui, via, decision, candidatos, obra}` acoplado en
-etapas_reales, excel_final, zip_infoobras y la vista SQL — cambios solo ADITIVOS.
+etapas_reales, excel_final y zip_infoobras — cambios solo ADITIVOS.
+(Antes esta línea listaba «la vista SQL» como cuarto consumidor: no existe. Las
+vistas `base_datos`/`analisis` viven solo en el `db/schema.sql` aspiracional,
+que ninguna BD real ejecuta — ver `architecture/database.md`.)
 
 ## Configuración (env `PIVOTE_*`, leída en el punto de uso)
 

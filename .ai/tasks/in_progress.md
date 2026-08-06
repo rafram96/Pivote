@@ -3,6 +3,75 @@
 *(Actualizar al iniciar cualquier trabajo; mover a completed.md al cerrar.)*
 
 ---
+id: T-TAREA-001
+tipo: tarea
+zona: otro (prosa de backend/scraping, backend/resolucion, backend/schemas y .ai/)
+agente_origen: fable
+estado: aprobado  # Rafael, 2026-08-05
+depende_de: [T-SONDEO-A02, T-SONDEO-A05, T-SONDEO-B04]
+---
+**Saneo documental de la zona backend — SOLO PROSA, CERO CÓDIGO.** Un doc que
+miente es peor que ninguno: `.ai/` promete que código y documentación no se
+contradicen.
+
+### Cerrada el 2026-08-05
+
+**Verificado uno por uno antes de tocar nada:**
+
+1. **`backend/scraping/README.md` — engaño confirmado, reescrito.** Era una
+   copia literal del README de `src/referencia/`: decía «copias de SOLO
+   LECTURA», «no editar nada aquí», «cuando termine el pivote esta carpeta
+   puede borrarse», daba rutas de `Alpamayo-InfoObras`, listaba 4 snapshots que
+   no existen en la carpeta y anunciaba **ALT-12 como funcionalidad activa**
+   («firmante ≠ representante legal») cuando ADR-008 la descartó con evidencia.
+   Ahora describe lo que la carpeta contiene HOY —los 6 módulos reales
+   (`infoobras`, `sunat`, `mef`, `seace_abierto`, `renipress`, `errores_red`)—
+   el patrón parseo-puro↔fetch, la distinción vacío≠caído, y **qué NO vive
+   aquí**: la resolución de CUI por nombre es de `resolucion/cui.py`.
+2. **`resolucion/texto.py` (cabecera) — engaño confirmado, corregido.** Decía
+   «por ahora ambos conviven con las definiciones duplicadas (no se edita
+   cui.py)» y «en una fase posterior cui.py pasará a IMPORTAR de este módulo».
+   `cui.py:31` YA importa de aquí y no quedan duplicados: describía un estado
+   transitorio terminado, e invitaba a editar la copia equivocada.
+3. **`resolucion/cui.py` (cabecera) — engaño confirmado, reescrito.** Describía
+   el método del prototipo (`tools/buscar_cui_por_nombre.py`: similitud +
+   departamento + fecha + RUC) sin una palabra de base MEF, público-primero,
+   vetos ni candados: quien leía solo la cabecera entendía un resolver que ya no
+   existe. Ahora resume los 6 pasos vigentes, los vetos, ADR-003/005 y el
+   vocabulario cerrado de `estado`, con puntero a `architecture/backend.md` como
+   fuente completa. ⚠ **El diff de `cui.py` es EXCLUSIVAMENTE docstring de
+   módulo — ni una sola línea de código**: sin la golden, la única protección
+   posible es que no haya cambio de comportamiento concebible.
+4. **`scraping/sunat.py:697` — YA ESTABA CORREGIDO, se saltó.** El docstring de
+   `consultar_representantes` ya dice que el dato es informativo y que ADR-008
+   descartó ALT-12. Lo que seguía mintiendo era el **encabezado de sección de la
+   línea 639** («insumo de ALT12»), que sí se corrigió.
+5. **`.ai/architecture/backend.md` — engaño confirmado, corregido.** Listaba «la
+   vista SQL» como cuarto consumidor del contrato del resolver. Esa vista
+   (`base_datos`, en `db/schema.sql`) no existe en ninguna BD que el código
+   arranque, y el schema es estructuralmente incompatible con el DDL real (B04).
+   Son 3 consumidores. (`contracts.md`, que la tarea citaba, no existe.)
+
+**Otros docs engañosos de la misma zona, hallados y corregidos:**
+
+- **`.ai/prompts/reviewer.md:16`** repetía «los 4 consumidores … vista SQL» — el
+  mismo error, y en el prompt con el que se revisa el trabajo, o sea el sitio
+  donde más caro sale.
+- **Tres comentarios que presentaban ALT-12 como viva**: `schemas/pipeline.py`
+  (la etapa SUNAT y la lista de códigos de `Observacion`), `schemas/espejo.py`
+  (`ruc_emisor` «→ … + ALT12») y el encabezado de sección de
+  `tests/test_sunat_parsing.py`.
+- **`.ai/architecture/database.md`**: decía que el DDL real «corre al arrancar»
+  —desde B03-fix se aplica en el primer uso que conecta— y describía
+  `db/schema.sql` como simplemente «distinto». Ahora dice lo que B04 probó: no
+  lo ejecuta nadie y es **incompatible**; aplicarlo levantaría un esquema
+  paralelo muerto.
+
+**Gates**: cero código tocado (el diff completo son docstrings, comentarios y
+`.md`) · suite **868 passed, 25 skipped**, sin movimiento · `compileall` y
+`git diff --check` limpios · panel y skill sin tocar.
+
+---
 id: T-TAREA-B03-FIX
 tipo: tarea
 zona: persistencia/ (repositorio_pg.py) + api/ (app.py)

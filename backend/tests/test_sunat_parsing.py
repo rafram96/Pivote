@@ -38,7 +38,7 @@ def test_parse_lista_dump_real(dump_sunat):
     assert all(i.get("razon_social") for i in items)
 
 
-# ── Representantes legales (getRepLeg, insumo ALT12) ─────────────────────────
+# ── Representantes legales (getRepLeg — dato informativo; ALT12 descartada) ──
 
 def test_parse_representantes_dump_real(dump_sunat):
     reps = sunat._parse_representantes(dump_sunat("25_getRepLeg.html"))

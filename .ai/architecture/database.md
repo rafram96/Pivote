@@ -13,12 +13,21 @@ Solo si `PIVOTE_DB_URL` está definida (`RepositorioConRespaldo`, write-through
 best-effort: si PG cae, se loguea y se sigue). Re-sync completo:
 `backend/scripts/migrar_a_postgres.py`.
 
+**Opcional también AL ARRANCAR** (B03-fix, 5-ago): `api/app.py` sondea la BD una
+vez con tope `PIVOTE_DB_TIMEOUT_BOOT` (default 5 s). Si no responde, deja UN
+warning y el backend arranca sobre archivos puros — el respaldo queda desactivado
+en esa corrida y se reengancha reiniciando. Antes la construcción del repositorio
+corría en el import y una BD caída impedía arrancar.
+
 ⚠ **Dos esquemas divergen** (decisión pendiente de unificar):
-- DDL **real** (corre al arrancar): embebido en `orquestador/repositorio_pg.py`
-  — 3 tablas: `jobs`, `documentos` (JSONB), `profesionales` (columnas `*_norm`
-  para LIKE, sin extensiones de PG).
+- DDL **real** (se aplica en el primer uso que conecta): embebido en
+  `orquestador/repositorio_pg.py` — 3 tablas: `jobs`, `documentos` (JSONB),
+  `profesionales` (columnas `*_norm` para LIKE, sin extensiones de PG).
 - `backend/db/schema.sql`: diseño aspiracional (4 tablas JSONB + vistas
-  `base_datos` y `analisis`). No es el que corre.
+  `base_datos` y `analisis`). **No lo ejecuta nadie**, y es estructuralmente
+  incompatible con el DDL real: sus vistas referencian tablas (`espejos`,
+  `enriquecimientos`) que el DDL nunca crea. Aplicarlo sobre una BD real
+  levantaría un esquema paralelo muerto.
 
 Tip local: la laptop tiene un Postgres de Windows ocupando el 5432 → usar
 **55432** para pruebas.

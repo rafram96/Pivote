@@ -1,17 +1,44 @@
 """
-Resolución de CUI — portado del prototipo `tools/buscar_cui_por_nombre.py`
-(medido: Libertador 100% · Trujillo 94% · Lircay 50% sin humano).
+Resolución de CUI — a qué obra del Estado corresponde cada experiencia declarada.
+
+⚠ Este módulo NACIÓ como puerto del prototipo `tools/buscar_cui_por_nombre.py`
+(similitud de nombre + departamento + fecha + RUC). Ese ya no es el método: el
+refactor T-008 lo reescribió como flujo público-primero con base local del MEF,
+vetos de identidad y candados de abstención. La descripción completa y vigente
+vive en `.ai/architecture/backend.md` («El resolver de CUI»); lo que sigue es el
+mapa mínimo para no leer 2.000 líneas a ciegas.
 
 Método por experiencia:
-  0. campo `cui` de la skill o "CUI/SNIP NNN" en el texto → determinístico
-     (verificando nombre/ubicación contra la obra del código).
-  1. nombre: limpiar boilerplate → fragmentos (establecimiento + nombre propio)
-     → buscar en InfoObras → puntuar (similitud + departamento + fecha + RUC)
-     → compuerta de tokens distintivos → AUTO / PROBABLE / REVISIÓN.
-  2. dedup por folio: el "2º periodo del mismo certificado" hereda el CUI.
+  0. **Código citado** (campo `cui` de la skill o "CUI/SNIP NNN" en el texto):
+     se busca por código y se CONTRASTA contra la ficha del MEF y la obra
+     encontrada. Un rubro/nombre/ubicación que lo contradiga NO lo promueve —
+     lo descarta como ancla y el resolver sigue por los demás caminos.
+  1. **Candidatos por nombre** = base MEF local (fuzzy, offline) fusionada con
+     la búsqueda de InfoObras; los que solo aparecen en el MEF se traen por
+     código, con tope.
+  2. **Ranking por IDENTIDAD, no por conveniencia**: similitud del nombre,
+     número de institución, ubigeo oficial, entidad contratante y RUC del emisor
+     contra ejecutor/supervisor. El solape de las fechas DECLARADAS no participa
+     en la selección (ADR-003): serviría para lavar una mentira.
+  3. **Vetos** (son veto, no puntaje): rubro contradictorio, provincia
+     contradictoria con ambas declaradas, entidad municipal distinta, fase
+     incompatible (un registro de expediente no respalda ejecución/supervisión).
+  4. **Candados de abstención** (ADR-005: abstenerse es barato, equivocarse no):
+     un candidato solo-MEF no gana sin corroboración dura, y un empate estrecho
+     sin señal separadora va a `revision` con sus candidatos a la vista.
+  5. **Privadas AL FINAL**: solo si no hubo candidato público fiable (léxico +
+     catálogo de entidades públicas del MEF).
+  6. **Dedup por folio**: el "2º periodo del mismo certificado" hereda el CUI,
+     pero solo si el emisor también coincide (#58 — el folio suele venir corrido).
+
+Vocabulario CERRADO de `estado`: `resuelto` · `revision` (con candidatos y
+motivo) · `na` (privada, no le toca CUI) · `sin_cui` · `no_encontrado` ·
+`portal` (la fuente no respondió — distinto de «no existe»). Nunca se inventa
+un CUI para llenar la celda.
 
 La red está detrás de `ConsultaInfoObras` (inyectable): los tests usan fakes,
-solo la etapa en vivo toca el portal.
+solo la etapa en vivo toca el portal. La normalización de texto (`norm`,
+`expandir_abrev`, `ABREV`) vive en `resolucion/texto.py` y se re-exporta aquí.
 """
 from __future__ import annotations
 

@@ -39,7 +39,7 @@ class Etapa(str, Enum):
     VALIDACION = "validacion"         # 1 · verifica lo que Claude afirma (15 notas)
     RESOLUCION_CUI = "resolucion_cui" # 2 · cada experiencia → CUI de obra
     INFOOBRAS = "infoobras"           # 3a · vía CUI: paralizaciones, códigos, ZIP
-    SUNAT = "sunat"                   # 3b · vía RUC: ALT04, ALT12, vinculación
+    SUNAT = "sunat"                   # 3b · vía RUC: ALT04, HABIDO, histórico
     RENIPRESS = "renipress"           # 3c · existencia auxiliar para experiencias de salud
     REGLAS = "reglas"                 # 4 · Paso 5 días efectivos, ALT03 25 años
     EXCEL = "excel"                   # 5 · regenera el Excel final enriquecido
@@ -79,7 +79,7 @@ class Severidad(str, Enum):
 
 class Observacion(_Model):
     """Hallazgo del validador o de los cruces. El sistema señala, no juzga."""
-    codigo: Optional[str] = None          # ALT04, ALT12, ALT03, ALT11, NOTA1...
+    codigo: Optional[str] = None          # ALT04, ALT03, ALT11, NOTA1... (ALT12 NO: ADR-008)
     severidad: Severidad = Severidad.INFO
     mensaje: str
     origen: Etapa

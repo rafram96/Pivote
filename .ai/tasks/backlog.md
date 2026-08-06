@@ -591,22 +591,6 @@ y B01/B02 (fallos de persistencia) son el mismo tema transversal
 ## Plan propuesto (fable, 2026-07-23) — TODO esperando aprobación del desarrollador
 
 ---
-id: T-TAREA-001
-tipo: tarea
-zona: otro
-agente_origen: fable
-estado: esperando_aprobacion
-depende_de: [T-SONDEO-A02, T-SONDEO-A05, T-SONDEO-B04]
----
-**Saneo documental de la zona backend** (solo prosa, cero código): reescribir
-o eliminar `backend/scraping/README.md` (hoy describe otro repo y da ALT-12
-por viva); corregir docstrings desfasados (`texto.py` cabecera, `cui.py`
-cabecera, `sunat.py:697`); corregir en `backend.md`/`contracts.md` la mención
-a «la vista SQL» como consumidor del contrato del resolver (la vista vive solo
-en el schema.sql aspiracional — no existe en ninguna BD real). 3 preguntas:
-es ejecución pura → tarea. Riesgo: nulo. Ejecutable de inmediato.
-
----
 id: T-TAREA-002
 tipo: tarea
 zona: scraping/
@@ -783,22 +767,6 @@ y B01/B02 (fallos de persistencia) son el mismo tema transversal
 «fallo silencioso vs señal explícita» en capas distintas.
 
 ## Plan propuesto (fable, 2026-07-23) — TODO esperando aprobación del desarrollador
-
----
-id: T-TAREA-001
-tipo: tarea
-zona: otro
-agente_origen: fable
-estado: esperando_aprobacion
-depende_de: [T-SONDEO-A02, T-SONDEO-A05, T-SONDEO-B04]
----
-**Saneo documental de la zona backend** (solo prosa, cero código): reescribir
-o eliminar `backend/scraping/README.md` (hoy describe otro repo y da ALT-12
-por viva); corregir docstrings desfasados (`texto.py` cabecera, `cui.py`
-cabecera, `sunat.py:697`); corregir en `backend.md`/`contracts.md` la mención
-a «la vista SQL» como consumidor del contrato del resolver (la vista vive solo
-en el schema.sql aspiracional — no existe en ninguna BD real). 3 preguntas:
-es ejecución pura → tarea. Riesgo: nulo. Ejecutable de inmediato.
 
 ---
 id: T-TAREA-002

@@ -1,12 +1,12 @@
 """
 Normalización y expansión de abreviaturas de nombres de obra/proyecto.
 
-COPIA EXACTA de `norm()` y `expandir_abrev()` (con su tabla `ABREV`) desde
-`resolucion/cui.py`. Se extraen aquí para que otros módulos (la base local del
-MEF, `base_mef.py`) los reutilicen sin arrastrar todo `cui.py` ni tocar la red.
-
-En una fase posterior `cui.py` pasará a IMPORTAR de este módulo; por ahora ambos
-conviven con las definiciones duplicadas (no se edita `cui.py`).
+Este es el ÚNICO hogar de `norm()` y `expandir_abrev()` (con su tabla `ABREV`).
+Nacieron en `resolucion/cui.py` y se extrajeron aquí para que otros módulos (la
+base local del MEF, `base_mef.py`) los reutilicen sin arrastrar todo `cui.py` ni
+tocar la red. `cui.py` los IMPORTA de aquí y los re-exporta con el mismo nombre
+(`cui.py:31`), así que no quedan definiciones duplicadas: tocar la
+normalización aquí la mueve para todos los consumidores a la vez.
 
 Nota de diseño — `norm_basica()`: NO se añade. `norm()` de `cui.py` es genérica
 (NFKD → ascii → mayúsculas → colapsar espacios); no trae lógica específica de

@@ -180,7 +180,7 @@ class SubObra(_Model):
 class ExperienciaProf(_Model):
     n: int = Field(ge=1)
     entidad_emisora: Optional[str] = None
-    ruc_emisor: Optional[str] = None      # RUC (11 díg.) del emisor del cert → cruce ejecutor/supervisor + ALT12
+    ruc_emisor: Optional[str] = None      # RUC (11 díg.) del emisor del cert → cruce ejecutor/supervisor y ALT04
     proyecto: Optional[str] = None        # nombre de obra VERBATIM y completo (sin abreviar ni meter metadata)
     cui: Optional[str] = None             # CUI/SNIP citado en el cert (solo dígitos) → Paso 0 determinístico
     # De dónde salió el CUI: "certificado" (citado en la constancia — lo único que la

@@ -1,46 +1,48 @@
-# `src/referencia/` — snapshots del backend Alpamayo-InfoObras
+# `backend/scraping/` — las fuentes públicas que verifican lo declarado
 
-Esta carpeta contiene **copias de SOLO LECTURA** de módulos del backend de
-producción `Alpamayo-InfoObras` que el pivote reusará tal cual.
+Código de **producción** del pivote. Aquí vive todo lo que sale a internet: el
+backend contrasta contra fuentes oficiales lo que la skill extrajo de la
+propuesta. Nada de esto llama a APIs de IA (regla on-prem, ver
+`.ai/architecture/backend.md`).
 
-## ⚠ Política de uso
+> Este archivo llegó a ser una copia del README de `src/referencia/` — decía
+> «no editar», daba rutas de `Alpamayo-InfoObras` y anunciaba ALT-12 como una
+> regla viva. Nada de eso aplica: esta carpeta es código propio y editable, y
+> **ADR-008 descartó ALT-12** (firmante ≠ representante legal) por falsos
+> positivos sistemáticos.
 
-- **No editar nada aquí.** Si necesitas cambios, se hacen en `Alpamayo-InfoObras`
-  y se vuelve a copiar el snapshot. Estos archivos son referencia de diseño,
-  no código de producción.
-- **No importar desde aplicaciones reales.** El código de producción sigue
-  viviendo en `Alpamayo-InfoObras/src/scraping/`. Estos archivos están aquí
-  solo para que las sesiones de planeación del pivote tengan los módulos a
-  mano sin abrir el otro repo.
-- Cuando termine el pivote, esta carpeta puede borrarse — su utilidad es
-  acelerar la fase de diseño.
+## Módulos
 
-## Snapshots actuales
-
-| Carpeta | Fuente original | Snapshot |
+| Módulo | Fuente | Qué resuelve |
 |---|---|---|
-| `scraping_alpamayo/sunat.py` | `Alpamayo-InfoObras/src/scraping/sunat.py` | 2026-05-27 |
-| `scraping_alpamayo/sunat_cache.py` | `Alpamayo-InfoObras/src/scraping/sunat_cache.py` | 2026-05-27 |
-| `scraping_alpamayo/infoobras.py` | `Alpamayo-InfoObras/src/scraping/infoobras.py` | 2026-05-27 |
-| `scraping_alpamayo/__init__.py` | `Alpamayo-InfoObras/src/scraping/__init__.py` | 2026-05-27 |
+| `infoobras.py` | InfoObras (Contraloría) | Ficha de la obra por CUI, datos de ejecución (avances, paralizaciones, supervisor/residente/contratista) y descarga de documentos. Es el **decisor** de identidad de obra. |
+| `sunat.py` | e-consultaruc | Ficha del RUC emisor: inscripción (ALT04), condición HABIDO, representantes legales e información histórica (`getRepLeg` / `getinfHis`). |
+| `mef.py` | Banco de Inversiones (SSI) | Verificación de **expedientes técnicos** (T-003): Formato 08-A, contratos SEACE del CUI y PDFs de sustento. |
+| `seace_abierto.py` | CONOSCE + OCDS del OECE | Bases Integradas y contrato firmado por CUI, con la segmentación por tipo de proceso (T-004). |
+| `renipress.py` | RENIPRESS (SUSALUD) | Existencia de establecimientos de salud. Evidencia **auxiliar**: no cambia veredictos. |
+| `errores_red.py` | — | Clasifica excepciones en `red` / `portal` / `otro` para que los logs no escupan la excepción cruda. Puro, sin red. |
 
-## Rol en el pivote
+`__init__.py` está vacío a propósito: cada consumidor importa el módulo que
+necesita (`from scraping import sunat`), y los tests parchean sobre esa fachada.
 
-Estos módulos son los que el nuevo endpoint `POST /api/analizar` del backend
-invocará para enriquecer el JSON que viene desde Claude:
+## Patrón de la carpeta
 
-- `sunat.consultar_ruc(ruc)` → ALT04 (empresa creada después de inicio
-  experiencia) y ALT12 (firmante ≠ representante legal). Llena las cols
-  11-12 del Paso 3 que Claude deja vacías.
-- `infoobras.fetch_by_cui(cui)` → cols 27-28 del manual (CIU + InfoObras)
-  + paralizaciones para Paso 5 (días efectivos descontando suspensiones).
-- `infoobras.verificar_profesional_en_obra(...)` → cruce de
-  supervisor/residente declarado vs registrado en InfoObras.
+- **Parseo puro ↔ fetch**: las funciones que interpretan HTML/JSON no tocan la
+  red y se prueban offline con fixtures; solo los `fetch_*` salen a internet.
+  `pytest backend/tests` **bloquea la red externa** (fixture de `conftest.py`),
+  así que un test que la intente falla en vez de quedar flaky.
+- **Vacío ≠ caído**: una búsqueda válida sin resultados y un portal que no
+  respondió son cosas distintas, y ningún consumidor debe confundirlas. Cada
+  módulo tiene su dialecto para decirlo (excepción / `[]` / `None`); unificarlos
+  es deuda registrada (T-REFACTOR-001), no un bug.
+- **Reintentos** propios por portal, con la razón acortada por `errores_red`.
+- **Cachés** en `PIVOTE_DATA_DIR/referencia/` (CONOSCE, procesos SEACE) para no
+  depender en vivo de hosts intermitentes.
 
-## Para refrescar el snapshot
+## Qué NO vive aquí
 
-```bash
-cp /c/Users/Holbi/Documents/Freelance/proyectos/InfoObras/Alpamayo-InfoObras/src/scraping/{__init__.py,sunat.py,sunat_cache.py,infoobras.py} src/referencia/scraping_alpamayo/
-```
-
-Y actualizar la fecha en la tabla de arriba.
+- La **resolución de CUI por nombre** es de `resolucion/cui.py` (base MEF,
+  público-primero, vetos y candados de abstención — ADR-002…005). En
+  `infoobras.py` no debe reconstruirse un resolver por nombre.
+- Los **veredictos**: scraping devuelve evidencia; quien juzga es
+  `reglas/` + `validacion/`.

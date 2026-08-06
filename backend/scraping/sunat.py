@@ -636,7 +636,8 @@ def buscar_por_razon_social(
 
 
 # ============================================================================
-# Representantes legales (acción getRepLeg) — insumo de ALT12
+# Representantes legales (acción getRepLeg) — dato INFORMATIVO del bloque emisor.
+# NO es insumo de ninguna regla: ADR-008 descartó ALT-12 (firmante ≠ representante).
 # ============================================================================
 
 @dataclass
