@@ -39,9 +39,9 @@ from reglas import (
 from schemas.cargo import etiqueta_hoja
 from scripts.generar_excel import (
     AL_HEAD, AL_WRAP, BORDER, F_BOLD, F_CELL, F_HEAD, F_PARTE, F_PROF,
-    FILL_BACKEND, FILL_CLAUDE, FILL_HEAD, FILL_PARTE, FILL_PROF, FILL_SUPUESTO,
-    FMT_DEC, FMT_FECHA, FMT_INT, _fill_veredicto, _sin_jerga, construir_hoja_evaluacion,
-    fecha_excel,
+    FILL_BACKEND, FILL_CLAUDE, FILL_HEAD, FILL_PARTE, FILL_PEND, FILL_PROF,
+    FILL_SUPUESTO, FMT_DEC, FMT_FECHA, FMT_INT, _fill_veredicto, _sin_jerga,
+    conciliar_conclusion, construir_hoja_evaluacion, fecha_excel,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,12 @@ Paralizaciones = dict[tuple[int, int], list[tuple[date, date]]]
 _PALETA_PROF = ["D7E9F7", "DCEFE8", "F8E1D5", "E1E8F5", "E8ECEF", "D5E9E7",
                 "F1DDD3", "DDE6F0"]
 
-# Amarillo para resaltar las valorizaciones que caen dentro del certificado
+# Amarillo FUERTE (FFFF00) — SOLO para lo que la leyenda de las hojas P promete:
+# dato del certificado, valorización dentro del periodo, separadores y el
+# encabezado CERT. Todo lo que significa «por verificar» usa el amarillo SUAVE
+# (`FILL_PEND`, FFF2CC), que es el que la leyenda declara como tal. Antes ambos
+# sentidos compartían el mismo FFFF00 y la leyenda mentía: un candado SEACE sin
+# confirmar se veía idéntico a una fecha declarada por el postor.
 FILL_VALOR = PatternFill("solid", fgColor="FFFF00")
 # Veredicto de la verificación de expedientes (MEF) → texto de evaluador (sin jerga)
 _VER_TXT = {"ok": "✔ Coincide", "no_verificable": "Por confirmar",
@@ -516,7 +521,7 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
                 "expediente publicada. No es un defecto de la propuesta ni del "
                 "análisis: es lo que las fuentes publican. Los periodos declarados "
                 "se evalúan con el resto del expediente, sin este contraste.",
-                FILL_VALOR, filas=3)
+                FILL_PEND, filas=3)
     for p in con_hito:
         r += 1
         titulo = str(p["nombre"] or "Proyecto sin nombre")
@@ -541,11 +546,11 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
             rot = _rotulo_candado_seace(candado.get("resultado"))
             if rot:
                 campo("¿El proceso corresponde a este certificado?", rot,
-                      None if candado.get("resultado") == "confirmado" else FILL_VALOR)
+                      None if candado.get("resultado") == "confirmado" else FILL_PEND)
         else:
             campo("Proceso de contratación",
                   "No figura en los datos abiertos del Estado (cobertura desde 2018)",
-                  FILL_VALOR)
+                  FILL_PEND)
         res = ((p["verificacion"] or {}).get("resolucion")) or {}
         aprob = p["aprobacion"] or {}
         if res or aprob:
@@ -554,7 +559,7 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
             f_aprob, fuente, inferida = _fecha_aprobacion_proyecto(p)
             campo("Fecha de la aprobación", _ddmmaa_larga(f_aprob),
                   FILL_SUPUESTO if (f_aprob and inferida) else
-                  (None if f_aprob else FILL_VALOR))
+                  (None if f_aprob else FILL_PEND))
             if fuente:
                 campo("De dónde sale esa fecha", fuente)
         mods = p["modificaciones"] or []
@@ -614,7 +619,7 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
     if not filas:
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=_NCOL_CRON)
         c = ws.cell(r, 1, "No hay experiencias que comparar.")
-        c.font, c.fill, c.border, c.alignment = F_CELL, FILL_VALOR, BORDER, AL_WRAP
+        c.font, c.fill, c.border, c.alignment = F_CELL, FILL_PEND, BORDER, AL_WRAP
         r += 1
     else:
         ws.auto_filter.ref = (f"A{fila_head}:"
@@ -948,7 +953,7 @@ def construir_hoja_profesional(
             texto = textos.get(estado, datos.get("motivo") or "Por confirmar.")
             ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
             c = ws.cell(rr, 6, texto)
-            c.font, c.fill, c.border, c.alignment = F_CELL, FILL_VALOR, BORDER, AL_WRAP
+            c.font, c.fill, c.border, c.alignment = F_CELL, FILL_PEND, BORDER, AL_WRAP
             ws.row_dimensions[rr].height = max(15, (-(-len(texto) // 70)) * 13 + 2)
             return rr
 
@@ -986,14 +991,14 @@ def construir_hoja_profesional(
             # candado NO confirmó. Un `confirmado` va sin resalte.
             if (etiqueta == "Correspondencia con el certificado"
                     and candado.get("resultado") != "confirmado"):
-                cv.fill = FILL_VALOR
+                cv.fill = FILL_PEND
             rr += 1
         if rotulo_candado and candado.get("resultado") != "confirmado":
             texto = str(candado.get("motivo") or "")
             if texto:
                 ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
                 c = ws.cell(rr, 6, texto)
-                c.font, c.fill, c.border, c.alignment = F_CELL, FILL_VALOR, BORDER, AL_WRAP
+                c.font, c.fill, c.border, c.alignment = F_CELL, FILL_PEND, BORDER, AL_WRAP
                 ws.row_dimensions[rr].height = max(15, (-(-len(texto) // 70)) * 13 + 2)
                 rr += 1
         if datos.get("ambiguo"):
@@ -1001,7 +1006,7 @@ def construir_hoja_profesional(
                      "el más reciente. Verificar la carátula de los documentos del ZIP.")
             ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
             c = ws.cell(rr, 6, texto)
-            c.font, c.fill, c.border, c.alignment = F_CELL, FILL_VALOR, BORDER, AL_WRAP
+            c.font, c.fill, c.border, c.alignment = F_CELL, FILL_PEND, BORDER, AL_WRAP
             ws.row_dimensions[rr].height = max(15, (-(-len(texto) // 70)) * 13 + 2)
             rr += 1
         return rr - 1
@@ -1494,7 +1499,7 @@ def construir_hoja_profesional(
             if alt04.get("estado") == "REINSCRIPCION":
                 txt = "🟡 ALT04 — " + alt04.get(
                     "mensaje", "Probable reinscripción; revisar el histórico SUNAT.")
-                fill = FILL_VALOR
+                fill = FILL_PEND
             elif alt04.get("estado") == "ALERTA":
                 txt = "🔴 ALT04 — " + alt04.get(
                     "mensaje", "Confirmar la inscripción original en SUNAT.")
@@ -1733,10 +1738,15 @@ def construir_hoja_profesional(
     ws.cell(r, 1, f"Nombre: {prof.get('nombre') or '—'}").font = F_BOLD; r += 1
     ws.cell(r, 1, f"Colegiatura: {prof.get('colegiatura') or '—'}").font = F_CELL; r += 1
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
+    # La leyenda tiene que describir los colores que la hoja usa REALMENTE. Le
+    # faltaban dos: el amarillo suave de «por verificar» —que además compartía el
+    # FFFF00 del dato declarado, así que decía una cosa y pintaba otra— y el verde
+    # de lo verificado como correcto.
     c = ws.cell(
         r, 1,
         "LEYENDA: violeta = supuesto o inferido · amarillo = dato del certificado / "
-        "valorización dentro del periodo · cyan = efectivo verificado · naranja = "
+        "valorización dentro del periodo · amarillo claro = por verificar · "
+        "verde = verificado correcto · cyan = efectivo verificado · naranja = "
         "periodo excluido · rojo = alerta o contradicción",
     )
     c.font, c.alignment = F_CELL, AL_WRAP
@@ -1889,7 +1899,8 @@ def construir_hoja_profesional(
         r += 1
 
         if not (ini and fin):
-            fila("Fechas no computables (parciales o POR VERIFICAR) — revisar espejo",
+            fila("Fechas no computables (parciales o POR VERIFICAR) — revisar "
+                 "contra el certificado original",
                  e.get("fecha_inicial"), e.get("fecha_final"), None)
             r += 1
         else:
@@ -1932,11 +1943,11 @@ def construir_hoja_profesional(
             tramos = restar_paralizaciones((ini, fin), tuplas)
             for k, (t_ini, t_fin) in enumerate(tramos, start=1):
                 fila(f"Tramo {'provisional' if en_revision else 'efectivo'} {k}", t_ini, t_fin,
-                     dias_inclusivos(t_ini, t_fin), fill=FILL_VALOR if en_revision else FILL_EFECTIVO)
+                     dias_inclusivos(t_ini, t_fin), fill=FILL_PEND if en_revision else FILL_EFECTIVO)
             efectivo = sum(dias_inclusivos(a, b) for a, b in tramos)
             fila(f"{'PROVISIONAL — POR VERIFICAR' if en_revision else 'EFECTIVO'} EXPERIENCIA {n_exp}",
                  "", "", efectivo, bold=True,
-                 fill=FILL_VALOR if en_revision else FILL_EFECTIVO)
+                 fill=FILL_PEND if en_revision else FILL_EFECTIVO)
             r += 1
 
             idx = len(periodos_validos)
@@ -2097,6 +2108,7 @@ def construir_hoja_profesional(
 
     _p5_head()
     _sd = _se = 0
+    _n_decl = 0        # periodos que sí aportan días declarados (desfase máximo)
     for e in prof.get("experiencias", []):
         ne = e.get("n")
         ini_, fin_ = _fecha_iso(e.get("fecha_inicial")), _fecha_iso(e.get("fecha_final"))
@@ -2109,6 +2121,7 @@ def construir_hoja_profesional(
             set(prof.get("supuestos") or []) | set(e.get("supuestos") or []))
         if isinstance(decl, (int, float)):
             _sd += decl
+            _n_decl += 1
         if isinstance(efec, (int, float)):
             _se += efec
 
@@ -2121,13 +2134,13 @@ def construir_hoja_profesional(
                         for e in prof.get("experiencias", []))
     _p5_tot("DÍAS PROVISIONALES DEL PROFESIONAL — POR VERIFICAR" if _hay_revision
             else "DÍAS EFECTIVOS DEL PROFESIONAL", None, _dias_ef,
-            FILL_VALOR if _hay_revision else FILL_EFECTIVO)
+            FILL_PEND if _hay_revision else FILL_EFECTIVO)
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=18)
     ca = ws.cell(r, 1, "AÑOS EFECTIVOS (días efectivos / 365)")
     ca.font, ca.border, ca.alignment = F_BOLD, BORDER, AL_HEAD
     cy = ws.cell(r, 19, round(anios(_dias_ef), 2))
     cy.font, cy.fill, cy.border, cy.number_format = (
-        F_BOLD, FILL_VALOR if _hay_revision else FILL_EFECTIVO, BORDER, FMT_DEC)
+        F_BOLD, FILL_PEND if _hay_revision else FILL_EFECTIVO, BORDER, FMT_DEC)
 
     r += 2
     veredicto = prof.get("cumple_backend") or prof.get("cumple") or "POR VERIFICAR — sin conclusión"
@@ -2135,9 +2148,19 @@ def construir_hoja_profesional(
     cvl = ws.cell(r, 1, "CONCLUSIÓN DEL TIEMPO EFECTIVO")
     cvl.font, cvl.fill, cvl.border, cvl.alignment = F_BOLD, FILL_RECAP, BORDER, AL_HEAD
     ws.merge_cells(start_row=r, start_column=7, end_row=r, end_column=19)
-    cver = ws.cell(r, 7, _sin_jerga(veredicto))
+    # La conclusión y la PARTE 5 de arriba tienen que decir el MISMO número: si el
+    # veredicto del evaluador cita el conteo sin bordes, se antepone el total
+    # declarado verificado (`_sd`, el que acaba de imprimirse) y se explica el
+    # otro. La línea del equipo evaluador (`cumple_backend`) no se toca: esa ya
+    # trae su propia cifra, la de los días efectivos.
+    _visible = _sin_jerga(veredicto)
+    if not prof.get("cumple_backend"):
+        _visible = conciliar_conclusion(_visible, _sd, _n_decl)
+    cver = ws.cell(r, 7, _visible)
     cver.font, cver.border, cver.alignment = F_BOLD, BORDER, AL_WRAP
-    cver.fill = (_fill_veredicto(veredicto, "pos") or FILL_VALOR)
+    # El color sale del veredicto ORIGINAL: con el prefijo delante,
+    # `_clasificar_veredicto` ya no reconocería el «CUMPLE» inicial.
+    cver.fill = (_fill_veredicto(veredicto, "pos") or FILL_PEND)
     ws.row_dimensions[r].height = max(30, (-(-len(str(cver.value)) // 90)) * 14 + 4)
 
     # ── CRUCE DE FECHAS (T-011), justo bajo la PARTE 5 ───────────────────────
@@ -2196,7 +2219,7 @@ def construir_hoja_profesional(
             c = ws.cell(r, 2, texto)
             c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
             if p["resp_a"] == "POR VERIFICAR" or p["resp_b"] == "POR VERIFICAR":
-                c.fill = FILL_VALOR
+                c.fill = FILL_PEND
             ws.row_dimensions[r].height = max(15, (-(-len(texto) // 150)) * 13 + 3)
             r += 1
 

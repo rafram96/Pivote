@@ -145,6 +145,11 @@ def _sin_jerga(v):
     if not isinstance(v, str):
         return v
     out = re.sub(r"\bbackend\s*/\s*comit[eé]\b", "Comité", v, flags=re.I)
+    # "(backend/evaluador)" es UNA sola instrucción («que lo mire quien evalúa»),
+    # no dos actores: la regla genérica de abajo lo dejaría en
+    # "equipo evaluador/evaluador".
+    out = re.sub(r"\bbackend\s*/\s*evaluador(?:es)?\b", "equipo evaluador", out,
+                 flags=re.I)
     out = re.sub(r"\bEl\s+backend\b", "El equipo evaluador", out)
     out = re.sub(r"\bel\s+backend\b", "el equipo evaluador", out)
     out = re.sub(r"\bbackend\b", "equipo evaluador", out, flags=re.I)
@@ -165,6 +170,10 @@ def _sin_jerga(v):
     out = re.sub(r"\bfunciones_similares\b", "funciones", out)
     out = re.sub(r"\bn_prof\s*=\s*(\d+)\b", r"profesional \1", out)
     out = re.sub(r"\broster_bundles\.json\b", "el mapa de la propuesta", out)
+    # «espejo» es el nombre interno del JSON que viaja al servidor; para quien
+    # evalúa, eso es «el análisis».
+    out = re.sub(r"\bJSON\s+espejo\b", "el análisis", out, flags=re.I)
+    out = re.sub(r"\bespejos?\b", "análisis", out, flags=re.I)
     out = re.sub(r"\bcargos_similares_validos\b", "cargos similares admitidos", out)
     out = re.sub(r"\baplica\s*:\s*false\b", "no aplica", out, flags=re.I)
     out = re.sub(r"\bsubagente(?:s)?\b", "revisión documental", out, flags=re.I)
@@ -176,6 +185,71 @@ def _sin_jerga(v):
     out = re.sub(r"\bCHACARILLLA\b", "CHACARILLA", out, flags=re.I)
     out = re.sub(r"\bnull\b", "sin dato", out)
     return re.sub(r"\s{2,}", " ", out).strip()
+
+
+# ── Conciliación de la cifra de días del veredicto con el total verificado ──────
+#
+# El texto de la conclusión («CUMPLE — acredita 1267 días…») lo escribe el
+# evaluador automático y es LITERAL: se conserva palabra por palabra porque es lo
+# que el Comité audita. Su cifra, en cambio, es aritmética, y ahí discrepa: el
+# proyecto cuenta INCLUSIVO (fin − inicio + 1, un día más POR PERIODO) en todo el
+# libro, así que el mismo profesional mostraba 1269 en la PARTE 5 y 1267 en la
+# conclusión de al lado — dos números sin explicación a la vista (job Vitarte
+# `7e9306a321ac`, hoja «P1. Contr»: PARTE 5 = 1269, CONCLUSIÓN = 1267).
+#
+# Aquí NO se reescribe la prosa del evaluador: se antepone el total verificado y
+# se declara de dónde sale el otro número. El sistema no corrige al documento, lo
+# confronta — pero nunca muestra dos cifras sin explicar.
+#
+# La conciliación se ABSTIENE salvo que la diferencia sea, demostrablemente, la
+# del conteo de bordes: el verificado tiene que ser MAYOR y por como mucho un día
+# por periodo declarado. Cualquier otra distancia es otra cosa (un recorte por
+# paralizaciones, una suma sobre otro conjunto de constancias, un margen citado
+# de pasada como «~7 días sobre el mínimo») y explicarla como conteo de bordes
+# sería mentir. En esos casos el texto sale intacto: el Excel ya muestra las
+# restas del Paso 5 en sus propias filas.
+_RE_DIAS_CITADOS = re.compile(r"(\d[\d.,]*)\s*d[ií]as?\b", re.I)
+
+
+def _entero_citado(txt: str) -> Optional[int]:
+    """"1,267" / "1267" → 1267. Decimales o basura → None (no es un conteo)."""
+    limpio = str(txt).replace(",", "").replace(".", "")
+    return int(limpio) if limpio.isdigit() else None
+
+
+def dias_citados(texto) -> list[int]:
+    """Conteos de días que menciona un texto de veredicto, en orden de aparición."""
+    if not isinstance(texto, str):
+        return []
+    vistos: list[int] = []
+    for m in _RE_DIAS_CITADOS.finditer(texto):
+        n = _entero_citado(m.group(1))
+        if n is not None and n not in vistos:
+            vistos.append(n)
+    return vistos
+
+
+def conciliar_conclusion(texto, dias_verificados, periodos: int = 0) -> str:
+    """Antepone el total verificado cuando el veredicto cita el conteo exclusivo.
+
+    `dias_verificados` es el TOTAL DECLARADO que el backend recalculó inclusivo
+    (el mismo que imprime la PARTE 5); `periodos`, cuántos periodos lo componen —
+    el desfase máximo que el conteo de bordes puede producir. Sin divergencia (o
+    con una divergencia que no es la de los bordes) devuelve el texto TAL CUAL:
+    el caso sano no debe cambiar ni una celda."""
+    if not isinstance(texto, str) or not isinstance(dias_verificados, int) \
+            or isinstance(dias_verificados, bool) or periodos <= 0:
+        return texto if isinstance(texto, str) else ("" if texto is None else str(texto))
+    candidatos = [n for n in dias_citados(texto)
+                  if 0 < dias_verificados - n <= periodos]
+    if not candidatos:
+        return texto
+    citada = max(candidatos)     # la más cercana al verificado
+    return (f"{dias_verificados} días verificados "
+            f"({round(dias_verificados / 365, 2)} años). {texto.strip()} "
+            f"· La cifra de {citada} días que cita esta conclusión cuenta un día "
+            f"menos por periodo; el cómputo del proyecto incluye el día de inicio "
+            f"y el de fin, y da {dias_verificados}.")
 
 
 # Un MONTO tiene forma de monto: miles agrupados ("16,670,989.88" / "16.670.989,88")
@@ -245,6 +319,54 @@ def _extraer_montos_prosa(detalle: str) -> dict[str, float | None]:
 
 
 
+def _num(v):
+    """Puntaje como número, o None si la celda trae texto ("NO APLICA")."""
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def nota_parte5(factores, puntaje_total) -> str:
+    """Resumen de la PARTE 5 armado desde las MISMAS celdas que se imprimen.
+
+    Recorre los factores tal como quedaron en la tabla: los que tienen puntaje
+    suman, los que dicen «NO APLICA» se listan aparte y los que quedaron sin
+    puntaje se declaran por confirmar. Si el total impreso no es la suma de lo
+    que la tabla muestra, la nota lo dice en vez de repetir un número que el
+    lector no puede reproducir."""
+    con_puntaje: list[str] = []
+    por_confirmar: list[str] = []
+    no_aplican: list[str] = []
+    suma = 0.0
+    for f in factores or []:
+        nombre = str((f or {}).get("factor") or "?").strip() or "?"
+        pje = (f or {}).get("puntaje")
+        num = _num(pje)
+        if num is not None:
+            suma += num
+            con_puntaje.append(f"{nombre} {num:g}")
+        elif str(pje or "").strip().upper().startswith("NO APLICA"):
+            no_aplican.append(nombre)
+        else:
+            por_confirmar.append(nombre)
+
+    total = _num(puntaje_total)
+    if total is None:
+        cabeza = "Puntaje técnico total: POR VERIFICAR — no hay un total calculable"
+    else:
+        cabeza = f"Puntaje técnico total {total:g}"
+        if con_puntaje:
+            cabeza += " = " + " + ".join(con_puntaje)
+        if abs(suma - total) > 0.005:
+            cabeza += (f" (los factores con puntaje de esta tabla suman {suma:g}: "
+                       f"revisar la diferencia)")
+    partes = [cabeza + "."]
+    if por_confirmar:
+        partes.append(f"Por confirmar: {', '.join(por_confirmar)} — su tramo no se "
+                      "pudo determinar con el cuadro de las bases, así que no suma.")
+    if no_aplican:
+        partes.append(f"No aplican (eliminados de las bases): {', '.join(no_aplican)}.")
+    return " ".join(partes)
+
+
 def fecha_excel(v):
     """ISO 'YYYY-MM-DD' → date real (NOTA 13: fechas en formato fecha, se
     muestran dd/mm/yy). Sentinels ('POR VERIFICAR…') y parciales quedan texto."""
@@ -295,16 +417,19 @@ class Builder:
         self.r += 1
 
     def row(self, values, bold=False, fmts=None, verdicts=None, backend_cols=None,
-            supuesto_cols=None):
+            supuesto_cols=None, fills=None):
         """Escribe una fila. Fondo blanco; verde/rojo SOLO en las columnas de
         veredicto (`verdicts` = {col: 'pos'|'neg'}, según si "SÍ" es bueno o malo)
         y amarillo suave en "POR VERIFICAR". Las columnas en `backend_cols` llevan
-        un borde izquierdo azul (dato verificado/enriquecido por el backend)."""
+        un borde izquierdo azul (dato verificado/enriquecido por el backend).
+        `fills` = {col: PatternFill} fuerza un fondo cuando el color no sale de un
+        veredicto (ej. el puntaje retirado de la PARTE 5)."""
         ws = self.ws
         fmts = fmts or {}
         verdicts = verdicts or {}
         backend_cols = backend_cols or set()
         supuesto_cols = supuesto_cols or set()
+        fills = fills or {}
         for i, v in enumerate(values, start=1):
             c = ws.cell(self.r, i, v)
             c.font = F_BOLD if bold else F_CELL
@@ -316,13 +441,19 @@ class Builder:
                 fill = _fill_veredicto(v, verdicts[i])
                 if fill:
                     c.fill = fill
+            if i in fills:
+                c.fill = fills[i]
             # La procedencia gana al color semántico: primero debe quedar claro
             # que el valor fue inferido; no se confunde con "por verificar".
             if i in supuesto_cols and v not in (None, ""):
                 c.fill = FILL_SUPUESTO
         self.r += 1
 
-    def kv(self, label, value, fmt=None, verdict=None):
+    def kv(self, label, value, fmt=None, verdict=None, valor_veredicto=None):
+        """`valor_veredicto` clasifica el color a partir de OTRO texto que el que
+        se escribe. Se usa cuando la celda lleva un prefijo del equipo evaluador
+        (la cifra verificada) delante del veredicto literal: sin esto el color
+        se perdería, porque `_clasificar_veredicto` mira el inicio del texto."""
         ws = self.ws
         ws.cell(self.r, 1, label).font = F_BOLD
         ws.merge_cells(start_row=self.r, start_column=2, end_row=self.r, end_column=NCOLS)
@@ -331,7 +462,8 @@ class Builder:
         if fmt and isinstance(value, (int, float)):
             c.number_format = fmt
         if verdict:
-            fill = _fill_veredicto(value, verdict)
+            fill = _fill_veredicto(
+                value if valor_veredicto is None else valor_veredicto, verdict)
             if fill:
                 c.fill = fill
         self.r += 1
@@ -475,11 +607,15 @@ def construir_hoja_evaluacion(ws, espejo: dict,
         sup_prof = set(prof.get("supuestos") or [])
         b.profblock(f"PROFESIONAL {prof.get('n_prof')}: {prof.get('cargo', '')}")
         b.headers(["No", "CARGO", "DETALLE", "INFORMACIÓN DE LA PROPUESTA", "FOLIO", "PUNTAJE"])
-        b.row([prof.get("n_prof"), prof.get("cargo"), "NOMBRE DEL PROFESIONAL", prof.get("nombre"), prof.get("folio_nombre"), ""], supuesto_cols={2 if "cargo" in sup_prof else 0, 4 if "nombre" in sup_prof else 0})
-        b.row(["", "", "TÍTULO PROFESIONAL", prof.get("titulo"), prof.get("folio_titulo"), ""], supuesto_cols={4} if "titulo" in sup_prof else set())
-        b.row(["", "", "¿La profesión es la indicada?", prof.get("profesion_valida"), "", ""], verdicts={4: "pos"}, supuesto_cols={4} if "profesion_valida" in sup_prof else set())
-        b.row(["", "", "No de COLEGIATURA / Fecha", prof.get("colegiatura"), prof.get("folio_colegiatura"), ""], supuesto_cols={4} if "colegiatura" in sup_prof else set())
-        b.row(["", "", "B. CERTIFICACIONES", prof.get("certificaciones"), "", ""], supuesto_cols={4} if "certificaciones" in sup_prof else set())
+        # Estas 5 celdas también las escribe el análisis y también las lee el
+        # evaluador: pasan por `_sin_jerga` como el resto del libro. Sin esto se
+        # colaba texto de programador ("Verificar folio/título (backend/evaluador)",
+        # celda D161 del job Vitarte).
+        b.row([prof.get("n_prof"), _sin_jerga(prof.get("cargo")), "NOMBRE DEL PROFESIONAL", _sin_jerga(prof.get("nombre")), prof.get("folio_nombre"), ""], supuesto_cols={2 if "cargo" in sup_prof else 0, 4 if "nombre" in sup_prof else 0})
+        b.row(["", "", "TÍTULO PROFESIONAL", _sin_jerga(prof.get("titulo")), prof.get("folio_titulo"), ""], supuesto_cols={4} if "titulo" in sup_prof else set())
+        b.row(["", "", "¿La profesión es la indicada?", _sin_jerga(prof.get("profesion_valida")), "", ""], verdicts={4: "pos"}, supuesto_cols={4} if "profesion_valida" in sup_prof else set())
+        b.row(["", "", "No de COLEGIATURA / Fecha", _sin_jerga(prof.get("colegiatura")), prof.get("folio_colegiatura"), ""], supuesto_cols={4} if "colegiatura" in sup_prof else set())
+        b.row(["", "", "B. CERTIFICACIONES", _sin_jerga(prof.get("certificaciones")), "", ""], supuesto_cols={4} if "certificaciones" in sup_prof else set())
         b.blank()
         b.subtitle(f"PARTE 4 - EXPERIENCIA DEL PROFESIONAL: {prof.get('cargo', '')}")
         b.headers(P4_HEAD)
@@ -546,7 +682,7 @@ def construir_hoja_evaluacion(ws, espejo: dict,
                    "", "", "", "", "", "", "", "", "", ""],
                   bold=True, fmts=m4, backend_cols={12})
             b.row(["", "", "", "", "", "", "", "", "", "",
-                   "TOTAL EFECTIVO (backend)", tb.get("dias_efectivos"), "",
+                   "TOTAL EFECTIVO VERIFICADO", tb.get("dias_efectivos"), "",
                    tb.get("anios_efectivos"), "", "", "", "", "", "", "", ""],
                   bold=True, fmts=m4, backend_cols={12, 14})
         # El veredicto lo escribe el LLM sobre los días DECLARADOS; el backend calcula
@@ -557,11 +693,18 @@ def construir_hoja_evaluacion(ws, espejo: dict,
         vb = prof.get("cumple_backend")
         contradice = bool(vb) and str(prof.get("cumple", "")).upper().startswith("CUMPLE")
         if prof.get("cumple"):
-            b.kv("¿EL PROFESIONAL CUMPLE?", _sin_jerga(prof["cumple"]),
-                 verdict="neg" if contradice else "pos")
+            # El veredicto del evaluador cuenta los días por su cuenta; la fila
+            # TOTAL DECLARADO de arriba los cuenta inclusivos. Si discrepan, la
+            # celda antepone el verificado en vez de dejar dos cifras sueltas.
+            _cumple = _sin_jerga(prof["cumple"])
+            b.kv("¿EL PROFESIONAL CUMPLE?",
+                 conciliar_conclusion(_cumple, t.get("dias"), len(exps) - sin_dias),
+                 verdict="neg" if contradice else "pos", valor_veredicto=_cumple)
         if vb:
             # `pos` sobre el TEXTO del backend: su "NO CUMPLE" se pinta rojo y su
             # "POR VERIFICAR" amarillo. Con `neg` un NO CUMPLE saldría VERDE.
+            # No se concilia: esta línea ya la escribe el equipo evaluador con su
+            # propia cifra (los días EFECTIVOS, no el total declarado).
             b.kv("⚠ Verificación del tiempo efectivo:" if contradice
                  else "Verificación del tiempo efectivo:", _sin_jerga(vb), verdict="pos")
         if prof.get("anios_adicionales"):
@@ -573,16 +716,31 @@ def construir_hoja_evaluacion(ws, espejo: dict,
     b.parte("PARTE 5: RESUMEN DE LA EVALUACIÓN")
     b.headers(["FACTOR", "CRITERIO", "FOLIO", "DETALLE / OBSERVACIONES", "PUNTAJE"])
     for fac in re_.get("factores", []):
-        b.row([fac.get("factor"), fac.get("criterio"), fac.get("folio"), fac.get("detalle"), fac.get("puntaje")],
-              fmts={5: FMT_INT})
+        # Un factor sin puntaje NO deja la celda muda. `_recalcular_factor_a`
+        # retira el puntaje heredado cuando la rúbrica no viaja estructurada
+        # (`orquestador/etapas_reales.py`), y la celda en blanco al lado de un
+        # total distinto de cero se leía como un error del archivo (E317 del job
+        # Vitarte). Ahora dice lo que pasó, en amarillo de «por verificar».
+        _pje = fac.get("puntaje")
+        _pendiente = _pje in (None, "")
+        b.row([fac.get("factor"), fac.get("criterio"), fac.get("folio"),
+               fac.get("detalle"), "POR CONFIRMAR" if _pendiente else _pje],
+              fmts={5: FMT_INT}, fills={5: FILL_PEND} if _pendiente else None)
     if re_.get("puntaje_total") is not None:
         b.row(["PUNTAJE TÉCNICO TOTAL", "", "", "", re_.get("puntaje_total")], bold=True, fmts={5: FMT_INT})
     else:
         b.row(["PUNTAJE TÉCNICO TOTAL", "", "",
                "POR VERIFICAR — no se recibió un puntaje total calculable",
                "POR VERIFICAR"], bold=True, verdicts={5: "pos"})
+    # La NOTA se ARMA con lo que la tabla de arriba muestra. Antes se imprimía el
+    # texto que venía redactado en el análisis y podía contradecirla a la vista
+    # («Puntaje técnico total 80/100 (A=40…)» sobre una tabla que mostraba 40 y
+    # el Factor A sin puntaje). Un resumen que no cuadra con su propia tabla
+    # obliga a desconfiar del libro entero.
+    b.kv("NOTA:", nota_parte5(re_.get("factores"), re_.get("puntaje_total")))
     if re_.get("nota"):
-        b.kv("NOTA:", re_["nota"])
+        b.kv("Observaciones de la evaluación (redactadas antes del recálculo "
+             "del puntaje):", _sin_jerga(re_["nota"]))
 
 
 def generar_excel(espejo: dict, salida: Path) -> Path:

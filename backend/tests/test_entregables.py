@@ -1328,7 +1328,7 @@ def test_parte4_muestra_total_declarado_y_descuentos_backend(tmp_path):
     texto = _texto(openpyxl.load_workbook(salida)["CLAUDE"])
     assert "TOTAL DECLARADO (suma de filas)" in texto
     assert "(−) Traslapes entre experiencias" in texto
-    assert "TOTAL EFECTIVO (backend)" in texto
+    assert "TOTAL EFECTIVO VERIFICADO" in texto
     assert "781" in texto and "716" in texto and "65" in texto
 
 

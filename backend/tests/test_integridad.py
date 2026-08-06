@@ -370,12 +370,13 @@ def test_la_marca_del_candado_de_cargo_no_cuenta_como_respuesta_del_evaluador():
     """`anotar_cargo_nucleo` reescribe `cargo bases válido`. Sobre una celda vacía
     el texto es 100% del backend; sobre una contestada conserva lo del evaluador
     entre ⟦…⟧. Solo el segundo caso prueba que el evaluador contestó."""
-    from validacion.cargo_nucleo import Hallazgo as HallazgoCargo, _texto_marca
+    from validacion.cargo_nucleo import (
+        Hallazgo as HallazgoCargo, _MARCA_NO, _MARCA_PEND, _texto_marca)
 
     h = HallazgoCargo(n_exp=1, cargo_ocupado="RESIDENTE", faltantes=("supervisión",),
                       referencia=None, funciones=False, llm=None)
-    del_backend = _texto_marca(h, None, "POR VERIFICAR (candado:")
-    con_eco = _texto_marca(h, "SÍ", "NO (candado:")
+    del_backend = _texto_marca(h, None, _MARCA_PEND)
+    con_eco = _texto_marca(h, "SÍ", _MARCA_NO)
 
     profs = [dict(SANO[0], cumple=None, profesion_valida=None,
                   experiencias=[_exp(1, cargo_bases_valido=del_backend,

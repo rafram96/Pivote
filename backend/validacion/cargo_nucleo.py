@@ -359,25 +359,29 @@ def revisar_profesional(prof: dict) -> tuple[Optional[Requisito], list[Hallazgo]
 # Reescribe `cargo_bases_valido` en el caso duro (ni cargo ni funciones), en DOS
 # niveles — calibrados con el replay sobre 35 espejos reales (1421 experiencias):
 #
-#   ROJO      "NO (candado: …)"            → el LLM había escrito un SÍ explícito.
-#             Es la contradicción del issue #31: había un verde que corregir.
-#   AMARILLO  "POR VERIFICAR (candado: …)" → el LLM no dejó veredicto legible.
-#             No hay verde que desmentir y ahí la precisión del candado es menor
-#             (los cargos vienen redactados de mil formas), así que se pide
+#   ROJO      "NO — el cargo certificado no corresponde al exigido (…)"
+#             → el LLM había escrito un SÍ explícito. Es la contradicción del
+#             issue #31: había un verde que corregir.
+#   AMARILLO  "POR VERIFICAR — el cargo certificado podría no corresponder al
+#             exigido (…)" → el LLM no dejó veredicto legible. No hay verde que
+#             desmentir y ahí la precisión de esta comprobación es menor (los
+#             cargos vienen redactados de mil formas), así que se pide
 #             confirmación en vez de afirmar el NO.
 #
-# Ambos textos los pinta `_fill_veredicto` por su prefijo, sin tocar el formato
-# congelado del Excel. El texto de Claude se conserva entre ⟦⟧ (traza, mismo
-# criterio que el consolidador). NO se toca el cómputo de días: se señala, no se
-# juzga — el veredicto duro es del Comité.
-_MARCA_NO = "NO (candado:"
-_MARCA_PEND = "POR VERIFICAR (candado:"
+# La celda la lee el EVALUADOR: la palabra «candado» es del taller, no del acta,
+# y por eso los dos rótulos dicen en castellano lo que pasó. Ambos textos los
+# pinta `_fill_veredicto` por su prefijo ("NO…" → rojo, "POR VERIFICAR…" →
+# amarillo), sin tocar el formato congelado del Excel. El texto de Claude se
+# conserva entre ⟦⟧ (traza, mismo criterio que el consolidador). NO se toca el
+# cómputo de días: se señala, no se juzga — el veredicto duro es del Comité.
+_MARCA_NO = "NO — el cargo certificado no corresponde al exigido"
+_MARCA_PEND = "POR VERIFICAR — el cargo certificado podría no corresponder al exigido"
 
 
 def _texto_marca(h: Hallazgo, previo, prefijo: str) -> str:
     falta = ", ".join(f"«{t}»" for t in h.faltantes)
     ref = f" del cargo exigido «{h.referencia.texto}»" if h.referencia else ""
-    txt = (f"{prefijo} el cargo declarado no acredita {falta}{ref}; el documento "
+    txt = (f"{prefijo} (no acredita {falta}{ref}; el documento "
            f"tampoco acredita funciones) — a ratificación del Comité")
     if isinstance(previo, str) and previo.strip():
         txt += f" ⟦Claude: {previo.strip()}⟧"

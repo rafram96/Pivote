@@ -17,8 +17,8 @@ from pathlib import Path
 from schemas.pipeline import Severidad
 from validacion import anotar_cargo_nucleo, verificar_espejo
 from validacion.cargo_nucleo import (
-    derivar_requisito, equivalentes, evaluar_cargo, faltantes,
-    funciones_acreditadas, revisar_profesional, veredicto_llm,
+    _MARCA_NO, _MARCA_PEND, derivar_requisito, equivalentes, evaluar_cargo,
+    faltantes, funciones_acreditadas, revisar_profesional, veredicto_llm,
 )
 from validacion.notas import nota_cargo_nucleo
 
@@ -307,7 +307,8 @@ def test_anotar_marca_las_cuatro_y_respeta_el_control():
     assert anotar_cargo_nucleo(espejo) == 4
     exps = espejo["profesionales"][0]["experiencias"]
     for e in exps[:4]:
-        assert e["cargo_bases_valido"].startswith("NO (candado:")
+        assert e["cargo_bases_valido"].startswith(_MARCA_NO)
+        assert "candado" not in e["cargo_bases_valido"]   # jerga fuera del entregable
         assert "a ratificación del Comité" in e["cargo_bases_valido"]
         assert "⟦Claude:" in e["cargo_bases_valido"]        # traza del juicio original
     assert exps[4]["cargo_bases_valido"].startswith("SÍ")    # control positivo intacto
@@ -351,7 +352,8 @@ def test_sin_veredicto_de_claude_la_marca_es_amarilla():
         _exp(1, "Ingeniero de Costos", cargo_bases_valido=None)])]}
     assert anotar_cargo_nucleo(espejo) == 1
     marcado = espejo["profesionales"][0]["experiencias"][0]["cargo_bases_valido"]
-    assert marcado.startswith("POR VERIFICAR (candado:")
+    assert marcado.startswith(_MARCA_PEND)
+    assert "candado" not in marcado
 
     from scripts.generar_excel import _clasificar_veredicto
     assert _clasificar_veredicto(marcado) == "pend"        # amarillo, no rojo
@@ -363,8 +365,8 @@ def test_las_dos_marcas_son_idempotentes_entre_si():
         _exp(2, "Ingeniero de Costos", cargo_bases_valido="SÍ — CUMPLE")])]}
     assert anotar_cargo_nucleo(espejo) == 2
     exps = espejo["profesionales"][0]["experiencias"]
-    assert exps[0]["cargo_bases_valido"].startswith("POR VERIFICAR (candado:")
-    assert exps[1]["cargo_bases_valido"].startswith("NO (candado:")
+    assert exps[0]["cargo_bases_valido"].startswith(_MARCA_PEND)
+    assert exps[1]["cargo_bases_valido"].startswith(_MARCA_NO)
     assert anotar_cargo_nucleo(espejo) == 0
 
 

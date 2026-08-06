@@ -303,4 +303,6 @@ def test_excel_muestra_documentos_seace_y_ambiguedad(tmp_path):
     assert "Bases Integradas" in texto
     assert "Contrato firmado" in texto
     aviso = next(c for c in celdas if str(c.value).startswith("Por confirmar"))
-    assert (aviso.fill.fgColor.rgb or "").endswith("FFFF00")
+    # Amarillo SUAVE: es «por verificar», no un dato del certificado. El amarillo
+    # fuerte (FFFF00) quedó reservado para lo que la leyenda de la hoja promete.
+    assert (aviso.fill.fgColor.rgb or "").endswith("FFF2CC")
