@@ -101,11 +101,20 @@ tal vez un formato vertical». IMPLEMENTADO: tarjeta vertical por experiencia
 Se preservó todo el contrato: solo el apéndice bajo la PARTE 5 cambió de FORMA
 (la hoja global «Cronología de expedientes» intacta); `presentacion_cruces`
 sigue siendo la fuente única de las dos vistas; colores idénticos (amarillo
-declarado / violeta deducida / semáforo en respuestas / «no aplica» sin
-color); abstención rotulada; fechas dd/mm/yyyy. Los 6 tests del bloque se
-reescribieron al formato vertical buscando por ETIQUETA (no coordenadas
-fijas). Gate: suite 967/25. Pendiente: validación visual de Rafael sobre el
-demo camino B v2.
+declarado / violeta deducida / semáforo en respuestas); abstención rotulada;
+fechas dd/mm/yyyy. Los tests del bloque se reescribieron al formato vertical
+buscando por ETIQUETA (no coordenadas fijas).
+
+**Iteración 2 (mismo día, aprobada por Rafael sobre mockup en texto): la
+tarjeta muestra SOLO lo que aplica a su tipo.** El tipo va en el título
+(«EXPERIENCIA N · obra/expediente», vara = `aplica_b`, la misma de la Regla
+B); la tarjeta de OBRA queda en 3 filas + explicación (se caen «Término
+declarado», «Aprobación del expediente: —» y el «NO APLICA»); la de
+EXPEDIENTE conserva las 6 filas. El «NO APLICA» sobrevive solo en la hoja
+global (allá las columnas son compartidas). Test nuevo:
+`test_tarjeta_de_expediente_muestra_el_termino_y_la_aprobacion`. Gate: suite
+967/25 (dos veces, una por iteración). Primera corrida real prevista: la
+propuesta nueva que mandó el ing. (6-ago, pendiente de descarga).
 
 ---
 id: T-TAREA-OCR-REMOTO

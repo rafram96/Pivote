@@ -513,18 +513,20 @@ def test_bloque_por_profesional_una_entrada_por_experiencia(tmp_path):
     fila, _c = _buscar(ws, TITULO_BLOQUE)
     assert fila, "el bloque de cruces no aparece en la hoja del profesional"
 
-    # Formato vertical: una TARJETA por experiencia, cada una con sus preguntas.
-    assert _buscar(ws, "EXPERIENCIA 1")[0] and _buscar(ws, "EXPERIENCIA 2")[0]
+    # Formato vertical: una TARJETA por experiencia, con el TIPO en el título y
+    # solo las preguntas que aplican — una obra no lleva filas de expediente.
+    assert _buscar(ws, "EXPERIENCIA 1 · obra")[0]
+    assert _buscar(ws, "EXPERIENCIA 2 · obra")[0]
     preguntas_a = _filas_etiqueta(ws, "¿Empezó después de firmado el contrato?", fila)
     preguntas_b = _filas_etiqueta(ws, "¿Terminó antes de aprobarse el expediente?", fila)
-    assert len(preguntas_a) == 2 and len(preguntas_b) == 2
+    assert len(preguntas_a) == 2 and not preguntas_b
 
     # Respuestas en la col B de cada tarjeta.
     assert ws.cell(preguntas_a[0], 2).value == "NO"              # la regla A dispara
     assert ws.cell(preguntas_a[1], 2).value == "POR VERIFICAR"   # sin proceso → abstención
 
     # La abstención se ROTULA, no desaparece (la explicación de la tarjeta 2).
-    fila_exp2 = _buscar(ws, "EXPERIENCIA 2")[0]
+    fila_exp2 = _buscar(ws, "EXPERIENCIA 2 · obra")[0]
     notas = " ".join(str(f[0].value) for f in ws.iter_rows(
         min_row=fila_exp2, min_col=1, max_col=1) if f[0].value)
     assert "no se identificó el proceso" in notas and "2018" in notas
@@ -543,8 +545,33 @@ def test_bloque_por_profesional_colorea_como_la_hoja_global(tmp_path):
     preguntas_b = _filas_etiqueta(ws, "¿Terminó antes de aprobarse el expediente?", fila)
     assert ws.cell(preguntas_a[0], 2).fill.fgColor.rgb.endswith("FFC7CE")   # rojo
     assert ws.cell(preguntas_a[1], 2).fill.fgColor.rgb.endswith("FFF2CC")   # amarillo
-    # «No aplica» sin color: amarillo significa «por verificar».
-    assert ws.cell(preguntas_b[0], 2).fill.fgColor.rgb in ("00000000", None)
+    # En obras la pregunta del término NO existe (antes iba «NO APLICA» sin
+    # color; ahora el tipo va en el título y la fila se omite).
+    assert not preguntas_b
+
+
+def test_tarjeta_de_expediente_muestra_el_termino_y_la_aprobacion(tmp_path):
+    """La tarjeta de un expediente lleva las 6 filas: término declarado,
+    aprobación (violeta si es deducida) y la Regla B pintada."""
+    c = cert(tipo_experiencia="expediente", fecha_final="2024-03-31")
+    espejo = _espejo_una_experiencia(c)
+    wb = _libro(espejo, {"1:1": enr_expediente()}, tmp_path)
+    ws = wb[[n for n in wb.sheetnames
+             if n not in ("CLAUDE", "Base de Datos", HOJA_CRONOLOGIA)][0]]
+    fila, _c = _buscar(ws, TITULO_BLOQUE)
+    assert _buscar(ws, "EXPERIENCIA 1 · expediente")[0]
+
+    from datetime import datetime as _dt
+    f_term = _filas_etiqueta(ws, "Término declarado", fila)[0]
+    assert isinstance(ws.cell(f_term, 2).value, _dt)
+    assert ws.cell(f_term, 2).number_format == "dd/mm/yyyy"
+
+    f_aprob = _filas_etiqueta(ws, "Aprobación del expediente", fila)[0]
+    assert ws.cell(f_aprob, 2).fill.fgColor.rgb.endswith("E4D7F5")   # violeta
+
+    f_b = _filas_etiqueta(ws, "¿Terminó antes de aprobarse el expediente?", fila)[0]
+    assert ws.cell(f_b, 2).value == "NO"
+    assert ws.cell(f_b, 2).fill.fgColor.rgb.endswith("FFC7CE")       # rojo
 
 
 def test_las_fechas_llevan_formato_de_fecha_en_las_dos_vistas(tmp_path):
@@ -568,7 +595,10 @@ def test_las_fechas_llevan_formato_de_fecha_en_las_dos_vistas(tmp_path):
     ws = wb[[n for n in wb.sheetnames
              if n not in ("CLAUDE", "Base de Datos", HOJA_CRONOLOGIA)][0]]
     fila, _c = _buscar(ws, TITULO_BLOQUE)
-    for etiqueta in ("Inicio declarado", "Firma del contrato", "Término declarado"):
+    # Tarjeta de obra: inicio y firma. (El término declarado, que solo aparece
+    # en tarjetas de expediente, se verifica en el test de la tarjeta de
+    # expediente.)
+    for etiqueta in ("Inicio declarado", "Firma del contrato"):
         f = _filas_etiqueta(ws, etiqueta, fila)[0]
         c = ws.cell(f, 2)
         assert isinstance(c.value, _dt), etiqueta

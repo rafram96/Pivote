@@ -2175,7 +2175,9 @@ def construir_hoja_profesional(
     # — etiqueta en A, dato en B:D — en vez de la tabla ancha de 19 columnas,
     # que resultaba difícil de leer. Los colores no cambian: amarillo en lo que
     # declara el certificado, violeta en la fecha deducida, semáforo en las
-    # respuestas (el «no aplica» va sin color).
+    # respuestas. El «NO APLICA» de la tabla ancha desapareció de estas
+    # tarjetas (el tipo va en el título); la hoja global lo conserva porque
+    # allá todas las experiencias comparten columnas.
     #
     # OJO con `r`: la PARTE 5 termina escribiendo EN la fila `r` sin avanzarla
     # (mismo detalle que documenta el bloque del factor, más abajo).
@@ -2204,7 +2206,16 @@ def construir_hoja_profesional(
 
         for e in prof.get("experiencias", []):
             p = presentacion_cruces(e, fichas.get((n_prof, e.get("n"))))
-            titulo = f"EXPERIENCIA {p['n_exp']}"
+            # La tarjeta muestra SOLO lo que aplica a su tipo (pedido de Rafael,
+            # 6-ago): en una obra las filas de término/aprobación nunca dicen
+            # nada — el tipo va en el título y esas filas se omiten. La vara es
+            # la misma de la Regla B (`aplica_b`): expediente cuando hay
+            # verificación/aprobación o el proceso es de expediente. El término
+            # de una obra no queda huérfano: su verificación real es el clamp
+            # por valorizaciones, que ya vive en la PARTE 5 y en la ficha.
+            es_exped = p["aplica_b"]
+            titulo = (f"EXPERIENCIA {p['n_exp']} · "
+                      + ("expediente" if es_exped else "obra"))
             if p["proceso"]:
                 titulo += f" · proceso {p['proceso']}"
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
@@ -2216,13 +2227,15 @@ def construir_hoja_profesional(
             _pintar_respuesta(
                 _cf_fila("¿Empezó después de firmado el contrato?", p["resp_a"]),
                 p["resp_a"])
-            _cf_fila("Término declarado", p["fin"], fill=FILL_CLAUDE)
-            cap = _cf_fila("Aprobación del expediente", p["aprobacion"])
-            if p["inferida"]:
-                cap.fill = FILL_SUPUESTO   # violeta = fecha deducida
-            _pintar_respuesta(
-                _cf_fila("¿Terminó antes de aprobarse el expediente?", p["resp_b"]),
-                p["resp_b"], p["aplica_b"])
+            if es_exped:
+                _cf_fila("Término declarado", p["fin"], fill=FILL_CLAUDE)
+                cap = _cf_fila("Aprobación del expediente", p["aprobacion"])
+                if p["inferida"]:
+                    cap.fill = FILL_SUPUESTO   # violeta = fecha deducida
+                _pintar_respuesta(
+                    _cf_fila("¿Terminó antes de aprobarse el expediente?",
+                             p["resp_b"]),
+                    p["resp_b"])
             # La explicación, a todo lo ancho de la tarjeta: es el texto que el
             # evaluador copia al acta, no un tooltip.
             texto = p["motivo"] or "Sin observaciones sobre las fechas."
