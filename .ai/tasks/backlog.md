@@ -16,7 +16,9 @@ depende_de: [T-TAREA-SEACE-F5]
 ---
 **Resolución del RUC exacto del emisor vía adjudicatario SEACE (~0.5 día).
 Idea de Rafael, 2026-08-05, registrada con su OK. Cotización: definir —
-candidato a bolsa o a presentarse junto con el paquete F5.**
+candidato a bolsa o a presentarse junto con el paquete F5.
+Registrada en GitHub como
+[#83](https://github.com/rafram96/Pivote/issues/83) (2026-08-06).**
 
 **Problema**: cuando el certificado no trae RUC del emisor, la etapa SUNAT
 busca por nombre — y los consorcios de nombre genérico ("CONSORCIO
