@@ -332,8 +332,27 @@ depende_de: []
     - [ ] `T-ETL-006` (#21): Control de calidad de volumen y Sanity Check (Gate >= 400k filas).
     - [ ] `T-ETL-007` (#22): Swap atómico de tablas PostgreSQL (`mef_inversiones_staging` -> `mef_inversiones`).
   - [ ] **[Feature #23] Búsqueda Paralela y Cron de Refresco**
-    - [ ] `T-ETL-008` (#24): Cron semanal y actualización de `metadata.json`.
-    - [ ] `T-ETL-009` (#25): Engine de búsqueda paralela N profesionales (SQL + Python Scoring).
+    - [x] ~~`T-ETL-008` (#24): Cron semanal y actualización de `metadata.json`.~~
+      **HECHO 2026-08-05** — la parte que importaba (que el fallo del refresco
+      deje de ser silencioso): bitácora estructurada por corrida
+      (`resolucion/bitacora_mef.py`), umbral `PIVOTE_MEF_DIAS_FRESCURA` (default
+      10 d) y aviso en las tres superficies existentes (`/api/pivote/salud`, el
+      buscador de #27, observación `BASE_MEF_DESACTUALIZADA` en el análisis).
+      **Instalar el cron sigue abierto: es tarea del deploy**, con el simulacro
+      en `docs/despliegue/despliegue-runbook.md` §10.
+    - [ ] `T-ETL-009` (#25): Engine de búsqueda paralela N profesionales.
+      **MEDIDO 2026-08-05 → recomendación NO-GO, esperando decisión de Rafael.**
+      Evidencia: `docs/pruebas/issue25-medicion-paralelismo.md` (reproducible con
+      `backend/scripts/medir_paralelismo.py`, offline, 7 concursos reales / 333
+      experiencias). Números: el **97,9 %** del tiempo de la etapa de resolución
+      es espera del portal InfoObras; el bucle local cuesta **0,6 ms por
+      experiencia** y las consultas a la base MEF **≤ 5,8 s por concurso**
+      (p50 82 ms, p95 204 ms), o sea **0,4 %–1,7 %** de un job de 3 a 21 minutos.
+      Techo de Amdahl de lo paralelizable POR REGLA (solo base local): **×1,004
+      a ×1,017** sobre el job. Además, `BaseMef` serializa `buscar_candidatos()`
+      con un `RLock` de instancia (un pool daría ×1 tal cual) y la herencia por
+      folio de `resolver_con_dedup` depende del orden. Reabrir solo si el CPU
+      local supera ~30 s por concurso o el p95 de la base pasa de ~1 s.
 - [ ] Camino A: no descargar ni pintar secciones de obra (valorizaciones,
   cronograma) en expedientes; silenciar advertencias COBERTURA para expedientes.
 - [x] ~~Re-revisar con el cliente los 2 casos de verdad auditada dudosa:

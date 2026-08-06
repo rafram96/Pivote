@@ -2,6 +2,36 @@
 
 > Última actualización: **2026-08-05** · rama de trabajo: `demo`
 
+## El fallo del refresco del MEF deja de ser silencioso (#24, 5-ago)
+
+Conservar la carga anterior cuando el ETL falla ya estaba bien (#21/#22); lo que
+faltaba era que alguien se enterara. Cada corrida —termine bien o mal— se anota
+ahora en `bitacora.json` (`resolucion/bitacora_mef.py`), con la causa del fallo
+ya clasificada por `errores_red.clasificar()`. El umbral es
+`PIVOTE_MEF_DIAS_FRESCURA` (**default 10 días**: la tarea es semanal, así que 10
+delata UNA semana saltada al miércoles siguiente sin protestar por un domingo con
+retraso), y el aviso sale por **tres superficies que ya existían**, sin vistas
+nuevas: `/api/pivote/salud`, el buscador de #27 (HTTP y consola) y una
+observación `BASE_MEF_DESACTUALIZADA` en el análisis. Con la base al día nadie es
+molestado — es la condición para que el aviso se lea el día que aparezca.
+`BaseMef.frescura()` es el punto único (barato: dos archivos, sin PG ni índice).
+**Instalar el cron sigue siendo tarea del deploy**; el simulacro está en el
+runbook §10.
+
+## #25 medida: paralelizar N profesionales NO vale la pena (5-ago)
+
+Recomendación **NO-GO**, esperando decisión de Rafael. Medido offline sobre los 7
+concursos reales de `datos_pivote` (333 experiencias): el **97,9 %** del tiempo
+de la etapa de resolución es espera del portal InfoObras; el bucle local cuesta
+**0,6 ms por experiencia** y la base MEF **≤ 5,8 s por concurso** (p50 82 ms,
+p95 204 ms) — o sea **0,4 %–1,7 %** de un análisis que dura de 3 a 21 minutos.
+Techo de Amdahl de lo que la regla del proyecto permite paralelizar (solo base
+local): ×1,004–×1,017. Y hoy `BaseMef` serializa `buscar_candidatos()` con un
+`RLock` de instancia, así que un pool daría literalmente ×1. Evidencia y riesgos
+en `docs/pruebas/issue25-medicion-paralelismo.md`; reproducible con
+`backend/scripts/medir_paralelismo.py`. Donde sí está el tiempo: las descargas de
+InfoObras y SUNAT — y ahí la palanca es **bajar menos**, no concurrir más.
+
 ## La base MEF se puede consultar, y el MCP sabe buscar y descargar (5-ago)
 
 **Issues #27 y #5**, las dos aprobadas por Rafael. Un núcleo

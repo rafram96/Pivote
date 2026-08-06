@@ -4,6 +4,42 @@
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
 
+## Nota (2026-08-05, Claude) — #24 cerrada e #25 medida (NO-GO)
+
+Dos issues aprobadas por Rafael, un commit cada una. Lo que un agente nuevo debe
+saber:
+
+1. **#24 · el fallo del refresco MEF ya no es silencioso.** `bitacora.json`
+   (`resolucion/bitacora_mef.py`) guarda cada corrida del ETL con su causa
+   clasificada; `BaseMef.frescura()` es el punto único de verdad de la frescura
+   (barato: no toca PG ni el índice RAM) y `estado_operativo()` = frescura + PG.
+   Umbral `PIVOTE_MEF_DIAS_FRESCURA`, default **10**. Estados: `missing` →
+   `invalid` → `stale` → `refresco_fallido` → `ok`.
+2. **Nada de vistas nuevas**: el aviso viaja por `/api/pivote/salud`, por el
+   buscador de #27 (`base_desactualizada` + `aviso_frescura`, campos aparte de
+   `aviso`) y por una observación `BASE_MEF_DESACTUALIZADA` del análisis. **Solo
+   si hay algo que decir** — con la base al día ninguna de las tres habla.
+3. **Lo que #24 NO incluye, a propósito**: instalar el cron. Es del deploy. El
+   runbook §10 gana el simulacro para comprobarlo en el server del cliente.
+4. **#25 · veredicto NO-GO, decide Rafael.** NO se implementó nada: el
+   entregable es la medición. Números en
+   `docs/pruebas/issue25-medicion-paralelismo.md`, reproducibles con
+   `backend/scripts/medir_paralelismo.py` (offline, no toca producción). Titular:
+   97,9 % de la etapa de resolución es espera de InfoObras; lo paralelizable por
+   regla son ≤ 5,8 s de un job de hasta 21 minutos.
+5. **Dos hallazgos del inventario de #25 que valen aunque no se paralelice**:
+   `BaseMef` mantiene su `RLock` de instancia tomado durante TODO
+   `buscar_candidatos()` (cualquier pool sobre ella daría ×1), y la herencia por
+   folio de `resolver_con_dedup` depende del orden de iteración — es regla de
+   negocio, no detalle. Antes de tocar concurrencia en cualquier parte del
+   backend, leer la sección 7 de ese doc: hay cinco piezas con estado compartido
+   (caché de `ConsultaInfoObras`, `threading.local` de las estadísticas de
+   descarga, `ContextVar` de la traza, el progreso «i de n»).
+
+Gate: **967 passed, 25 skipped** (base 949; +18 de #24), sin red ni PG real,
+`resolucion/cui.py` intacto, compileall y `git diff --check` limpios. Sin push,
+panel y skill sin tocar.
+
 ## Nota (2026-08-05, Claude) — ADR-009 cerrado y schema.sql consolidado
 
 `T-REFACTOR-003` y `F-SCHEMA` quedaron cerradas. Lo que un agente nuevo debe
