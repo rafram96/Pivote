@@ -413,6 +413,81 @@ depende_de: []
 - [ ] Skill: imágenes a media resolución para el agente-mapa cuando Camino B
   sea inevitable (el Camino A/Tesseract ya funciona en la laptop).
 
+---
+id: T-IDEA-PLIEGO-ABSOLUTORIO
+tipo: idea
+zona: skill/ (agent-bases) — el backend no cambia
+agente_origen: fable
+estado: idea registrada (2026-08-06, pregunta de Rafael) — sin compromiso
+depende_de: []
+---
+**Pliego absolutorio como tercer PDF OPCIONAL de la skill: la fuente que
+convertiría varios «Por confirmar» en respuestas oficiales del comité.**
+
+Qué es: el documento donde el comité del concurso responde por escrito las
+consultas/observaciones a las bases. Sus respuestas son VINCULANTES, pero
+muchas son precisiones interpretativas que NO alteran el texto de las Bases
+Integradas («también se acepta el título X», «el cargo Y cuenta como
+similar», «nivel I-4 se considera equivalente») — hoy viven solo en el
+pliego y el sistema no lo lee.
+
+Dónde pega: exactamente en los veredictos de criterio que las bases dejan
+ambiguos — `profesion_valida`, `cargo_bases_valido`,
+`cargos_similares_validos`, `tipo_obra_valido`, comparación de niveles.
+Donde el evaluador hoy razona con criterio propio o marca «Por confirmar»,
+el pliego puede tener la respuesta oficial escrita.
+
+Dónde NO pega: experiencias históricas (candado F5, cruces, InfoObras) — es
+insumo del concurso QUE SE EVALÚA, no de las experiencias.
+
+Diseño si se hace: `bases.pdf + propuesta.pdf + pliego.pdf` (opcional);
+lo consume SOLO el agent-bases, filtrando las absoluciones que tocan
+personal clave/requisitos (es Q&A estructurado — lectura barata, alineada
+con la meta de tokens de #82). Alimenta los campos de requisitos que ya
+existen; el resto del pipeline no cambia. El documento siempre está
+publicado en SEACE junto a las bases — conseguirlo es trivial.
+
+Comercial: candidato a presentarse en la conversación de cierre; no bloquea
+nada.
+
+---
+id: T-TAREA-GUIA-SETUP-INGENIERO
+tipo: tarea (documentación — parte del HITO FINAL: «manual de usuario
+  actualizado y capacitación 2h»)
+zona: docs/ (guía nueva) — sin código
+agente_origen: fable
+estado: pendiente
+depende_de: []
+---
+**Guía de setup de la máquina del ingeniero para correr la skill — lo que la
+corrida CIBA (6-ago) demostró que hace falta, en palabras de evaluador.**
+
+Requisitos que la guía debe cubrir, con el porqué de cada uno:
+
+1. **Claude Code + la skill instalada** — el flujo completo.
+2. **Tesseract OCR con idioma español (`spa`) y en el PATH** — el OCR
+   barato (Camino A, ~80% menos consumo del plan). ⚠ Sin él, la skill cae
+   al Camino B (visión) — la caída debe explicarse en la guía porque es
+   silenciosa y cara. Fricción REAL medida: PATH mal puesto incluso en la
+   laptop de Rafael (28-jul).
+3. **Python con pymupdf** — unir/trocear PDFs y el script de OCR. Fricción
+   REAL de la corrida CIBA: el Python por defecto no lo tenía; hubo que
+   encontrar `py -3.12`. La guía debe fijar UN Python y cómo verificarlo
+   (`python -c "import fitz"`).
+4. **El MCP configurado** (`mcp-server/`, SERVER_URL al backend on-prem) —
+   la subida del análisis al final.
+5. **Expectativas de tiempo**: una propuesta escaneada grande (500+ pp)
+   toma decenas de minutos de OCR en segundo plano — «la sesión callada
+   está trabajando». Propuestas multi-parte: la skill las une sola; solo
+   deben estar en la misma carpeta.
+6. **Verificación de humo**: checklist de 4 comandos (tesseract --version,
+   import fitz, probar_conexion del MCP, y una corrida con el fixture
+   liviano) antes de la primera corrida real.
+
+Relación: si T-TAREA-OCR-REMOTO se construye, los puntos 2 y 3 desaparecen
+de la guía (la máquina del ing. solo necesitaría Claude Code + MCP) — la
+guía debe escribirse de forma que esa sección sea desmontable.
+
 (El progreso fino B/C/D es CROSS-REPO — vive en
 `InfoObras/.ai/tasks/backlog.md`, aquí no se copia.)
 
