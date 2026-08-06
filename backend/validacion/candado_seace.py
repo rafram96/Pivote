@@ -297,9 +297,18 @@ def _senal_entidad(proceso: dict, cert: dict) -> Senal:
         return Senal("entidad", FUERTE, SIN_DATO,
                      f"El certificado no declara la entidad contratante; el proceso "
                      f"fue convocado por «{convocante}». No se puede comparar.")
-    # Reutiliza el comparador de razones sociales de SUNAT (ver docstring).
+    # Reutiliza el comparador de razones sociales de SUNAT (ver docstring), pero
+    # puntuando también la forma PRELIMPIADA del nombre (T-REFACTOR-002): el
+    # membrete del certificado suele traer la composición del consorcio entre
+    # paréntesis, y esa cola hundía el parecido hasta 46/100 — una señal FUERTE
+    # «en contra» sobre dos nombres que son el mismo consorcio. Se toma el mejor
+    # de los dos, así que el candado solo puede dejar de contradecir, nunca
+    # empezar a hacerlo. La frase sigue citando lo que el documento dice
+    # literalmente; lo que se limpia es lo que se puntúa.
+    from scraping.nombres_empresa import variantes
     from scraping.sunat import score_match_empresa
-    score = score_match_empresa(contratante, convocante)
+    score = max(score_match_empresa(x, y)
+                for x in variantes(contratante) for y in variantes(convocante))
     frase = (f"Entidad: «{contratante}» (certificado) vs «{convocante}» "
              f"(proceso) → ")
     if score >= UMBRAL_ENTIDAD_A_FAVOR:

@@ -21,6 +21,7 @@ propuesta. Nada de esto llama a APIs de IA (regla on-prem, ver
 | `seace_abierto.py` | CONOSCE + OCDS del OECE | Bases Integradas y contrato firmado por CUI, con la segmentación por tipo de proceso (T-004). |
 | `renipress.py` | RENIPRESS (SUSALUD) | Existencia de establecimientos de salud. Evidencia **auxiliar**: no cambia veredictos. |
 | `errores_red.py` | — | Clasifica excepciones en `red` / `portal` / `otro` para que los logs no escupan la excepción cruda. Puro, sin red. |
+| `nombres_empresa.py` | — | Prelimpiado compartido de nombres de entidad (fuera el paréntesis con los miembros del consorcio, fuera la cola «RUC …»). Lo consumen el cruce SUNAT, el candado SEACE y la verificación de expedientes del MEF. Puro, sin red y sin dependencias. |
 
 `__init__.py` está vacío a propósito: cada consumidor importa el módulo que
 necesita (`from scraping import sunat`), y los tests parchean sobre esa fachada.

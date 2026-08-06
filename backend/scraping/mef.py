@@ -27,6 +27,7 @@ import requests
 from scraping.errores_red import (
     EXPONENCIAL, Politica, RespuestaTransitoria, con_reintentos, corto,
 )
+from scraping.nombres_empresa import variantes
 
 logger = logging.getLogger(__name__)
 
@@ -120,15 +121,26 @@ def _tokens(s: str) -> set:
     return {t for t in _norm(s).split() if len(t) >= 3}
 
 
-def _nombres_coinciden(a: str, b: str) -> bool:
-    """True si dos nombres refieren (probablemente) a la misma persona/empresa:
-    substring de núcleos o ≥2 tokens distintivos en común."""
+def _coinciden_literal(a: str, b: str) -> bool:
     na, nb = _norm(a), _norm(b)
     if not na or not nb:
         return False
     if na in nb or nb in na:
         return True
     return len(_tokens(a) & _tokens(b)) >= 2
+
+
+def _nombres_coinciden(a: str, b: str) -> bool:
+    """True si dos nombres refieren (probablemente) a la misma persona/empresa:
+    substring de núcleos o ≥2 tokens distintivos en común.
+
+    El CRITERIO es el de siempre (`_coinciden_literal`). Lo que cambió en
+    T-REFACTOR-002 es la ENTRADA: el emisor llega tal como lo tipeó el membrete
+    del certificado, así que se prueba también su forma prelimpiada (sin la
+    composición del consorcio entre paréntesis) y basta que UNA coincida.
+    Monótono: lo que antes daba `ok` sigue dando `ok`."""
+    return any(_coinciden_literal(x, y)
+               for x in variantes(a) for y in variantes(b))
 
 
 # ── parseo del Formato 08-A (puro) ───────────────────────────────────────────

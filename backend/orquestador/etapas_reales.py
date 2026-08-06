@@ -1368,10 +1368,13 @@ def _es_publica(entidad: str) -> bool:
 
 def _nombre_emisor_limpio(entidad: str) -> str:
     """Nombre del emisor para buscar en SUNAT: sin paréntesis (miembros del
-    consorcio) ni la cola 'RUC …'."""
-    s = re.sub(r"\(.*?\)", " ", entidad or "")
-    s = re.sub(r"\bRUC\b.*$", " ", s, flags=re.I)
-    return re.sub(r"\s+", " ", s).strip()
+    consorcio) ni la cola 'RUC …'.
+
+    El prelimpiado vive en `scraping/nombres_empresa.py` desde T-REFACTOR-002:
+    el candado SEACE y la verificación de expedientes del MEF necesitaban
+    exactamente esta limpieza y la tenían escondida acá."""
+    from scraping.nombres_empresa import limpiar_nombre_entidad
+    return limpiar_nombre_entidad(entidad)
 
 
 def _elegir_match_exacto(nombre: str, matches: list) -> Optional[dict]:
@@ -1383,7 +1386,13 @@ def _elegir_match_exacto(nombre: str, matches: list) -> Optional[dict]:
     consorcio, una homónima dada de baja, etc.). Comparando con el nombre
     normalizado (sin sufijos legales/puntuación/acentos) se puede desempatar
     cuando solo UNA fila es idéntica. Si hay varias idénticas, prefiere la
-    ACTIVA; si sigue habiendo ambigüedad, devuelve None (revisión humana)."""
+    ACTIVA; si sigue habiendo ambigüedad, devuelve None (revisión humana).
+
+    `nombre` llega ya prelimpiado por `_nombre_emisor_limpio` (el compartido de
+    `scraping/nombres_empresa.py`). Aquí NO se limpia la razón social que
+    devuelve SUNAT: son denominaciones registrales, no membretes, y limpiarlas
+    solo podría crear empates nuevos — o sea convertir un desempate exitoso en
+    una revisión humana. La monotonía manda (T-REFACTOR-002)."""
     from scraping.sunat import normalizar_nombre_empresa
     objetivo = normalizar_nombre_empresa(nombre)
     if not objetivo:
