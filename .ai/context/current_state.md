@@ -1,6 +1,71 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-08-06** · rama de trabajo: `demo`
+> Última actualización: **2026-08-07** · rama de trabajo: `demo`
+
+## Estado de versionado (7-ago)
+
+El bloque P0 quedó registrado en ambos repos: Pivote en el commit que contiene
+esta actualización y Panel-InfoObras en `1fcf2dd`. Gate final: **988 passed,
+25 skipped**, TypeScript y build Next.js aprobados. Ambos árboles de trabajo
+quedaron limpios; falta push y despliegue.
+
+## Auditoría de lenguaje y alertas estructuradas del Panel (6-ago)
+
+La interfaz aplica una capa común de lenguaje de evaluación sin alterar los
+mensajes fuente. Códigos internos, nombres de etapas y referencias se convierten
+en títulos, fuentes y ubicaciones legibles. `CARGO_NUCLEO` muestra cargo
+declarado, función exigida, conceptos ausentes y necesidad de decisión del
+comité; `RECALCULO`/`TOTAL` comparan días declarados y calculados; y
+`FECHA_CONTRATO` muestra una secuencia de fechas y cuánto excede el margen de
+15 días. También se retiraron menciones visibles a backend, Claude, espejo,
+campos internos y servidor en las vistas principales.
+
+Validación sobre CIBA `41a442cdcd81`: Brave + TypeScript + build Next.js
+aprobados. El cambio es exclusivamente de presentación del Panel; no modifica
+el job ni el resolver y no requiere golden. Panel dev activo en `:3002` y API
+en `:8001` al cierre.
+
+## Expediente técnico entendible en revisión y Profesionales (6-ago)
+
+La revisión humana ya distingue la inversión (CUI) del servicio acreditado. Si
+el certificado es de elaboración/supervisión de expediente, el Panel explica
+qué verificará al confirmar y recomienda un candidato solo con señales
+semánticas visibles (nivel educativo, unidad académica y ubicación), mostrando
+también las diferencias de los demás; el puntaje interno nunca se presenta como
+porcentaje ni como certeza.
+
+Después de resolver, Profesionales muestra un bloque propio de **Verificación
+SEACE/MEF del expediente**: empresa y firmante declarados por separado,
+contratista, contrato, objeto, fecha, monto, aprobación, CUI y fuentes. La
+ejecución física de InfoObras queda rotulada como referencia posterior que no
+acredita quién elaboró el expediente. Jobs antiguos se renderizan con los datos
+del espejo aunque su enriquecimiento no tenga los nuevos campos.
+
+Se corrigió además `scraping/mef.py`: el contratista estatal se coteja primero
+con `entidad_emisora` (empresa) y solo usa `nombre_emisor` como fallback para
+persona natural/legado; el firmante queda informativo y separado. No cambió el
+resolver CUI, por lo que no aplica golden. Gate: **988 passed, 25 skipped**;
+Panel con TypeScript y build productivo aprobados; caso CIBA `1:9` revisado en
+Brave sin resolver ni modificar el job.
+
+## P0 del Panel: una sola verdad para resultado, alertas y salud (6-ago)
+
+El backend reconstruye ahora el resultado efectivo desde `espejo.json` y
+`enriquecimiento.json` para que `/espejo`, `/resumen`, la corrida normal y la
+regeneración del Excel compartan el mismo cálculo. En jobs antiguos sanea las
+paralizaciones que no aplican a expedientes/privadas y mantiene «Por confirmar»
+si SUNAT o una fuente pública no sostienen la conclusión. El contrato añade
+`estado_efectivo`, `veredicto_efectivo`, `total_efectivo` y
+`conteo_alertas`; el Panel dejó de interpretar la prosa original de Claude.
+
+También se eliminó el doble conteo visual de observaciones, la métrica principal
+pasó a «Requieren atención» y `base_mef=stale/refresco_fallido` se presenta como
+advertencia utilizable, no como portal caído. CIBA `41a442cdcd81`: 0 cumple / 0
+no cumple / 9 por confirmar; alertas 21 atención + 55 advertencias + 61
+informativas. `final.xlsx` fue respaldado en
+`backups/pre-p0-panel-20260806-161623/` y regenerado sin red: 12 hojas, 129
+imágenes. Gate backend: **987 passed, 25 skipped**; resolver intacto, no aplica
+golden. Panel: typecheck y build productivo aprobados.
 
 ## Idea futura T-018: explorador SEACE por CUI (6-ago)
 

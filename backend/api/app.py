@@ -35,7 +35,8 @@ from pydantic import ValidationError
 
 from entregables import (
     completar_revisiones_privadas, construir_zip_infoobras, descargar_cui,
-    generar_excel_final, mapear_certificados, regenerar_excel_final, _zip_carpeta,
+    generar_excel_final, mapear_certificados, reconciliar_resultados_profesionales,
+    regenerar_excel_final, _zip_carpeta,
 )
 from orquestador import Motor, RepositorioArchivos, etapas_esqueleto, etapas_reales
 from orquestador.progreso import REGISTRO
@@ -827,11 +828,24 @@ def consultar_renipress(q: str = "", solo_activos: bool = True, limite: int = 50
 
 # ── Vistas derivadas (extracción + resumen) ──────────────────────────────────
 
+def _estado_veredicto(texto: str) -> str:
+    """Clasificación estructurada; evita que la UI interprete prosa libre."""
+    normalizado = texto.strip().upper()
+    if "NO CUMPLE" in normalizado:
+        return "no_cumple"
+    if normalizado.startswith(("POR VERIFICAR", "POR CONFIRMAR", "PENDIENTE")):
+        return "por_confirmar"
+    if "CUMPLE" in normalizado or normalizado.startswith(("SÍ", "SI ", "SI—", "SI —")):
+        return "cumple"
+    return "por_confirmar"
+
+
 @app.get("/api/pivote/jobs/{job_id}/espejo")
 def extraccion(job_id: str):
     _job_o_404(job_id)
     espejo = _espejo_o_404(job_id)
     enr = repo.cargar_enriquecimiento(job_id) or {}
+    resultados = reconciliar_resultados_profesionales(espejo, enr)
     profesionales = []
     for p in espejo.get("profesionales", []):
         np_ = p.get("n_prof")
@@ -840,7 +854,9 @@ def extraccion(job_id: str):
             d = {k: e.get(k) for k in (
                 "n", "proyecto", "entidad_emisora", "cargo_ocupado",
                 "fecha_inicial", "fecha_final", "dias", "cui",
-                "incluye_covid", "traslape", "folio")}
+                "incluye_covid", "traslape", "folio", "ruc_emisor",
+                "nombre_emisor", "cargo_emisor", "fecha_emision",
+                "tipo_documento", "entidad_contratante")}
             # enriquecimiento del backend: CUI resuelto + quién ejecutó/supervisó
             # la obra en InfoObras (Representante de obra) + verificación SUNAT.
             ev = enr.get(f"{np_}:{e.get('n')}")
@@ -852,9 +868,17 @@ def extraccion(job_id: str):
                 d["representante_obra"] = ev.get("representante_obra")
                 d["sunat"] = ev.get("sunat")
                 d["verificacion_expediente"] = ev.get("verificacion_expediente")
+                # El panel necesita los documentos y el candado del proceso para
+                # explicar qué evidencia abre cada enlace (bases/contrato) y con
+                # qué nivel de confianza fue asociado al certificado.
+                d["seace"] = ev.get("seace")
                 d["sub_obras"] = ev.get("sub_obras")
                 d["multi_rubro"] = ev.get("multi_rubro")
             experiencias.append(d)
+        resultado = resultados.get(np_) or {}
+        veredicto_efectivo = resultado.get("cumple_backend") or p.get("cumple")
+        texto_efectivo = str(veredicto_efectivo or "").upper()
+        estado_efectivo = _estado_veredicto(texto_efectivo)
         profesionales.append({
             "n_prof": np_,
             "cargo": p.get("cargo"),
@@ -866,6 +890,14 @@ def extraccion(job_id: str):
             "notas": p.get("notas") or [],
             "cumple": p.get("cumple"),
             "total": p.get("total") or {},
+            "cumple_backend": resultado.get("cumple_backend"),
+            "veredicto_efectivo": veredicto_efectivo,
+            "estado_efectivo": estado_efectivo,
+            "total_efectivo": {
+                "dias": resultado.get("dias_efectivos"),
+                "anios": resultado.get("anios_efectivos"),
+                "provisional": bool(resultado.get("veredicto_provisional")),
+            },
             "experiencias": experiencias,
         })
     return {"profesionales": profesionales}
@@ -878,19 +910,23 @@ def resumen(job_id: str):
     decisiones = _decisiones(job_id)
 
     enr = repo.cargar_enriquecimiento(job_id)
+    resultados = reconciliar_resultados_profesionales(espejo, enr)
     veredictos = []
     for p in espejo.get("profesionales", []):
         total = p.get("total") or {}
         np_ = p.get("n_prof")
-        d = enr.get(f"prof:{np_}") or {}
+        d = resultados.get(np_) or {}
         motivo = None
         if d.get("dias_paralizados") or d.get("dias_traslape"):
             partes = []
             if d.get("dias_paralizados"):
-                partes.append(f"paralizaciones de obra: -{d['dias_paralizados']} dias")
+                partes.append(f"periodos no efectivos: -{d['dias_paralizados']} días")
             if d.get("dias_traslape"):
-                partes.append(f"traslapes entre experiencias: -{d['dias_traslape']} dias")
-            motivo = " - ".join(partes)
+                partes.append(f"traslapes entre experiencias: -{d['dias_traslape']} días")
+            motivo = " · ".join(partes)
+        veredicto_efectivo = d.get("cumple_backend") or p.get("cumple")
+        texto_efectivo = str(veredicto_efectivo or "").upper()
+        estado_efectivo = _estado_veredicto(texto_efectivo)
         veredictos.append({
             "n_prof": np_,
             "cargo": p.get("cargo"),
@@ -898,12 +934,16 @@ def resumen(job_id: str):
             "cargo_bases_nombre": p.get("cargo_bases_nombre"),
             "nombre": p.get("nombre"),
             "cumple_claude": p.get("cumple") or "(sin veredicto en el espejo)",
-            "anios_brutos": total.get("anios") or 0,
+            "anios_brutos": (round(d["dias_brutos"] / 365, 2)
+                              if d.get("dias_brutos") is not None
+                              else total.get("anios")),
             "cumple_backend": d.get("cumple_backend"),
+            "veredicto_efectivo": veredicto_efectivo,
+            "estado_efectivo": estado_efectivo,
             "anios_efectivos": d.get("anios_efectivos"),
             "minimo_anios": d.get("minimo_anios"),
             "motivo_backend": motivo,
-            "fuente": "InfoObras" if d.get("dias_paralizados") else ("recalculo" if d else None),
+            "fuente": "verificación determinística" if d else None,
         })
 
     alertas = []
@@ -934,6 +974,12 @@ def resumen(job_id: str):
          "puntaje": f.get("puntaje"), "detalle": f.get("detalle")}
         for f in re_.get("factores", [])
     ]
+    conteo_alertas = {
+        "requieren_atencion": sum(a["severidad"] in ("critica", "alerta") for a in alertas),
+        "advertencias": sum(a["severidad"] == "advertencia" for a in alertas),
+        "informativas": sum(a["severidad"] == "info" for a in alertas),
+        "total": len(alertas),
+    }
     return {
         "job_id": job_id,
         "postor": job.postor or job.analisis_id,
@@ -943,6 +989,7 @@ def resumen(job_id: str):
         ],
         "veredictos": veredictos,
         "alertas": alertas,
+        "conteo_alertas": conteo_alertas,
         "factores": factores,
         "puntaje_total": re_.get("puntaje_total"),
     }

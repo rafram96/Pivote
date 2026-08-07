@@ -13,7 +13,8 @@ RAIZ = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(RAIZ / "backend"))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from entregables import desempaquetar_enriquecimiento, generar_excel_final  # noqa: E402
+from entregables import (completar_revisiones_privadas, mapear_certificados,
+                         regenerar_excel_final)  # noqa: E402
 
 job_id = sys.argv[1] if len(sys.argv) > 1 else "4816fbdf3bea"
 dir_datos = Path(sys.argv[2]) if len(sys.argv) > 2 else RAIZ / "backend" / "datos_pivote"
@@ -34,27 +35,17 @@ def _leer(nombre: str) -> dict:
 
 espejo = _leer("espejo")
 enrich = _leer("enriquecimiento")
-
-# EL MISMO desempaquetado que usa EtapaExcelReal, no una copia: mientras este
-# script duplicaba el armado a mano se quedó atrás del real (no copiaba
-# `obra_nombre`, así que la herramienta con la que se revisa el Excel sobre datos
-# reales afirmaba "InfoObras no devolvió el nombre" — falso: el nombre sí estaba
-# en el enriquecimiento).
-paral, cuis, fichas, sunat = desempaquetar_enriquecimiento(enrich)
+job = _leer("job")
 
 # Las experiencias en revisión (motivo + acción del ItemRevision) también las pasa
 # EtapaExcelReal: sin ellas el Excel regenerado no muestra los avisos y parece que
 # no hubiera ninguno.
 revisiones: dict[tuple[int, int], tuple[str, str | None]] = {}
-for it in _leer("job").get("items_revision") or []:
+for it in job.get("items_revision") or []:
     if not it.get("resuelto") and it.get("n_exp") is not None:
         revisiones.setdefault((it["n_prof"], it["n_exp"]),
                               (it.get("motivo") or "", it.get("accion_sugerida")))
-for k, enr in enrich.items():
-    if isinstance(enr, dict) and str(enr.get("via") or "").upper() == "PRIVADA" \
-            and ":" in k and not k.startswith("prof:"):
-        np_, ne = (int(x) for x in k.split(":"))
-        revisiones.setdefault((np_, ne), ("[PRIVADA]", None))
+completar_revisiones_privadas(revisiones, enrich)
 
 salida = (Path(sys.argv[3]) if len(sys.argv) > 3
           else dir_datos / job_id / "muestra.xlsx")
@@ -64,10 +55,14 @@ salida.parent.mkdir(parents=True, exist_ok=True)
 # original sí traía — se detectó regenerando urgente1 (28-jul): el archivo
 # quedaba "corregido" pero mudo de evidencia. EtapaExcelReal siempre las pasa;
 # este script las omitía.
-from entregables import mapear_certificados  # noqa: E402
 certs = mapear_certificados(dir_datos, job_id)
-generar_excel_final(espejo, salida, paral, cuis, fichas, revisiones, sunat, certs)
+regenerar_excel_final(
+    espejo, enrich, salida, revisiones, certs,
+    confiabilidad={
+        "veredicto": job.get("confiabilidad"),
+        "hallazgos_criticos": job.get("hallazgos_criticos") or [],
+    },
+)
 print(f"Excel regenerado: {salida}")
-print(f"  cuadros SUNAT: {len(sunat)} · fichas (obra): {len(fichas)} · "
-      f"en revisión: {len(revisiones)} · certificados: {len(certs)} · "
+print(f"  rutas/revisiones: {len(revisiones)} · certificados: {len(certs)} · "
       f"profesionales: {len(espejo.get('profesionales', []))}")

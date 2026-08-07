@@ -949,6 +949,58 @@ def test_clasificacion_privada_exige_ruc_sunat_inequivoco():
     assert revisiones[(1, 3)][0].startswith("[PRIVADA_PENDIENTE]")
 
 
+def test_resultado_compartido_no_resta_ejecucion_a_expediente_o_privada():
+    from entregables import reconciliar_resultados_profesionales
+
+    espejo = {
+        "profesionales": [{
+            "n_prof": 1,
+            "cumple": "CUMPLE — declarado",
+            "requisitos": {"experiencia": "Experiencia mínima: 24 meses"},
+            "experiencias": [
+                {"n": 1, "proyecto": "Supervisión del expediente técnico del hospital",
+                 "fecha_inicial": "2020-01-01", "fecha_final": "2020-12-31"},
+                {"n": 2, "proyecto": "Clínica privada",
+                 "fecha_inicial": "2021-01-01", "fecha_final": "2021-12-31"},
+            ],
+        }],
+    }
+    enriquecimiento = {
+        "1:1": {"paralizaciones": [{"inicio": "2020-01-01", "fin": "2020-12-31"}],
+                "cobertura_baja": 0},
+        "1:2": {"via": "PRIVADA", "sunat": {"ruc": "20123456789"},
+                "sin_verificar": True,
+                "paralizaciones": [{"inicio": "2021-01-01", "fin": "2021-12-31"}]},
+        "prof:1": {"dias_efectivos": 0,
+                   "cumple_backend": "NO CUMPLE — resultado histórico"},
+    }
+
+    resultado = reconciliar_resultados_profesionales(espejo, enriquecimiento)[1]
+
+    assert resultado["dias_paralizados"] == 0
+    assert resultado["dias_efectivos"] == 731
+    assert resultado.get("cumple_backend") is None
+    assert not resultado.get("veredicto_provisional")
+
+
+def test_resultado_compartido_deja_privada_sin_ruc_por_confirmar():
+    from entregables import reconciliar_resultados_profesionales
+
+    espejo = {"profesionales": [{
+        "n_prof": 1,
+        "requisitos": {"experiencia": "Experiencia mínima: 1 año"},
+        "experiencias": [{"n": 1, "proyecto": "Cliente privado",
+                           "fecha_inicial": "2021-01-01", "fecha_final": "2021-12-31"}],
+    }]}
+    resultado = reconciliar_resultados_profesionales(espejo, {
+        "1:1": {"via": "PRIVADA", "sunat": {"ambiguo": 2}},
+    })[1]
+
+    assert resultado["veredicto_provisional"] == [1]
+    assert resultado["cumple_backend"].startswith("POR VERIFICAR")
+    assert "SUNAT" in resultado["cumple_backend"]
+
+
 def test_sin_obra_el_bloque_usa_la_accion_del_item_si_la_trae(tmp_path):
     """…pero si el item trae su propia acción, manda la del item."""
     revisiones = {(1, 1): ("no se pudo verificar en InfoObras — veredicto provisional",

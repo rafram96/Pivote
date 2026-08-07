@@ -120,6 +120,30 @@ def test_verificar_expediente_match_positivo():
     assert set(b["fuentes"]) == {"MEF-SEACE", "MEF-08A"}
 
 
+def test_verificar_expediente_coteja_empresa_y_separa_firmante():
+    """Un gerente firma, pero la razón social es quien contrató con el Estado."""
+    exp = {
+        "cui": "2324482",
+        "entidad_emisora": "VELÁSQUEZ VÁSQUEZ EMILIO FÉLIX",
+        "ruc_emisor": "10123456789",
+        "nombre_emisor": "MARÍA REPRESENTANTE DISTINTA",
+        "cargo_emisor": "Gerente General",
+    }
+    b = mef.verificar_expediente(
+        exp, mef.parsear_ficha_08a(_html("2324482")),
+        mef.normalizar_contratos(_contratos("2324482")),
+    )
+
+    assert b["contratista"]["veredicto"] == "ok"
+    assert b["contratista"]["declarado"] == "VELÁSQUEZ VÁSQUEZ EMILIO FÉLIX"
+    assert b["emisor_certificado"] == {
+        "empresa": "VELÁSQUEZ VÁSQUEZ EMILIO FÉLIX",
+        "ruc": "10123456789",
+        "firmante": "MARÍA REPRESENTANTE DISTINTA",
+        "cargo_firmante": "Gerente General",
+    }
+
+
 def test_verificar_expediente_contratista_no_cotejable():
     # emisor que no coincide con ningún contratista → no_verificable (NO discrepancia)
     exp = {"cui": "2324482", "nombre_emisor": "OTRA EMPRESA DISTINTA SAC"}

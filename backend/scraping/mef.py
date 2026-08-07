@@ -269,15 +269,37 @@ def verificar_expediente(exp: dict, ficha: dict, contratos: list[dict]) -> dict:
     ficha = ficha or {}
     contratos = contratos or []
     cui = str(exp.get("cui") or "").strip() or None
-    emisor = exp.get("nombre_emisor") or exp.get("entidad_emisora") or ""
+    # El contratista del MEF es una empresa/persona contratada, no necesariamente
+    # quien firma la constancia. En certificados societarios `nombre_emisor` es
+    # el firmante (gerente, representante, etc.) y `entidad_emisora` es la razón
+    # social que sí debe cotejarse con el adjudicatario. Para consultores persona
+    # natural o jobs antiguos sin entidad conservamos el firmante como fallback.
+    empresa_emisora = str(exp.get("entidad_emisora") or "").strip()
+    firmante = str(exp.get("nombre_emisor") or "").strip()
+    identidad_contratista = empresa_emisora or firmante
 
-    bloque: dict = {"cui_confirmado": cui, "fuentes": [], "verificado_en_mef": False}
+    bloque: dict = {
+        "cui_confirmado": cui,
+        "fuentes": [],
+        "verificado_en_mef": False,
+        "emisor_certificado": {
+            "empresa": empresa_emisora or None,
+            "ruc": str(exp.get("ruc_emisor") or "").strip() or None,
+            "firmante": firmante or None,
+            "cargo_firmante": str(exp.get("cargo_emisor") or "").strip() or None,
+        },
+    }
     c = contrato_de_expediente(contratos)
     if c:
         bloque["fuentes"].append("MEF-SEACE")
         bloque["verificado_en_mef"] = True
-        ver_ct = "ok" if _nombres_coinciden(emisor, c["contratista"]) else "no_verificable"
-        bloque["contratista"] = {"valor": c["contratista"], "veredicto": ver_ct}
+        ver_ct = ("ok" if _nombres_coinciden(identidad_contratista, c["contratista"])
+                  else "no_verificable")
+        bloque["contratista"] = {
+            "valor": c["contratista"],
+            "declarado": identidad_contratista or None,
+            "veredicto": ver_ct,
+        }
         bloque["contrato"] = {
             "numero": c["numero"], "monto": c["monto"],
             "fecha": c["fecha_suscripcion"].isoformat() if c["fecha_suscripcion"] else None,

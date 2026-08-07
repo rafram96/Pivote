@@ -24,6 +24,9 @@ ESPEJO = {
          "total": {"dias": 1645, "anios": 4.51},
          "experiencias": [
              {"n": 1, "proyecto": "Obra API A", "entidad_emisora": "Entidad A",
+              "ruc_emisor": "20123456789", "nombre_emisor": "Firma Uno",
+              "cargo_emisor": "Gerente General", "fecha_emision": "2023-06-01",
+              "tipo_documento": "Constancia", "entidad_contratante": "Entidad Pública",
               "fecha_inicial": "2021-05-13", "fecha_final": "2023-05-06",
               "dias": 724, "cui": "2418877", "folio": "100"},
          ]},
@@ -87,6 +90,13 @@ def test_flujo_completo_de_la_demo(cliente):
     profs = r.json()["profesionales"]
     assert profs[0]["cargo"] == "JEFE DE SUPERVISIÓN"
     assert profs[0]["experiencias"][0]["cui"] == "2418877"
+    assert profs[0]["experiencias"][0]["ruc_emisor"] == "20123456789"
+    assert profs[0]["experiencias"][0]["nombre_emisor"] == "Firma Uno"
+    assert profs[0]["experiencias"][0]["cargo_emisor"] == "Gerente General"
+    assert profs[0]["experiencias"][0]["entidad_contratante"] == "Entidad Pública"
+    assert profs[0]["veredicto_efectivo"] == profs[0]["cumple"]
+    assert profs[0]["estado_efectivo"] == "cumple"
+    assert profs[0]["total_efectivo"]["dias"] == 724
 
     # 6 · resumen (veredictos + factores)
     r = cliente.get(f"/api/pivote/jobs/{job_id}/resumen")
@@ -94,6 +104,12 @@ def test_flujo_completo_de_la_demo(cliente):
     assert res["puntaje_total"] == 55
     assert "confiabilidad" in res and "hallazgos_criticos" in res
     assert res["veredictos"][0]["cumple_claude"].startswith("SÍ")
+    assert res["veredictos"][0]["anios_brutos"] == pytest.approx(724 / 365, abs=0.01)
+    assert res["veredictos"][0]["estado_efectivo"] == "cumple"
+    assert res["conteo_alertas"] == {
+        "requieren_atencion": 0, "advertencias": 0,
+        "informativas": 0, "total": 0,
+    }
 
     # 7 · Excel final REAL descargable (CLAUDE + Base de Datos + hoja del prof)
     r = cliente.get(f"/api/pivote/jobs/{job_id}/excel")
@@ -126,13 +142,25 @@ def test_espejo_expone_desglose_multiobra(cliente):
         {"proyecto": "OBRA B", "cui": None, "estado": "revision", "via": "NOMBRE"},
     ]
     modulo.repo.guardar_enriquecimiento(job.job_id, {
-        "1:1": {"via": "MULTI_OBRA", "multi_rubro": True, "sub_obras": sub_obras},
+        "1:1": {
+            "via": "MULTI_OBRA", "multi_rubro": True, "sub_obras": sub_obras,
+            "seace": {
+                "estado": "seleccionado",
+                "docs": {
+                    "bases": {"estado": "disponible", "url": "https://seace/bases.rar"},
+                    "contrato": {"estado": "disponible", "url": "https://seace/contrato.pdf"},
+                },
+                "candado": {"resultado": "confirmado", "motivo": "Coincide."},
+            },
+        },
     })
 
     experiencia = cliente.get(f"/api/pivote/jobs/{job.job_id}/espejo").json()[
         "profesionales"][0]["experiencias"][0]
     assert experiencia["sub_obras"] == sub_obras
     assert experiencia["multi_rubro"] is True
+    assert experiencia["seace"]["docs"]["bases"]["url"] == "https://seace/bases.rar"
+    assert experiencia["seace"]["candado"]["resultado"] == "confirmado"
 
 
 def test_espejo_invalido_rechazado_con_errores_claros(cliente):

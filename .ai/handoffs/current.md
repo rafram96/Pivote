@@ -1,8 +1,65 @@
 # Handoff — punto de continuación
 
-> Actualizado: **2026-08-06**. Si eres un agente nuevo: lee esto completo,
+> Actualizado: **2026-08-07**. Si eres un agente nuevo: lee esto completo,
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
+
+## Nota (2026-08-07, Codex) — cierre versionado del bloque P0
+
+Los cambios acumulados de verificación mixta, entregables y documentación
+quedaron versionados en Pivote en el commit que contiene esta nota. Las mejoras
+de claridad, alertas, revisión, experiencias y compatibilidad con `sub_obras`
+de jobs antiguos quedaron versionadas en Panel-InfoObras como `1fcf2dd`.
+Validación final: **988 passed, 25 skipped**, TypeScript y build Next.js
+aprobados; ambos repos limpios. No hubo push ni despliegue.
+
+## Nota (2026-08-06, Codex) — lenguaje del Panel y alertas legibles
+
+El Panel dejó de exponer al evaluador códigos y vocabulario interno como
+`CARGO_NUCLEO`, `RECALCULO`, `FECHA_CONTRATO`, «backend», «Claude», «espejo» y
+«recálculo determinístico». La traducción vive solo en presentación: los datos
+originales del análisis no se reescriben. Alertas ahora enfrenta cargo de la
+constancia vs requisito y conceptos faltantes; compara días declarados vs
+calculados con diferencia; y presenta inicio vs firma del contrato con margen
+de 15 días. El resto de códigos conocidos tiene nombre y explicación para el
+evaluador, con fallback legible para códigos futuros.
+
+La misma capa se usa en Proceso, Resultados, Profesionales, revisión humana,
+mensajes de salud y errores visibles. Se validó CIBA `41a442cdcd81` en Brave:
+los 9 casos de cargo, 7 recálculos y 3 fechas se renderizan estructurados, sin
+modificar ni resolver el job. Gate Panel: `npx tsc --noEmit`, `git diff
+--check` y `npm run build` aprobados. No hubo cambio de resolver/backend, por lo
+que no aplica pytest/golden. Panel dev quedó activo en `:3002`; API siguió
+activa en `:8001`. Cambios locales, sin commit/push/deploy.
+
+## Nota (2026-08-06, Codex) — expediente técnico visible y contraste corregido
+
+La revisión CUI explica ahora que el candidato identifica la inversión, no el
+servicio, y muestra recomendación/diferencias semánticas sin porcentajes. En
+Profesionales se renderiza el bloque SEACE/MEF del expediente separado de la
+ejecución física. El backend coteja al contratista con la empresa emisora y no
+con la persona firmante; mantiene fallback para consultores persona natural y
+jobs antiguos. CIBA `1:9` se comprobó visualmente sin resolverlo. Gate: **988
+passed, 25 skipped** + build Next.js; resolver intacto, no aplica golden.
+Cambios locales, sin commit/push/deploy. El Uvicorn que ya estaba corriendo no
+se reinició: debe reiniciarse antes de resolver casos para cargar el backend
+nuevo.
+
+## Nota (2026-08-06, Codex) — P0 del Panel implementado
+
+Se cerraron localmente los cuatro bloqueadores de exactitud hallados en la
+auditoría: Profesionales y Resultados consumen `estado_efectivo` del backend;
+las observaciones ya no se duplican ni se mezclan como una sola cifra; MEF
+desactualizado usa el mensaje real y color de advertencia; y API/Excel comparten
+una reconciliación offline compatible con jobs antiguos. La herramienta
+`tools/utils/regenerar_excel_final.py` dejó el camino paralelo y usa el helper
+canónico con certificados y confiabilidad.
+
+Validación real CIBA `41a442cdcd81`: 9/9 «Por confirmar» en `/espejo` y
+`/resumen`; 21 requieren atención, 55 advertencias y 61 informativas. Excel
+respaldado y regenerado con 12 hojas/129 imágenes. Gate: **987 passed, 25
+skipped**, sin cambio en `resolucion/cui.py` (no aplica golden); Panel compila y
+construye producción. Cambios locales en Pivote y Panel, sin commit/push/deploy.
 
 ## Nota (2026-08-06, Codex) — T-018 registrada como idea cross-repo
 

@@ -33,7 +33,8 @@ from resolucion import (ConsultaInfoObras, resolver_con_dedup, resolver_obras,
 from resolucion.cui import establecimiento, rubros_de
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
 from entregables import (completar_revisiones_privadas, desempaquetar_enriquecimiento,
-                         generar_excel_final, mapear_certificados)
+                         generar_excel_final, inyectar_veredicto_backend,
+                         mapear_certificados)
 from .etapas import Contexto, EtapaIngesta, EtapaStub
 from .repositorio import carpeta_job
 
@@ -2210,6 +2211,9 @@ class EtapaExcelReal:
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
         ctx.reportar(self.nombre, 0, 0, "Armando el Excel de evaluación")
+        # Fuente única del resultado visible: también sanea jobs creados antes
+        # de separar expediente, privada y ejecución física.
+        inyectar_veredicto_backend(ctx.espejo, ctx.enriquecimiento)
         # pasa los periodos CON su tipo (paralizado / sin valorización) para que
         # el Excel los muestre diferenciados; el generador normaliza las fechas.
         paral, cuis, fichas, sunat = desempaquetar_enriquecimiento(ctx.enriquecimiento)
