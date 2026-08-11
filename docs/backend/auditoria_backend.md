@@ -56,7 +56,7 @@ El motor de reglas (`backend/reglas/calculo.py`) y el orquestador implementan fi
   - Hoja "CLAUDE" con la evaluación del LLM.
   - Hoja "Base de Datos" con todas las experiencias y autofiltros.
   - Hojas individuales por profesional que detallan el cuadro de hitos, desglose de días efectivos (Paso 5) y, a la derecha, la ficha oficial de InfoObras junto con sus valorizaciones y modificaciones de plazo (ampliaciones/suspensiones).
-* **Columna "ARCHIVOS (ZIP)"**: Indica explícitamente si una valorización tiene sustento documental adjunto (`Sí (N)` o `—`) para que el evaluador audite rápidamente antes de abrir el ZIP.
+* **Columna "ARCHIVOS (ZIP)"**: Indica cuántos archivos encontró InfoObras para cada valorización (`N archivo(s)`), independientemente del estado operativo de la descarga, para que el evaluador audite rápidamente antes de abrir el ZIP.
 * **Agrupación en ZIP**: Organiza los documentos descargados de forma estructurada: `Proyecto → Profesional → Experiencia → Valorizaciones → AAAA-MM MES → Documento`.
 
 ---

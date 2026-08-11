@@ -1,6 +1,34 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-08-07** · rama de trabajo: `demo`
+> Última actualización: **2026-08-10** · rama de trabajo: `demo`
+
+## Archivos encontrados separados del estado de descarga (10-ago)
+
+En las filas de valorización del Excel, `ARCHIVOS (ZIP)` consume ahora
+`valorizaciones[].docs` y muestra `N archivo(s)`: expresa cuántos adjuntos halló
+InfoObras, no cuántos llegaron a descargarse ni si la descarga está pendiente.
+El inventario real y sus estados permanecen en `descargas_reales` para el
+seguimiento operativo. Regresión explícita: 9 encontrados/2 descargados produce
+`9 archivos`. Copia offline de `00a9816dc632`: P6 E4 conserva diez hitos con
+`1 archivo` y no aparece `Pendiente`. Gate: **990 passed, 25 skipped**.
+
+## Mínimos decimales y equivalencias explícitas corregidos (10-ago)
+
+El parser compartido de mínimos ya reconoce decimales con punto o coma y, si
+las bases escriben una equivalencia temporal explícita entre paréntesis, usa
+esa unidad literal. Caso que destapó el defecto: job `00a9816dc632`, profesional
+7, requisito `0.5 años (6 meses)`; antes quedaba `mínimo sin dato`, ahora se
+normaliza a **180 días / 6 meses**. Un decimal sin equivalencia se convierte con
+`Decimal` y redondeo hacia arriba para no crear un falso CUMPLE de borde.
+
+Comprobación offline con reconciliación API y Excel temporal: mantiene `POR
+VERIFICAR` y muestra `623 días provisionales contra un mínimo de 6 meses`; la
+hoja `P7. Tic` contiene el mismo texto. El Uvicorn ya activo continuó durante la
+auditoría las descargas diferidas del job y produjo su ZIP; no se restauró ni
+sobrescribió ese avance. El `final.xlsx` real permanece generado por el proceso
+viejo y todavía dice `mínimo sin dato`: requiere reiniciar backend y regenerar.
+Gate: **990 passed, 25 skipped**; 140 focales + 1 skip.
+`resolucion/cui.py` intacto, no aplica golden.
 
 ## Estado de versionado (7-ago)
 

@@ -1128,8 +1128,8 @@ def test_excel_marca_valorizaciones_con_archivos(tmp_path):
     texto = "\n".join(str(c.value) for row in wb[hoja].iter_rows()
                       for c in row if c.value)
     assert "ARCHIVOS (ZIP)" in texto   # nueva columna
-    assert "1 archivo" in texto        # recuento REAL, no los 2 anunciados
-    assert "0 archivos" in texto       # intento sin documento descargado
+    assert "2 archivos" in texto       # encontrados por InfoObras para el hito
+    assert "0 archivos" in texto       # InfoObras no publicó adjuntos en el hito
     assert "Sí (2)" not in texto
 
 
@@ -1759,6 +1759,31 @@ def test_minimo_en_meses_se_capta(tmp_path):
     assert _minimo_exigido({"a": "mínimo de 3 años"}) == (1095, "3 años")
     assert _minimo_exigido({"a": "experiencia mínima 720 días"}) == (720, "720 días")
     assert _minimo_exigido({"a": "sin requisito de tiempo"}) is None
+
+
+def test_minimo_decimal_prefiere_equivalencia_explicita_de_las_bases():
+    """Caso Huachocolpa P7: el decimal no puede ocultar los seis meses escritos
+    por las propias bases ni terminar presentado como «mínimo sin dato»."""
+    from orquestador.etapas_reales import _minimo_exigido
+
+    minimo, texto = _minimo_exigido({
+        "tipo_experiencia": "Experiencia mínima: 0.5 años (6 meses), computados desde la colegiatura."
+    })
+    assert (minimo, texto) == (180, "6 meses")
+    assert 179 < minimo
+    assert 180 >= minimo and 181 >= minimo
+    assert _minimo_exigido({
+        "tipo_experiencia": "Experiencia mínima: 0,5 años (6 meses)."
+    }) == (180, "6 meses")
+
+
+def test_minimo_decimal_sin_equivalencia_redondea_hacia_arriba():
+    """Sin una equivalencia literal, nunca redondear el umbral hacia abajo:
+    sería posible convertir un NO CUMPLE de borde en un falso CUMPLE."""
+    from orquestador.etapas_reales import _minimo_exigido
+
+    minimo, texto = _minimo_exigido({"tipo_experiencia": "Experiencia mínima: 0.5 años"})
+    assert (minimo, texto) == (183, "0.5 años")
 
 
 def _espejo_bim(fecha_pares):

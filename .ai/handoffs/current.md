@@ -1,8 +1,35 @@
 # Handoff — punto de continuación
 
-> Actualizado: **2026-08-07**. Si eres un agente nuevo: lee esto completo,
+> Actualizado: **2026-08-10**. Si eres un agente nuevo: lee esto completo,
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
+
+## Nota (2026-08-10, Codex) — `ARCHIVOS (ZIP)` muestra archivos encontrados
+
+La columna por valorización dejó de depender de `descargas_reales.por_hito` y
+de mostrar `Pendiente`: ahora usa `valorizaciones[].docs`, el número de adjuntos
+encontrados por el parseo de InfoObras, exista o no una descarga iniciada o
+completa. El estado operativo sigue separado en el seguimiento de descargas.
+Validado con una regresión 9 encontrados/2 descargados y con una copia offline
+del job `00a9816dc632`; P6 E4 muestra 1 archivo en cada uno de sus diez hitos y
+ninguna celda `Pendiente`. Gate: **990 passed, 25 skipped**. Resolver intacto;
+no aplica golden. El `final.xlsx` activo no se sobrescribió.
+
+## Nota (2026-08-10, Codex) — mínimo `0.5 años (6 meses)` corregido
+
+El job `00a9816dc632`, profesional 7, reveló que `_minimo_exigido()` solo
+aceptaba enteros: `0.5 años (6 meses)` terminaba como `mínimo sin dato`. El
+parser acepta ahora punto/coma decimal, prioriza la equivalencia explícita de
+las bases (`6 meses` = 180 días) y redondea hacia arriba cuando solo existe un
+decimal. La corrida y la reconciliación del API/Excel consumen la misma función.
+
+Comprobación sin red mediante reconciliación API y Excel temporal: muestran
+`623 días provisionales contra un mínimo de 6 meses`; el estado permanece `POR
+VERIFICAR`. El Uvicorn ya activo continuó a la vez las descargas diferidas del
+job y completó su ZIP; ese avance no se revirtió. El `final.xlsx` real aún fue
+generado con el proceso viejo y conserva `mínimo sin dato`: reiniciar backend y
+regenerar después. Gate: **990 passed, 25 skipped**; 140 focales + 1 skip.
+Resolver intacto, no aplica golden. No hubo commit, push ni despliegue.
 
 ## Nota (2026-08-07, Codex) — cierre versionado del bloque P0
 

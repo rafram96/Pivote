@@ -1523,7 +1523,7 @@ def test_job_antiguo_sin_confiabilidad_no_muestra_alerta_roja(tmp_path):
     assert "CONFIABILIDAD:" not in texto
 
 
-def test_recuento_real_reemplaza_inventario_anunciado(tmp_path):
+def test_archivos_zip_muestra_encontrados_no_estado_de_descarga(tmp_path):
     espejo = {
         "_meta": {"analisis_id": "d", "concurso": "C", "postor": "P"},
         "postor": {},
@@ -1543,9 +1543,10 @@ def test_recuento_real_reemplaza_inventario_anunciado(tmp_path):
         "descargas_reales": {"archivos": 2, "por_hito": {"2020-01": 2}},
     }}
     salida = generar_excel_final(espejo, tmp_path / "real.xlsx", fichas=fichas)
-    texto = _texto(openpyxl.load_workbook(salida)[etiqueta_hoja(1, "JEFE")])
-    assert "2 archivos" in texto
-    assert "Sí (9)" not in texto
+    hoja = openpyxl.load_workbook(salida)[etiqueta_hoja(1, "JEFE")]
+    cabecera = next(c for row in hoja.iter_rows() for c in row
+                    if c.value == "ARCHIVOS (ZIP)")
+    assert hoja.cell(cabecera.row + 1, cabecera.column).value == "9 archivos"
 
 
 def test_excel_final_requisitos_lista_no_crashea(tmp_path):

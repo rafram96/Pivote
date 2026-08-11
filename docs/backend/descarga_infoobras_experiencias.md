@@ -55,7 +55,7 @@ Las experiencias sin documentos llevan `SIN_DOCUMENTOS.txt` con el motivo
 `indice.txt`.
 
 ### En el Excel
-Cada fila de valorización tiene la columna **"ARCHIVOS (ZIP)"**: `Sí (N)` / `—`,
+Cada fila de valorización tiene la columna **"ARCHIVOS (ZIP)"**: `N archivo(s)`,
 para que el evaluador sepa qué hitos tienen sustento documental antes de abrir
 el ZIP. El dato sale del parseo (`AvanceMensual.num_documentos`), no requiere
 descargar.

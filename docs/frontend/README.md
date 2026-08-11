@@ -46,7 +46,7 @@ panel debe superficiar y que el spec original no contemplaba:
    se arma on-demand la primera vez (puede tardar: descarga documentos del portal
    flaky). La UI debe mostrar progreso/estado, no congelarse.
 3. **Visibilidad documental por hito** (P5 o detalle de experiencia): el Excel ya
-   trae la columna **ARCHIVOS (ZIP)** (`Sí (N)`/`—`) por valorización. El panel
+   trae la columna **ARCHIVOS (ZIP)** (`N archivo(s)`) por valorización. El panel
    puede reflejar lo mismo: qué hitos tienen sustento descargable antes de bajar
    el ZIP.
 4. **Modificaciones de plazo** (ampliaciones/suspensiones): dato nuevo por

@@ -20,6 +20,7 @@ import logging
 import os
 import re
 from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -1889,8 +1890,15 @@ class EtapaRenipressReal:
 #
 # `m[ií]nim[ao]` cubre "mínimo de 3 años" y "Experiencia mínima: 24 meses"; el
 # hueco intermedio es corto y no-codicioso para no saltar a otra cifra de la frase.
+_UNIDAD_TIEMPO_RE = r"a[ñn]os?|meses|mes|d[ií]as?"
 _RE_MINIMO = re.compile(
-    r"m[ií]nim[ao][^0-9]{0,20}?(\d+)\s*(a[ñn]os?|meses|mes|d[ií]as?)", re.I)
+    rf"m[ií]nim[ao][^0-9]{{0,20}}?(\d+(?:[.,]\d+)?)\s*({_UNIDAD_TIEMPO_RE})",
+    re.I,
+)
+_RE_EQUIVALENCIA_TIEMPO = re.compile(
+    rf"\(\s*(\d+(?:[.,]\d+)?)\s*({_UNIDAD_TIEMPO_RE})\s*\)",
+    re.I,
+)
 
 # Conversión a días: la MISMA convención que `reglas.anios` (365) y `reglas.meses`
 # (30). Usar otra haría que el umbral contradiga la cifra que se muestra al lado.
@@ -1904,10 +1912,28 @@ def _minimo_exigido(requisitos) -> Optional[tuple[int, str]]:
     pérdida: convertir los efectivos a años y redondear puede volcar un caso de
     borde (2.996 años redondea a 3.0 y un mínimo de "3 años" pasaría a cumplir)."""
     for v in (requisitos or {}).values():
-        m = _RE_MINIMO.search(str(v))
-        if m:
-            n, unidad = int(m.group(1)), m.group(2).lower()[0]
-            return n * _DIAS_POR_UNIDAD[unidad], f"{n} {m.group(2)}"
+        texto = str(v)
+        m = _RE_MINIMO.search(texto)
+        if not m:
+            continue
+
+        # Si las bases escriben la equivalencia de manera literal —p. ej.
+        # «0.5 años (6 meses)»— esa unidad explícita gana. Evita convertir seis
+        # meses en 182.5 días y respeta la convención mensual del mismo documento.
+        equivalencia = _RE_EQUIVALENCIA_TIEMPO.search(texto[m.end():m.end() + 80])
+        elegido = equivalencia or m
+        numero_literal, unidad_literal = elegido.group(1), elegido.group(2)
+        try:
+            numero = Decimal(numero_literal.replace(",", "."))
+        except InvalidOperation:
+            continue
+        if numero <= 0:
+            continue
+
+        unidad = unidad_literal.lower()[0]
+        dias = int((numero * _DIAS_POR_UNIDAD[unidad]).to_integral_value(
+            rounding=ROUND_CEILING))
+        return dias, f"{numero_literal} {unidad_literal}"
     return None
 
 

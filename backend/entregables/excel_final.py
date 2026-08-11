@@ -1084,12 +1084,12 @@ def construir_hoja_profesional(
                 anio, mes = v.get("anio") or 0, v.get("mes") or 0
                 resaltar = _mes_en_rango(anio, mes, ini, fin)
                 paraliz = "paraliz" in str(v.get("estado") or "").lower()
-                clave_hito = f"{anio:04d}-{mes:02d}" if anio and mes else ""
-                if isinstance(descargas_reales, dict):
-                    ndoc = int((descargas_reales.get("por_hito") or {}).get(clave_hito, 0))
-                    texto_docs = f"{ndoc} archivo{'s' if ndoc != 1 else ''}"
-                else:
-                    texto_docs = "Pendiente"
+                # Esta columna describe lo que InfoObras PUBLICÓ para el hito,
+                # no el avance operativo de la descarga. `docs` está disponible
+                # desde el parseo; por eso nunca debe degradarse a "Pendiente"
+                # ni variar si luego falla o todavía no empieza a bajar el ZIP.
+                ndoc = int(v.get("docs") or 0)
+                texto_docs = f"{ndoc} archivo{'s' if ndoc != 1 else ''}"
                 celdas = [n, f"{anio} / {_MES_ES.get(mes, mes)}",
                           v.get("fisico_real"), v.get("valorizado_real"), _sin_jerga(v.get("estado") or ""),
                           texto_docs]
