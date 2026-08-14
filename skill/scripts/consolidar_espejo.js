@@ -3,7 +3,7 @@
 /**
  * consolidar_espejo.js — Paso 4 de la skill, DETERMINÍSTICO.
  *
- * Une las salidas de los subagentes en el JSON espejo v1.2.0, normalizando los
+ * Une las salidas de los subagentes en el JSON espejo v1.4.0, normalizando los
  * alias/typos que producen (cada subagente LLM diverge) y dejando `_backend` en
  * null. Reemplaza el "el orquestador consolida a mano" — que es inviable y
  * propenso a errores en propuestas grandes (miles de líneas).
@@ -58,6 +58,11 @@ const numify = (v) => {
   const m = String(v).replace(/[^\d.,-]/g, "").replace(/,/g, "");
   const n = parseFloat(m);
   return Number.isFinite(n) ? n : null;
+};
+const decimalTexto = (v) => {
+  if (v == null || v === "") return null;
+  const n = numify(v);
+  return n == null ? null : n.toFixed(2);
 };
 const intsFrom = (v) => {
   if (v == null) return [];
@@ -525,7 +530,60 @@ function requisitosDe(bases, cargoNum) {
     // evaluador. Viaja estructurada para que el servidor puntúe solo el exceso
     // de tiempo efectivo y no el declarado.
     factor_a_aplica: c.factor_a_aplica ?? c.aplica_factor_a ?? c.aplica ?? null,
+    acreditacion_formacion: pick(c.acreditacion_formacion, bases.acreditacion_formacion),
     folio: pick(c.folio, c.folio_requisito, c.folio_tdr),   // folio en las BASES → recorte TDR (mejora A)
+  };
+}
+
+function reglasEvaluacionDe(bases) {
+  const mc = bases.metadata_concurso || {};
+  const reglas = bases.reglas_evaluacion || {};
+  const factores = bases.factores_evaluacion || {};
+  const listaFactores = Array.isArray(factores) ? factores : [];
+  const factorCrudo = pick(
+    reglas.factor_a,
+    bases.factor_a,
+    (!Array.isArray(factores) && factores.factor_a),
+    listaFactores.find((f) => /^\s*(?:FACTOR\s*)?A\b/i.test(String(f.factor || f.codigo || f.nombre || ""))),
+  );
+  let factorA = null;
+  if (factorCrudo && typeof factorCrudo === "object") {
+    const tramos = (Array.isArray(factorCrudo.tramos) ? factorCrudo.tramos : []).map((t) => ({
+      desde_porcentaje: numify(pick(t.desde_porcentaje, t.minimo_porcentaje, t.desde)),
+      desde_inclusivo: t.desde_inclusivo !== false,
+      hasta_porcentaje: numify(pick(t.hasta_porcentaje, t.maximo_porcentaje, t.hasta)),
+      hasta_inclusivo: t.hasta_inclusivo === true,
+      puntaje: numify(pick(t.puntaje, t.puntos)),
+    })).filter((t) => t.puntaje != null);
+    factorA = {
+      dias_adicionales_requeridos: numify(pick(
+        factorCrudo.dias_adicionales_requeridos,
+        factorCrudo.minimo_adicional_dias,
+      )),
+      tramos,
+      folio: pick(factorCrudo.folio, factorCrudo.pagina, mc.pagina_factores),
+    };
+  }
+  const fecha = fechaOk(pick(reglas.fecha_presentacion_oferta, mc.fecha_presentacion_oferta));
+  return {
+    fecha_presentacion_oferta: fecha,
+    fecha_presentacion_fuente: pick(reglas.fecha_presentacion_fuente, fecha ? {
+      origen: "bases",
+      referencia: pick(mc.folio_fecha_presentacion, mc.pagina_cronograma),
+      texto: pick(mc.fecha_presentacion_texto),
+    } : null),
+    antiguedad_maxima_anios: numify(pick(
+      reglas.antiguedad_maxima_anios,
+      mc.antiguedad_maxima_anios,
+      bases.antiguedad_maxima_anios,
+      bases.reglas_experiencia && bases.reglas_experiencia.antiguedad_maxima_anios,
+    )),
+    periodos_sin_dia: pick(
+      reglas.periodos_sin_dia,
+      bases.periodos_sin_dia,
+      bases.reglas_experiencia && bases.reglas_experiencia.periodos_sin_dia,
+    ) === "mes_completo" ? "mes_completo" : "no_definida",
+    factor_a: factorA,
   };
 }
 
@@ -745,6 +803,21 @@ function consolidar(WS) {
       ])],
       cumple: pick(pe.cumple),
       anios_adicionales: aniosAd,
+      acreditacion_formacion: {
+        titulo_declarado: pick(pr.acreditacion_formacion && pr.acreditacion_formacion.titulo_declarado, pr.titulo_declarado, pr.titulo),
+        universidad_declarada: pick(pr.acreditacion_formacion && pr.acreditacion_formacion.universidad_declarada, pr.universidad_declarada, pr.universidad),
+        documento_identidad: pick(pr.acreditacion_formacion && pr.acreditacion_formacion.documento_identidad, pr.documento_identidad, pr.dni),
+        diploma_adjunto: typeof (pr.acreditacion_formacion && pr.acreditacion_formacion.diploma_adjunto) === "boolean"
+          ? pr.acreditacion_formacion.diploma_adjunto
+          : typeof pr.diploma_adjunto === "boolean" ? pr.diploma_adjunto : null,
+        colegiatura_declarada: pick(pr.colegiatura),
+        constancia_colegiatura_adjunta: typeof (pr.acreditacion_formacion && pr.acreditacion_formacion.constancia_colegiatura_adjunta) === "boolean"
+          ? pr.acreditacion_formacion.constancia_colegiatura_adjunta
+          : typeof pr.constancia_colegiatura_adjunta === "boolean" ? pr.constancia_colegiatura_adjunta : null,
+        extraccion_completa: (pr.acreditacion_formacion && pr.acreditacion_formacion.extraccion_completa) === true,
+        folio_anexo_15: pick(pr.acreditacion_formacion && pr.acreditacion_formacion.folio_anexo_15, pr.folio_anexo_15, pr.folio_nombre),
+      },
+      _backend: {},
     });
   }
 
@@ -820,6 +893,19 @@ function consolidar(WS) {
       ultimos_20_anios: pick(x.ultimos_20_anios, "POR VERIFICAR (corte 20 años — backend/Comité)"),
       tipo_solicitado: pick(j.tipo_solicitado, x.tipo_solicitado),
       observaciones: pick(j.observaciones, x.observaciones),
+      contrato_id: pick(x.contrato_id, x.contrato),
+      item_id: pick(x.item_id, x.item, x.componente_id),
+      componentes: Array.isArray(x.componentes) ? x.componentes.filter(Boolean).map(String) : [],
+      monto_contrato: decimalTexto(pick(x.monto_contrato, x.monto)),
+      monto_item: decimalTexto(x.monto_item),
+      monto_aplicable: decimalTexto(pick(j.monto_aplicable, x.monto_aplicable)),
+      participacion_porcentaje: decimalTexto(pick(
+        x.participacion_porcentaje, j.participacion_porcentaje)),
+      evidencia_desglose: pick(x.evidencia_desglose, j.evidencia_desglose),
+      estado_monto: pick(j.estado_monto, x.estado_monto),
+      dentro_periodo_admitido: pick(x.dentro_periodo_admitido),
+      fecha_inicio: fechaOk(pick(x.fecha_inicio, x.fecha_inicial)),
+      fecha_fin: fechaOk(pick(x.fecha_fin, x.fecha_final)),
     };
   }) : [];
   if (!experiencia_postor.length) avisos.push({
@@ -846,8 +932,8 @@ function consolidar(WS) {
         bases.metadata_concurso && bases.metadata_concurso.rango_personal_clave),
       postor: pick(P.postor, P.nombre, (roster.postor_nivel || {}).postor),
       postor_ruc: pick(P.postor_ruc, P.ruc, (roster.postor_nivel || {}).postor_ruc),
-      fecha_presentacion_oferta: pick(P.fecha_presentacion_oferta),
-      version_contrato: "1.3.0",
+      fecha_presentacion_oferta: fechaOk(pick(mc.fecha_presentacion_oferta)),
+      version_contrato: "1.4.0",
       generado_por: "claude-code",
     },
     postor: {
@@ -858,14 +944,32 @@ function consolidar(WS) {
       experiencia_postor_total: pick((ev.postor_eval || {}).experiencia_postor_total, P.experiencia_postor_total, {}),
       postor_cumple: pick((ev.postor_eval || {}).postor_cumple),
       consorciados: Array.isArray(P.consorciados) ? P.consorciados : [],
+      isos_certificaciones: Array.isArray(P.isos_certificaciones)
+        ? P.isos_certificaciones.map((iso) => ({
+          norma: pick(iso.norma),
+          presente: typeof iso.presente === "boolean" ? iso.presente : null,
+          titular: pick(iso.titular),
+          fecha_emision: fechaOk(pick(iso.fecha_emision)),
+          fecha_vencimiento: fechaOk(pick(iso.fecha_vencimiento, iso.vigente_hasta)),
+          alcance: pick(iso.alcance),
+          domicilio: pick(iso.domicilio),
+          organismo_certificador: pick(iso.organismo_certificador, iso.organismo),
+          folio: iso.folio != null ? iso.folio : null,
+          estado_vigencia: pick(iso.estado_vigencia),
+        }))
+        : [],
     },
     profesionales,
     resumen_evaluacion: {
       factores: (ev.resumen_evaluacion || {}).factores || [],
       puntaje_total: numify((ev.resumen_evaluacion || {}).puntaje_total),
       nota: pick((ev.resumen_evaluacion || {}).nota),
+      estado_puntaje: pick((ev.resumen_evaluacion || {}).estado_puntaje),
+      puntaje_confirmado: numify((ev.resumen_evaluacion || {}).puntaje_confirmado),
+      puntaje_maximo_posible: numify((ev.resumen_evaluacion || {}).puntaje_maximo_posible),
     },
     observaciones_claude: [...avisos, ...(ev.observaciones_claude || [])],
+    reglas_evaluacion: reglasEvaluacionDe(bases),
   };
 
   const outPath = path.join(WS, "espejo.json");
@@ -879,7 +983,8 @@ function consolidar(WS) {
 const main = (WS) => consolidar(WS).espejo;
 
 module.exports = {
-  normalizarEval, auditarEvaluacion, extraerCuiLiteral, consolidar, main,
+  normalizarEval, auditarEvaluacion, extraerCuiLiteral, reglasEvaluacionDe,
+  consolidar, main,
 };
 
 if (require.main === module) {

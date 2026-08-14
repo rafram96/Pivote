@@ -101,9 +101,8 @@ def test_descargar_cui_seccion_caida_no_tumba_el_resto(tmp_path, monkeypatch):
     assert any("Informes de control" in a for a in r["avisos"])
 
 
-def test_descargar_cui_reintenta_solo_la_seccion_caida(tmp_path, monkeypatch):
-    """La caché de la descarga no congela el error: un segundo pedido con el
-    mismo `dir_cache` rehace solo los informes y no vuelve a bajar el hito."""
+def test_descargar_cui_no_repite_una_seccion_caida(tmp_path, monkeypatch):
+    """El segundo pedido reutiliza el único resultado, también si fue parcial."""
     reg = []
     _stub_descargas(monkeypatch, reg)
     monkeypatch.setattr(zip_infoobras, "descargar_informes_control",
@@ -123,8 +122,9 @@ def test_descargar_cui_reintenta_solo_la_seccion_caida(tmp_path, monkeypatch):
     monkeypatch.setattr(zip_infoobras, "descargar_informes_control", informes_ok)
     segundo = descargar_cui("2418877", tmp_path / "d", fetch=obra,
                             dir_cache=tmp_path / "cache")
-    assert segundo["secciones"]["Informes de control"]["descargados"] == 1
-    assert segundo["fallidos"] == 1          # solo el documento del hito
+    assert segundo["secciones"]["Informes de control"] == {"error": True}
+    assert segundo["fallidos"] == 2
     assert [c for c in reg if c[0] == "hito"] == [("hito", 111)], (
         "la sección sana no se vuelve a descargar")
-    assert (tmp_path / "d" / "Informes de control" / "2020 - I-01.pdf").is_file()
+    assert not any(c[0] == "informes-ok" for c in reg)
+    assert not (tmp_path / "d" / "Informes de control" / "2020 - I-01.pdf").exists()

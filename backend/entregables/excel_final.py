@@ -19,11 +19,12 @@ experiencia no las tiene, su cuadro muestra brutos = efectivos.
 from __future__ import annotations
 
 import calendar
+import hashlib
 import io
 import json
 import logging
 import re
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
@@ -522,7 +523,7 @@ _CRON_LEYENDA = ("Colores: verde = la fecha declarada calza con el documento · 
                  "documento).")
 
 
-_CRON_SIN_REGLA_B = "NO APLICA — no es un expediente técnico"
+_CRON_SIN_FUENTE_B = "POR VERIFICAR — sin fuente pública localizada"
 
 # Formato de fecha de los cruces: año de CUATRO dígitos. Aquí se comparan
 # periodos declarados contra documentos oficiales y un `29/05/18` obliga a
@@ -541,6 +542,20 @@ def _cron_cruce(cruces, regla) -> Optional[dict]:
     return None
 
 
+def _tipo_experiencia(e: dict, fx: dict) -> str:
+    explicito = str(fx.get("tipo_experiencia") or e.get("tipo_experiencia") or "").lower()
+    texto = " ".join((explicito, str(e.get("proyecto") or ""))).lower()
+    if re.search(r"expediente\s+t[eé]cnico|estudio\s+definitivo", texto):
+        return "expediente"
+    if re.search(r"preinversi[oó]n|perfil|factibilidad", texto):
+        return "preinversion"
+    if re.search(r"ejecuci[oó]n\s+de\s+obra|residente\s+de\s+obra|obra\s+ejecutada", texto):
+        return "ejecucion"
+    if explicito in {"expediente", "preinversion", "ejecucion", "supervision"}:
+        return explicito
+    return "indeterminada"
+
+
 def presentacion_cruces(e: dict, fx: Optional[dict]) -> dict:
     """Los cruces de UNA experiencia, ya traducidos a lo que se pinta.
 
@@ -554,16 +569,22 @@ def presentacion_cruces(e: dict, fx: Optional[dict]) -> dict:
     from reglas.cruces_fechas import REGLA_INICIO, REGLA_TERMINO, RESPUESTA
 
     fx = fx or {}
+    tipo = _tipo_experiencia(e, fx)
     if str(fx.get("via") or "").upper() == "PRIVADA":
         pendiente = bool(fx.get("privada_pendiente"))
-        rotulo = ("REVISIÓN — RUTA PRIVADA / SUNAT PENDIENTE" if pendiente
-                  else "NO APLICA — OBRA PRIVADA")
+        rotulo_a = ("REVISIÓN — RUTA PRIVADA / SUNAT PENDIENTE" if pendiente
+                    else "FUENTE PÚBLICA NO APLICA — OBRA PRIVADA")
+        rotulo_b = (_CRON_SIN_FUENTE_B + "; revisar el sustento privado"
+                    if tipo == "expediente" else
+                    ("POR VERIFICAR — tipo de experiencia no determinado"
+                     if tipo == "indeterminada" else
+                     "NO APLICA — la regla corresponde a expedientes técnicos"))
         return {
             "n_exp": e.get("n"), "proyecto": e.get("proyecto"), "cui": None,
             "proceso": None, "inicio": fecha_excel(e.get("fecha_inicial")),
             "fin": fecha_excel(e.get("fecha_final")), "firma": None,
-            "aprobacion": None, "resp_a": rotulo,
-            "resp_b": rotulo, "aplica_b": False,
+            "aprobacion": None, "resp_a": rotulo_a,
+            "resp_b": rotulo_b, "aplica_b": tipo != "ejecucion",
             "inferida": False,
             "motivo": (("SUNAT aún no identificó inequívocamente al emisor. "
                         if pendiente else "") +
@@ -591,9 +612,12 @@ def presentacion_cruces(e: dict, fx: Optional[dict]) -> dict:
         "firma": fecha_excel(firma),
         "aprobacion": fecha_excel(aprobacion),
         "resp_a": RESPUESTA.get(ca.get("resultado"), "POR VERIFICAR"),
-        "resp_b": (RESPUESTA.get(cb.get("resultado"), "POR VERIFICAR") if cb
-                   else _CRON_SIN_REGLA_B),
-        "aplica_b": cb is not None,
+        "resp_b": (RESPUESTA.get(cb.get("resultado"), "POR VERIFICAR") if cb else
+                   (_CRON_SIN_FUENTE_B if tipo == "expediente" else
+                    ("POR VERIFICAR — tipo de experiencia no determinado"
+                     if tipo == "indeterminada" else
+                     "NO APLICA — la regla corresponde a expedientes técnicos"))),
+        "aplica_b": cb is not None or tipo in {"expediente", "indeterminada"},
         "inferida": bool(cb and cb.get("inferida") and aprobacion),
         "motivo": _sin_jerga(" ".join(str(m) for m in motivos)),
     }
@@ -964,18 +988,22 @@ def construir_hoja_profesional(
         kv("Monto informado en la ficha (S/)", fx.get("monto") if fx.get("monto") is not None else "—", FMT_SOLES)
         kv("Inicio de obra", _fecha_iso(fx.get("fecha_inicio")) or "—", FMT_FECHA)
         kv("Fin de obra", _fecha_iso(fx.get("fecha_fin")) or "—", FMT_FECHA)
-        descargas_reales = fx.get("descargas_reales")
-        if isinstance(descargas_reales, dict):
-            n_real = int(descargas_reales.get("archivos") or 0)
-            kv("Documentos en el ZIP",
-               f"{n_real} archivo{'s' if n_real != 1 else ''} descargado{'s' if n_real != 1 else ''}")
-            secciones = descargas_reales.get("secciones") or {}
-            if isinstance(secciones, dict) and secciones:
-                kv("Detalle de descargas", "; ".join(
-                    f"{_sin_jerga(str(k).replace('_', ' '))}: {v}"
-                    for k, v in secciones.items()))
+        inventario = fx.get("inventario_documental") or {}
+        documentos = inventario.get("documentos") if isinstance(inventario, dict) else None
+        if isinstance(documentos, list):
+            n_encontrados = len({str(d.get("id") or d.get("url") or i)
+                                 for i, d in enumerate(documentos)
+                                 if isinstance(d, dict)})
+        elif isinstance(fx.get("documentos_encontrados"), int):
+            n_encontrados = fx["documentos_encontrados"]
         else:
-            kv("Documentos en el ZIP", "Pendiente de descarga")
+            n_encontrados = sum(int(v.get("docs") or 0)
+                                for v in (fx.get("valorizaciones") or [])
+                                if isinstance(v, dict))
+        texto_encontrados = ("No se encontraron documentos" if n_encontrados == 0 else
+                             "1 archivo encontrado" if n_encontrados == 1 else
+                             f"{n_encontrados} archivos encontrados")
+        kv("Documentos encontrados", texto_encontrados)
         rr += 1
 
         vals_crudas = fx.get("valorizaciones") or []
@@ -1076,7 +1104,7 @@ def construir_hoja_profesional(
             c.alignment = Alignment(vertical="center", wrap_text=True)
             rr += 1
             for i, h in enumerate(["N°", "AÑO / MES", "AVANCE FÍSICO REAL",
-                                   "VALORIZADO REAL (S/)", "ESTADO", "ARCHIVOS (ZIP)"], start=6):
+                                   "VALORIZADO REAL (S/)", "ESTADO", "ARCHIVOS ENCONTRADOS"], start=6):
                 cc = ws.cell(rr, i, h)
                 cc.font, cc.fill, cc.border, cc.alignment = F_HEAD, FILL_HEAD, BORDER, AL_HEAD
             rr += 1
@@ -1089,7 +1117,9 @@ def construir_hoja_profesional(
                 # desde el parseo; por eso nunca debe degradarse a "Pendiente"
                 # ni variar si luego falla o todavía no empieza a bajar el ZIP.
                 ndoc = int(v.get("docs") or 0)
-                texto_docs = f"{ndoc} archivo{'s' if ndoc != 1 else ''}"
+                texto_docs = ("No se encontraron documentos" if ndoc == 0 else
+                              "1 archivo encontrado" if ndoc == 1 else
+                              f"{ndoc} archivos encontrados")
                 celdas = [n, f"{anio} / {_MES_ES.get(mes, mes)}",
                           v.get("fisico_real"), v.get("valorizado_real"), _sin_jerga(v.get("estado") or ""),
                           texto_docs]
@@ -1135,8 +1165,7 @@ def construir_hoja_profesional(
         return rr - 1
 
     def render_seace(top: int, datos: dict) -> int:
-        """Disponibilidad de Bases Integradas y contrato para ESTA experiencia.
-        Solo informa y sustenta el ZIP; nunca convierte una ausencia en incumplimiento."""
+        """Disponibilidad documental de Bases Integradas y contrato."""
         rr = top
         ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
         c = ws.cell(rr, 6, "DOCUMENTOS DEL PROCESO (SEACE)")
@@ -1146,7 +1175,7 @@ def construir_hoja_profesional(
         estado = datos.get("estado")
         if estado != "seleccionado":
             textos = {
-                "fuente_no_disponible": "Por confirmar — la fuente no respondió; reintentar.",
+                "fuente_no_disponible": "Por confirmar — la fuente no respondió.",
                 "sin_procesos": "No disponible en datos abiertos (cobertura desde 2018).",
                 "sin_tipo": "No se encontró un proceso del tipo correspondiente a la experiencia.",
             }
@@ -1171,7 +1200,7 @@ def construir_hoja_profesional(
         docs = datos.get("docs") or {}
         for clave, etiqueta in (("bases", "Bases Integradas"), ("contrato", "Contrato firmado")):
             disponible = (docs.get(clave) or {}).get("estado") == "disponible"
-            filas.append((etiqueta, "Identificado para incluir en el ZIP"
+            filas.append((etiqueta, "1 archivo encontrado"
                           if disponible else "No disponible en datos abiertos"))
         if datos.get("fecha_suscripcion"):
             filas.append(("Fecha de firma", datos["fecha_suscripcion"]))
@@ -1203,7 +1232,7 @@ def construir_hoja_profesional(
                 rr += 1
         if datos.get("ambiguo"):
             texto = ("Por confirmar — hay varios procesos del mismo tipo; se eligió "
-                     "el más reciente. Verificar la carátula de los documentos del ZIP.")
+                     "el más reciente. Verificar la carátula de los documentos encontrados.")
             ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
             c = ws.cell(rr, 6, texto)
             c.font, c.fill, c.border, c.alignment = F_CELL, FILL_PEND, BORDER, AL_WRAP
@@ -2515,6 +2544,34 @@ def generar_excel_final(
     revisiones = revisiones or {}
     sunat = sunat or {}
     certificados = certificados or {}
+    revisiones_analiticas = len(revisiones)
+    revisiones_analiticas += sum(
+        1 for p in espejo.get("profesionales", []) or []
+        if (((p.get("_backend") or {}).get("formacion") or {}).get("estado")
+            == "revision_manual")
+    )
+    if ((espejo.get("postor") or {}).get("experiencia_postor_total") or {}).get("estado") == "condicionado":
+        revisiones_analiticas += 1
+    if (espejo.get("resumen_evaluacion") or {}).get("estado_puntaje") == "condicionado":
+        revisiones_analiticas += 1
+    meta = espejo.setdefault("_meta", {})
+    meta["estado_entregable"] = (
+        f"FINAL AUTOMÁTICO — REQUIERE REVISIÓN ({revisiones_analiticas})"
+        if revisiones_analiticas else "FINAL AUTOMÁTICO — SIN REVISIONES")
+    meta["generado_en"] = datetime.now().astimezone().isoformat(timespec="seconds")
+
+    def _analitico(v):
+        if isinstance(v, dict):
+            excluir = {"descargas_reales", "descarga_documentos", "descargas_estado",
+                       "zip_infoobras", "generado_en", "huella_analitica"}
+            return {k: _analitico(x) for k, x in v.items() if k not in excluir}
+        if isinstance(v, list):
+            return [_analitico(x) for x in v]
+        return v
+
+    canon = json.dumps(_analitico(espejo), sort_keys=True, default=str,
+                       ensure_ascii=False, separators=(",", ":"))
+    meta["huella_analitica"] = hashlib.sha256(canon.encode("utf-8")).hexdigest()[:16]
     wb = openpyxl.Workbook()
 
     ws = wb.active
@@ -2541,9 +2598,40 @@ def generar_excel_final(
     construir_hoja_cronologia(wb.create_sheet(HOJA_CRONOLOGIA), espejo,
                               fichas_crono)
 
+    validar_integridad_entregable(wb, espejo)
     salida.parent.mkdir(parents=True, exist_ok=True)
     wb.save(salida)
     return salida
+
+
+def validar_integridad_entregable(wb, espejo: dict) -> None:
+    """Gate final: el libro no puede publicar autoridades contradictorias."""
+    prohibidos = (
+        "pendiente de descarga", "documentos en el zip", "redescargar",
+        "redactadas antes del recálculo", "¿últimos 20 años?",
+    )
+    hallazgos = []
+    for ws in wb.worksheets:
+        for fila in ws.iter_rows():
+            for celda in fila:
+                if not isinstance(celda.value, str):
+                    continue
+                bajo = celda.value.lower()
+                for texto in prohibidos:
+                    if texto in bajo:
+                        hallazgos.append(f"{ws.title}!{celda.coordinate}: {texto}")
+    resumen = espejo.get("resumen_evaluacion") or {}
+    total = resumen.get("puntaje_total")
+    factores = resumen.get("factores", []) or []
+    if isinstance(total, (int, float)) and factores:
+        suma = sum(float(f.get("puntaje")) for f in factores
+                   if isinstance(f.get("puntaje"), (int, float)))
+        if abs(float(total) - suma) > 0.005:
+            hallazgos.append(f"puntaje_total={total} pero factores={suma}")
+    if resumen.get("estado_puntaje") == "condicionado" and total is not None:
+        hallazgos.append("puntaje condicionado conserva un total definitivo")
+    if hallazgos:
+        raise ValueError("Entregable inconsistente: " + "; ".join(hallazgos[:12]))
 
 
 def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
@@ -2569,7 +2657,7 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
         if (enr.get("obra_ficha") or enr.get("valorizaciones")
                 or enr.get("representante_obra") or enr.get("aprobacion_expediente")
                 or enr.get("verificacion_expediente") or enr.get("seace")
-                or enr.get("descargas_reales") or enr.get("cruces_fechas")
+                or enr.get("inventario_documental") or enr.get("cruces_fechas")
                 or str(enr.get("via") or "").upper() == "PRIVADA"):
             # `obra_ficha` NO trae el nombre (solo código/CUI/estado/monto/fechas);
             # el nombre viaja suelto en `obra_nombre` (o en `obra.nombre_obra`) y sin
@@ -2585,7 +2673,9 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                                  "aprobacion_expediente": enr.get("aprobacion_expediente"),
                                  "verificacion_expediente": enr.get("verificacion_expediente"),
                                  "seace": enr.get("seace"),
-                                 "descargas_reales": enr.get("descargas_reales"),
+                                 "inventario_documental": enr.get("inventario_documental"),
+                                 "documentos_encontrados": enr.get("documentos_encontrados"),
+                                 "tipo_experiencia": enr.get("tipo_experiencia"),
                                  "via": enr.get("via"),
                                  # T-011: los cruces de fechas de la etapa REGLAS.
                                  # Viajan dentro de `fichas` (y no como argumento
@@ -2679,9 +2769,18 @@ def regenerar_excel_final(espejo: dict, enriquecimiento: Optional[dict],
     pasaban en absoluto, así que regenerar arrancaba TODAS las imágenes embebidas
     (constancias, TDR, Anexo 16) del entregable — silenciosamente."""
     inyectar_cruces_fechas(espejo, enriquecimiento)
+    from validacion import construir_inventario_documental
+    construir_inventario_documental(espejo, enriquecimiento or {})
     paral, cuis, fichas, sunat = desempaquetar_enriquecimiento(enriquecimiento)
+    from validacion import (aplicar_reglas_formacion, aplicar_reglas_iso,
+                            recalcular_experiencia_postor,
+                            reconciliar_puntajes)
     from validacion.recalculo import recalcular_espejo
     recalcular_espejo(espejo, sobrescribir=True)
+    aplicar_reglas_formacion(espejo)
+    recalcular_experiencia_postor(espejo)
+    aplicar_reglas_iso(espejo)
+    reconciliar_puntajes(espejo)
     inyectar_veredicto_backend(espejo, enriquecimiento)
     salida = Path(salida)
     if certificados is None:

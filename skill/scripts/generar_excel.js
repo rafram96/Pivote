@@ -193,17 +193,18 @@ async function generarExcel(espejo, salida) {
   b.parte("PARTE 2: EXPERIENCIA DEL POSTOR");
   b.headers(["No", "CLIENTE QUE EMITE", "CONTRATO Y/O OS Y/O FACTURA", "Nombre del Proyecto", "TIPO DE ACREDITACIÓN",
     "MONTO (S/)", "% POR OBJETO U CONTRATO", "LE CORRESPONDE (S/)", "ACREDITA (consorciado)", "Folio",
-    "¿Últimos 20 años?", "¿Tipo solicitado en bases?", "OBSERVACIONES"]);
+    "¿Dentro del periodo admitido?", "¿Tipo solicitado en bases?", "OBSERVACIONES"]);
   const m2 = { 6: FMT_MONEY, 7: FMT_DEC, 8: FMT_MONEY };
   // ¿últimos 20/25 años? (11) y ¿tipo solicitado? (12) son veredictos "pos";
   // la antigüedad (11) la recalcula el backend.
   const V2 = { 11: "pos", 12: "pos" }, BE2 = new Set([11]);
   (p.experiencia_postor || []).forEach((e) => b.row([e.n, e.cliente, e.contrato, e.proyecto, e.tipo_acreditacion,
-    e.monto, e.pct_objeto, e.le_corresponde, e.acredita, e.folio, e.ultimos_20_anios, e.tipo_solicitado, e.observaciones],
+    e.monto, e.pct_objeto, e.le_corresponde, e.acredita, e.folio,
+    e.dentro_periodo_admitido || e.ultimos_20_anios, e.tipo_solicitado, e.observaciones],
     { fmts: m2, verdicts: V2, backendCols: BE2 }));
   const tot = p.experiencia_postor_total || {};
   if (Object.keys(tot).length) {
-    const tv = (tot.le_corresponde !== undefined ? tot.le_corresponde : tot.acredita);
+    const tv = tot.monto_confirmado ?? (tot.le_corresponde !== undefined ? tot.le_corresponde : tot.acredita);
     b.row(["", "", "", "", "", "", "", "TOTAL (le corresponde):", tv, "", "", "", ""], { bold: true, fmts: { 9: FMT_MONEY } });
   }
   if (p.postor_cumple) b.bc("EL POSTOR CUMPLE EL REQUISITO 3.4:", p.postor_cumple, "pos");
@@ -261,11 +262,18 @@ async function generarExcel(espejo, salida) {
   const re = espejo.resumen_evaluacion || {};
   b.parte("PARTE 5: RESUMEN DE LA EVALUACIÓN — FACTORES DE EVALUACIÓN (Cap. IV)");
   b.headers(["FACTOR", "CRITERIO", "FOLIO", "DETALLE / OBSERVACIONES", "PUNTAJE"]);
-  (re.factores || []).forEach((f) => b.row([f.factor, f.criterio, f.folio, f.detalle, f.puntaje], { fmts: { 5: FMT_INT } }));
+  (re.factores || []).forEach((f) => {
+    const puntaje = f.puntaje ?? (f.puntaje_confirmado != null && f.puntaje_maximo_posible != null
+      ? `${f.puntaje_confirmado}–${f.puntaje_maximo_posible}` : "POR VERIFICAR");
+    b.row([f.factor, f.criterio, f.folio, f.detalle, puntaje], { fmts: { 5: FMT_INT } });
+  });
   if (re.puntaje_total !== null && re.puntaje_total !== undefined) {
     b.row(["PUNTAJE TÉCNICO TOTAL", "", "", "", re.puntaje_total], { bold: true, fmts: { 5: FMT_INT } });
+  } else {
+    const rango = re.puntaje_confirmado != null && re.puntaje_maximo_posible != null
+      ? `${re.puntaje_confirmado}–${re.puntaje_maximo_posible}` : "POR VERIFICAR";
+    b.row(["PUNTAJE TÉCNICO TOTAL", "", "", "Total condicionado", rango], { bold: true });
   }
-  if (re.nota) b.bc("Conclusión:", re.nota);
 
   fs.mkdirSync(path.dirname(salida), { recursive: true });
   await wb.xlsx.writeFile(salida);

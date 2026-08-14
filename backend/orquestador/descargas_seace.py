@@ -48,18 +48,16 @@ _ETIQUETAS_SEACE: dict[str, str] = {
 
 # ── Textos de las notas SEACE (fuente única, issue #81 R3) ───────────────────
 # Las lee un evaluador dentro de la carpeta de la experiencia: frases completas,
-# sin jerga, y con la distinción intacta entre «falló ahora, se puede reintentar»
-# y «no existe publicado, no lo busques más».
+# sin jerga y sin sugerir nuevas descargas: cada fuente se intenta una vez.
 NOTA_SEACE_DESCARGA_FALLIDA = (
-    "No se pudo descargar este documento en esta corrida: la fuente oficial "
-    "falló temporalmente. El proceso sí lo publica; se puede reintentar."
+    "No se pudo obtener este documento en la única consulta realizada. "
+    "El proceso sí lo publica, pero el archivo no quedó disponible."
 )
 
 _NOTAS_SEACE_AUSENCIA: dict[str, str] = {
-    # reintentable: la consulta misma no respondió
     "fuente_no_disponible": (
         "La consulta a los datos abiertos del SEACE no respondió en esta corrida, "
-        "así que no fue posible obtener este documento. Se puede reintentar."
+        "así que no fue posible obtener este documento."
     ),
     # definitivos: la fuente respondió y el documento no está
     "sin_tipo": (
@@ -210,3 +208,15 @@ class CacheDescargasSeace:
             materializar_archivo(cache, destino)
 
         return ResultadoCacheSeace(True, clave, cache_hit)
+
+    def materializar_existente(self, url: str, destino: Path) -> ResultadoCacheSeace:
+        """Reutiliza el archivo local; jamás llama al descargador."""
+        destino = Path(destino)
+        extension = destino.suffix.lower()
+        clave = clave_archivo_seace(url)
+        cache = self.directorio / f"{clave}{extension}"
+        with lock_para_descarga(cache):
+            if not archivo_seace_valido(cache):
+                return ResultadoCacheSeace(False, clave, False)
+            materializar_archivo(cache, destino)
+        return ResultadoCacheSeace(True, clave, True)

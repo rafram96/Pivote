@@ -1,13 +1,21 @@
 """
 Pydantic v2 — JSON espejo de la skill `analizar-licitacion-osce`.
 
-Contrato **v1.3.0**. Valida el artefacto consolidado que la skill emite (la otra
+Contrato **v1.4.0**. Valida el artefacto consolidado que la skill emite (la otra
 cara del Excel). Refleja la forma **plana** que realmente fluye por el pipeline
 (la misma que consume `scripts/generar_excel.py` y que se validó round-trip
 contra Trujillo y Libertador).
 
 El bloque `_backend` es opcional y, en la salida de Claude, va vacío/null — es el
 contrato explícito de lo que el servidor on-prem llena después.
+
+Cambios v1.4.0:
+- `reglas_evaluacion` lleva fecha oficial, corte temporal, periodos sin día y
+  baremo del Factor A; el LLM ya no es la autoridad de esos cálculos.
+- formación declarada y verificación manual quedan separadas (#89).
+- experiencia del postor admite contrato/ítem/componentes y montos desagregados
+  para evitar sumar contratos mixtos o deduplicar ítems distintos (#97).
+- factores y total pueden expresar un rango condicionado (#90/#91).
 
 Cambios v1.3.0:
 - `Profesional.supuestos` y `ExperienciaProf.supuestos` conservan la procedencia
@@ -35,7 +43,7 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime
-from typing import Annotated, Optional, Union
+from typing import Annotated, Literal, Optional, Union
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
@@ -106,6 +114,34 @@ class Meta(_ModelLax):
     representante_comun: Optional[str] = None
 
 
+class FuenteRegla(_ModelLax):
+    origen: Optional[Literal["bases", "seace_existente", "manual"]] = None
+    referencia: Optional[str] = None
+    texto: Optional[str] = None
+
+
+class TramoFactorA(_ModelLax):
+    desde_porcentaje: Optional[float] = Field(default=None, ge=0, le=100)
+    desde_inclusivo: bool = True
+    hasta_porcentaje: Optional[float] = Field(default=None, ge=0, le=100)
+    hasta_inclusivo: bool = False
+    puntaje: float = Field(ge=0)
+
+
+class ReglaFactorA(_ModelLax):
+    dias_adicionales_requeridos: Optional[int] = Field(default=None, ge=0)
+    tramos: list[TramoFactorA] = Field(default_factory=list)
+    folio: FolioT = None
+
+
+class ReglasEvaluacion(_ModelLax):
+    fecha_presentacion_oferta: FechaFlexible = None
+    fecha_presentacion_fuente: Optional[FuenteRegla] = None
+    antiguedad_maxima_anios: Optional[int] = Field(default=None, ge=0)
+    periodos_sin_dia: Literal["mes_completo", "no_definida"] = "no_definida"
+    factor_a: Optional[ReglaFactorA] = None
+
+
 # ── Postor (Partes 1-2) ──────────────────────────────────────────────────────
 class Formulario(_Model):
     anexo: str = ""
@@ -136,6 +172,35 @@ class ExperienciaPostor(_Model):
     ultimos_20_anios: Optional[str] = None
     tipo_solicitado: Optional[str] = None
     observaciones: Optional[str] = None
+    # v1.4 · hechos documentales para separar alcance mixto, multi-ítem y
+    # participación. Los montos canónicos son strings decimales para no perder
+    # céntimos al cruzar Node/Python/JSON.
+    contrato_id: Optional[str] = None
+    item_id: Optional[str] = None
+    componentes: list[str] = Field(default_factory=list)
+    monto_contrato: Optional[str] = None
+    monto_item: Optional[str] = None
+    monto_aplicable: Optional[str] = None
+    participacion_porcentaje: Optional[str] = None
+    evidencia_desglose: Optional[str] = None
+    estado_monto: Optional[Literal["confirmado", "por_verificar", "excluido"]] = None
+    dentro_periodo_admitido: Optional[str] = None
+    fecha_inicio: FechaFlexible = None
+    fecha_fin: FechaFlexible = None
+
+
+class CertificacionISO(_ModelLax):
+    """Hechos literales del certificado; nunca implica consulta registral."""
+    norma: Optional[str] = None
+    presente: Optional[bool] = None
+    titular: Optional[str] = None
+    fecha_emision: FechaFlexible = None
+    fecha_vencimiento: FechaFlexible = None
+    alcance: Optional[str] = None
+    domicilio: Optional[str] = None
+    organismo_certificador: Optional[str] = None
+    folio: FolioT = None
+    estado_vigencia: Optional[Literal["vigente", "vencido", "por_verificar"]] = None
 
 
 class Postor(_ModelLax):
@@ -147,6 +212,7 @@ class Postor(_ModelLax):
     postor_cumple: Optional[str] = None
     # NOTA 14: quiénes integran el consorcio (para exigir ISO de TODOS).
     consorciados: Optional[list[dict]] = None
+    isos_certificaciones: list[CertificacionISO] = Field(default_factory=list)
 
 
 # ── Bloque _backend (lo llena el servidor; Claude lo deja null) ──────────────
@@ -159,6 +225,10 @@ class Backend(_ModelLax):
     codigo_infoobras: Optional[str] = None
     paralizaciones: Optional[list] = None
     alerta_experiencia_antigua: Optional[str] = None
+    fecha_inicial_calculo: Optional[date] = None
+    fecha_final_calculo: Optional[date] = None
+    fechas_deducidas: bool = False
+    regla_deduccion: Optional[str] = None
 
 
 # Sub-obra de un cert MULTI-OBRA: N obras bajo un mismo vínculo continuo. Dos formas:
@@ -267,6 +337,10 @@ class Profesional(_ModelLax):
     supuestos: list[str] = Field(default_factory=list)
     cumple: Optional[str] = None
     anios_adicionales: Optional[str] = None
+    acreditacion_formacion: Optional[dict] = None
+    # Lo completa el backend o una resolución humana. No implica ni dispara
+    # consultas a MINEDU/SUNEDU ni a otra fuente nueva.
+    backend: dict = Field(default_factory=dict, alias="_backend")
 
     @model_validator(mode="after")
     def _exp_contiguas(self):
@@ -290,12 +364,18 @@ class Factor(_Model):
     detalle: Optional[str] = None
     aplica: Optional[bool] = None         # false ⇔ puntaje "NO APLICA"
     puntaje: Annotated[Optional[Union[float, str]], BeforeValidator(_valida_puntaje)] = None
+    estado_puntaje: Optional[Literal["definitivo", "condicionado", "no_aplica"]] = None
+    puntaje_confirmado: Optional[float] = Field(default=None, ge=0)
+    puntaje_maximo_posible: Optional[float] = Field(default=None, ge=0)
 
 
 class ResumenEvaluacion(_ModelLax):
     factores: list[Factor] = Field(default_factory=list)
     puntaje_total: Optional[float] = Field(default=None, ge=0)
     nota: Optional[str] = None
+    estado_puntaje: Optional[Literal["definitivo", "condicionado"]] = None
+    puntaje_confirmado: Optional[float] = Field(default=None, ge=0)
+    puntaje_maximo_posible: Optional[float] = Field(default=None, ge=0)
 
 
 # ── Raíz ─────────────────────────────────────────────────────────────────────
@@ -313,6 +393,7 @@ class JsonEspejo(_ModelLax):
     profesionales: list[Profesional] = Field(min_length=1)
     resumen_evaluacion: ResumenEvaluacion = Field(default_factory=ResumenEvaluacion)
     observaciones_claude: list[Observacion] = Field(default_factory=list)
+    reglas_evaluacion: ReglasEvaluacion = Field(default_factory=ReglasEvaluacion)
 
     @model_validator(mode="after")
     def _n_prof_contiguos(self):

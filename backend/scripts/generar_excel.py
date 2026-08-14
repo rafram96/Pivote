@@ -230,26 +230,23 @@ def dias_citados(texto) -> list[int]:
 
 
 def conciliar_conclusion(texto, dias_verificados, periodos: int = 0) -> str:
-    """Antepone el total verificado cuando el veredicto cita el conteo exclusivo.
-
-    `dias_verificados` es el TOTAL DECLARADO que el backend recalculó inclusivo
-    (el mismo que imprime la PARTE 5); `periodos`, cuántos periodos lo componen —
-    el desfase máximo que el conteo de bordes puede producir. Sin divergencia (o
-    con una divergencia que no es la de los bordes) devuelve el texto TAL CUAL:
-    el caso sano no debe cambiar ni una celda."""
+    """Conclusión visible desde el total inclusivo, nunca desde prosa aritmética."""
     if not isinstance(texto, str) or not isinstance(dias_verificados, int) \
             or isinstance(dias_verificados, bool) or periodos <= 0:
         return texto if isinstance(texto, str) else ("" if texto is None else str(texto))
-    candidatos = [n for n in dias_citados(texto)
-                  if 0 < dias_verificados - n <= periodos]
-    if not candidatos:
-        return texto
-    citada = max(candidatos)     # la más cercana al verificado
-    return (f"{dias_verificados} días verificados "
-            f"({round(dias_verificados / 365, 2)} años). {texto.strip()} "
-            f"· La cifra de {citada} días que cita esta conclusión cuenta un día "
-            f"menos por periodo; el cómputo del proyecto incluye el día de inicio "
-            f"y el de fin, y da {dias_verificados}.")
+    normal = texto.strip().upper()
+    if normal.startswith("NO CUMPLE"):
+        estado = "NO CUMPLE"
+    elif normal.startswith(("POR VERIFICAR", "POR CONFIRMAR")):
+        estado = "POR VERIFICAR"
+    elif normal.startswith(("CUMPLE", "SÍ CUMPLE", "SI CUMPLE")):
+        estado = "CUMPLE"
+    else:
+        estado = "POR VERIFICAR"
+    return (f"{estado} — total declarado recalculado: {dias_verificados} días "
+            f"inclusivos ({round(dias_verificados / 365, 2)} años) en "
+            f"{periodos} periodo{'s' if periodos != 1 else ''} computable"
+            f"{'s' if periodos != 1 else ''}.")
 
 
 # Un MONTO tiene forma de monto: miles agrupados ("16,670,989.88" / "16.670.989,88")
@@ -350,7 +347,7 @@ def nota_parte5(factores, puntaje_total) -> str:
 
     total = _num(puntaje_total)
     if total is None:
-        cabeza = "Puntaje técnico total: POR VERIFICAR — no hay un total calculable"
+        cabeza = "Puntaje técnico total: POR VERIFICAR — no se recibió un puntaje total calculable"
     else:
         cabeza = f"Puntaje técnico total {total:g}"
         if con_puntaje:
@@ -505,6 +502,12 @@ def construir_hoja_evaluacion(ws, espejo: dict,
     # ── Encabezado ──
     b.kv("Postor:", p.get("detalle") or espejo["_meta"].get("postor", ""))
     b.kv("Concurso:", espejo["_meta"].get("concurso", ""))
+    meta = espejo.get("_meta") or {}
+    if meta.get("estado_entregable"):
+        b._band(meta["estado_entregable"], F_BOLD,
+                FILL_PEND if "REQUIERE" in meta["estado_entregable"] else FILL_CUMPLE, 30)
+        b.kv("Generado:", meta.get("generado_en") or "—")
+        b.kv("Huella analítica:", meta.get("huella_analitica") or "—")
     veredicto = str((confiabilidad or {}).get("veredicto") or "").lower()
     rotulos = {
         "confiable": "CONFIABILIDAD: CONFIABLE — sin hallazgos críticos de integridad",
@@ -569,7 +572,7 @@ def construir_hoja_evaluacion(ws, espejo: dict,
     b.parte("PARTE 2: EXPERIENCIA DEL POSTOR")
     b.headers(["No", "CLIENTE / EMISOR", "CONTRATO/OS/FACTURA", "PROYECTO", "TIPO ACREDITACIÓN",
                "MONTO", "% OBJETO", "LE CORRESPONDE", "ACREDITA", "FOLIO",
-               "¿ÚLTIMOS 20 AÑOS?", "¿TIPO SOLICITADO?", "OBSERVACIONES"])
+               "¿DENTRO DEL PERIODO ADMITIDO?", "¿TIPO SOLICITADO?", "OBSERVACIONES"])
     m2 = {6: FMT_MONEY, 7: FMT_DEC, 8: FMT_MONEY, 9: FMT_MONEY}
     # ¿últimos 20/25 años? (11) y ¿tipo solicitado? (12) son veredictos "pos";
     # el cómputo de antigüedad (11) lo recalcula el backend.
@@ -578,12 +581,15 @@ def construir_hoja_evaluacion(ws, espejo: dict,
         b.row([_sin_jerga(x) for x in
                [e.get("n"), e.get("cliente"), e.get("contrato"), e.get("proyecto"), e.get("tipo_acreditacion"),
                 e.get("monto"), e.get("pct_objeto"), e.get("le_corresponde"), e.get("acredita"), e.get("folio"),
-                e.get("ultimos_20_anios"), e.get("tipo_solicitado"), e.get("observaciones")]],
+                 e.get("dentro_periodo_admitido") or e.get("ultimos_20_anios"),
+                 e.get("tipo_solicitado"), e.get("observaciones")]],
               fmts=m2, verdicts=V2, backend_cols=BE2)
     tot = p.get("experiencia_postor_total", {})
     if tot:
-        b.row(["", "TOTAL", "", "", "", "", "", _sin_jerga(tot.get("le_corresponde")),
-               _sin_jerga(tot.get("acredita")), "", "", "", ""],
+        b.row(["", "TOTAL", "", "", "", "", "",
+               _sin_jerga(tot.get("monto_confirmado") or tot.get("le_corresponde")),
+               _sin_jerga(tot.get("monto_maximo_posible") or tot.get("acredita")),
+               "", "", "", ""],
               bold=True, fmts={8: FMT_MONEY, 9: FMT_MONEY})
     if p.get("postor_cumple"):
         b.kv("¿POSTOR CUMPLE 3.4?", _sin_jerga(p["postor_cumple"]), verdict="pos")
@@ -723,24 +729,27 @@ def construir_hoja_evaluacion(ws, espejo: dict,
         # Vitarte). Ahora dice lo que pasó, en amarillo de «por verificar».
         _pje = fac.get("puntaje")
         _pendiente = _pje in (None, "")
+        if _pendiente and fac.get("puntaje_confirmado") is not None:
+            _pje = (f"{fac.get('puntaje_confirmado'):g}–"
+                    f"{fac.get('puntaje_maximo_posible'):g}")
         b.row([fac.get("factor"), fac.get("criterio"), fac.get("folio"),
-               fac.get("detalle"), "POR CONFIRMAR" if _pendiente else _pje],
+               fac.get("detalle"), "POR CONFIRMAR" if _pje in (None, "") else _pje],
               fmts={5: FMT_INT}, fills={5: FILL_PEND} if _pendiente else None)
     if re_.get("puntaje_total") is not None:
         b.row(["PUNTAJE TÉCNICO TOTAL", "", "", "", re_.get("puntaje_total")], bold=True, fmts={5: FMT_INT})
     else:
+        _min = re_.get("puntaje_confirmado")
+        _max = re_.get("puntaje_maximo_posible")
+        _rango = f"{_min:g}–{_max:g}" if isinstance(_min, (int, float)) and isinstance(_max, (int, float)) else "POR VERIFICAR"
         b.row(["PUNTAJE TÉCNICO TOTAL", "", "",
-               "POR VERIFICAR — no se recibió un puntaje total calculable",
-               "POR VERIFICAR"], bold=True, verdicts={5: "pos"})
+               "POR VERIFICAR — total condicionado por factores pendientes",
+               _rango], bold=True, verdicts={5: "pos"})
     # La NOTA se ARMA con lo que la tabla de arriba muestra. Antes se imprimía el
     # texto que venía redactado en el análisis y podía contradecirla a la vista
     # («Puntaje técnico total 80/100 (A=40…)» sobre una tabla que mostraba 40 y
     # el Factor A sin puntaje). Un resumen que no cuadra con su propia tabla
     # obliga a desconfiar del libro entero.
     b.kv("NOTA:", nota_parte5(re_.get("factores"), re_.get("puntaje_total")))
-    if re_.get("nota"):
-        b.kv("Observaciones de la evaluación (redactadas antes del recálculo "
-             "del puntaje):", _sin_jerga(re_["nota"]))
 
 
 def generar_excel(espejo: dict, salida: Path) -> Path:

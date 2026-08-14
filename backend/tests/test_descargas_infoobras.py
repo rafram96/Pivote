@@ -142,9 +142,8 @@ def _corpus_con_informes_caidos(destino, pendientes=None):
     return estado
 
 
-def test_seccion_en_error_no_se_congela_como_completa(tmp_path):
-    """Issue #81 R1: una sección caída publica caché PARCIAL y el siguiente
-    pedido reintenta SOLO esa sección, sin volver a bajar las sanas."""
+def test_seccion_en_error_queda_parcial_y_terminal(tmp_path):
+    """Una sección caída se informa, pero nunca habilita otra descarga."""
     cache = CacheDescargasInfoObras(tmp_path / "job" / "cache_obras")
     primero = cache.obtener(72056, descargar=_corpus_con_informes_caidos)
     entrada = tmp_path / "job" / "cache_obras" / "72056"
@@ -155,52 +154,32 @@ def test_seccion_en_error_no_se_congela_como_completa(tmp_path):
     assert secciones_en_error(primero.estado) == ("Informes de control",)
     assert (entrada / "Valorizaciones/2025-01 ENERO/val.pdf").is_file()
 
-    pedidas = []
-
-    def reintento(destino, pendientes=None):
-        pedidas.append(pendientes)
-        (destino / "Informes de control").mkdir(parents=True)
-        (destino / "Informes de control" / "2025 - I-01.pdf").write_bytes(b"%PDF i")
-        return {"secciones": {"Informes de control": {"esperados": 1, "descargados": 1}},
-                "informes_anios": [2025]}
-
-    segundo = cache.obtener(72056, descargar=reintento)
-    assert pedidas == [frozenset({"Informes de control"})]
-    assert segundo.completa and segundo.reintentadas == ("Informes de control",)
-    assert (entrada / ".completa").is_file() and not (entrada / ".parcial").exists()
-    # la sección sana sobrevivió al reintento sin volver a descargarse
+    segundo = cache.obtener(
+        72056, descargar=lambda *_: (_ for _ in ()).throw(
+            AssertionError("una caché parcial también es terminal")))
+    assert segundo.cache_hit and not segundo.completa
+    assert (entrada / ".parcial").is_file() and not (entrada / ".completa").exists()
     assert (entrada / "Valorizaciones/2025-01 ENERO/val.pdf").is_file()
     assert segundo.estado["secciones"]["InfoObras"] == {"esperados": 1, "descargados": 1}
-    assert segundo.estado["informes_anios"] == [2025]
-    assert segundo.estado["avisos"] == []      # el aviso caducó con el error
-
-    tercero = cache.obtener(
-        72056,
-        descargar=lambda _d, _p=None: (_ for _ in ()).throw(
-            AssertionError("una caché ya completa no vuelve a la fuente")))
-    assert tercero.cache_hit
+    assert segundo.estado["avisos"]
 
 
-def test_reintento_fallido_conserva_el_corpus_publicado(tmp_path):
+def test_segunda_peticion_no_invoca_el_descargador(tmp_path):
     cache = CacheDescargasInfoObras(tmp_path / "cache_obras")
     cache.obtener(72056, descargar=_corpus_con_informes_caidos)
 
     def revienta(_destino, _pendientes=None):
         raise ConnectionError("portal caído")
 
-    try:
-        cache.obtener(72056, descargar=revienta)
-    except ConnectionError:
-        pass
+    segundo = cache.obtener(72056, descargar=revienta)
+    assert segundo.cache_hit
     entrada = tmp_path / "cache_obras" / "72056"
     assert (entrada / "Valorizaciones/2025-01 ENERO/val.pdf").is_file()
     assert (entrada / ".parcial").is_file()
     assert not list((tmp_path / "cache_obras").glob(".*.part"))
 
 
-def test_purga_de_revision_desatasca_una_cache_completa_con_error(tmp_path):
-    """Compatibilidad: un job viejo pudo publicar `.completa` con una sección en
-    error. Resolver la revisión debe poder forzar el reintento de esa sección."""
+def test_revision_no_purga_ni_reabre_una_descarga_terminal(tmp_path):
     raiz = tmp_path / "cache_obras"
     cache = CacheDescargasInfoObras(raiz)
     cache.obtener(72056, descargar=_corpus_con_informes_caidos)
@@ -216,17 +195,13 @@ def test_purga_de_revision_desatasca_una_cache_completa_con_error(tmp_path):
             AssertionError("una caché heredada sigue siendo válida tal cual"))
     ).cache_hit
 
-    assert purgar_secciones_en_error(raiz, 72056) == ("Informes de control",)
-    assert not (entrada / "Informes de control").exists()
+    assert purgar_secciones_en_error(raiz, 72056) == ()
+    assert (entrada / "Informes de control/resto.pdf").is_file()
     assert (entrada / "Valorizaciones/2025-01 ENERO/val.pdf").is_file()
 
-    pedidas = []
-    cache.obtener(72056, descargar=lambda d, p=None: (
-        pedidas.append(p) or {"secciones": {"Informes de control": {
-            "esperados": 0, "descargados": 0}}}))
-    assert pedidas == [frozenset({"Informes de control"})]
+    cache.obtener(72056, descargar=lambda *_: (_ for _ in ()).throw(
+        AssertionError("la revisión no vuelve a descargar")))
     assert (entrada / ".completa").is_file()
-    # una caché sana no se purga: la revisión la reutiliza sin tocar el portal
     assert purgar_secciones_en_error(raiz, 72056) == ()
     assert purgar_secciones_en_error(raiz, 999999) == ()
 
@@ -260,11 +235,9 @@ _ESPEJO_UNA_EXPERIENCIA = {
 }
 
 
-def test_job_no_congela_la_seccion_caida_y_la_reintenta_en_la_pasada_siguiente(
+def test_job_informa_la_seccion_caida_y_no_la_descarga_otra_vez(
         tmp_path, monkeypatch):
-    """Recorrido completo de R1 sobre `descargar_documentos_job` + índice del ZIP:
-    primera pasada con los informes caídos (error visible, resto sano), segunda
-    pasada que reintenta SOLO esa sección y promueve la caché a completa."""
+    """El resultado parcial es terminal y el índice describe lo encontrado."""
     import zipfile
 
     from entregables import construir_zip_infoobras, zip_infoobras
@@ -301,18 +274,18 @@ def test_job_no_congela_la_seccion_caida_y_la_reintenta_en_la_pasada_siguiente(
     assert manifiesto["secciones"]["Informes de control"] == {"estado": "error"}
     assert manifiesto["secciones"]["InfoObras"]["estado"] == "completa"
     assert (destino / "Valorizaciones/2020-01 ENERO/val.pdf").is_file()
-    # el corpus quedó incompleto → la experiencia NO se da por terminada
-    assert not (base / "P1_E1.ok").exists()
+    # La marca expresa intento terminal, no éxito integral.
+    assert (base / "P1_E1.ok").exists()
     assert not manifiesto["completada"]
 
     indice = _indice_del_zip(construir_zip_infoobras(
         _ESPEJO_UNA_EXPERIENCIA, {(1, 1): destino}, tmp_path / "r1-a.zip",
         enriquecimiento=enr))
-    assert ("SECCIÓN Informes de control: la fuente no respondió en esta corrida "
-            "(se puede reintentar)") in indice
+    assert ("SECCIÓN Informes de control: la fuente no respondió en la única "
+            "consulta realizada") in indice
     assert "ADVERTENCIA: Informes de control: la consulta no pudo completarse." in indice
 
-    # ── segunda pasada: la fuente vuelve, con 3 informes de OTROS años ──────
+    # Aunque la fuente luego responda, una segunda pasada no vuelve a consultarla.
     def informes_ok(obra_id, destino_cache, **_k):
         llamadas.append("informes-ok")
         carpeta = destino_cache / "Informes de control"
@@ -324,29 +297,14 @@ def test_job_no_congela_la_seccion_caida_y_la_reintenta_en_la_pasada_siguiente(
     monkeypatch.setattr(zip_infoobras, "descargar_informes_control", informes_ok)
     descargar_documentos_job(_ESPEJO_UNA_EXPERIENCIA, enr, "job-r1", tmp_path)
 
-    assert llamadas == ["hito", "informes-error", "cierre", "informes-ok"], (
-        "el reintento solo vuelve por la sección caída")
+    assert llamadas == ["hito", "informes-error", "cierre"]
     entrada = carpeta_job(tmp_path, "job-r1") / "cache_obras" / "72056"
-    assert (entrada / ".completa").is_file() and not (entrada / ".parcial").exists()
+    assert (entrada / ".parcial").is_file() and not (entrada / ".completa").exists()
     assert (base / "P1_E1.ok").is_file()
     manifiesto = enr["1:1"]["descargas_reales"]
-    assert manifiesto["completada"]
-    assert manifiesto["secciones"]["Informes de control"] == {
-        "estado": "sin_documentos", "esperados": 0, "descargados": 0, "publicados": 3}
-    # los informes existen pero son de 2018: no se materializan en una
-    # experiencia de 2020 (y el índice ya no los llama "0 disponibles")
+    assert not manifiesto["completada"]
+    assert manifiesto["secciones"]["Informes de control"] == {"estado": "error"}
     assert not (destino / "Informes de control").exists()
-
-    indice = _indice_del_zip(construir_zip_infoobras(
-        _ESPEJO_UNA_EXPERIENCIA, {(1, 1): destino}, tmp_path / "r1-b.zip",
-        enriquecimiento=enr))
-    assert ("SECCIÓN Informes de control: los informes de control publicados no "
-            "corresponden al periodo de este certificado (3 publicados, todos de "
-            "otros años)") in indice
-    assert "Informes de control: sin documentos publicados" not in indice
-    # la ausencia REAL conserva su texto: la obra no publicó datos de cierre
-    assert "SECCIÓN Datos de cierre: sin documentos publicados (0 disponibles)" in indice
-    assert "ADVERTENCIA" not in indice
 
 
 def _indice_del_zip(ruta) -> str:

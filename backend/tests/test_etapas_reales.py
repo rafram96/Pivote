@@ -1127,9 +1127,9 @@ def test_excel_marca_valorizaciones_con_archivos(tmp_path):
     hoja = next(s for s in wb.sheetnames if s.startswith("P1."))
     texto = "\n".join(str(c.value) for row in wb[hoja].iter_rows()
                       for c in row if c.value)
-    assert "ARCHIVOS (ZIP)" in texto   # nueva columna
-    assert "2 archivos" in texto       # encontrados por InfoObras para el hito
-    assert "0 archivos" in texto       # InfoObras no publicó adjuntos en el hito
+    assert "ARCHIVOS ENCONTRADOS" in texto
+    assert "2 archivos encontrados" in texto
+    assert "No se encontraron documentos" in texto
     assert "Sí (2)" not in texto
 
 

@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
 import threading
 import time
 import uuid
@@ -183,8 +182,8 @@ def _espejo_o_404(job_id: str) -> dict:
 
 # ── Descarga DIFERIDA de documentos InfoObras ────────────────────────────────
 # Los PDFs de InfoObras (~1 GB) solo alimentan el ZIP, no el veredicto/Excel. Por
-# eso se bajan DESPUÉS del pipeline (sin bloquear el resultado) y, como red de
-# seguridad, también al pedir el /zip. Serializado por job para no duplicar trabajo.
+# eso se bajan DESPUÉS del pipeline (sin bloquear el resultado). GET /zip solo
+# empaqueta lo ya persistido; nunca abre una nueva descarga.
 logger = logging.getLogger("pivote.api")
 _descargas_guard = threading.Lock()
 
@@ -230,16 +229,17 @@ def _mapa_descargas(job_id: str) -> dict:
 
 
 def _asegurar_descargas(job_id: str) -> None:
-    """Idempotente + serializado por job: baja lo que falte de InfoObras, rellena la
-    métrica de INFOOBRAS y, al terminar TODO, arma el ZIP COMPLETO antes de marcar
-    `descargas_estado="listas"`. La llaman el background task (tras el pipeline) y el
-    endpoint /zip (que la reanuda si se cortó). No relanza: deja el estado en el job."""
+    """Ejecuta una sola pasada lógica por fuente y arma el ZIP con lo hallado.
+
+    Cada clave se persiste antes de tocar red. Un fallo, reinicio, GET /zip o
+    regeneración no vuelve a descargar la misma fuente.
+    """
     job = repo.cargar(job_id)
-    if job is None or job.descargas_estado == "listas":
+    if job is None or job.descargas_estado in {"listas", "listas_con_errores"}:
         return
     with _lock_descargas(job_id):
         job = repo.cargar(job_id)                      # re-leer dentro del lock
-        if job is None or job.descargas_estado == "listas":
+        if job is None or job.descargas_estado in {"listas", "listas_con_errores"}:
             return
         espejo = repo.cargar_espejo(job_id) or {}
         enr = repo.cargar_enriquecimiento(job_id) or {}
@@ -258,21 +258,23 @@ def _asegurar_descargas(job_id: str) -> None:
 
         try:
             from orquestador.etapas_reales import descargar_documentos_job
+            intentos = set(job.descargas_intentos or [])
+
+            def _marcar_intento(clave: str) -> None:
+                nonlocal job
+                if clave in intentos:
+                    return
+                intentos.add(clave)
+                job.descargas_intentos = sorted(intentos)
+                repo.guardar(job)  # antes de la llamada de red
+
             stats = descargar_documentos_job(espejo, enr, job_id, DATA_DIR,
-                                             max_descargas=maxd, reportar=_rep)
+                                             max_descargas=maxd, reportar=_rep,
+                                             intentos_documentos=intentos,
+                                             marcar_intento=_marcar_intento)
             # El manifiesto por experiencia es parte del enriquecimiento persistente:
             # alimenta tanto el Excel como el índice y sobrevive a un reinicio.
             repo.guardar_enriquecimiento(job_id, enr)
-            revisiones = {
-                (it.n_prof, it.n_exp): (it.motivo, it.accion_sugerida)
-                for it in job.items_revision if not it.resuelto
-            }
-            completar_revisiones_privadas(revisiones, enr)
-            regenerar_excel_final(
-                espejo, enr, _dir_job(job_id) / "final.xlsx", revisiones,
-                mapear_certificados(DATA_DIR, job_id),
-                confiabilidad=_confiabilidad_excel(job),
-            )
             # arma el ZIP COMPLETO recién ahora que están TODOS los documentos
             # (atómico → reemplaza cualquier zip parcial previo).
             ruta_zip = _dir_job(job_id) / "infoobras.zip"
@@ -288,7 +290,11 @@ def _asegurar_descargas(job_id: str) -> None:
                 io.metrica.bytes_descargados = stats["bytes"]
                 io.metrica.reintentos = stats["reintentos"]
             job.zip_infoobras = f"/api/pivote/jobs/{job_id}/zip"
-            job.descargas_estado = "listas"
+            parciales = [d for k, d in enr.items() if ":" in k and not k.startswith("prof:")
+                         and isinstance(d, dict)
+                         and isinstance(d.get("descargas_reales"), dict)
+                         and not d["descargas_reales"].get("completada")]
+            job.descargas_estado = "listas_con_errores" if parciales else "listas"
             repo.guardar(job)
             REGISTRO.limpiar(job_id)   # job terminal: suelta el progreso fino en memoria
             logger.info("DESCARGAS job %s · %d arch · %.0f MB · %d reintentos · %.0fs",
@@ -347,7 +353,7 @@ def _reanudar_pendientes() -> None:
         # ser un job viejo (el campo se defaulteó) → NO lo re-disparamos.
         if j.descargas_estado == "en_progreso":
             threading.Thread(target=_asegurar_descargas, args=(jid,), daemon=True).start()
-            logger.info("reanudando descargas pendientes del job %s tras reinicio", jid)
+            logger.info("continuando documentos nunca intentados del job %s tras reinicio", jid)
 
 
 def _decisiones(job_id: str) -> dict:
@@ -474,7 +480,7 @@ def _avance_descargas_dict(job: pipeline.Job) -> dict:
     viva = REGISTRO.etapas(job.job_id).get("descargas")
     return {
         "estado": job.descargas_estado,
-        "listo": job.descargas_estado == "listas",
+        "listo": job.descargas_estado in {"listas", "listas_con_errores"},
         "total": total,
         "descargadas": descargadas,
         "faltan": total - descargadas,
@@ -672,45 +678,38 @@ def _confiabilidad_excel(job: pipeline.Job) -> dict:
     }
 
 
-def _forzar_reintento_cache_obra(job_id: str, n_prof: int, n_exp: int) -> tuple[str, ...]:
-    """Al resolver una revisión, deja la caché de la obra lista para reintentar.
+def _sembrar_ledger_legado(job: pipeline.Job) -> None:
+    """Migra jobs terminales previos al ledger sin repetir ninguna descarga."""
+    if job.descargas_intentos or job.descargas_estado not in {
+            "listas", "listas_con_errores", "error"}:
+        return
+    from orquestador.descargas_seace import clave_archivo_seace
 
-    Borrar `P{n}_E{m}/` no alcanza: si el corpus de esa obra quedó guardado en
-    `cache_obras/` con una sección caída, rematerializar lo volvería a copiar
-    igual de incompleto. Se purgan SOLO las secciones en error de la obra que
-    quedó resuelta para este ítem; las sanas se reutilizan sin volver al portal.
-    Una entrada de una obra que ya no le corresponde a ninguna experiencia queda
-    huérfana a propósito: no molesta a nadie y se va con el job (issue #81, R1).
-    """
-    try:
-        from orquestador.descargas_infoobras import purgar_secciones_en_error
-        datos = (repo.cargar_enriquecimiento(job_id) or {}).get(f"{n_prof}:{n_exp}") or {}
-        obra = datos.get("obra") if isinstance(datos.get("obra"), dict) else {}
-        obra_id = (obra or {}).get("obra_id")
-        if not obra_id:
-            return ()
-        pendientes = purgar_secciones_en_error(
-            _dir_job(job_id) / "cache_obras", obra_id)
-        if pendientes:
-            logger.info("revisión job %s item %s:%s — se reintentará %s de la obra %s",
-                        job_id, n_prof, n_exp, ", ".join(pendientes), obra_id)
-        return pendientes
-    except Exception:  # noqa: BLE001 — nunca tumbar la revisión por la caché
-        logger.exception("no se pudo purgar la caché de obra del job %s", job_id)
-        return ()
+    claves: set[str] = set()
+    for dato in (repo.cargar_enriquecimiento(job.job_id) or {}).values():
+        if not isinstance(dato, dict):
+            continue
+        obra = dato.get("obra") if isinstance(dato.get("obra"), dict) else {}
+        if obra.get("obra_id"):
+            claves.add(f"infoobras:{obra['obra_id']}")
+        seace = dato.get("seace") if isinstance(dato.get("seace"), dict) else {}
+        for doc in (seace.get("docs") or {}).values():
+            if isinstance(doc, dict) and doc.get("url"):
+                claves.add(f"seace:{clave_archivo_seace(doc['url'])}")
+    job.descargas_intentos = sorted(claves)
+    repo.guardar(job)
 
 
 def _resolver_revision_background(job_id: str, n_prof: int, n_exp: int, body: dict):
     """Re-ejecuta la experiencia fuera del request y deja un estado consultable."""
     with _lock_descargas(job_id):
         try:
+            previo = repo.cargar(job_id)
+            if previo is not None:
+                _sembrar_ledger_legado(previo)
             job = motor.resolver_revision(job_id, n_prof, n_exp, body)
-            # La obra/CUI pudo cambiar: invalida solo los documentos de este ítem.
-            base = _dir_job(job_id) / "descargas"
-            shutil.rmtree(base / f"P{n_prof}_E{n_exp}", ignore_errors=True)
-            (base / f"P{n_prof}_E{n_exp}.ok").unlink(missing_ok=True)
-            (base / f"P{n_prof}_E{n_exp}.seace.ok").unlink(missing_ok=True)
-            _forzar_reintento_cache_obra(job_id, n_prof, n_exp)
+            # La obra/CUI puede cambiar. El ledger permitirá únicamente fuentes
+            # lógicas nuevas; las ya intentadas se reutilizan desde disco.
             job.descargas_estado = "pendiente"
             job.revision_estado = "completada"
             job.revision_error = None
@@ -723,7 +722,7 @@ def _resolver_revision_background(job_id: str, n_prof: int, n_exp: int, body: di
                 job.revision_error = str(exc) or type(exc).__name__
                 repo.guardar(job)
             return
-    _asegurar_descargas(job_id)
+    _asegurar_descargas(job_id)  # solo intentará fuentes lógicas nuevas
 
 
 @app.post("/api/pivote/jobs/{job_id}/revision", status_code=202)
@@ -1041,27 +1040,28 @@ _zip_build_lock = threading.Lock()
 
 
 @app.get("/api/pivote/jobs/{job_id}/zip")
-def descargar_zip(job_id: str, tareas: BackgroundTasks):
+def descargar_zip(job_id: str):
     job = _job_o_404(job_id)
     ruta = _dir_job(job_id) / "infoobras.zip"
     en_prep = {"descargas_estado": job.descargas_estado,
                "mensaje": "El ZIP se está preparando: descargando los documentos de InfoObras."}
     # Descargando activamente → el zip (si existe) es PARCIAL → no servirlo: 202.
-    # El panel pollea `descargas_estado` y habilita la descarga SOLO al quedar "listas".
-    if job.descargas_estado == "en_progreso":
-        tareas.add_task(_asegurar_descargas, job_id)
+    # El panel habilita al quedar `listas` o `listas_con_errores`.
+    if job.descargas_estado in {"pendiente", "en_progreso"}:
         return JSONResponse(status_code=202, content=en_prep)
     if not ruta.exists():
-        if job.descargas_estado == "listas":      # listas pero borraron el zip → rearmar
+        if job.descargas_estado in {"listas", "listas_con_errores"}:
             with _zip_build_lock:
                 if not ruta.exists():
                     espejo = _espejo_o_404(job_id)
                     enr = repo.cargar_enriquecimiento(job_id) or {}
                     construir_zip_infoobras(espejo, _mapa_descargas(job_id), ruta, enriquecimiento=enr)
-        else:                                      # pendiente/error sin zip → reanuda + 202
-            tareas.add_task(_asegurar_descargas, job_id)
-            return JSONResponse(status_code=202, content=en_prep)
-    # zip presente y NO se está descargando → completo (listas, o job previo) → servir
+        else:
+            return JSONResponse(status_code=409, content={
+                "descargas_estado": job.descargas_estado,
+                "mensaje": "El ZIP no está disponible.",
+            })
+    # ZIP terminal: puede contener todo lo encontrado o faltantes explícitos.
     return FileResponse(ruta, media_type="application/zip",
                         filename=nombre_descarga(job, ext="zip"))
 

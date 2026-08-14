@@ -100,11 +100,10 @@ def test_la_nota_sale_de_la_tabla_y_no_la_contradice(tmp_path):
     assert "C 10" in nota.value and "G 10" in nota.value and "J 20" in nota.value
     assert "Por confirmar: A" in nota.value
     assert "No aplican" in nota.value and "B, D" in nota.value
-    # el texto redactado por la evaluación se conserva, pero rotulado: ya no
-    # puede leerse como si fuera el resumen vigente.
-    etiqueta = _buscar(ws, "Observaciones de la evaluación")
-    assert etiqueta is not None and "antes del recálculo" in etiqueta.value
-    assert _buscar(ws, "80/100") is not None
+    # La nota numérica del LLM se retira: una segunda autoridad, aunque esté
+    # rotulada, volvía contradictorio el entregable.
+    assert _buscar(ws, "Observaciones de la evaluación") is None
+    assert _buscar(ws, "80/100") is None
 
 
 def test_nota_parte5_declara_cuando_la_suma_no_da_el_total():
@@ -126,18 +125,18 @@ def test_dias_citados_lee_los_conteos_del_veredicto():
     assert dias_citados(None) == []
 
 
-def test_conciliar_antepone_el_verificado_cuando_falta_un_dia_por_periodo():
+def test_conciliar_reemplaza_la_cifra_del_llm_por_la_autoridad_inclusiva():
     txt = conciliar_conclusion("CUMPLE — acredita 1267 días (3.47 años).",
                                1269, periodos=2)
-    assert txt.startswith("1269 días verificados (3.48 años).")
-    assert "CUMPLE — acredita 1267 días" in txt          # el literal se conserva
-    assert "1267" in txt.split("·")[-1]                  # y queda explicado
-    assert "incluye el día de inicio y el de fin" in txt
+    assert txt.startswith("CUMPLE — total declarado recalculado: 1269 días inclusivos")
+    assert "1267" not in txt
 
 
-def test_conciliar_no_toca_el_texto_cuando_las_cifras_ya_coinciden():
+def test_conciliar_canoniza_aun_si_la_cifra_del_llm_coincide():
     txt = "CUMPLE — acredita 1269 días (3.48 años)."
-    assert conciliar_conclusion(txt, 1269, periodos=2) == txt
+    assert conciliar_conclusion(txt, 1269, periodos=2) == (
+        "CUMPLE — total declarado recalculado: 1269 días inclusivos "
+        "(3.48 años) en 2 periodos computables.")
 
 
 @pytest.mark.parametrize("texto, verificado, periodos", [
@@ -151,8 +150,13 @@ def test_conciliar_no_toca_el_texto_cuando_las_cifras_ya_coinciden():
     # sin periodos computables no hay desfase que justificar
     ("CUMPLE — acredita 1267 días.", 1269, 0),
 ])
-def test_conciliar_se_abstiene_fuera_del_desfase_de_bordes(texto, verificado, periodos):
-    assert conciliar_conclusion(texto, verificado, periodos) == texto
+def test_conciliar_no_publica_una_segunda_cifra(texto, verificado, periodos):
+    resultado = conciliar_conclusion(texto, verificado, periodos)
+    if periodos:
+        assert resultado.startswith("CUMPLE — total declarado recalculado:")
+        assert f"{verificado} días inclusivos" in resultado
+    else:
+        assert resultado == texto
 
 
 def test_conciliar_conserva_el_verde_del_veredicto(tmp_path):
@@ -178,15 +182,15 @@ def test_conciliar_conserva_el_verde_del_veredicto(tmp_path):
     }
     ws = openpyxl.load_workbook(
         generar_excel_final(espejo, tmp_path / "dias.xlsx"))["CLAUDE"]
-    celda = _buscar(ws, "1269 días verificados")
+    celda = _buscar(ws, "total declarado recalculado: 1269 días inclusivos")
     assert celda is not None
     assert _fill(celda) == str(FILL_CUMPLE.fgColor.rgb)
 
     # y la hoja del profesional dice el mismo número en sus dos superficies
     hoja_p = openpyxl.load_workbook(
         generar_excel_final(espejo, tmp_path / "dias.xlsx")).worksheets[2]
-    conclusion = _buscar(hoja_p, "días verificados")
-    assert conclusion is not None and conclusion.value.startswith("1269 ")
+    conclusion = _buscar(hoja_p, "días inclusivos")
+    assert conclusion is not None and conclusion.value.startswith("CUMPLE — total declarado")
 
 
 # ── 3 · el entregable no habla en jerga ──────────────────────────────────────

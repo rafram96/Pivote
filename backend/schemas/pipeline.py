@@ -178,6 +178,9 @@ class Job(_ModelLax):
     # Descarga de documentos InfoObras: diferida tras el pipeline (no bloquea el
     # veredicto). pendiente → en_progreso → listas | error.
     descargas_estado: str = "pendiente"
+    # Claves de fuente marcadas ANTES de tocar red. Persistirlas evita repetir
+    # transferencias tras fallo, regeneración del Excel, GET /zip o reinicio.
+    descargas_intentos: list[str] = Field(default_factory=list)
     # Una sola decisión humana pesada por job. El POST responde 202 y estas
     # columnas permiten al panel seguirla sin mantener el request abierto (#42).
     revision_estado: Optional[str] = None   # en_curso | completada | error

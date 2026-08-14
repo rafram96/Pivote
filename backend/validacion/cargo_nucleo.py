@@ -110,6 +110,8 @@ _PREFIJO_MIN = 6
 _LARGO_MIN_PREFIJO = 7
 
 _SEPARADORES = re.compile(r"[;/|\n·•]+")
+_PREFIJO_LITERAL = re.compile(
+    r"^(?:(?:CARGOS?\s+)?SIMILARES?\s*:?\s*|COMO\s*:?\s*)+", re.I)
 
 
 def _norm(s) -> str:
@@ -119,6 +121,11 @@ def _norm(s) -> str:
     t = t.upper()
     t = re.sub(r"[^A-Z0-9\s]", " ", t)
     return re.sub(r"\s+", " ", t).strip()
+
+
+def _literal_normalizado(texto) -> str:
+    """Alternativa tal como la escriben las bases, sin su rótulo de columna."""
+    return _PREFIJO_LITERAL.sub("", _norm(texto)).strip()
 
 
 def _stem(tok: str) -> str:
@@ -263,6 +270,16 @@ def evaluar_cargo(cargo_ocupado, requisito: Requisito) -> tuple[list[str], Optio
     la que se le cita al Comité. Si `cargo_ocupado` viene vacío no se puede
     afirmar nada → acredita por abstención (nunca un falso NO).
     """
+    candidato_literal = _norm(cargo_ocupado)
+    # #99 · la lista que sigue a «Como:» es derecho positivo del concurso: una
+    # alternativa completa no puede ser anulada porque el analizador la llame
+    # «profesión» en vez de «cargo». Esta puerta es deliberadamente exacta; las
+    # equivalencias siguen a cargo del núcleo conservador de abajo.
+    for alt in requisito.alternativas:
+        literal = _literal_normalizado(alt.texto)
+        if literal and re.search(rf"(?:^|\s){re.escape(literal)}(?:\s|$)", candidato_literal):
+            return [], alt
+
     toks = _tokens(cargo_ocupado)
     if not toks or not requisito.alternativas:
         return [], None

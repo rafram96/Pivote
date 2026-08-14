@@ -976,7 +976,7 @@ def _estado_seccion_legible(estado: dict, nombre: str = "documentos") -> str:
     if e == "error":
         if not esperados and not bajados:
             # La consulta ni siquiera pudo listar qué había: un (0/0) no dice nada.
-            return "la fuente no respondió en esta corrida (se puede reintentar)"
+            return "la fuente no respondió en la única consulta realizada"
         return f"consulta fallida ({bajados}/{esperados} descargados)"
     return f"por verificar ({bajados}/{esperados} descargados)"
 

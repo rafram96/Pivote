@@ -21,9 +21,9 @@ Toda la aritmética se delega a `reglas/` (`dias_inclusivos`, `meses`, `anios`,
 + 1), verificada contra las hojas manuales del ingeniero. Ver `reglas/calculo.py`.
 
 Abstención (es un detector de mentiras — un falso CUMPLE es el peor fallo):
-- Fecha centinela ("POR VERIFICAR…") o parcial ("2019-03 (sin día)") → NO se
-  calcula. Elegir un día dentro del mes es adivinar, y ese día inventado se
-  propaga a DÍAS, a los años acumulados y al veredicto.
+- Fecha centinela ("POR VERIFICAR…") → NO se calcula. Una fecha parcial
+  ("2019-03 (sin día)") solo se convierte al borde del mes cuando las bases
+  trajeron `periodos_sin_dia="mes_completo"`; la literal nunca se sobrescribe.
 - Periodo invertido (fin < inicio) → no se sabe cuál de las dos fechas está mal:
   se abstiene de las tres columnas, no se "arregla" dando vuelta el par.
 - Sin `fecha_colegiatura` → `anterior_colegiatura` queda vacío, NO "NO":
@@ -53,6 +53,7 @@ convención que `anotar_cargo_nucleo`). Sin I/O, sin red.
 from __future__ import annotations
 
 import re
+from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Optional
@@ -103,6 +104,7 @@ MOTIVO_DIAS_DISCREPANTE = "DIAS_DISCREPANTE"
 MOTIVO_TOTAL_INCOMPLETO = "TOTAL_INCOMPLETO"
 
 _RE_ISO_COMPLETA = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_RE_MES = re.compile(r"^(\d{4})-(\d{2})(?:\D.*)?$")
 
 
 # ── Lectura defensiva de fechas ──────────────────────────────────────────────
@@ -127,6 +129,27 @@ def fecha_dura(v) -> Optional[date]:
         except ValueError:
             return None      # "2019-02-30": ISO en la forma, imposible en el calendario
     return None
+
+
+def fecha_para_calculo(v, *, extremo: str, regla: str) -> tuple[Optional[date], bool]:
+    """Fecha cierta o borde mensual autorizado por las bases.
+
+    El literal del certificado nunca se reemplaza. La fecha deducida se usa solo
+    para cálculo y se devuelve acompañada de una marca de procedencia.
+    """
+    dura = fecha_dura(v)
+    if dura is not None:
+        return dura, False
+    if regla != "mes_completo" or not isinstance(v, str):
+        return None, False
+    m = _RE_MES.match(v.strip())
+    if not m:
+        return None, False
+    anio, mes = int(m.group(1)), int(m.group(2))
+    if not 1 <= mes <= 12:
+        return None, False
+    dia = 1 if extremo == "inicio" else monthrange(anio, mes)[1]
+    return date(anio, mes, dia), True
 
 
 def _vacio(v) -> bool:
@@ -177,7 +200,8 @@ def derivar_de_dias(dias) -> dict:
             "anios": round(anios(dias), DECIMALES)}
 
 
-def calcular_campos(exp: dict, fecha_colegiatura=None) -> tuple[dict, dict]:
+def calcular_campos(exp: dict, fecha_colegiatura=None, *,
+                    periodos_sin_dia: str = "no_definida") -> tuple[dict, dict]:
     """Calcula `dias`, `anterior_colegiatura` e `incluye_covid` de UNA experiencia.
 
     No muta `exp` ni mira lo que ya trae. Devuelve
@@ -189,7 +213,10 @@ def calcular_campos(exp: dict, fecha_colegiatura=None) -> tuple[dict, dict]:
     motivos: dict = {}
 
     crudo_ini, crudo_fin = exp.get("fecha_inicial"), exp.get("fecha_final")
-    ini, fin = fecha_dura(crudo_ini), fecha_dura(crudo_fin)
+    ini, _ = fecha_para_calculo(
+        crudo_ini, extremo="inicio", regla=periodos_sin_dia)
+    fin, _ = fecha_para_calculo(
+        crudo_fin, extremo="fin", regla=periodos_sin_dia)
 
     if ini is None:
         motivo_periodo = _motivo_fecha(crudo_ini, "fecha_inicial")
@@ -458,6 +485,8 @@ def recalcular_espejo(
                     prefijo=prefijo, dias_tolerados=dias_tolerados,
                     forzar=forzar)
 
+    regla_periodos = ((espejo.get("reglas_evaluacion") or {})
+                      .get("periodos_sin_dia") or "no_definida")
     for prof in espejo.get("profesionales", []) or []:
         n_prof = prof.get("n_prof")
         colegiatura = prof.get("fecha_colegiatura")
@@ -465,7 +494,18 @@ def recalcular_espejo(
 
         for exp in prof.get("experiencias", []) or []:
             n_exp = exp.get("n")
-            valores, motivos = calcular_campos(exp, colegiatura)
+            ini_calc, ini_deducida = fecha_para_calculo(
+                exp.get("fecha_inicial"), extremo="inicio", regla=regla_periodos)
+            fin_calc, fin_deducida = fecha_para_calculo(
+                exp.get("fecha_final"), extremo="fin", regla=regla_periodos)
+            if ini_deducida or fin_deducida:
+                backend = exp.setdefault("_backend", {})
+                backend["fecha_inicial_calculo"] = ini_calc.isoformat() if ini_calc else None
+                backend["fecha_final_calculo"] = fin_calc.isoformat() if fin_calc else None
+                backend["fechas_deducidas"] = True
+                backend["regla_deduccion"] = "mes completo según regla de las bases"
+            valores, motivos = calcular_campos(
+                exp, colegiatura, periodos_sin_dia=regla_periodos)
             dias_calculado = valores.get("dias")
 
             dias_vigente = aplicar(exp, n_prof, n_exp, "dias",

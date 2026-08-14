@@ -163,12 +163,13 @@ def test_descarga_seace_escribe_notas_honestas(tmp_path):
         "BASES_INTEGRADAS_ERROR.txt",
         "CONTRATO_FIRMADO_ERROR.txt",
     ]
-    assert "reintentar" in (destino / notas[0]).read_text(encoding="utf-8")
+    texto = (destino / notas[0]).read_text(encoding="utf-8")
+    assert "no fue posible obtener" in texto
+    assert "reintentar" not in texto.lower()
 
 
 def test_notas_seace_hablan_en_frases_de_evaluador(tmp_path):
-    """Issue #81 R3: las tres notas dicen QUÉ pasó y si tiene sentido reintentar,
-    en lugar del apunte técnico que salía del `motivo` interno."""
+    """Las notas dicen qué pasó sin convertir el fallo en tarea de descarga."""
     casos = {
         "sin_tipo": ("El SEACE solo publica procesos de otro tipo para esta obra "
                      "(por ejemplo ejecución o equipamiento); el proceso que "
@@ -179,7 +180,7 @@ def test_notas_seace_hablan_en_frases_de_evaluador(tmp_path):
                          "documentos no están publicados ahí.", "NO_DISPONIBLE"),
         "fuente_no_disponible": ("La consulta a los datos abiertos del SEACE no "
                                  "respondió en esta corrida, así que no fue posible "
-                                 "obtener este documento. Se puede reintentar.",
+                                 "obtener este documento.",
                                  "ERROR"),
     }
     for estado, (texto, sufijo) in casos.items():
@@ -192,14 +193,14 @@ def test_notas_seace_hablan_en_frases_de_evaluador(tmp_path):
         assert nota == texto + "\n"
 
 
-def test_nota_seace_de_descarga_fallida_invita_a_reintentar(tmp_path):
+def test_nota_seace_de_descarga_fallida_es_terminal(tmp_path):
     enr = {"1:1": {"cui": "2279396", "via": "CUI_TEXTO", "seace": _seace()}}
     descargar_documentos_job(ESPEJO, enr, "job-falla", tmp_path,
                              descargar_seace=lambda _url, _destino: False)
     destino = carpeta_job(tmp_path, "job-falla") / "descargas" / "P1_E1"
     assert (destino / "BASES_INTEGRADAS_ERROR.txt").read_text(encoding="utf-8") == (
-        "No se pudo descargar este documento en esta corrida: la fuente oficial "
-        "falló temporalmente. El proceso sí lo publica; se puede reintentar.\n")
+        "No se pudo obtener este documento en la única consulta realizada. "
+        "El proceso sí lo publica, pero el archivo no quedó disponible.\n")
 
 
 def test_notas_seace_llegan_al_zip_con_el_nombre_completo(tmp_path):

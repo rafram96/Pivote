@@ -4,7 +4,7 @@
  * Versión Node del contrato (la PC del ingeniero solo tiene Node, no Python).
  * Equivalente a `backend/schemas/espejo.py` (Pydantic), forma plana real.
  *
- * Contrato **v1.3.0** — mantener en paridad con el Pydantic (los cambios de
+ * Contrato **v1.4.0** — mantener en paridad con el Pydantic (los cambios de
  * versión se listan en el docstring de espejo.py). El test de contrato
  * (`tools/test_contrato.py`) corre los mismos fixtures por ambos validadores.
  *
@@ -56,9 +56,62 @@ const ExperienciaPostor = z.object({
   acredita: z.union([z.number(), z.string()]).nullable().optional(), // consorciado que acredita (texto) o monto
   folio: folioT,
   ultimos_20_anios: txt, tipo_solicitado: txt, observaciones: txt,
+  contrato_id: txt,
+  item_id: txt,
+  componentes: z.array(z.string()).default([]),
+  monto_contrato: txt,
+  monto_item: txt,
+  monto_aplicable: txt,
+  participacion_porcentaje: txt,
+  evidencia_desglose: txt,
+  estado_monto: z.enum(["confirmado", "por_verificar", "excluido"]).nullable().optional(),
+  dentro_periodo_admitido: txt,
+  fecha_inicio: fecha,
+  fecha_fin: fecha,
 }).strict();
 
+const CertificacionISO = z.object({
+  norma: txt,
+  presente: z.boolean().nullable().optional(),
+  titular: txt,
+  fecha_emision: fecha,
+  fecha_vencimiento: fecha,
+  alcance: txt,
+  domicilio: txt,
+  organismo_certificador: txt,
+  folio: folioT,
+  estado_vigencia: z.enum(["vigente", "vencido", "por_verificar"]).nullable().optional(),
+}).passthrough();
+
 const Backend = z.object({}).passthrough();
+
+const FuenteRegla = z.object({
+  origen: z.enum(["bases", "seace_existente", "manual"]).nullable().optional(),
+  referencia: txt,
+  texto: txt,
+}).passthrough();
+
+const TramoFactorA = z.object({
+  desde_porcentaje: z.number().min(0).max(100).nullable().optional(),
+  desde_inclusivo: z.boolean().default(true),
+  hasta_porcentaje: z.number().min(0).max(100).nullable().optional(),
+  hasta_inclusivo: z.boolean().default(false),
+  puntaje: z.number().nonnegative(),
+}).passthrough();
+
+const ReglaFactorA = z.object({
+  dias_adicionales_requeridos: z.number().int().nonnegative().nullable().optional(),
+  tramos: z.array(TramoFactorA).default([]),
+  folio: folioT,
+}).passthrough();
+
+const ReglasEvaluacion = z.object({
+  fecha_presentacion_oferta: fecha,
+  fecha_presentacion_fuente: FuenteRegla.nullable().optional(),
+  antiguedad_maxima_anios: z.number().int().nonnegative().nullable().optional(),
+  periodos_sin_dia: z.enum(["mes_completo", "no_definida"]).default("no_definida"),
+  factor_a: ReglaFactorA.nullable().optional(),
+}).passthrough();
 
 // Cert con VARIAS obras bajo un mismo vínculo continuo: 1 experiencia (1 periodo)
 // que abarca N obras. Dos formas: (a) el cert las ENUMERA, casi siempre con su CUI
@@ -143,6 +196,8 @@ const Profesional = z.object({
   notas: z.array(z.string()).optional(),
   supuestos: z.array(z.string()).default([]),
   cumple: txt, anios_adicionales: txt,
+  acreditacion_formacion: z.record(z.any()).nullable().optional(),
+  _backend: z.record(z.any()).optional(),
 }).passthrough().superRefine((p, ctx) => {
   const ns = p.experiencias.map((e) => e.n);
   const esperado = ns.map((_, i) => i + 1);
@@ -160,12 +215,18 @@ const Factor = z.object({
     z.string().refine((s) => s.trim().toUpperCase().startsWith("NO APLICA"),
       { message: "puntaje inválido (número, null o 'NO APLICA…')" }),
   ]).nullable().optional(),
+  estado_puntaje: z.enum(["definitivo", "condicionado", "no_aplica"]).nullable().optional(),
+  puntaje_confirmado: monto,
+  puntaje_maximo_posible: monto,
 }).strict();
 
 const ResumenEvaluacion = z.object({
   factores: z.array(Factor).default([]),
   puntaje_total: monto,
   nota: txt,
+  estado_puntaje: z.enum(["definitivo", "condicionado"]).nullable().optional(),
+  puntaje_confirmado: monto,
+  puntaje_maximo_posible: monto,
 }).passthrough();
 
 // Hallazgo cualitativo de los subagentes (ambigüedad, ilegibilidad, …).
@@ -189,10 +250,12 @@ const JsonEspejo = z.object({
     postor_cumple: txt,
     // NOTA 14: quiénes integran el consorcio (para exigir ISO de TODOS).
     consorciados: z.array(z.record(z.any())).nullable().optional(),
+    isos_certificaciones: z.array(CertificacionISO).default([]),
   }).passthrough(),
   profesionales: z.array(Profesional).min(1),
   resumen_evaluacion: ResumenEvaluacion.default({}),
   observaciones_claude: z.array(Observacion).optional(),
+  reglas_evaluacion: ReglasEvaluacion.default({}),
 }).passthrough().superRefine((d, ctx) => {
   const ns = d.profesionales.map((p) => p.n_prof);
   const esperado = ns.map((_, i) => i + 1);

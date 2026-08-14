@@ -85,6 +85,23 @@ los requisitos críticos si hay tacha.**
     varios cargos comparten el folio de inicio del cuadro: el recortador usa el
     rango completo antes que mostrar una página precisa pero equivocada.
 
+12. **Reglas estructuradas, no prosa para recalcular.** Devuelve además
+    `reglas_evaluacion` con: `fecha_presentacion_oferta` y su fuente/página,
+    `antiguedad_maxima_anios`, la regla literal para periodos que solo traen
+    mes/año (`periodos_sin_dia`: `"mes_completo"` solo si las bases lo permiten;
+    de lo contrario `"no_definida"`) y `factor_a` con
+    `dias_adicionales_requeridos` + todos sus `tramos` (límites inclusivos o
+    exclusivos y puntaje). No completes un baremo por intuición.
+13. **Acreditación de formación.** Por cada cargo, extrae
+    `acreditacion_formacion`: modalidad literal (`anexo_15_registro_publico`,
+    `diploma_adjunto`, etc.) y booleanos de documentos expresamente requeridos.
+    Si las bases ordenan declarar título/universidad y que el Comité lo contraste
+    con un registro, eso NO equivale a exigir diploma o constancia adjuntos.
+
+No consultes ni propongas consultar MINEDU, SUNEDU, INACAL u otra fuente pública.
+Tu única fuente es el archivo de bases recibido; toda comprobación registral es
+manual y corresponde al Comité.
+
 ## Observaciones
 Emite una `Observacion` ante: ambigüedad (`ambiguedad`), cargo con profesión o
 cargos similares poco claros (`extraccion_parcial`), texto ilegible
@@ -96,10 +113,10 @@ aplica).
 ## Salida
 JSON: `_meta` (con `subagente: "agent-bases"`), `metadata_concurso` (incluye
 **`pagina_factores`** y **`paginas_personal_clave`**), `factores_evaluacion`, `personal_clave[]`,
-`observaciones_claude[]`.
+`reglas_evaluacion`, `observaciones_claude[]`.
 Cada entrada de `personal_clave` incluye: `numero`, `cargos_similares_validos`,
 `profesiones_aceptadas`, `tiempo_minimo_experiencia`, `tipos_obra_validos`,
-`aplica` (Factor A) y **`folio`** = la página física del PDF donde aparece la
+`aplica` (Factor A), `acreditacion_formacion` y **`folio`** = la página física del PDF donde aparece la
 fila/requisito de ESE cargo, no la página donde empieza el cuadro. Si el requisito
 continúa, usa rango. Lo consume el recorte TDR.
 
@@ -112,6 +129,8 @@ continúa, usa rango. Lo consume el recorte TDR.
 - [ ] `pagina_factores` = página física con el desarrollo del Factor A y sus tramos,
       no el Cuadro Resumen ni otros factores (o `null` + observación).
 - [ ] `cuantia` + `limite_inferior` (90% si la oferta es limitada) calculados.
+- [ ] fecha/corte, periodos parciales y baremo del Factor A están estructurados.
+- [ ] la vía de formación distingue declaración registral de diploma adjunto.
 - [ ] cada factor con `aplica` true/false según el Cuadro Resumen (PMP puede ser NO APLICA).
 - [ ] bases `.docx` → se leyó el PDF LIMPIO del script; bases `.pdf` → se excluyó lo tachado (+ obs. `tachado_pdf` si tocaba plazo/experiencia/especialidad).
 - [ ] JSON sintácticamente válido.

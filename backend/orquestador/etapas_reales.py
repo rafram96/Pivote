@@ -25,9 +25,12 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from schemas import pipeline
-from validacion import (a_observaciones, anotar_cargo_nucleo,
+from validacion import (a_observaciones, anotar_cargo_nucleo, aplicar_reglas_formacion,
+                        aplicar_reglas_iso,
+                        construir_inventario_documental,
                         evaluar_confiabilidad, observaciones_recalculo,
-                        recalcular_espejo, revisar_certificados,
+                        recalcular_espejo, recalcular_experiencia_postor,
+                        reconciliar_puntajes, revisar_certificados,
                         verificar_espejo)
 from resolucion import (ConsultaInfoObras, resolver_con_dedup, resolver_obras,
                         rubros_mixtos)
@@ -247,6 +250,14 @@ class EtapaValidacionReal:
         # DESPUÉS de `verificar_espejo`: las NOTAS 9 y 10 comparan contra lo que
         # escribió Claude y ya no lo encontrarían.
         observaciones += verificar_espejo(ctx.espejo)
+        for h in aplicar_reglas_formacion(ctx.espejo):
+            if h.estado == "REVISION_MANUAL":
+                observaciones.append(pipeline.Observacion(
+                    codigo="FORMACION_MANUAL", severidad=pipeline.Severidad.ALERTA,
+                    mensaje=h.mensaje, origen=self.nombre,
+                    referencia=f"prof={h.n_prof}"))
+        recalcular_experiencia_postor(ctx.espejo)
+        aplicar_reglas_iso(ctx.espejo)
         # La verificación conserva primero la cifra original para poder señalar
         # discrepancias; después el entregable adopta SIEMPRE la aritmética
         # inclusiva determinística. Así Base de Datos, CLAUDE y las hojas P usan
@@ -1000,8 +1011,9 @@ def _estado_seccion(secciones: dict, avisos: list[str], nombre: str,
 
 
 def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
-                             max_descargas=None, descargar=None, reportar=None,
-                             descargar_seace=None, dir_cache_seace=None):
+                              max_descargas=None, descargar=None, reportar=None,
+                              descargar_seace=None, dir_cache_seace=None,
+                              intentos_documentos=None, marcar_intento=None):
     """Descarga DIFERIDA de InfoObras y SEACE a {job}.descargas/P{n}_E{m}.
     Cada fuente tiene su propia marca idempotente: una experiencia puede traer
     documentos SEACE aunque no tenga `obra_id`, y completar una fuente no salta
@@ -1020,7 +1032,8 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
     from orquestador.descargas_infoobras import (
         CacheDescargasInfoObras, secciones_en_error)
     from orquestador.descargas_seace import (
-        DOCUMENTOS_SEACE, CacheDescargasSeace, etiqueta_documento_seace,
+        DOCUMENTOS_SEACE, CacheDescargasSeace, clave_archivo_seace,
+        etiqueta_documento_seace,
         NOTA_SEACE_DESCARGA_FALLIDA, nota_seace_ausencia)
     cache_infoobras = CacheDescargasInfoObras(
         carpeta_job(Path(dir_descargas), job_id) / "cache_obras"
@@ -1038,6 +1051,18 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
     )
     reset_descargas_stats()
     bajadas = saltados = 0
+    intentos_documentos = set(intentos_documentos or ())
+    resultados_por_obra = {}
+
+    def _intentar(clave_fuente: str) -> bool:
+        if clave_fuente in intentos_documentos:
+            return False
+        # Persistir ANTES de red: un crash queda terminal, nunca ambiguamente
+        # reintentable. El callback de la API hace la escritura durable.
+        if marcar_intento is not None:
+            marcar_intento(clave_fuente)
+        intentos_documentos.add(clave_fuente)
+        return True
 
     requisitos_obra: dict[str, dict] = {}
     for profesional in espejo.get("profesionales", []):
@@ -1098,17 +1123,24 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                 descargador = descargar_archivo
             else:
                 descargador = descargar_seace
-            ok_archivo = cache_seace.materializar(
-                doc["url"], archivo, descargar=descargador
-            ).ok
+            clave_fuente = f"seace:{clave_archivo_seace(doc['url'])}"
+            if _intentar(clave_fuente):
+                ok_archivo = cache_seace.materializar(
+                    doc["url"], archivo, descargar=descargador
+                ).ok
+            else:
+                ok_archivo = cache_seace.materializar_existente(
+                    doc["url"], archivo).ok
             if not ok_archivo:
                 _nota_atomica(nota_err, NOTA_SEACE_DESCARGA_FALLIDA + "\n")
 
     def _descargar_corpus_obra(obra_id, destino_cache: Path,
                                pendientes: frozenset[str] | None = None) -> dict:
-        """Baja el corpus de una obra a la caché. `pendientes` = reintento
-        selectivo (issue #81): se rehacen SOLO esas secciones y el estado
-        devuelto habla solo de ellas; la caché lo fusiona con lo sano."""
+        """Baja el corpus en una sola pasada lógica.
+
+        `pendientes` se conserva solo por compatibilidad de firma; el flujo
+        vigente nunca vuelve a invocar una entrada publicada.
+        """
         def _toca(seccion: str) -> bool:
             return pendientes is None or seccion in pendientes
 
@@ -1125,7 +1157,7 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
         estado: dict = {"secciones": {}, "avisos": [], "informes_anios": []}
         if _toca("InfoObras"):
             # Que la sección principal reviente ya no tira TODO el corpus: se
-            # publica lo demás y esta sección queda marcada para reintento.
+            # publica lo demás y esta sección queda declarada como fallida.
             try:
                 principal = descargar_documentos_obra_por_hito(obra_id, destino_cache)
                 inventario = principal.get("inventario") or {}
@@ -1245,58 +1277,59 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
             fallos_antes = len(descargas_stats().get("fallidos") or [])
             try:
                 if obra_id and not ok.exists():
-                    hizo_trabajo = True
                     avisos, secciones = [], {}
-                    resultado_cache = cache_infoobras.obtener(
-                        obra_id,
-                        descargar=lambda ruta, pend, oid=obra_id: (
-                            _descargar_corpus_obra(oid, ruta, pend)),
-                    )
-                    cert_ini = _fecha_iso(e.get("fecha_inicial"))
-                    cert_fin = _fecha_iso(e.get("fecha_final"))
-                    materializados = cache_infoobras.materializar(
-                        resultado_cache, destino,
-                        fecha_ini=cert_ini, fecha_fin=cert_fin,
-                    )
-                    estado_cache = resultado_cache.estado
-                    avisos.extend(estado_cache.get("avisos") or [])
-                    for nombre, datos_seccion in (
-                            estado_cache.get("secciones") or {}).items():
-                        if datos_seccion.get("error"):
-                            secciones[nombre] = {"estado": "error"}
-                            continue
-                        esperados = datos_seccion.get("esperados") or 0
-                        descargados = datos_seccion.get("descargados") or 0
-                        publicados = None
-                        if nombre == "Informes de control":
-                            anios = estado_cache.get("informes_anios") or []
-                            publicados = len(anios)
-                            if cert_ini is not None and cert_fin is not None:
-                                inferior, superior = sorted((cert_ini.year, cert_fin.year))
-                                esperados = sum(
-                                    1 for anio in anios
-                                    if anio is None or inferior <= anio <= superior
-                                )
-                            else:
-                                esperados = len(anios)
-                            descargados = materializados.informes
-                        _estado_seccion(
-                            secciones, avisos, nombre, esperados, descargados)
-                        if publicados:
-                            # El inventario COMPLETO de la obra distingue «no hay
-                            # informes» de «los hay, pero de otros años» (issue #81).
-                            secciones[nombre]["publicados"] = publicados
-                    base.mkdir(parents=True, exist_ok=True)
-                    if resultado_cache.completa:
-                        ok.write_text("ok", encoding="utf-8")
+                    clave_fuente = f"infoobras:{obra_id}"
+                    resultado_cache = resultados_por_obra.get(str(obra_id))
+                    if resultado_cache is None and _intentar(clave_fuente):
+                        hizo_trabajo = True
+                        resultado_cache = cache_infoobras.obtener(
+                            obra_id,
+                            descargar=lambda ruta, pend, oid=obra_id: (
+                                _descargar_corpus_obra(oid, ruta, pend)),
+                        )
+                        resultados_por_obra[str(obra_id)] = resultado_cache
+                    elif resultado_cache is None:
+                        resultado_cache = cache_infoobras.existente(obra_id)
+                    if resultado_cache is None:
+                        avisos.append("InfoObras: la única descarga ya fue intentada y no dejó archivos reutilizables.")
+                        secciones["InfoObras"] = {"estado": "error"}
                     else:
-                        # Corpus con secciones caídas: NO se marca la experiencia
-                        # como terminada, para que la siguiente pasada reintente
-                        # (la caché solo re-descarga lo fallido).
-                        logger.info(
-                            "descargas job %s P%sE%s: obra %s con secciones "
-                            "pendientes de reintento (%s)", job_id, np_, ne, obra_id,
-                            ", ".join(secciones_en_error(estado_cache)))
+                        cert_ini = _fecha_iso(e.get("fecha_inicial"))
+                        cert_fin = _fecha_iso(e.get("fecha_final"))
+                        materializados = cache_infoobras.materializar(
+                            resultado_cache, destino,
+                            fecha_ini=cert_ini, fecha_fin=cert_fin,
+                        )
+                        estado_cache = resultado_cache.estado
+                        avisos.extend(estado_cache.get("avisos") or [])
+                        for nombre, datos_seccion in (
+                                estado_cache.get("secciones") or {}).items():
+                            if datos_seccion.get("error"):
+                                secciones[nombre] = {"estado": "error"}
+                                continue
+                            esperados = datos_seccion.get("esperados") or 0
+                            descargados = datos_seccion.get("descargados") or 0
+                            publicados = None
+                            if nombre == "Informes de control":
+                                anios = estado_cache.get("informes_anios") or []
+                                publicados = len(anios)
+                                if cert_ini is not None and cert_fin is not None:
+                                    inferior, superior = sorted((cert_ini.year, cert_fin.year))
+                                    esperados = sum(
+                                        1 for anio in anios
+                                        if anio is None or inferior <= anio <= superior
+                                    )
+                                else:
+                                    esperados = len(anios)
+                                descargados = materializados.informes
+                            _estado_seccion(
+                                secciones, avisos, nombre, esperados, descargados)
+                            if publicados:
+                                secciones[nombre]["publicados"] = publicados
+                        base.mkdir(parents=True, exist_ok=True)
+                        # La marca significa «intento terminal», incluso si hubo
+                        # secciones fallidas. No habilita una segunda descarga.
+                        ok.write_text("ok", encoding="utf-8")
                 if seace and not ok_seace.exists():
                     hizo_trabajo = True
                     _bajar_seace(seace, destino)
@@ -1331,9 +1364,15 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                     aviso = f"{etiqueta}: no publicado por la fuente."
                     if aviso not in avisos:
                         avisos.append(aviso)
+            estados_seccion = [str(x.get("estado") or "") for x in secciones.values()
+                               if isinstance(x, dict)]
+            completa_terminal = not any(x in {"error", "parcial"}
+                                        for x in estados_seccion)
+            completa_terminal = completa_terminal and not any(
+                "no se pudo" in str(a).lower() or "no descargado" in str(a).lower()
+                for a in avisos)
             enr["descargas_reales"] = {
-                "completada": bool((not obra_id or ok.exists())
-                                    and (not seace or ok_seace.exists())),
+                "completada": completa_terminal,
                 "archivos": archivos_reales,
                 "por_hito": por_hito,
                 "secciones": secciones,
@@ -1964,10 +2003,9 @@ def _participantes_factor_a(espejo: dict) -> set[int]:
 def _recalcular_factor_a(espejo: dict, enriquecimiento: dict) -> None:
     """El Factor A solo existe sobre tiempo efectivo que excede el mínimo.
 
-    La rúbrica histórica no viaja estructurada, por lo que no se inventa un
-    tramo: se retira el puntaje anterior y se deja pendiente. Cuando la skill ya
-    traiga ``factor_a_aplica``, el detalle y la elegibilidad sí son plenamente
-    determinísticos.
+    Con contrato v1.4 el baremo viaja estructurado. Los casos pendientes generan
+    un límite inferior/superior; solo se publica un puntaje único si ambos caen
+    en el mismo tramo. En espejos antiguos sin baremo se conserva la abstención.
     """
     resumen = espejo.get("resumen_evaluacion") or {}
     factor = next((f for f in resumen.get("factores", [])
@@ -1977,6 +2015,11 @@ def _recalcular_factor_a(espejo: dict, enriquecimiento: dict) -> None:
     participantes = _participantes_factor_a(espejo)
     if not participantes:
         return
+    regla = (espejo.get("reglas_evaluacion") or {}).get("factor_a") or {}
+    tramos = regla.get("tramos") or []
+    adicional_requerido = regla.get("dias_adicionales_requeridos")
+    if not isinstance(adicional_requerido, int):
+        adicional_requerido = 365
     califican: list[int] = []
     pendientes: list[int] = []
     for p in espejo.get("profesionales", []):
@@ -1985,27 +2028,88 @@ def _recalcular_factor_a(espejo: dict, enriquecimiento: dict) -> None:
             continue
         d = enriquecimiento.get(f"prof:{np_}") or {}
         minimo, efectivos = d.get("minimo_dias"), d.get("dias_efectivos")
-        provisional = bool(d.get("veredicto_provisional"))
-        if minimo is None or efectivos is None or provisional:
+        # La falta de InfoObras es una verificación complementaria y no invalida
+        # el contrato/constancia salvo que la regla documental lo marque así.
+        documental_pendiente = d.get("factor_a_documental") == "por_verificar"
+        if minimo is None or efectivos is None or documental_pendiente:
             pendientes.append(np_)
             p["anios_adicionales"] = "POR VERIFICAR — el tiempo efectivo no es definitivo"
             continue
         exceso = max(0, efectivos - minimo)
         p["anios_adicionales"] = f"{round(exceso / 365, 2)} años efectivos adicionales"
-        if exceso >= 365:
+        if exceso >= adicional_requerido:
             califican.append(np_)
     puntaje_anterior = factor.get("puntaje")
-    factor["puntaje"] = None
+    porcentaje_confirmado = (len(califican) * 100 / len(participantes))
+    porcentaje_maximo = ((len(califican) + len(pendientes)) * 100 / len(participantes))
+
+    def _en_tramo(pct: float, tramo: dict) -> bool:
+        desde, hasta = tramo.get("desde_porcentaje"), tramo.get("hasta_porcentaje")
+        if desde is not None:
+            if pct < desde or (pct == desde and tramo.get("desde_inclusivo") is False):
+                return False
+        if hasta is not None:
+            if pct > hasta or (pct == hasta and tramo.get("hasta_inclusivo") is not True):
+                return False
+        return True
+
+    def _puntaje(pct: float):
+        for tramo in tramos:
+            if isinstance(tramo, dict) and _en_tramo(pct, tramo):
+                return tramo.get("puntaje")
+        return None
+
+    puntaje_min, puntaje_max = _puntaje(porcentaje_confirmado), _puntaje(porcentaje_maximo)
+    factor["puntaje_confirmado"] = puntaje_min
+    factor["puntaje_maximo_posible"] = puntaje_max
+    if puntaje_min is not None and puntaje_min == puntaje_max:
+        factor["puntaje"] = puntaje_min
+        factor["estado_puntaje"] = "definitivo"
+    else:
+        factor["puntaje"] = None
+        factor["estado_puntaje"] = "condicionado"
     factor["detalle"] = (
-        f"{len(califican)} de {len(participantes)} cargos acreditan al menos un año "
+        f"{len(califican)} de {len(participantes)} cargos acreditan al menos "
+        f"{adicional_requerido} días "
         f"efectivo adicional (profesionales {', '.join(map(str, califican)) or 'ninguno'}). "
-        + (f"Pendientes de verificación: {', '.join(map(str, pendientes))}. " if pendientes else "")
-        + "Puntaje por confirmar con el cuadro del Factor A de las bases."
+        + (f"Revisión documental pendiente: {', '.join(map(str, pendientes))}. " if pendientes else "")
+        + (f"Tramo definitivo: {puntaje_min} puntos."
+           if factor["estado_puntaje"] == "definitivo" else
+           f"Resultado condicionado entre {puntaje_min if puntaje_min is not None else 'sin dato'} "
+           f"y {puntaje_max if puntaje_max is not None else 'sin dato'} puntos.")
     )
-    if isinstance(puntaje_anterior, (int, float)) and isinstance(resumen.get("puntaje_total"), (int, float)):
-        resumen["puntaje_total"] = max(0, resumen["puntaje_total"] - puntaje_anterior)
-    resumen["nota"] = ((resumen.get("nota") or "") +
-                       " · Factor A recalculado con tiempo efectivo; su tramo queda por confirmar.").strip(" ·")
+    if not tramos:
+        factor["puntaje"] = None
+        factor["estado_puntaje"] = "condicionado"
+        factor["puntaje_confirmado"] = None
+        factor["puntaje_maximo_posible"] = None
+        factor["detalle"] += " Baremo no estructurado: requiere revisión manual."
+        if (isinstance(puntaje_anterior, (int, float))
+                and isinstance(resumen.get("puntaje_total"), (int, float))):
+            resumen["puntaje_total"] = max(0, resumen["puntaje_total"] - puntaje_anterior)
+
+    minimos, maximos, condicionado = [], [], False
+    for f in resumen.get("factores", []):
+        if f.get("aplica") is False or isinstance(f.get("puntaje"), str):
+            continue
+        p = f.get("puntaje")
+        pmin = f.get("puntaje_confirmado", p)
+        pmax = f.get("puntaje_maximo_posible", p)
+        if isinstance(pmin, (int, float)):
+            minimos.append(pmin)
+        if isinstance(pmax, (int, float)):
+            maximos.append(pmax)
+        condicionado = condicionado or f.get("estado_puntaje") == "condicionado" or p is None
+    if tramos:
+        resumen["puntaje_confirmado"] = sum(minimos)
+        resumen["puntaje_maximo_posible"] = sum(maximos)
+        resumen["estado_puntaje"] = "condicionado" if condicionado else "definitivo"
+        resumen["puntaje_total"] = None if condicionado else sum(minimos)
+    resumen["nota"] = (
+        "Puntajes y total generados desde los valores finales reconciliados. "
+        + ("El total es condicionado mientras existan factores por verificar."
+           if resumen.get("estado_puntaje") == "condicionado" else
+           "El total es definitivo."))
 
 
 class EtapaReglasReal:
@@ -2024,7 +2128,9 @@ class EtapaReglasReal:
             cobertura_baja: list[int] = []  # obra verificada pero casi sin solape
             fechas_invalidas: list[int] = []  # fecha sin leer (ej. "POR VERIFICAR")
             for e in p.get("experiencias", []):
-                ini, fin = _fecha_iso(e.get("fecha_inicial")), _fecha_iso(e.get("fecha_final"))
+                calculo = e.get("_backend") if isinstance(e.get("_backend"), dict) else {}
+                ini = _fecha_iso(calculo.get("fecha_inicial_calculo") or e.get("fecha_inicial"))
+                fin = _fecha_iso(calculo.get("fecha_final_calculo") or e.get("fecha_final"))
                 if not (ini and fin) or fin < ini:
                     # no se puede contar; si tenía algún dato de fecha, marcarla
                     # (Claude no la leyó) para que el humano la confirme.
@@ -2201,6 +2307,7 @@ class EtapaReglasReal:
                     origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
 
         _recalcular_factor_a(ctx.espejo, ctx.enriquecimiento)
+        reconciliar_puntajes(ctx.espejo)
         # B2 — resumen de incertidumbre InfoObras: "X de Y no encontrados". Solo en
         # corrida COMPLETA (en re-disparo de un item no se recalcula → evita duplicar,
         # porque el re-disparo EXTIENDE las observaciones en vez de reemplazarlas).
@@ -2240,6 +2347,7 @@ class EtapaExcelReal:
         # Fuente única del resultado visible: también sanea jobs creados antes
         # de separar expediente, privada y ejecución física.
         inyectar_veredicto_backend(ctx.espejo, ctx.enriquecimiento)
+        construir_inventario_documental(ctx.espejo, ctx.enriquecimiento)
         # pasa los periodos CON su tipo (paralizado / sin valorización) para que
         # el Excel los muestre diferenciados; el generador normaliza las fechas.
         paral, cuis, fichas, sunat = desempaquetar_enriquecimiento(ctx.enriquecimiento)

@@ -65,6 +65,10 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
    > contra un `POR VERIFICAR` que cuesta revisión humana. Si NI la imagen lo
    > resuelve, entonces sí `POR VERIFICAR` — esa abstención ya es de verdad.
 
+   No calcules ni completes un día para fechas parciales. El backend aplicará la
+   regla estructurada de las bases (por ejemplo, mes calendario completo) y
+   conservará por separado la fecha literal y la usada para cálculo.
+
    **Procedencia de supuestos (#65):** cada profesional y cada experiencia lleva
    `supuestos: []`. Si excepcionalmente completas un valor que NO está literal en
    el documento, agrega el nombre exacto del campo a esa lista (por ejemplo,
@@ -218,6 +222,14 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
    **fecha de inicio**, **fecha de expiración/vigencia**, y si el documento habla
    de **PDU/horas/capacitación** (eso NO es un PMP). NO decidas validez — solo
    reporta los hechos.
+
+8b. **Formación según la vía documental real.** Extrae
+   `acreditacion_formacion` con `titulo_declarado`, `universidad_declarada`,
+   `documento_identidad`, `diploma_adjunto`,
+   `constancia_colegiatura_adjunta` y `extraccion_completa`. Si la propuesta usa
+   un Anexo 15 declarativo, registra esos hechos sin convertir la ausencia de un
+   diploma no exigido en incumplimiento. No consultes MINEDU, SUNEDU ni ningún
+   registro o portal; la verificación registral se deja al Comité.
 
 ### Alertas factuales que SÍ puedes marcar
 9. `incluye_covid`: `"SÍ"` si el periodo **se superpone** con la ventana COVID

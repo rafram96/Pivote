@@ -358,9 +358,8 @@ def test_revision_background_persiste_error_consultable(cliente, monkeypatch):
     assert final["items_revision"][0]["resuelto"] is False
 
 
-def test_revision_deja_la_cache_de_obra_lista_para_reintentar(cliente, monkeypatch):
-    """Issue #81 R1: invalidar `P{n}_E{m}/` no basta — si el corpus de la obra
-    quedó guardado con una sección caída, la revisión debe forzar su reintento."""
+def test_revision_no_purga_una_descarga_documental_previa(cliente, monkeypatch):
+    """Resolver el análisis no autoriza redescargar documentos ya intentados."""
     from api import app as modulo
     from schemas import pipeline
 
@@ -397,9 +396,9 @@ def test_revision_deja_la_cache_de_obra_lista_para_reintentar(cliente, monkeypat
                         json={"n_prof": 1, "n_exp": 1, "cui": "2418877"}
                         ).status_code == 202
 
-    assert not (entrada / ".completa").exists()
-    assert (entrada / ".parcial").is_file()
-    assert not (entrada / "Informes de control").exists()
+    assert (entrada / ".completa").exists()
+    assert not (entrada / ".parcial").exists()
+    assert (entrada / "Informes de control/resto.pdf").is_file()
     assert (entrada / "Valorizaciones" / "val.pdf").is_file(), (
         "lo sano se reutiliza: la revisión no re-descarga la obra entera")
 

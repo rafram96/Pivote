@@ -171,6 +171,14 @@ def test_caso_positivo_pasa_sin_alerta():
     assert faltantes("Responsable de Costos y Planeamiento", r) == []   # orden libre
 
 
+def test_alternativa_literal_de_las_bases_siempre_acredita():
+    """El análisis por núcleo no puede rechazar el mismo texto que las bases
+    enumeraron expresamente como alternativa válida (#99)."""
+    literal = "Coordinador de Supervisión de Instalaciones Hospitalarias"
+    r = derivar_requisito(literal)
+    assert faltantes(literal, r) == []
+
+
 def test_equivalencia_planificacion_es_planeamiento():
     r = derivar_requisito(LISTA_BASES)
     assert faltantes("Especialista en Planificación y Costos", r) == []

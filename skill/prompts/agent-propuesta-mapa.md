@@ -85,7 +85,9 @@ Es el bloque grande y **manual** (req. 3.4; el backend no lo recomputa). Devuelv
   quede acotada y nadie la lea a fondo.
 - `experiencia_postor[]`: la lista de contratos **al nivel del cuadro/resumen del
   postor** (no de cada constancia) — por contrato
-  `{ emisor, contrato, proyecto, monto, tipo_acreditacion, folio, acredita }`:
+  `{ emisor, contrato, contrato_id, item_id, proyecto, componentes,
+  monto_contrato, monto_item, participacion_porcentaje, evidencia_desglose,
+  tipo_acreditacion, folio, acredita, fecha_inicio, fecha_fin }`:
   los **hechos** que el postor ya tabula, sin abrir cada constancia ni decidir si
   cumple.
 
@@ -102,8 +104,13 @@ Es el bloque grande y **manual** (req. 3.4; el backend no lo recomputa). Devuelv
 Si no hay cuadro-resumen y toca listar desde las constancias, hazlo **somero**
 (emisor + monto + folio de la 1ª página de cada una), no transcripción completa.
 
-> ⚠ **El `monto` es el dato de ADMISIÓN (req. 3.4) — recupéralo aunque cueste
-> un salto de tomo** (caso Lircay-hospitalario: 0/8 montos → el requisito quedó
+> ⚠ **Los montos son hechos documentales de ADMISIÓN (req. 3.4).** Conserva el
+> monto total del contrato separado del monto del ítem y de la participación.
+> Si el contrato mezcla componentes solicitados y no solicitados, no estimes un
+> porcentaje: captura el desglose literal en `evidencia_desglose`, o deja el monto
+> aplicable sin confirmar. En contratos multi-ítem, cada ítem es una fila con el
+> mismo `contrato_id` y distinto `item_id`; no dupliques el total del contrato.
+> Recupéralos aunque cueste un salto de tomo (caso Lircay-hospitalario: 0/8 montos → el requisito quedó
 > «NO EVALUABLE» y el análisis salió sin responder si el postor podía competir, #53):
 > 1. Si el cuadro-resumen no trae el monto de un contrato, búscalo en la
 >    **primera página del contrato/constancia citada** (su folio) — que en
@@ -131,8 +138,13 @@ el sello de la certificadora). Devuelve presencia + folio + a quién pertenece:
   **ISO 9001** (calidad).
 - Si es **consorcio**, indica **a qué consorciado** pertenece cada certificado
   (el evaluador exige que TODOS acrediten — NOTA 14).
-- NO decidas el puntaje. Solo reporta hechos: documento, norma, titular, vigencia
-  si aparece, folio.
+- NO decidas el puntaje. Solo reporta hechos: `norma`, `titular`, `fecha_emision`,
+  `fecha_vencimiento`, `alcance`, `domicilio`, `organismo_certificador`, `presente`
+  y `folio`. Las fechas son ISO completas o parciales/sentinel; no inventes el día.
+
+No consultes registros, buscadores ni portales externos (incluidos MINEDU,
+SUNEDU, INACAL u otras fuentes estatales). Toda la extracción sale únicamente de
+la propuesta recibida.
 
 ## Lo que NO haces
 - NO extraes las experiencias atómicas de cada profesional (eso es del subagente
@@ -160,11 +172,11 @@ Guárdala como **`roster_bundles.json`**. El consolidador (Paso 4) lee `roster`
     "oferta_economica": { "cuantia": 18015551.75, "limite_inferior": 16213996.58, "propuesta": 16213996.58, "detalle": "literal si aparece en la propuesta" },
     "experiencia_postor_folios": "32-1097",
     "experiencia_postor": [
-      { "emisor": "MINSA/PRONIS", "contrato": "Contrato N° 045-2021-MINSA", "proyecto": "Supervisión del Hospital de Andahuaylas", "monto": 21166773.88, "tipo_acreditacion": "Contrato + constancia", "folio": "32-90", "acredita": "consorcio 40% — criterio del Comité" }
+      { "emisor": "MINSA/PRONIS", "contrato": "Contrato N° 045-2021-MINSA", "contrato_id": "045-2021-MINSA", "item_id": null, "proyecto": "Supervisión del Hospital de Andahuaylas", "componentes": ["supervisión"], "monto_contrato": "21166773.88", "monto_item": null, "participacion_porcentaje": "40", "evidencia_desglose": "Promesa de consorcio, folio 40", "tipo_acreditacion": "Contrato + constancia", "folio": "32-90", "acredita": "CONSORCIADO X", "fecha_inicio": "2021-02", "fecha_fin": "2022-06" }
     ],
     "consorciados": [],
     "isos_certificaciones": [
-      { "norma": "ISO 9001", "presente": true, "folio": 1205, "titular": "razón social del titular" }
+      { "norma": "ISO 9001:2015", "presente": true, "folio": 1205, "titular": "razón social del titular", "fecha_emision": "2024-03-01", "fecha_vencimiento": "2027-02-28", "alcance": "texto literal", "domicilio": "texto literal", "organismo_certificador": "texto literal" }
     ]
   },
   "roster": [
