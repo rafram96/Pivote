@@ -1,8 +1,113 @@
 # Handoff — punto de continuación
 
-> Actualizado: **2026-08-10**. Si eres un agente nuevo: lee esto completo,
+> Actualizado: **2026-08-14**. Si eres un agente nuevo: lee esto completo,
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
+
+## Nota (2026-08-14, Codex) — plan #89–#100 implementado y verificado
+
+La corrección quedó versionada localmente en `6a005d3`; no hubo push.
+El contrato espejo subió a v1.4 y separa reglas oficiales, hechos literales,
+campos calculados y estados condicionados. El backend asumió como autoridad:
+fechas inclusivas (incluido mes completo si lo dicen las bases), formación por
+vía documental, experiencia monetaria del postor, Factor A, vigencia/titularidad
+ISO, reconciliación de puntajes, cronología e inventario documental.
+
+Frontera de fuentes: **no se implementó scraping ni llamada a MINEDU, SUNEDU,
+INACAL ni a otra fuente estatal nueva**. La comprobación registral académica es
+manual del Comité. Las fuentes preexistentes del producto no se ampliaron.
+
+Descargas: un ledger persistente marca cada fuente lógica antes de red; el
+resultado parcial es terminal, GET `/zip`, reinicios, revisiones y regeneración
+del Excel no vuelven a descargar. El Excel solo muestra `No se encontraron
+documentos`, `1 archivo encontrado` o `N archivos encontrados`; el Panel admite
+`listas_con_errores` como ZIP descargable con faltantes.
+
+Gate ejecutado:
+
+- `pytest backend/tests -q`: **1000 passed, 25 skipped**.
+- `node --test skill/scripts/consolidar_espejo.test.js`: **39 passed**.
+- contrato legado de referencia: válido.
+- Panel `npx tsc --noEmit`: válido.
+- `next build`: no se pudo ejecutar porque el dev server activo bloquea
+  `.next/trace` (`EPERM`); no se detuvo ni se borró ese entorno.
+- Resolver CUI intacto; no aplica golden perdida.
+
+Las issues #89–#100 recibieron comentarios de implementación. #98 se corrigió
+para que la completitud sea **analítica** e independiente del ZIP. Su estado
+remoto no se modificó como parte de este commit.
+
+## Nota (2026-08-14, Codex) — auditoría generalizada en issues #89–#100
+
+Una nueva auditoría local de un entregable real detectó once defectos de reglas,
+reconciliación y presentación. La evidencia y los datos del cliente no se
+publicaron: los reportes se redactaron como regresiones generalizables y sin
+identificadores. Quedaron abiertos en GitHub: acreditación académica [#89],
+Factor A [#90], narrativa contradictoria [#91], semántica de cronología [#92],
+periodos mes/año [#93], conteo inclusivo [#94], corte temporal [#95], fecha
+oficial e ISO [#96], experiencia mixta del postor [#97], gate de completitud
+del Excel [#98] y equivalencias de cargo [#99].
+
+El criterio funcional de documentos quedó aclarado en [#100]: cada documento
+se descarga una sola vez; el Excel solo informa cero, uno o N archivos
+encontrados y no muestra estados operativos ni provoca redescargas.
+
+[#89]: https://github.com/rafram96/Pivote/issues/89
+[#90]: https://github.com/rafram96/Pivote/issues/90
+[#91]: https://github.com/rafram96/Pivote/issues/91
+[#92]: https://github.com/rafram96/Pivote/issues/92
+[#93]: https://github.com/rafram96/Pivote/issues/93
+[#94]: https://github.com/rafram96/Pivote/issues/94
+[#95]: https://github.com/rafram96/Pivote/issues/95
+[#96]: https://github.com/rafram96/Pivote/issues/96
+[#97]: https://github.com/rafram96/Pivote/issues/97
+[#98]: https://github.com/rafram96/Pivote/issues/98
+[#99]: https://github.com/rafram96/Pivote/issues/99
+[#100]: https://github.com/rafram96/Pivote/issues/100
+
+## Nota (2026-08-14, Codex) — auditoría local de un entregable real
+
+Se documentó una auditoría completa de consistencia, reglas, cómputo de días,
+trazabilidad y presentación de un entregable real. El detalle contiene datos del
+cliente y quedó únicamente en
+`docs/comercial/auditorias/2026-08-14-auditoria-entregable.md`, ruta gitignored;
+**no versionar ni trasladar a issues públicas**. No hubo cambios de producto,
+resoluciones ni datos del job.
+
+## Nota (2026-08-13, Claude) — aprendizajes de una corrida extensa
+
+Una corrida end-to-end de consultoría de obra confirmó cuatro fricciones
+reutilizables de la skill. El corpus, los resultados y los identificadores del
+concurso permanecen fuera del repositorio. El detalle técnico anonimizado está
+en [`2026-08-13_claude.md`](2026-08-13_claude.md):
+
+1. `_veredictoSinSustento` puede dar un falso positivo cuando existe un
+   paréntesis explicativo antes de la raya que introduce el sustento.
+2. `resumen_evaluacion.factores[]` exige `factor`, pero el prompt permite que
+   el evaluador produzca naturalmente `codigo` y `nombre`.
+3. `_meta.fecha_presentacion_oferta` no debe depender de una sola ubicación
+   del mapa cuando la fecha también puede estar estructurada en las bases.
+4. Las propuestas extensas necesitan salidas segmentadas
+   (`_eval/eval_NN.json`) y una fusión determinística con control de cobertura.
+
+También se confirmó que los títulos presentados solo como imagen necesitan una
+segunda lectura visual y que las constancias emitidas por el postor o por otro
+integrante del plantel requieren un candado determinístico de afiliación.
+
+## Nota (2026-08-12, Claude) — diseño anonimizado de posibles Pasos 6 y 7
+
+Se analizaron materiales locales del cliente para dos extensiones potenciales:
+**Paso 6**, constatación nominal del profesional en Informes de Control CGR, y
+**Paso 7**, contraste del cargo certificado contra las bases o especificaciones
+de la obra de origen más un resumen por proyecto. Los documentos y entregables
+reales permanecen fuera del repositorio y su carpeta está gitignored.
+
+Parte de la adquisición ya existe: bases y contrato SEACE, aprobación del
+expediente, informes CGR y datos CUI/RUC/MEF. El alcance nuevo es interpretar
+los informes y contrastar el cargo contra la fuente de la obra de origen. La
+ausencia de un nombre no prueba inasistencia, por lo que esta señal debe ser
+auxiliar y abstenerse ante ambigüedad. Detalle técnico anonimizado en
+[`2026-08-12_claude.md`](2026-08-12_claude.md).
 
 ## Nota (2026-08-10, Codex) — `ARCHIVOS (ZIP)` muestra archivos encontrados
 

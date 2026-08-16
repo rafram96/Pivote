@@ -92,3 +92,6 @@ graphify*
 
 # Consolidado interno con IP del server y cuentas por cobrar - JAMAS al repo publico
 docs/nuevos_modulos/LISTA-FINAL.html
+
+# Material de análisis entregado por el cliente: documentos y Excels reales.
+/docs/analisis_paso6/
