@@ -10,6 +10,9 @@
  * prueba aparte, en textos.test.js.
  */
 import { strict as assert } from "node:assert";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { after, beforeEach, describe, it } from "node:test";
 
 import { crearCliente } from "../cliente.js";
@@ -34,6 +37,129 @@ after(() => {
 });
 
 const cli = () => crearCliente({ serverUrl: BASE });
+
+async function carpetaAnalisis(raiz, nombre = "licitacion") {
+  const carpeta = join(raiz, nombre);
+  await mkdir(carpeta, { recursive: true });
+  await writeFile(join(carpeta, "espejo.json"), JSON.stringify({ _meta: { concurso: "CP-1" } }));
+  await writeFile(join(carpeta, "analisis.xlsx"), Buffer.from([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]));
+  await writeFile(join(carpeta, "certificados.zip"), Buffer.from([0x50, 0x4b, 0x05, 0x06, 4, 5]));
+  return carpeta;
+}
+
+describe("subirAnalisisDesdeCarpeta", () => {
+  it("lee los archivos en la PC y los envía por multipart al servidor LAN", async () => {
+    const raiz = await mkdtemp(join(tmpdir(), "mcp-rutas-"));
+    try {
+      const carpeta = await carpetaAnalisis(raiz);
+      responder(201, { job_id: "job-lan" });
+      const cliente = crearCliente({ serverUrl: BASE, analisisDir: raiz });
+      const r = await cliente.subirAnalisisDesdeCarpeta({
+        carpeta_analisis: carpeta,
+        concurso_id: "concurso-existente",
+      });
+
+      assert.equal(r.ok, true);
+      assert.equal(r.job_id, "job-lan");
+      assert.equal(pedidos.length, 1);
+      assert.equal(new URL(pedidos[0].url).pathname, "/api/pivote/analizar");
+      const form = pedidos[0].cuerpo;
+      assert.equal(form.get("concurso_id"), "concurso-existente");
+      assert.deepEqual(JSON.parse(await form.get("espejo").text()), { _meta: { concurso: "CP-1" } });
+      assert.equal(form.get("excel").name, "analisis.xlsx");
+      assert.equal(form.get("certificados").name, "certificados.zip");
+    } finally {
+      await rm(raiz, { recursive: true, force: true });
+    }
+  });
+
+  it("rechaza rutas fuera de ANALISIS_DIR sin leerlas ni llamar a red", async () => {
+    const raiz = await mkdtemp(join(tmpdir(), "mcp-raiz-"));
+    const fuera = await mkdtemp(join(tmpdir(), "mcp-fuera-"));
+    try {
+      const carpeta = await carpetaAnalisis(fuera);
+      responder(201, { job_id: "no-debe-crearse" });
+      const r = await crearCliente({ serverUrl: BASE, analisisDir: raiz })
+        .subirAnalisisDesdeCarpeta({ carpeta_analisis: carpeta, concurso_id: "c1" });
+      assert.equal(r.ok, false);
+      assert.equal(r.etapa, "leer_carpeta_local");
+      assert.match(r.error, /fuera de ANALISIS_DIR/);
+      assert.equal(pedidos.length, 0);
+    } finally {
+      await rm(raiz, { recursive: true, force: true });
+      await rm(fuera, { recursive: true, force: true });
+    }
+  });
+
+  it("rechaza un enlace dentro de ANALISIS_DIR que apunta fuera de la raíz", async () => {
+    const raiz = await mkdtemp(join(tmpdir(), "mcp-raiz-link-"));
+    const fuera = await mkdtemp(join(tmpdir(), "mcp-fuera-link-"));
+    try {
+      const carpeta = await carpetaAnalisis(fuera);
+      const enlace = join(raiz, "analisis-enlazado");
+      await symlink(carpeta, enlace, "junction");
+      responder(201, { job_id: "no-debe-crearse" });
+      const r = await crearCliente({ serverUrl: BASE, analisisDir: raiz })
+        .subirAnalisisDesdeCarpeta({ carpeta_analisis: enlace, concurso_id: "c1" });
+      assert.equal(r.ok, false);
+      assert.match(r.error, /fuera de ANALISIS_DIR/);
+      assert.equal(pedidos.length, 0);
+    } finally {
+      await rm(raiz, { recursive: true, force: true });
+      await rm(fuera, { recursive: true, force: true });
+    }
+  });
+
+  it("rechaza una carpeta ambigua con más de un Excel", async () => {
+    const raiz = await mkdtemp(join(tmpdir(), "mcp-excels-"));
+    try {
+      const carpeta = await carpetaAnalisis(raiz);
+      await writeFile(join(carpeta, "otro.xlsx"), Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+      const r = await crearCliente({ serverUrl: BASE, analisisDir: raiz })
+        .subirAnalisisDesdeCarpeta({ carpeta_analisis: carpeta, concurso_id: "c1" });
+      assert.equal(r.ok, false);
+      assert.match(r.error, /exactamente un Excel/);
+      assert.equal(pedidos.length, 0);
+    } finally {
+      await rm(raiz, { recursive: true, force: true });
+    }
+  });
+
+  it("rechaza archivos con extensión correcta pero firma inválida", async () => {
+    const raiz = await mkdtemp(join(tmpdir(), "mcp-magia-"));
+    try {
+      const carpeta = await carpetaAnalisis(raiz);
+      await writeFile(join(carpeta, "analisis.xlsx"), "esto no es un xlsx");
+      const r = await crearCliente({ serverUrl: BASE, analisisDir: raiz })
+        .subirAnalisisDesdeCarpeta({ carpeta_analisis: carpeta, concurso_id: "c1" });
+      assert.equal(r.ok, false);
+      assert.match(r.error, /firma XLSX\/ZIP válida/);
+      assert.equal(pedidos.length, 0);
+    } finally {
+      await rm(raiz, { recursive: true, force: true });
+    }
+  });
+
+  it("deshabilita lectura de rutas si ANALISIS_DIR no fue configurado", async () => {
+    const r = await cli().subirAnalisisDesdeCarpeta({ carpeta_analisis: "C:\\analisis", concurso_id: "c1" });
+    assert.equal(r.ok, false);
+    assert.match(r.error, /ANALISIS_DIR no está configurado/);
+    assert.equal(pedidos.length, 0);
+  });
+
+  it("mantiene Base64 como compatibilidad para clientes sin disco compartido", async () => {
+    responder(201, { job_id: "job-base64" });
+    const r = await cli().subirAnalisis({
+      json_espejo: { _meta: { concurso: "CP-2" } },
+      excel_base64: Buffer.from("xlsx").toString("base64"),
+      certificados_base64: Buffer.from("zip").toString("base64"),
+      concurso_id: "c2",
+    });
+    assert.equal(r.ok, true);
+    assert.equal(pedidos[0].cuerpo.get("excel").name, "analisis.xlsx");
+    assert.equal(pedidos[0].cuerpo.get("certificados").name, "certificados.zip");
+  });
+});
 
 // ── buscar_cui ───────────────────────────────────────────────────────────────
 

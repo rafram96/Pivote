@@ -16,11 +16,99 @@
  *
  * Requiere Node 18+ (fetch, FormData, Blob, Buffer globales).
  */
+import { readFile, readdir, realpath, stat } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
-export function crearCliente({ serverUrl, token = null, timeoutMs = 60000, log = () => {} }) {
+const LIMITES = {
+  espejo: 30 * 1024 * 1024,
+  excel: 60 * 1024 * 1024,
+  certificados: 400 * 1024 * 1024,
+};
+
+function dentroDe(raiz, candidato) {
+  const rel = relative(raiz, candidato);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+async function leerArchivoPermitido(ruta, raiz, maximo, etiqueta) {
+  const canonica = await realpath(ruta);
+  if (!dentroDe(raiz, canonica)) {
+    throw new Error(`${etiqueta} queda fuera de ANALISIS_DIR`);
+  }
+  const info = await stat(canonica);
+  if (!info.isFile()) throw new Error(`${etiqueta} no es un archivo`);
+  if (info.size > maximo) {
+    throw new Error(`${etiqueta} excede el límite de ${Math.floor(maximo / 1048576)} MB`);
+  }
+  return { bytes: await readFile(canonica), ruta: canonica };
+}
+
+function esZip(bytes) {
+  return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b
+    && [0x03, 0x05, 0x07].includes(bytes[2]);
+}
+
+/** Lee exclusivamente el paquete conocido de una carpeta local autorizada. */
+export async function cargarAnalisisDesdeCarpeta(carpeta, analisisDir) {
+  if (!analisisDir) throw new Error("ANALISIS_DIR no está configurado para permitir rutas locales");
+  const raiz = await realpath(resolve(analisisDir));
+  const solicitada = isAbsolute(String(carpeta))
+    ? resolve(String(carpeta))
+    : resolve(raiz, String(carpeta));
+  const canonica = await realpath(solicitada);
+  if (!dentroDe(raiz, canonica)) throw new Error("carpeta_analisis queda fuera de ANALISIS_DIR");
+  if (!(await stat(canonica)).isDirectory()) throw new Error("carpeta_analisis no es una carpeta");
+
+  const nombres = await readdir(canonica);
+  const porNombre = (nombre) => nombres.find((n) => n.toLowerCase() === nombre);
+  const espejoNombre = porNombre("espejo.json");
+  if (!espejoNombre) throw new Error("la carpeta no contiene espejo.json");
+  const excels = nombres.filter((n) => !n.startsWith("~$") && n.toLowerCase().endsWith(".xlsx"));
+  if (excels.length !== 1) {
+    throw new Error(`la carpeta debe contener exactamente un Excel .xlsx; encontrados: ${excels.length}`);
+  }
+
+  const espejoArchivo = await leerArchivoPermitido(
+    join(canonica, espejoNombre), raiz, LIMITES.espejo, "espejo.json",
+  );
+  let json_espejo;
+  try {
+    json_espejo = JSON.parse(espejoArchivo.bytes.toString("utf8"));
+  } catch {
+    throw new Error("espejo.json no contiene JSON válido");
+  }
+  if (!json_espejo || typeof json_espejo !== "object" || Array.isArray(json_espejo)) {
+    throw new Error("espejo.json debe contener un objeto JSON");
+  }
+
+  const excel = await leerArchivoPermitido(
+    join(canonica, excels[0]), raiz, LIMITES.excel, "el Excel",
+  );
+  if (!esZip(excel.bytes)) throw new Error("el Excel no tiene firma XLSX/ZIP válida");
+
+  const certificadosNombre = porNombre("certificados.zip");
+  let certificados = null;
+  if (certificadosNombre) {
+    certificados = await leerArchivoPermitido(
+      join(canonica, certificadosNombre), raiz, LIMITES.certificados, "certificados.zip",
+    );
+    if (!esZip(certificados.bytes)) throw new Error("certificados.zip no tiene firma ZIP válida");
+  }
+  return {
+    json_espejo,
+    excel_bytes: excel.bytes,
+    excel_nombre: excels[0],
+    certificados_bytes: certificados && certificados.bytes,
+  };
+}
+
+export function crearCliente({
+  serverUrl, token = null, timeoutMs = 60000, uploadTimeoutMs = 600000,
+  analisisDir = null, log = () => {},
+}) {
   const base = String(serverUrl).replace(/\/$/, "");
 
-  async function pedir(metodo, ruta, { json, form } = {}) {
+  async function pedir(metodo, ruta, { json, form, timeout } = {}) {
     const url = `${base}/${ruta.replace(/^\//, "")}`;
     const headers = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -38,7 +126,8 @@ export function crearCliente({ serverUrl, token = null, timeoutMs = 60000, log =
     let ultimo = "sin respuesta";
     for (let i = 0; i < intentos; i++) {
       const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      const limite = timeout || timeoutMs;
+      const t = setTimeout(() => ctrl.abort(), limite);
       log(`→ ${metodo} ${url}${i ? ` (intento ${i + 1})` : ""}`);
       try {
         const resp = await fetch(url, { method: metodo, headers, body, signal: ctrl.signal });
@@ -48,7 +137,7 @@ export function crearCliente({ serverUrl, token = null, timeoutMs = 60000, log =
         log(`← ${resp.status} (${texto.length} bytes)`);
         return { status: resp.status, ok: resp.ok, data };
       } catch (err) {
-        ultimo = err?.name === "AbortError" ? `timeout tras ${timeoutMs}ms` : String(err?.message || err);
+        ultimo = err?.name === "AbortError" ? `timeout tras ${limite}ms` : String(err?.message || err);
         log(`✗ error: ${ultimo}`);
       } finally {
         clearTimeout(t);
@@ -75,7 +164,11 @@ export function crearCliente({ serverUrl, token = null, timeoutMs = 60000, log =
      * Sube el análisis: resuelve el concurso (lo crea si no se pasa concurso_id)
      * y POSTea el espejo + Excel como multipart al backend real.
      */
-    async subirAnalisis({ json_espejo, excel_base64 = null, certificados_base64 = null, concurso_id = null, concurso = null }) {
+    async subirAnalisis({
+      json_espejo, excel_base64 = null, certificados_base64 = null,
+      excel_bytes = null, certificados_bytes = null, excel_nombre = "analisis.xlsx",
+      concurso_id = null, concurso = null,
+    }) {
       if (!json_espejo || typeof json_espejo !== "object") {
         return { ok: false, error: "json_espejo es obligatorio (objeto)" };
       }
@@ -101,22 +194,25 @@ export function crearCliente({ serverUrl, token = null, timeoutMs = 60000, log =
       fd.set("concurso_id", concurso_id);
       fd.set("origen", "mcp");
       fd.set("espejo", new Blob([JSON.stringify(json_espejo)], { type: "application/json" }), "espejo.json");
-      const xls = excel_base64
-        ? new Blob([Buffer.from(excel_base64, "base64")], {
+      const contenidoExcel = excel_bytes || (excel_base64 ? Buffer.from(excel_base64, "base64") : null);
+      const xls = contenidoExcel
+        ? new Blob([contenidoExcel], {
             type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           })
         : new Blob([""], { type: "application/octet-stream" });
-      fd.set("excel", xls, excel_base64 ? "analisis.xlsx" : "pendiente.xlsx");
+      fd.set("excel", xls, contenidoExcel ? excel_nombre : "pendiente.xlsx");
       // certificados: ZIP de PDFs P{n}_E{m}.pdf (constancias recortadas por la skill) — opcional
-      if (certificados_base64) {
+      const contenidoCertificados = certificados_bytes
+        || (certificados_base64 ? Buffer.from(certificados_base64, "base64") : null);
+      if (contenidoCertificados) {
         fd.set(
           "certificados",
-          new Blob([Buffer.from(certificados_base64, "base64")], { type: "application/zip" }),
+          new Blob([contenidoCertificados], { type: "application/zip" }),
           "certificados.zip"
         );
       }
 
-      const r = await pedir("POST", "/api/pivote/analizar", { form: fd });
+      const r = await pedir("POST", "/api/pivote/analizar", { form: fd, timeout: uploadTimeoutMs });
       if (!r.ok) return { ok: false, etapa: "analizar", concurso_id, status_http: r.status, error: r.data };
 
       const job_id = r.data && r.data.job_id;
@@ -128,6 +224,15 @@ export function crearCliente({ serverUrl, token = null, timeoutMs = 60000, log =
         excel_url: `${base}/api/pivote/jobs/${job_id}/excel`,
         zip_url: `${base}/api/pivote/jobs/${job_id}/zip`,
       };
+    },
+
+    async subirAnalisisDesdeCarpeta({ carpeta_analisis, concurso_id = null, concurso = null }) {
+      try {
+        const archivos = await cargarAnalisisDesdeCarpeta(carpeta_analisis, analisisDir);
+        return await this.subirAnalisis({ ...archivos, concurso_id, concurso });
+      } catch (error) {
+        return { ok: false, etapa: "leer_carpeta_local", error: String(error?.message || error) };
+      }
     },
 
     /**

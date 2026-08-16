@@ -10,8 +10,8 @@
  * Son los documentos de la EXPERIENCIA (constancias / conformidades de servicio),
  * NO los títulos/colegiatura (eso es del profesional, no de la experiencia).
  *
- * Mejora A: si se pasa `bases.pdf`, además recorta por profesional el requisito
- * del TDR (`prof.requisitos.folio`, de las bases) → `P{n}_TDR.pdf` y el Anexo 16
+ * Mejora A: si se pasa `--tdr`, además recorta por profesional el requisito
+ * (`prof.requisitos.folio`) → `P{n}_TDR.pdf` y el Anexo 16
  * (`prof.folio_anexo`, de la propuesta) → `P{n}_ANEXO.pdf`. El backend los embebe
  * ANTES de las experiencias en la hoja del profesional.
  *
@@ -20,11 +20,40 @@
  * `P{n}_FACTOR.pdf` por profesional (misma página replicada). El backend lo
  * embebe AL FINAL de la hoja: es el baremo con el que se puntúa lo de arriba.
  *
- * Uso:  node scripts/extraer_certificados.js <espejo.json> <propuesta.pdf> <salida.zip> [bases.pdf]
+ * Uso:
+ *   node scripts/extraer_certificados.js <espejo.json> <propuesta.pdf> <salida.zip> [pdf-comun]
+ *   node scripts/extraer_certificados.js <espejo.json> <propuesta.pdf> <salida.zip> \
+ *        --bases <bases.pdf> --tdr <terminos-de-referencia.pdf>
+ *
+ * El posicional histórico sigue significando que ambos recortes viven en el
+ * mismo PDF. Las opciones separadas eliminan ese supuesto (#86).
  */
 const fs = require("fs");
+const { spawnSync } = require("child_process");
 const { PDFDocument } = require("pdf-lib");
 const JSZip = require("jszip");
+
+function parseArgs(argv) {
+  const [espejoPath, propuestaPath, zipPath, ...resto] = argv;
+  if (!espejoPath || !propuestaPath || !zipPath) return null;
+  let basesPath = null;
+  let tdrPath = null;
+  let i = 0;
+  if (resto[0] && !resto[0].startsWith("--")) {
+    basesPath = tdrPath = resto[0];
+    i = 1;
+  }
+  while (i < resto.length) {
+    const opcion = resto[i++];
+    const valor = resto[i++];
+    if (!valor || !["--bases", "--tdr"].includes(opcion)) {
+      throw new Error(`opción inválida o sin valor: ${opcion || "(vacía)"}`);
+    }
+    if (opcion === "--bases") basesPath = valor;
+    if (opcion === "--tdr") tdrPath = valor;
+  }
+  return { espejoPath, propuestaPath, zipPath, basesPath, tdrPath };
+}
 
 // "590" → [590] · "622-625" → [622..625] · "48,52" → [48,52]
 function parseFolios(folio) {
@@ -80,21 +109,55 @@ async function recortar(src, total, folios) {
   return out.save();
 }
 
+function validarTextoFactor(texto) {
+  const limpio = String(texto || "").replace(/\s+/g, " ").trim();
+  if (limpio.length < 20) return "no_verificado";
+  const normal = limpio.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  if (/FACTORES? DE EVALUACION/.test(normal)
+      || (/PUNTAJE/.test(normal) && /EXPERIENCIA.+PERSONAL CLAVE/.test(normal))) {
+    return "verificado";
+  }
+  return "incorrecto";
+}
+
+function comprobarPaginaFactor(ruta, folios, ejecutar = spawnSync) {
+  if (!ruta || !folios.length) return { estado: "no_verificado", detalle: "sin fuente o páginas" };
+  const paginas = [...folios].sort((a, b) => a - b);
+  const r = ejecutar("pdftotext", [
+    "-f", String(paginas[0]), "-l", String(paginas[paginas.length - 1]), ruta, "-",
+  ], { encoding: "utf8", windowsHide: true });
+  if (r.error || r.status !== 0) {
+    return { estado: "no_verificado", detalle: "pdftotext no disponible o falló" };
+  }
+  const estado = validarTextoFactor(r.stdout);
+  return {
+    estado,
+    detalle: estado === "no_verificado"
+      ? "la página no tiene texto extraíble; requiere comprobación visual"
+      : estado === "incorrecto"
+        ? "el texto no contiene Factores de evaluación/Puntaje del personal clave"
+        : "texto del baremo reconocido",
+  };
+}
+
+async function cargarPdf(ruta) {
+  if (!ruta || !fs.existsSync(ruta)) return { doc: null, total: 0 };
+  const doc = await PDFDocument.load(fs.readFileSync(ruta));
+  return { doc, total: doc.getPageCount() };
+}
+
 async function main() {
-  const [espejoPath, propuestaPath, zipPath, basesPath] = process.argv.slice(2);
-  if (!espejoPath || !propuestaPath || !zipPath) {
-    console.error("uso: node extraer_certificados.js <espejo.json> <propuesta.pdf> <salida.zip> [bases.pdf]");
+  const args = parseArgs(process.argv.slice(2));
+  if (!args) {
+    console.error("uso: node extraer_certificados.js <espejo.json> <propuesta.pdf> <salida.zip> [pdf-comun] [--bases bases.pdf] [--tdr tdr.pdf]");
     process.exit(2);
   }
+  const { espejoPath, propuestaPath, zipPath, basesPath, tdrPath } = args;
   const espejo = JSON.parse(fs.readFileSync(espejoPath, "utf8"));
   const src = await PDFDocument.load(fs.readFileSync(propuestaPath));
   const total = src.getPageCount();
-  // bases.pdf (opcional) → recorte del TDR por cargo (mejora A)
-  let bases = null, basesTotal = 0;
-  if (basesPath && fs.existsSync(basesPath)) {
-    bases = await PDFDocument.load(fs.readFileSync(basesPath));
-    basesTotal = bases.getPageCount();
-  }
+  const { doc: bases, total: basesTotal } = await cargarPdf(basesPath);
+  const { doc: tdr, total: tdrTotal } = await cargarPdf(tdrPath);
   // Factor de evaluación (issue #32): UNA sola página de las bases — la del Cuadro
   // de Factores / "4.2 A" con la tabla de puntaje — que el backend embebe AL FINAL
   // de cada hoja de profesional. Es la misma para todos, así que se recorta una vez
@@ -102,8 +165,16 @@ async function main() {
   // abajo (el ingest solo acepta nombres `P*` y el Excel reparte por n_prof).
   const factorPags = parseFolios(espejo._meta && espejo._meta.pagina_factores);
   let factorBuf = null;
+  let factorComprobacion = { estado: "no_verificado", detalle: "sin recorte" };
   if (bases && factorPags.length) {
     factorBuf = await recortar(bases, basesTotal, factorPags);
+    if (factorBuf) {
+      factorComprobacion = comprobarPaginaFactor(basesPath, factorPags);
+      // Texto extraíble que contradice la finalidad del recorte: no adjuntar una
+      // evidencia sabidamente equivocada. Si es escaneada, se conserva pero se
+      // rotula como no verificada para revisión visual.
+      if (factorComprobacion.estado === "incorrecto") factorBuf = null;
+    }
   }
   const zip = new JSZip();
   let nCerts = 0, nAnexo = 0, nTdr = 0, nFactor = 0, sinFolio = 0;
@@ -140,11 +211,11 @@ async function main() {
     let tdrFolios = parseFolios(prof.requisitos && prof.requisitos.folio);
     const folioRepetido = sospechosos.has(claveFolios(tdrFolios));
     if (folioRepetido && tdrFolios.length) {
-      tdrFolios = ampliarTdr(tdrFolios, rangoPersonal, basesTotal);
+      tdrFolios = ampliarTdr(tdrFolios, rangoPersonal, tdrTotal);
       tdrAmpliados++;
     }
-    if (bases && tdrFolios.length) {
-      const b = await recortar(bases, basesTotal, tdrFolios);
+    if (tdr && tdrFolios.length) {
+      const b = await recortar(tdr, tdrTotal, tdrFolios);
       if (b) { zip.file(`P${prof.n_prof}_TDR.pdf`, b); nTdr++; }
     }
     if (factorBuf) { zip.file(`P${prof.n_prof}_FACTOR.pdf`, factorBuf); nFactor++; }
@@ -157,18 +228,23 @@ async function main() {
   if (bases && !factorPags.length) {
     avisoFactor = " · ⚠ sin `_meta.pagina_factores` (el Excel saldrá SIN el recorte del factor)";
   } else if (bases && !factorBuf) {
-    avisoFactor = ` · ⚠ pagina_factores=${espejo._meta.pagina_factores} fuera del rango ` +
-      `1..${basesTotal} de bases.pdf (sin recorte del factor)`;
+    avisoFactor = factorComprobacion.estado === "incorrecto"
+      ? ` · ⚠ Factor OMITIDO: ${factorComprobacion.detalle}`
+      : ` · ⚠ pagina_factores=${espejo._meta.pagina_factores} fuera del rango ` +
+        `1..${basesTotal} de bases.pdf (sin recorte del factor)`;
+  } else if (factorBuf && factorComprobacion.estado === "no_verificado") {
+    avisoFactor = ` · ⚠ factor recortado pero NO verificado: ${factorComprobacion.detalle}`;
   }
   console.log(
     `OK · ${nCerts} constancias` +
       (nAnexo ? ` · ${nAnexo} anexos` : "") +
       (nTdr ? ` · ${nTdr} TDR` : "") +
       (tdrAmpliados ? ` · ⚠ ${tdrAmpliados} TDR ampliados al cuadro completo (folio repetido)` : "") +
-      (nFactor ? ` · ${nFactor} factor` : "") +
+      (nFactor ? ` · ${nFactor} factor ${factorComprobacion.estado === "verificado" ? "verificado" : "recortado"}` : "") +
       ` recortados → ${zipPath}` +
       (sinFolio ? ` · ${sinFolio} experiencias sin folio (omitidas)` : "") +
-      (basesPath && !bases ? ` · ⚠ bases.pdf no hallado (sin recortes TDR)` : "") +
+      (tdrPath && !tdr ? ` · ⚠ TDR no hallado (sin recortes TDR)` : "") +
+      (basesPath && !bases ? ` · ⚠ bases no halladas (sin recorte Factor A)` : "") +
       avisoFactor
   );
 }
@@ -180,4 +256,7 @@ if (require.main === module) {
   });
 }
 
-module.exports = { parseFolios, foliosTdrSospechosos, ampliarTdr };
+module.exports = {
+  parseArgs, parseFolios, foliosTdrSospechosos, ampliarTdr,
+  validarTextoFactor, comprobarPaginaFactor,
+};

@@ -20,7 +20,7 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 
 const {
-  auditarEvaluacion, normalizarEval, extraerCuiLiteral, main,
+  auditarEvaluacion, normalizarEval, normalizarFactores, extraerCuiLiteral, main,
 } = require("./consolidar_espejo");
 
 test("#66 · extrae CUI incrustado al final del párrafo del servicio", () => {
@@ -28,6 +28,49 @@ test("#66 · extrae CUI incrustado al final del párrafo del servicio", () => {
   assert.strictEqual(extraerCuiLiteral(texto), "2198318");
   assert.strictEqual(extraerCuiLiteral("obra sin código 2198318"), null,
     "un número suelto no se convierte en CUI");
+});
+
+test("#88 · normaliza aliases y extras de Factor sin inventar puntaje", () => {
+  const { factores, avisos } = normalizarFactores([{
+    codigo: "A",
+    nombre: "Experiencia adicional",
+    criterio: "Supera el mínimo",
+    condicion: "al menos 20 % adicional",
+    puntaje: "POR CONFIRMAR",
+    puntaje_maximo: 10,
+    folio: "28",
+  }]);
+  assert.deepStrictEqual(factores, [{
+    factor: "A — Experiencia adicional",
+    criterio: "Supera el mínimo",
+    folio: "28",
+    detalle: "Condición de las bases: al menos 20 % adicional",
+    aplica: null,
+    puntaje: null,
+    estado_puntaje: null,
+    puntaje_confirmado: null,
+    puntaje_maximo_posible: null,
+  }]);
+  assert.strictEqual(avisos.length, 1);
+  assert.strictEqual(avisos[0].tipo, "normalizacion_orquestador");
+  assert.match(avisos[0].mensaje, /sin alterar decisiones/);
+});
+
+test("#88 · conserva íntegro un Factor que ya cumple el contrato", () => {
+  const entrada = {
+    factor: "B",
+    criterio: "Certificación PMP",
+    folio: 50,
+    detalle: "No presenta",
+    aplica: true,
+    puntaje: 0,
+    estado_puntaje: "definitivo",
+    puntaje_confirmado: 0,
+    puntaje_maximo_posible: 0,
+  };
+  const { factores, avisos } = normalizarFactores([entrada]);
+  assert.deepStrictEqual(factores, [entrada]);
+  assert.deepStrictEqual(avisos, []);
 });
 
 // ── el caso real: 3 profesionales de un mismo concurso ──────────────────────

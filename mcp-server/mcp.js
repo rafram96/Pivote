@@ -18,6 +18,8 @@
  *   SERVER_URL      base del backend (default http://localhost:8001)
  *   ONPREM_TOKEN    token Bearer opcional (no hardcodear credenciales)
  *   REQUEST_TIMEOUT timeout HTTP en ms (default 60000)
+ *   UPLOAD_TIMEOUT  timeout de subida multipart en ms (default 600000)
+ *   ANALISIS_DIR    única carpeta local desde la que la tool puede leer análisis
  *   LOG_FILE        ruta opcional de archivo de log
  *   NODE_EXTRA_CA_CERTS  (nativo de Node) CA bundle si el backend usa HTTPS interno
  *
@@ -34,6 +36,8 @@ import { textoBusqueda, textoDescargaEstado, textoDescargaIniciada } from "./tex
 const SERVER_URL = (process.env.SERVER_URL || "http://127.0.0.1:8001").replace(/\/$/, "");
 const ONPREM_TOKEN = process.env.ONPREM_TOKEN || null;
 const REQUEST_TIMEOUT = parseInt(process.env.REQUEST_TIMEOUT || "60000", 10);
+const UPLOAD_TIMEOUT = parseInt(process.env.UPLOAD_TIMEOUT || "600000", 10);
+const ANALISIS_DIR = process.env.ANALISIS_DIR || null;
 const LOG_FILE = process.env.LOG_FILE || null;
 
 // ── Logging (stderr + archivo opcional, NUNCA stdout) ────────────────────────
@@ -53,6 +57,8 @@ const cli = crearCliente({
   serverUrl: SERVER_URL,
   token: ONPREM_TOKEN,
   timeoutMs: REQUEST_TIMEOUT,
+  uploadTimeoutMs: UPLOAD_TIMEOUT,
+  analisisDir: ANALISIS_DIR,
   log,
 });
 
@@ -85,9 +91,10 @@ server.tool(
 
 server.tool(
   "subir_analisis",
-  "Sube el análisis de Claude (JSON espejo v1.2.0 + Excel) al backend on-prem, que hace los cruces SUNAT/InfoObras y calcula los días efectivos. Si no pasas concurso_id, crea el concurso (nomenclatura = _meta.concurso). Devuelve el job_id para seguir el estado y los enlaces de descarga.",
+  "Sube un análisis desde la computadora del usuario al backend on-prem por LAN. El camino normal es carpeta_analisis: el MCP local lee espejo.json, el único Excel y certificados.zip dentro de ANALISIS_DIR y los envía como multipart. Base64 queda solo para compatibilidad. Devuelve el job_id y enlaces de descarga.",
   {
-    json_espejo: z.record(z.any()).describe("Objeto JSON espejo (contrato v1.2.0) producido por la skill."),
+    carpeta_analisis: z.string().optional().describe("Ruta local, dentro de ANALISIS_DIR, que contiene espejo.json, un Excel .xlsx y certificados.zip opcional."),
+    json_espejo: z.record(z.any()).optional().describe("Compatibilidad: objeto JSON espejo cuando no se usa carpeta_analisis."),
     excel_base64: z
       .string()
       .optional()
@@ -110,7 +117,15 @@ server.tool(
       .optional()
       .describe("Datos para crear el concurso si no hay concurso_id; nomenclatura por defecto = _meta.concurso."),
   },
-  async (args) => comoTexto(await cli.subirAnalisis(args))
+  async (args) => {
+    if (args.carpeta_analisis && args.json_espejo) {
+      return comoTexto({ ok: false, error: "usa carpeta_analisis o json_espejo/base64, no ambos" });
+    }
+    if (args.carpeta_analisis) {
+      return comoTexto(await cli.subirAnalisisDesdeCarpeta(args));
+    }
+    return comoTexto(await cli.subirAnalisis(args));
+  }
 );
 
 server.tool(
@@ -166,6 +181,8 @@ async function main() {
   log(`SERVER_URL = ${SERVER_URL}`);
   log(`auth = ${ONPREM_TOKEN ? "Bearer (configurado)" : "ninguna"}`);
   log(`timeout = ${REQUEST_TIMEOUT}ms`);
+  log(`upload timeout = ${UPLOAD_TIMEOUT}ms`);
+  log(`ANALISIS_DIR = ${ANALISIS_DIR || "NO CONFIGURADO (rutas locales deshabilitadas)"}`);
   log("─".repeat(50));
   const transport = new StdioServerTransport();
   await server.connect(transport);

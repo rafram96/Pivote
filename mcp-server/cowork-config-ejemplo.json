@@ -7,18 +7,21 @@
         "C:\\Users\\Holbi\\Documents\\Freelance\\proyectos\\InfoObras\\Pivote\\mcp-server\\mcp.js"
       ],
       "env": {
-        "SERVER_URL": "http://127.0.0.1:8001",
+        "SERVER_URL": "http://192.168.1.50:8001",
         "REQUEST_TIMEOUT": "60000",
+        "UPLOAD_TIMEOUT": "600000",
+        "ANALISIS_DIR": "C:\\Users\\Holbi\\InfoObras\\analisis",
         "LOG_FILE": "C:\\Users\\Holbi\\Documents\\Freelance\\proyectos\\InfoObras\\Pivote\\mcp-server\\mcp.log"
       }
     }
   },
   "_notas": {
-    "tools": "Expone: probar_conexion, listar_concursos, subir_analisis(json_espejo, excel_base64?, concurso_id?), consultar_estado(job_id).",
+    "tools": "Expone: probar_conexion, listar_concursos, subir_analisis(carpeta_analisis, concurso_id?), consultar_estado(job_id). Base64 queda como compatibilidad.",
     "backend": "Levantar el backend antes: cd backend && ../venv/Scripts/uvicorn api.app:app --port 8001  (PIVOTE_ETAPAS=esqueleto para prueba sin scrapers).",
     "auth": "Para el server real con token: agregar 'ONPREM_TOKEN': 'xxx' dentro de env. Nunca hardcodear en mcp.js.",
     "https_cert_interno": "Si el server usa HTTPS con CA propia: agregar 'NODE_EXTRA_CA_CERTS': 'C:\\\\ruta\\\\ca-bundle.pem' dentro de env.",
-    "ip_lan": "Para apuntar al servidor real en la red: cambiar SERVER_URL a 'http://192.168.x.x:8001'.",
+    "ip_lan": "SERVER_URL es la IP LAN del servidor. El MCP sigue corriendo en esta computadora y transmite los archivos por multipart.",
+    "analisis_dir": "ANALISIS_DIR limita qué carpetas puede leer el MCP; carpeta_analisis debe estar dentro de esa raíz.",
     "windows_path": "En Windows las rutas en JSON van con doble backslash."
   }
 }

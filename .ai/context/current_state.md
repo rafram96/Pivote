@@ -1,6 +1,34 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-08-10** · rama de trabajo: `demo`
+> Última actualización: **2026-08-14** · rama de trabajo: `demo`
+
+## Correcciones de auditoría implementadas localmente (14-ago)
+
+Issues #89–#100 implementadas en Pivote y Panel-InfoObras, aún sin commit/push.
+El backend es autoridad de fechas/días, formación documental, montos del postor,
+Factor A, ISO y totales; Cronología diferencia ausencia de fuente de NO APLICA.
+El inventario documental no depende del ZIP y cada fuente lógica se intenta una
+sola vez. No se añadieron fuentes ni scrapers gubernamentales nuevos; la revisión
+académica registral es manual.
+
+Gate: **1000 passed, 25 skipped**; Node **39 passed**; TypeScript válido. Build
+Next bloqueado por `.next/trace` del dev server activo, no por error de tipos.
+Resolver CUI intacto, por lo que no aplica golden.
+
+## Auditoría de reglas registrada sin datos del cliente (14-ago)
+
+Se abrieron los issues **#89–#100** con defectos generalizables detectados
+en una auditoría local: acreditación académica, Factor A, autoridad única del
+resumen, cronología, periodos mensuales, conteo inclusivo, corte temporal,
+fecha oficial, montos mixtos del postor, completitud del entregable y
+equivalencias de cargo. El repositorio y los issues no contienen evidencia,
+identificadores ni archivos del cliente. Esa frase describe el momento de la
+auditoría; la implementación posterior está documentada en el bloque anterior.
+
+La [#100](https://github.com/rafram96/Pivote/issues/100) fija además el contrato
+de salida documental: descarga única por documento lógico; el Excel muestra
+solo el número de archivos encontrados, nunca estados de descarga ni acciones
+de redescarga.
 
 ## Archivos encontrados separados del estado de descarga (10-ago)
 

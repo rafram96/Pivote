@@ -118,7 +118,8 @@ Cada entrada de `personal_clave` incluye: `numero`, `cargos_similares_validos`,
 `profesiones_aceptadas`, `tiempo_minimo_experiencia`, `tipos_obra_validos`,
 `aplica` (Factor A), `acreditacion_formacion` y **`folio`** = la página física del PDF donde aparece la
 fila/requisito de ESE cargo, no la página donde empieza el cuadro. Si el requisito
-continúa, usa rango. Lo consume el recorte TDR.
+continúa, usa rango. Añade `fuente: "bases" | "terminos_de_referencia"` para que
+la procedencia sobreviva a la consolidación. Lo consume el recorte TDR.
 
 ## Checklist antes de devolver
 - [ ] `personal_clave` tiene una entrada por cada cargo del cuadro (ninguno omitido).

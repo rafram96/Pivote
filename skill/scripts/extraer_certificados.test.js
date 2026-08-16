@@ -3,8 +3,11 @@
 const assert = require("assert");
 const {
   parseFolios,
+  parseArgs,
   foliosTdrSospechosos,
   ampliarTdr,
+  validarTextoFactor,
+  comprobarPaginaFactor,
 } = require("./extraer_certificados");
 
 assert.deepStrictEqual(parseFolios("4-6, 8"), [4, 5, 6, 8]);
@@ -27,4 +30,26 @@ const sanos = [
 ];
 assert.strictEqual(foliosTdrSospechosos(sanos).size, 0);
 
-console.log("extraer_certificados: 5 pruebas OK");
+assert.deepStrictEqual(
+  parseArgs(["e.json", "p.pdf", "s.zip", "comun.pdf"]),
+  { espejoPath: "e.json", propuestaPath: "p.pdf", zipPath: "s.zip", basesPath: "comun.pdf", tdrPath: "comun.pdf" },
+);
+assert.deepStrictEqual(
+  parseArgs(["e.json", "p.pdf", "s.zip", "--bases", "bases.pdf", "--tdr", "tdr.pdf"]),
+  { espejoPath: "e.json", propuestaPath: "p.pdf", zipPath: "s.zip", basesPath: "bases.pdf", tdrPath: "tdr.pdf" },
+);
+
+assert.strictEqual(validarTextoFactor("4. FACTORES DE EVALUACIÓN — PUNTAJE 100"), "verificado");
+assert.strictEqual(validarTextoFactor("Norma técnica sanitaria y especificaciones generales"), "incorrecto");
+assert.strictEqual(validarTextoFactor(""), "no_verificado");
+
+assert.deepStrictEqual(
+  comprobarPaginaFactor("bases.pdf", [28, 29], () => ({ status: 0, stdout: "FACTORES DE EVALUACIÓN PUNTAJE" })),
+  { estado: "verificado", detalle: "texto del baremo reconocido" },
+);
+assert.strictEqual(
+  comprobarPaginaFactor("tdr.pdf", [28], () => ({ status: 0, stdout: "Normas técnicas aplicables al hospital" })).estado,
+  "incorrecto",
+);
+
+console.log("extraer_certificados: 12 pruebas OK");

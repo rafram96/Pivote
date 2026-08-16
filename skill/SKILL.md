@@ -60,20 +60,26 @@ vive en la skill: `scripts/ocr_propuesta.py`. Llámalo **en bucle** hasta que im
 python3 scripts/ocr_propuesta.py "<propuesta.pdf>" "<out_ocr>" 33 120
 ```
 
-Si en vez de avanzar imprime **`NO_TESSERACT`** (o `NO_PYMUPDF`) y sale con código 3,
-el entorno **no** tiene el binario → cae al **Camino B** sin pedir instalar nada.
-(En **Cowork** / sandbox Linux, antes de rendirte intenta `pip install -q pymupdf` y
-comprueba `tesseract --version`; si el binario no está y no puedes instalarlo, B.)
+Si imprime **`NO_TESSERACT`**, `NO_TESSDATA` o `NO_RENDERER` y sale con código 3,
+el entorno no puede completar el camino local → cae al **Camino B** sin pedir
+instalar nada. Sin PyMuPDF, el script intenta automáticamente `pdfimages` +
+`pdfinfo` antes de rendirse.
 Cada página queda en `<out_ocr>/pNNNN.txt` (= el índice por folio). Diseño:
 - Tesseract con idioma `spa` (tessdata_fast) en un `TESSDATA_PREFIX` escribible.
 - **`OMP_THREAD_LIMIT=1`** por proceso (evita que Tesseract sobre-suscriba hilos);
   paraleliza con un `Pool` = nº de CPUs.
+- Usa `--psm 1`: detecta orientación y corrige páginas rotadas. Con Poppler,
+  concatena todas las imágenes JPG/PNG útiles de cada página; sellos, logos
+  diminutos y máscaras PPM no pueden sobrescribir el texto principal.
 - **Reanudable/idempotente**: el shell del entorno tiene timeout corto (~45 s) y no
   conserva procesos de fondo entre llamadas — el script se auto-limita por tiempo y
   retoma donde quedó en cada corrida.
 - DPI **110-130** basta para nombres/fechas/folios.
 - Construye un **índice por folio** (folio = número grande del borde de la página,
   ≈ número de página) que consumen el mapa y los subagentes por profesional.
+- Al terminar muestra `bajo_umbral=N [pNNNN,…]`. Esas páginas no se aceptan en
+  silencio: renderízalas a **300 dpi**, revísalas por visión y reemplaza su TXT con
+  una transcripción literal encabezada por `[TRANSCRIPCIÓN POR VISIÓN]`.
 
 **Camino B — OCR nativo de Claude (fallback por defecto si NO hay Tesseract).**
 Si en la máquina **no está** `scripts/ocr_propuesta.py` ni el binario de Tesseract,
@@ -177,18 +183,19 @@ propenso a errores en propuestas grandes):
 - las **imágenes de las constancias** (Fase 2): recorta de `propuesta.pdf` las
   páginas de la constancia de cada experiencia (usa `paginas_pdf` = páginas FÍSICAS
   reales, principal 1ª — el folio impreso ≠ página no siempre) a un ZIP —
-  `node scripts/extraer_certificados.js <espejo.json> <propuesta.pdf> certificados.zip <bases.pdf>`.
+  `node scripts/extraer_certificados.js <espejo.json> <propuesta.pdf> certificados.zip --bases <bases.pdf> --tdr <tdr.pdf>`.
   Son los documentos de la **experiencia** (constancias/conformidades de servicio),
   NO los títulos/colegiatura. El backend los embebe en cada bloque `CERT N°X`.
-  **Mejora A:** si pasas `bases.pdf`, también recorta por profesional el requisito
-  del TDR (`requisitos.folio`, de las bases) y el Anexo 16 (`folio_anexo`, de la
+  **Mejora A:** `--tdr` recorta por profesional el requisito
+  (`requisitos.folio`) y el Anexo 16 (`folio_anexo`, de la
   propuesta) → `P{n}_TDR.pdf` / `P{n}_ANEXO.pdf`; el backend los embebe **antes de
   las experiencias** en la hoja del profesional.
-  **Factor de evaluación:** además recorta la página del Cuadro de Factores
+  **Factor de evaluación:** `--bases` recorta la página del Cuadro de Factores
   (`_meta.pagina_factores`, que puso `agent-bases`) → `P{n}_FACTOR.pdf`; el backend
-  la embebe **al final** de cada hoja, como baremo a la mano. Si el script avisa
-  `⚠ sin _meta.pagina_factores` o `fuera del rango`, agrega una observación
-  `severidad: warning` al espejo: el Excel saldrá sin ese recorte.
+  la embebe **al final** de cada hoja. Si ambos viven en el mismo PDF, el cuarto
+  argumento posicional histórico sigue funcionando. El resumen debe decir
+  `factor verificado`; si dice `recortado pero NO verificado`, revisa la página
+  antes de subir. Un texto incompatible se omite del ZIP.
 
 Al armar `_meta`, pon también **`slug`**: el nombre CORTO del concurso, el que un
 evaluador usaría para referirse a él de palabra — normalmente el distrito o la
@@ -247,9 +254,11 @@ manual: `docs/prompt-verificacion-expediente.md`.)
 (gate del Paso 4: exit 0) y validar:
 1. `probar_conexion` del MCP `infoobras-onprem-bridge` (ver `mcp-server/`). Si
    responde, continúa; si no, ve al fallback.
-2. `subir_analisis(json_espejo, excel_base64, certificados_base64)` — crea/usa el
-   concurso y hace POST multipart por LAN a `/api/pivote/analizar` (espejo + Excel +
-   el ZIP de constancias del Paso 4 en base64, si lo hay). Devuelve `job_id`.
+2. `subir_analisis(carpeta_analisis)` — pasa solo la ruta de la carpeta terminada.
+   El MCP corre en la computadora del usuario, valida que la ruta esté dentro de
+   `ANALISIS_DIR`, lee `espejo.json`, el único `.xlsx` y `certificados.zip`
+   opcional, y hace POST multipart por LAN al servidor. Los binarios nunca entran
+   al contexto del modelo ni se convierten a base64. Devuelve `job_id`.
 3. `consultar_estado(job_id)` — reporta el estado + los enlaces de descarga del
    Excel/ZIP enriquecidos.
 
@@ -314,7 +323,7 @@ tres formas (ISO · parcial `"YYYY-MM (anotación)"` · `"POR VERIFICAR…"`),
 ✓ agent-propuesta-profesional ×N:  K experiencias atómicas · cross-check NOTA 1 OK
 ✓ agent-evaluador:           evaluación lista · X observaciones (Y críticas)
 📦 Excel + JSON espejo en ~/InfoObras/analisis/<analisis_id>/
-→ Transporte: subir_analisis (MCP, por defecto) → job_id · fallback dropzone si el backend no responde
+→ Transporte: subir_analisis(carpeta_analisis) (MCP local → servidor LAN) → job_id · fallback dropzone si el backend no responde
 ```
 
 ## Referencias

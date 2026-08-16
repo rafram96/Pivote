@@ -108,6 +108,88 @@ const BACKEND = () => ({
   paralizaciones: null, alerta_experiencia_antigua: null,
 });
 
+const _CLAVES_FACTOR = new Set([
+  "factor", "criterio", "folio", "detalle", "aplica", "puntaje",
+  "estado_puntaje", "puntaje_confirmado", "puntaje_maximo_posible",
+]);
+
+/**
+ * Tolera deriva de forma del LLM sin cambiar el juicio (#88).
+ *
+ * - `codigo`/`nombre` rescatan únicamente el rótulo del factor;
+ * - `condicion` se conserva dentro de `detalle`;
+ * - puntajes narrativos no contractuales quedan null para que el backend los
+ *   determine, nunca se convierten en cero;
+ * - cualquier clave extra se descarta de forma visible.
+ */
+function normalizarFactores(crudos) {
+  if (!Array.isArray(crudos)) return { factores: [], avisos: [] };
+  const cambios = [];
+  const factores = crudos.map((valor, idx) => {
+    const f = valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
+    const razones = [];
+    let factor = pick(f.factor);
+    if (!factor) {
+      factor = f.codigo && f.nombre
+        ? `${f.codigo} — ${f.nombre}`
+        : pick(f.codigo, f.nombre);
+      if (factor) razones.push("rótulo rescatado de codigo/nombre");
+    }
+
+    let detalle = pick(f.detalle);
+    const condicion = pick(f.condicion);
+    if (condicion) {
+      const anexo = `Condición de las bases: ${condicion}`;
+      if (!detalle || !String(detalle).includes(String(condicion))) {
+        detalle = [detalle, anexo].filter(Boolean).join(" · ");
+      }
+      razones.push("condicion integrada en detalle");
+    }
+
+    let puntaje = f.puntaje;
+    if (typeof puntaje === "string") {
+      const limpio = puntaje.trim();
+      if (/^NO APLICA\b/i.test(limpio)) {
+        puntaje = limpio;
+      } else if (/^-?\d+(?:[.,]\d+)?$/.test(limpio)) {
+        puntaje = Number(limpio.replace(",", "."));
+        razones.push("puntaje numérico normalizado");
+      } else {
+        puntaje = null;
+        razones.push("puntaje narrativo reemplazado por null");
+      }
+    } else if (typeof puntaje === "number" && !Number.isFinite(puntaje)) {
+      puntaje = null;
+      razones.push("puntaje no finito reemplazado por null");
+    } else if (puntaje === undefined) {
+      puntaje = null;
+    }
+
+    const extras = Object.keys(f).filter((k) => !_CLAVES_FACTOR.has(k));
+    if (extras.length) razones.push(`claves extra descartadas: ${extras.join(", ")}`);
+
+    const limpio = {
+      factor,
+      criterio: pick(f.criterio),
+      folio: f.folio ?? null,
+      detalle,
+      aplica: f.aplica ?? null,
+      puntaje,
+      estado_puntaje: pick(f.estado_puntaje),
+      puntaje_confirmado: numify(f.puntaje_confirmado),
+      puntaje_maximo_posible: numify(f.puntaje_maximo_posible),
+    };
+    if (razones.length) cambios.push(`factor ${idx + 1}: ${razones.join("; ")}`);
+    return limpio;
+  });
+  const avisos = cambios.length ? [obs(
+    "info", "normalizacion_orquestador",
+    `Se normalizaron ${cambios.length} factor(es) para cumplir el contrato estricto, sin alterar decisiones: ${cambios.join(" | ")}.`,
+    "evaluacion.json → resumen_evaluacion.factores",
+  )] : [];
+  return { factores, avisos };
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // Candado 1:1 evaluador ↔ profesionales (#45-L3)
 // ════════════════════════════════════════════════════════════════════════════
@@ -532,6 +614,7 @@ function requisitosDe(bases, cargoNum) {
     factor_a_aplica: c.factor_a_aplica ?? c.aplica_factor_a ?? c.aplica ?? null,
     acreditacion_formacion: pick(c.acreditacion_formacion, bases.acreditacion_formacion),
     folio: pick(c.folio, c.folio_requisito, c.folio_tdr),   // folio en las BASES → recorte TDR (mejora A)
+    fuente: pick(c.fuente, c.fuente_requisito),
   };
 }
 
@@ -647,6 +730,10 @@ function consolidar(WS) {
   const avisos = []; // observaciones_claude que generamos si falta data
   // Mapas normalizados de la evaluación (los avisos de forma los emite auditarEvaluacion).
   const { PE, EE } = normalizarEval(ev);
+  const factoresNormalizados = normalizarFactores(
+    (ev.resumen_evaluacion || {}).factores,
+  );
+  avisos.push(...factoresNormalizados.avisos);
 
   // ── profesionales: auto-detecta N de _prof/ ─────────────────────────────────
   const dirProf = path.join(WS, "_prof");
@@ -961,7 +1048,7 @@ function consolidar(WS) {
     },
     profesionales,
     resumen_evaluacion: {
-      factores: (ev.resumen_evaluacion || {}).factores || [],
+      factores: factoresNormalizados.factores,
       puntaje_total: numify((ev.resumen_evaluacion || {}).puntaje_total),
       nota: pick((ev.resumen_evaluacion || {}).nota),
       estado_puntaje: pick((ev.resumen_evaluacion || {}).estado_puntaje),
@@ -983,7 +1070,7 @@ function consolidar(WS) {
 const main = (WS) => consolidar(WS).espejo;
 
 module.exports = {
-  normalizarEval, auditarEvaluacion, extraerCuiLiteral, reglasEvaluacionDe,
+  normalizarEval, normalizarFactores, auditarEvaluacion, extraerCuiLiteral, reglasEvaluacionDe,
   consolidar, main,
 };
 

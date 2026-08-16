@@ -113,6 +113,26 @@ Para cada experiencia, cruzándola con los requisitos del cargo en `bases`:
     APLICA"`, sin inventar criterio. Para cada factor: puntaje + detalle/condición +
     folio del sustento.
 
+    Cada elemento de `resumen_evaluacion.factores[]` es **estricto**: solo admite
+    estas claves y ninguna otra: `factor`, `criterio`, `folio`, `detalle`,
+    `aplica`, `puntaje`, `estado_puntaje`, `puntaje_confirmado` y
+    `puntaje_maximo_posible`. No emitas `codigo`, `nombre`, `condicion` ni
+    `puntaje_maximo`. Ejemplo completo:
+
+    ```json
+    {
+      "factor": "B — Certificación del personal clave",
+      "criterio": "PMP vigente emitido por PMI",
+      "folio": 412,
+      "detalle": "No presenta certificación PMP",
+      "aplica": true,
+      "puntaje": 0,
+      "estado_puntaje": "definitivo",
+      "puntaje_confirmado": 0,
+      "puntaje_maximo_posible": 0
+    }
+    ```
+
     - **Factor A — Experiencia adicional del personal clave**: déjalo
       `puntaje: null`; el backend aplica días inclusivos y los tramos literales.
     - **Factor B — Certificaciones del personal clave (PMP)**: un **PMP** solo vale
@@ -210,7 +230,15 @@ los campos de juicio dentro de cada `experiencia` y `profesional`, y
     "postor_cumple": null,
     "oferta_economica": { "…": "…" }
   },
-  "resumen_evaluacion": { "factores": [], "puntaje_total": null, "nota": null },
+  "resumen_evaluacion": {
+    "factores": [
+      { "factor": "A — Experiencia adicional", "criterio": "Tramos de las bases",
+        "folio": 28, "detalle": "Cálculo delegado al backend", "aplica": true,
+        "puntaje": null, "estado_puntaje": "condicionado",
+        "puntaje_confirmado": null, "puntaje_maximo_posible": 10 }
+    ],
+    "puntaje_total": null, "nota": null
+  },
   "observaciones_claude": []
 }
 ```

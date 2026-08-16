@@ -7,6 +7,30 @@
 ## Técnico (listo para ejecutar)
 
 ---
+id: T-SONDEO-CRONOLOGIA-TIPO-EXPEDIENTE
+tipo: sondeo
+zona: entregables/ (excel_final.py) + reglas/ (cruces_fechas.py)
+agente_origen: codex
+estado: completado (2026-08-14, sin commit)
+depende_de: [T-TAREA-CRUCES-FECHAS]
+---
+**La hoja de cronología puede rotular falsamente `NO APLICA — no es un
+expediente técnico` cuando simplemente falta la Regla B.**
+
+`presentacion_cruces()` deriva `aplica_b` de que exista el cruce `cb`; esa
+ausencia también ocurre si faltó enriquecimiento, CUI, fecha de aprobación o
+identidad documental. En un entregable real local aparecieron proyectos cuyo
+nombre declara explícitamente elaboración de expediente o estudio definitivo y,
+aun así, la columna de término dijo `NO APLICA`. El detalle identificable quedó
+en `docs/comercial/auditorias/` y no se versiona.
+
+Implementado: clasificación separada por tipo de experiencia:
+tipo no expediente → `NO APLICA`; expediente sin hito/identidad suficiente →
+`POR VERIFICAR`; expediente con cruce → respuesta de la regla. La regresión
+cubre la fuente compartida `presentacion_cruces`, consumida por la tabla global
+y la tarjeta por profesional. No se relajaron compuertas ni se añadieron fuentes.
+
+---
 id: T-TAREA-RUC-ADJUDICATARIO
 tipo: tarea
 zona: orquestador/ (etapas_reales.py, etapa SUNAT) + validacion/ (candado_seace.py)
