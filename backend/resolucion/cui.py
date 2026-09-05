@@ -20,9 +20,10 @@ Método por experiencia:
      número de institución, ubigeo oficial, entidad contratante y RUC del emisor
      contra ejecutor/supervisor. El solape de las fechas DECLARADAS no participa
      en la selección (ADR-003): serviría para lavar una mentira.
-  3. **Vetos** (son veto, no puntaje): rubro contradictorio, provincia
-     contradictoria con ambas declaradas, entidad municipal distinta, fase
-     incompatible (un registro de expediente no respalda ejecución/supervisión).
+  3. **Vetos** (son veto, no puntaje): rubro contradictorio, ETAPA/tramo/
+     componente distinto del mismo proyecto, provincia contradictoria con ambas
+     declaradas, entidad municipal distinta, fase incompatible (un registro de
+     expediente no respalda ejecución/supervisión).
   4. **Candados de abstención** (ADR-005: abstenerse es barato, equivocarse no):
      un candidato solo-MEF no gana sin corroboración dura, y un empate estrecho
      sin señal separadora va a `revision` con sus candidatos a la vista.
@@ -459,6 +460,91 @@ def _rubros_ficha_mef(ficha: Optional[dict]) -> set[str]:
     texto = " ".join(str(ficha.get(c) or "")
                      for c in ("funcion", "nombre", "tipologia"))
     return rubros_de(texto)
+
+
+# ── ETAPA / TRAMO / COMPONENTE / PAQUETE (veto de identidad) ──────────────────
+# Un proyecto con OTRA etapa es OTRA inversión: tiene su propio CUI, su propio
+# contrato y sus propias valorizaciones. El caso que lo motiva: el expediente
+# técnico de una facultad universitaria «3RA ETAPA» se resolvió contra el CUI
+# cuyo nombre oficial dice «2DA ETAPA» (la resolución nombraba al emisor, así que
+# ninguna otra señal la frenó). Las cuatro clases se tratan igual —etapa, tramo,
+# componente y paquete parten un mismo proyecto en inversiones distintas.
+#
+# «FASE» NO entra: en este dominio ya designa la fase del ciclo de inversión
+# (expediente técnico vs ejecución), que tiene su propio veto (`_es_registro_expediente`).
+_CLASES_ETAPA = ("ETAPA", "TRAMO", "COMPONENTE", "PAQUETE")
+
+# Ordinales admitidos, hasta 10. Los romanos van SIN punto y se exigen delimitados
+# (`\b`), así "III" no se confunde con la "I" de un "I ETAPA" ni al revés.
+_ORDINALES_ETAPA: dict[int, tuple[str, ...]] = {
+    1: ("PRIMERA", "PRIMERO", "PRIMER", "1RA", "1ERA", "1ER", "1RO", "1", "I"),
+    2: ("SEGUNDA", "SEGUNDO", "2DA", "2DO", "2", "II"),
+    3: ("TERCERA", "TERCERO", "TERCER", "3RA", "3ERA", "3RO", "3", "III"),
+    4: ("CUARTA", "CUARTO", "4TA", "4TO", "4", "IV"),
+    5: ("QUINTA", "QUINTO", "5TA", "5TO", "5", "V"),
+    6: ("SEXTA", "SEXTO", "6TA", "6TO", "6", "VI"),
+    7: ("SEPTIMA", "SEPTIMO", "SETIMA", "SETIMO", "7MA", "7MO", "7", "VII"),
+    8: ("OCTAVA", "OCTAVO", "8VA", "8VO", "8", "VIII"),
+    9: ("NOVENA", "NOVENO", "9NA", "9NO", "9", "IX"),
+    10: ("DECIMA", "DECIMO", "10MA", "10MO", "10", "X"),
+}
+_NUM_ORDINAL = {t: n for n, ts in _ORDINALES_ETAPA.items() for t in ts}
+_ALT_ORDINAL = "|".join(sorted(_NUM_ORDINAL, key=len, reverse=True))
+_ALT_CLASE_ETAPA = "|".join(_CLASES_ETAPA)
+
+# "3RA ETAPA", "SEGUNDA ETAPA", "III ETAPA"
+_RE_ETAPA_PRE = re.compile(rf"\b({_ALT_ORDINAL})\.?\s+({_ALT_CLASE_ETAPA})\b")
+# "ETAPA 3", "ETAPA III", "ETAPA N° 3" (norm() borra el ° → "N 3"), "TRAMO-2".
+# El lookahead descarta el nivel hospitalario ("… ETAPA III-1" no es una etapa):
+# un número seguido de guion y otro dígito es una categoría, no un ordinal.
+_RE_ETAPA_POST = re.compile(
+    rf"\b({_ALT_CLASE_ETAPA})[\s.:\-]*(?:N(?:O|RO|UM)?\.?\s*)?({_ALT_ORDINAL})\b(?!\s*-\s*\d)")
+
+
+def etapa_de(nombre: str) -> Optional[tuple[str, int]]:
+    """Etapa/tramo/componente/paquete declarado en un nombre de obra o proyecto.
+
+    Devuelve `("ETAPA", 3)` para "… 3RA ETAPA" o "… ETAPA III", `("TRAMO", 2)`
+    para "TRAMO 2", o `None` si el nombre no declara ninguno. Si aparecen varios
+    gana el PRIMERO del texto (orden de lectura, determinístico)."""
+    t = norm(nombre or "")
+    if not t:
+        return None
+    hallazgos = [(m.start(), m.group(2), _NUM_ORDINAL[m.group(1)])
+                 for m in _RE_ETAPA_PRE.finditer(t)]
+    hallazgos += [(m.start(), m.group(1), _NUM_ORDINAL[m.group(2)])
+                  for m in _RE_ETAPA_POST.finditer(t)]
+    if not hallazgos:
+        return None
+    _, clase, num = min(hallazgos)
+    return (clase, num)
+
+
+def _etapa_contradice(proyecto_cert: str, nombre_cand: str) -> bool:
+    """True solo si AMBOS lados declaran la MISMA clase (etapa/tramo/…) con número
+    DISTINTO. Si uno de los dos calla, no hay contradicción: los nombres oficiales
+    omiten la etapa con frecuencia y vetar por omisión sería vetar por ausencia
+    —el mismo error que `_rubro_contradice` evita."""
+    a = etapa_de(proyecto_cert)
+    b = etapa_de(nombre_cand)
+    if not a or not b:
+        return False
+    return a[0] == b[0] and a[1] != b[1]
+
+
+def _etapa_txt(e: Optional[tuple[str, int]]) -> str:
+    """"ETAPA 3" — forma legible de `etapa_de` para trazas y motivos."""
+    return f"{e[0]} {e[1]}" if e else ""
+
+
+def _motivo_etapa(vetados: list[dict]) -> str:
+    """Motivo EN LLANO para la cola de revisión cuando el (mejor) candidato quedó
+    apartado por el veto de etapa. Mismo estilo que el veto de rubro: dice qué
+    contradice y con qué números, para que el humano decida sin abrir el código."""
+    peor = max(vetados, key=lambda c: c.get("score") or 0)
+    clase, n_cert, n_obra = peor.get("veto_etapa") or ("ETAPA", "?", "?")
+    return (f"la obra hallada es otra {clase.lower()} del mismo proyecto "
+            f"(N° {n_cert} en el certificado, N° {n_obra} en el registro) — confirmar")
 
 
 # ── UBIGEO del certificado: provincia/distrito (veto de ubicación, F8) ────────
@@ -1336,6 +1422,30 @@ def _paso_codigo_citado(exp: dict, consulta: Consulta, base=None) -> Optional[di
     sin_afinidad = bool(toks) and n_hit == 0
     rubros_cert = rubros_de(proyecto)
     rubros_oficiales = _rubros_ficha_mef(ficha_citada)
+    # ETAPA · un código citado que apunta a OTRA etapa/tramo/componente del mismo
+    # proyecto no se promueve: el nombre calza casi entero (es el mismo proyecto),
+    # así que ninguna compuerta de afinidad lo frena — pero la inversión es otra.
+    # Abstención pura, con el candidato a la vista (patrón de `contra_rubro`).
+    etapa_cert_cod = etapa_de(proyecto)
+    if etapa_cert_cod:
+        for _txt in (o.get("nombrObra") or "",
+                     str((ficha_citada or {}).get("nombre") or "")):
+            if not _etapa_contradice(proyecto, _txt):
+                continue
+            etapa_reg = etapa_de(_txt)
+            _traza().ev("cui_citado_otra_etapa", codigo=codigo,
+                        etapa_cert=_etapa_txt(etapa_cert_cod),
+                        etapa_registro=_etapa_txt(etapa_reg),
+                        obra=(o.get("nombrObra") or "")[:80])
+            return {"estado": "revision", "cui": None, "via": "CUI_TEXTO",
+                    "decision": ("el CUI citado corresponde a otra etapa del mismo "
+                                 f"proyecto (N° {etapa_cert_cod[1]} en el certificado, "
+                                 f"N° {etapa_reg[1]} en el registro) — confirmar"),
+                    "candidatos": [{"cui": cui_out,
+                                    "nombre_obra": (o.get("nombrObra") or ""),
+                                    "departamento": o.get("nombrDepartamento"),
+                                    "score": 50}],
+                    "obra": None}
     # #69 · Un CUI escrito en el certificado sigue siendo evidencia fuerte, pero
     # no puede imponerse a una contradicción POSITIVA de la función oficial MEF.
     # Es una compuerta de abstención: exige rubro declarado en ambos lados y nunca
@@ -1438,6 +1548,9 @@ def _cotejo_codigo(o: dict, proyecto: str, codigo: str, deptos_cert: set[str]) -
         # el certificado declara departamento y la obra está en otro
         "contra_dep": bool(deptos_cert) and bool(dep_obra) and dep_obra not in deptos_cert,
         "contra_rubro": _rubro_contradice(rubros_de(proyecto), o.get("nombrObra") or ""),
+        # el registro declara OTRA etapa/tramo/componente que el certificado: es
+        # otra inversión del mismo proyecto, no un componente del mismo registro
+        "contra_etapa": _etapa_contradice(proyecto, o.get("nombrObra") or ""),
         # el código calzó contra el SNIP de una obra que TIENE su propio CUI, distinto
         # (los espacios CUI/SNIP se solapan). Una obra antigua registrada solo con
         # SNIP —sin codUniqInv— no cuenta: ahí el SNIP es su único código legítimo.
@@ -1454,7 +1567,14 @@ def _codigo_dudoso(c: dict) -> Optional[str]:
     Yanahuanca→Ferreñafe— o (b) la obra contradice la ubicación o el rubro que el
     certificado sí declara. Los casos documentados como CORRECTOS sobreviven:
     Fortaleza (componente de una red integrada, sin departamento en el cert, mismo
-    rubro) y COAR (afinidad de nombre ≥ 1) no cumplen ninguna de las dos."""
+    rubro) y COAR (afinidad de nombre ≥ 1) no cumplen ninguna de las dos.
+
+    EXCEPCIÓN · `contra_etapa` abstiene POR SÍ SOLO, sin exigir `sin_afinidad`:
+    otra etapa del mismo proyecto comparte casi todo el nombre (por eso ninguna
+    señal de afinidad la frena) y aun así es otra inversión."""
+    if c.get("contra_etapa"):
+        return ("el registro del código citado corresponde a otra etapa del mismo "
+                "proyecto que la del certificado")
     if not c.get("sin_afinidad"):
         return None
     if c.get("solo_snip"):
@@ -1669,7 +1789,11 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
 
     VETO DE RUBRO: un candidato cuyo rubro contradice al del certificado (salud vs
     deportivo, etc.) NO compite — se aparta a `vetados` para que la cola de revisión
-    pueda mostrarlo, pero jamás gana en silencio."""
+    pueda mostrarlo, pero jamás gana en silencio.
+
+    VETO DE ETAPA: igual, cuando ambos nombres declaran etapa/tramo/componente/paquete
+    de la misma clase con NÚMERO distinto. Aquí `ruc_match` no exime (el mismo
+    contratista suele ejecutar varias etapas del mismo proyecto)."""
     proyecto = exp.get("proyecto") or ""
     pn = norm(proyecto)
     deptos_hint = ubicacion(proyecto)
@@ -1679,6 +1803,7 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
     ruc_cert = mruc.group(1) if mruc else None
     nums_cert = frozenset(_numero_obra(proyecto))   # N° de I.E./C.E. del certificado
     rub_cert = rubros_de(proyecto)
+    etapa_cert = etapa_de(proyecto)   # etapa/tramo/componente declarado por el cert
     base_ok = bool(base) and base.disponible()
     fichas_mef = exp.get("_fichas_mef") if base_ok else None
     sig_geo = ubigeo_cert(exp) if base_ok else None   # señales prov/dist del cert (F8)
@@ -1766,6 +1891,24 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
         if o.get("_origen"):
             cand["origen"] = o["_origen"]
             origenes.setdefault(cui, set()).add(o["_origen"])
+        # VETO DE ETAPA: una etapa/tramo/componente/paquete distinto es OTRA
+        # inversión (otro CUI, otro contrato, otras valorizaciones). A diferencia
+        # del rubro, `ruc_match` NO exime: el mismo contratista suele ganar varias
+        # etapas del mismo proyecto, así que su RUC no distingue cuál acredita.
+        # El nombre oficial del MEF (`full`) sirve de respaldo cuando InfoObras
+        # registra el nombre sin la etapa.
+        if etapa_cert:
+            nom_etapa = cand["nombre_obra"] if etapa_de(cand["nombre_obra"]) else full
+            if _etapa_contradice(proyecto, nom_etapa):
+                etapa_obra = etapa_de(nom_etapa)
+                cand["veto"] = "etapa"
+                cand["veto_etapa"] = (etapa_cert[0], etapa_cert[1], etapa_obra[1])
+                _traza().ev("veto_etapa", cui=cui, score=cand["score"],
+                            etapa_cert=_etapa_txt(etapa_cert),
+                            etapa_obra=_etapa_txt(etapa_obra),
+                            obra=cand["nombre_obra"])
+                vetados.append(cand)
+                continue
         # el RUC del emisor en la obra es evidencia más fuerte que el rubro
         # inferido del texto → el veto no aplica a ruc_match
         if not ruc_match and _rubro_contradice(rub_cert, cand["nombre_obra"]):
@@ -2176,6 +2319,8 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
                                        vetados, base)
         if all(c.get("veto") == "rubro" for c in vetados):
             motivo = "los candidatos hallados son de otro rubro de servicio — confirmar"
+        elif all(c.get("veto") == "etapa" for c in vetados):
+            motivo = _motivo_etapa(vetados)
         elif all(c.get("veto") == "ubigeo" for c in vetados):
             niveles = {c.get("veto_nivel") for c in vetados}
             if niveles == {"departamento"}:
@@ -2188,6 +2333,9 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
                 lugar = "en otra ubicación que la"
             motivo = (f"los candidatos hallados están {lugar} del certificado "
                       "— confirmar")
+        elif any(c.get("veto") == "etapa" for c in vetados):
+            motivo = ("los candidatos hallados contradicen la etapa, el rubro o la "
+                      "ubicación del certificado — confirmar")
         else:
             motivo = ("los candidatos hallados contradicen el rubro o la ubicación "
                       "del certificado — confirmar")
