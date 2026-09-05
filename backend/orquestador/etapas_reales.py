@@ -854,6 +854,18 @@ class EtapaInfoObrasReal:
             lectura = self._leer_resolucion_aprobacion(ctx, _e, cui, _vmef)
             if not lectura:
                 return
+            # Una lectura que CONFIRMA al emisor (vía RESOLUCION, otra resolución del
+            # mismo 08-A) no se pisa con una que no lo nombra: se conserva la
+            # confirmante y solo se toma la fecha nueva si aquella no traía.
+            previa = enr.get("resolucion_aprobacion") if isinstance(enr.get("resolucion_aprobacion"), dict) else None
+            if previa and previa.get("coincide_emisor") == "confirma" \
+                    and lectura.get("coincide_emisor") != "confirma":
+                # La fecha oficial es la de la resolución numerada del 08-A; una
+                # modificatoria sin número puede traer una fecha ajena (vigencias).
+                if lectura.get("fecha") and (not previa.get("fecha") or not previa.get("numero")):
+                    previa["fecha"] = lectura["fecha"]
+                    previa["fecha_de_resolucion_numero"] = lectura.get("numero") or _vmef.get("resolucion", {}).get("numero")
+                lectura = previa
             enr["resolucion_aprobacion"] = lectura
             if lectura.get("fecha"):
                 _vmef.setdefault("resolucion", {})["fecha"] = lectura["fecha"]
@@ -1230,7 +1242,7 @@ class EtapaInfoObrasReal:
                         positivos.append((cui, "RESOLUCION",
                                           f"la resolución de aprobación {info.get('numero') or ''} "
                                           "nombra al emisor del certificado como consultor".replace("  ", " "),
-                                          None))
+                                          {"lectura": lect, "info": info}))
                         break
             cuis = {p[0] for p in positivos}
             if len(cuis) != 1:
@@ -1249,12 +1261,23 @@ class EtapaInfoObrasReal:
             # El contrato QUE RESOLVIÓ, guardado aparte: la ficha del Excel elige su
             # contrato por su cuenta (`verificar_expediente`) y, si el CUI tiene
             # varios, podría no ser este. Dejarlo aquí es la trazabilidad de la vía.
-            if ce_ok:
+            if via == "CONTRATO" and ce_ok:
                 _f = ce_ok.get("fecha_suscripcion")
                 enr["contrato_emisor"] = {
                     "numero": ce_ok.get("numero"),
                     "contratista": ce_ok.get("contratista"),
                     "fecha": _f.isoformat() if hasattr(_f, "isoformat") else (_f or None),
+                }
+            elif via == "RESOLUCION" and ce_ok:
+                # La lectura QUE RESOLVIÓ se persiste ya: el 08-A puede tener varias
+                # resoluciones (original + modificatorias) y la que lee después la
+                # etapa (`_aplicar_lectura`) es la «mejor» del 08-A, que puede no
+                # nombrar a nadie. Sin esto el Panel/Excel decían «no nombra al
+                # consultor» sobre una experiencia resuelta justo porque lo nombraba.
+                enr["resolucion_aprobacion"] = ce_ok["lectura"]
+                enr["resolucion_confirmante"] = {
+                    "numero": (ce_ok.get("info") or {}).get("numero"),
+                    "url": (ce_ok.get("info") or {}).get("url"),
                 }
             ctx.enriquecimiento[k] = enr
             for it in ctx.job.items_revision:

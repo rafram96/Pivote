@@ -167,6 +167,9 @@ def test_resolucion_que_nombra_al_emisor_promueve(tmp_path):
     etapa._promover_expedientes_por_fuente_oficial(ctx)
     enr = ctx.enriquecimiento["1:1"]
     assert enr["cui"] == "2425571" and enr["via"] == "RESOLUCION", enr
+    # la lectura QUE confirmó al emisor queda persistida (no la «mejor» del 08-A)
+    assert enr["resolucion_aprobacion"]["coincide_emisor"] == "confirma"
+    assert enr["resolucion_confirmante"]["numero"] == "274-2021"
 
 
 def test_experiencia_de_obra_no_entra_a_la_promocion():
