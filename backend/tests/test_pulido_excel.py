@@ -190,7 +190,7 @@ def test_conciliar_conserva_el_verde_del_veredicto(tmp_path):
     # y la hoja del profesional dice el mismo número en sus dos superficies
     hoja_p = openpyxl.load_workbook(
         generar_excel_final(espejo, tmp_path / "dias.xlsx")).worksheets[2]
-    conclusion = _buscar(hoja_p, "días declarados")
+    conclusion = _buscar(hoja_p, "según la evaluación inicial")
     assert conclusion is not None and conclusion.value.startswith("CUMPLE según la evaluación inicial")
 
 
