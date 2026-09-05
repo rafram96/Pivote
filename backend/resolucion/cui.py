@@ -1570,6 +1570,18 @@ def _codigos_de(o: dict) -> set[str]:
     return out
 
 
+def _registro_desde_ficha(cui: str, ficha: dict) -> dict:
+    """Registro con la forma de InfoObras construido desde una ficha del MEF, para
+    que un proyecto SIN registro de ejecución compita en el ranking (solo
+    expedientes, ver `_fusionar_mef`). `codigoObra` lleva el prefijo `MEF:` y el
+    candidato queda marcado `_solo_ficha` — nunca se toma por una obra real."""
+    return {"codUniqInv": cui, "codSnip": ficha.get("snip") or "",
+            "codigoObra": f"MEF:{cui}", "nombrObra": ficha.get("nombre") or "",
+            "nombrDepartamento": ficha.get("dpto") or "", "fechaIniObra": None,
+            "rucEjecutor": "", "rucSupervisor": "",
+            "_origen": "mef", "_solo_ficha": True}
+
+
 def _fusionar_mef(exp: dict, consulta: Consulta, base, vistos: dict) -> None:
     """F3 · Fusión con la base local del MEF. Solo se invoca con `base` disponible.
     Marca el origen de cada registro y trae por código (`por_codigo`) los CUIs que
@@ -1623,6 +1635,18 @@ def _fusionar_mef(exp: dict, consulta: Consulta, base, vistos: dict) -> None:
             continue  # se descarta ESTE candidato; la experiencia sigue
         if not registros:
             _traza().ev("fusion_mef_sin_obra", cui=cui, nombre=c.get("nombre"))
+            # ADR-010 · Para un EXPEDIENTE el Banco de Inversiones ES la fuente: el
+            # proyecto puede no haberse ejecutado nunca (o InfoObras no lo indexa)
+            # y aun así el expediente existe, con contrato y resolución en el MEF.
+            # Medido en la corrida real de expedientes: 7 de 8 «no detectables»
+            # estaban en la base MEF con score 100 y se perdían justo acá. La ficha
+            # compite como candidato propio (`_solo_ficha`); la vía MEF decide.
+            if es_expediente_exp(exp):
+                key = f"MEF:{cui}"
+                if key not in vistos:
+                    vistos[key] = _registro_desde_ficha(cui, c)
+                    _traza().ev("fusion_mef_ficha_expediente", cui=cui,
+                                score=c.get("score"), nombre=c.get("nombre"))
             continue
         nuevos = 0
         for o in registros:
@@ -1734,7 +1758,11 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
                 # estado del MEF: "" = el CUI NO está en la base local (desconocido,
                 # que no es lo mismo que vivo — ver `_estado_separa`).
                 "mef_estado": ((ficha or {}).get("estado_dataset") or ""),
-                "mef_desactivada": _mef_desactivada(ficha)}
+                "mef_desactivada": _mef_desactivada(ficha),
+                # ADR-010 · candidato sintetizado desde la ficha del MEF (expediente
+                # sin registro de ejecución en InfoObras) y su score de nombre MEF.
+                "solo_ficha": bool(o.get("_solo_ficha")),
+                "mef_score": ((fichas_mef or {}).get(cui) or {}).get("score")}
         if o.get("_origen"):
             cand["origen"] = o["_origen"]
             origenes.setdefault(cui, set()).add(o["_origen"])
@@ -1807,6 +1835,61 @@ def _corroborado(c: dict, exp: Optional[dict] = None) -> bool:
     return bool(tokens_distintivos(ent)) if ent else True
 
 
+_UMBRAL_MEF_NOMBRE = 95.0    # score de nombre del Banco de Inversiones para resolver
+_COBERTURA_MEF_MIN = 0.8     # fracción del nombre oficial que el certificado debe contener
+_DELTA_RIVAL_MEF = 3.0       # otra ficha a menos de esto en score MEF = empate
+
+
+def _via_mef_expediente(exp: dict, best: dict, ranked: list, candidatos: list,
+                        obra_best: Optional[dict], loc_contra: bool) -> dict:
+    """Vía MEF (ADR-010): un EXPEDIENTE cuyo proyecto figura en el Banco de
+    Inversiones pero no tiene registro de ejecución en InfoObras. Resuelve solo si
+    el nombre oficial es casi idéntico al del certificado (score MEF ≥ 95 y el
+    certificado contiene ≥ 80 % de las palabras del nombre oficial: evita que un
+    certificado corto «quepa» dentro de otra intervención del mismo lugar), la
+    ubicación no contradice, la obra no añade un rubro ajeno y ninguna otra ficha
+    empata. Si no, revisión con la ficha visible: la vía CONTRATO/RESOLUCION de la
+    etapa aún puede confirmarla por fuente oficial."""
+    proyecto = str(exp.get("proyecto") or "")
+    cui = best["cui"]
+    ms = float(best.get("mef_score") or 0)
+    pal_mef = {t for t in _palabras(best.get("nombre_obra") or "") if len(t) > 3}
+    pal_cert = _palabras(proyecto + " " + str(exp.get("ubicacion") or ""))
+    cobertura = (len(pal_mef & pal_cert) / len(pal_mef)) if pal_mef else 0.0
+    rub_extra = rubros_de(best.get("nombre_obra") or "") - rubros_de(proyecto)
+    rivales = [c for c in ranked if c["cui"] != cui
+               and ((best["score"] - c["score"]) <= 4.0
+                    or float(c.get("mef_score") or 0) >= ms - _DELTA_RIVAL_MEF)]
+    motivo = None
+    if ms < _UMBRAL_MEF_NOMBRE:
+        motivo = "el nombre oficial no coincide lo suficiente con el del certificado"
+    elif cobertura < _COBERTURA_MEF_MIN:
+        motivo = "el certificado no menciona una parte sustancial del nombre oficial del proyecto"
+    elif loc_contra:
+        motivo = "el departamento del proyecto no es el que declara el certificado"
+    elif rub_extra:
+        motivo = ("el proyecto añade un rubro que el certificado no menciona "
+                  f"({', '.join(sorted(rub_extra))}) — puede ser otra intervención en el mismo lugar")
+    elif rivales:
+        motivo = "otro proyecto del MEF compite con un nombre igual de parecido"
+    obra = dict(obra_best or {})
+    obra["obra_id"] = None   # no hay obra de InfoObras detrás: jamás se fetchea
+    if motivo is None:
+        _traza().ev("via_mef_expediente", cui=cui, mef_score=ms,
+                    cobertura=round(cobertura, 2))
+        return {"estado": "resuelto", "cui": cui, "via": "MEF",
+                "decision": ("el proyecto figura con ese nombre en el Banco de Inversiones "
+                             "del MEF e InfoObras no registra su ejecución; el expediente se "
+                             "verifica contra el contrato y la resolución de aprobación del MEF"),
+                "candidatos": candidatos, "obra": obra}
+    _traza().ev("via_mef_expediente_revision", cui=cui, mef_score=ms, motivo=motivo)
+    return {"estado": "revision", "cui": None, "via": "NOMBRE",
+            "decision": (f"hay un proyecto con ese nombre en el Banco de Inversiones del MEF "
+                         f"(CUI {cui}) sin registro de ejecución en InfoObras, pero {motivo} "
+                         "— confirmar"),
+            "candidatos": candidatos, "obra": None}
+
+
 def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict:
     """Bloque final de decisión: compuerta de tokens, RUC, NOMBRE, PROBABLE,
     loc_contra y motivos de revisión. Emite el evento `ranking` y devuelve el
@@ -1837,9 +1920,15 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
     # Esto además DESBLOQUEA correctos que un mef sin compuerta tapaba en el #1
     # (p. ej. Pichanaki, San Ignacio: el mef gate=0 quedaba #1 por 0.3 pts y hundía
     # al InfoObras correcto a revisión).
+    # ADR-010 · para un EXPEDIENTE, la ficha del MEF sintetizada (`solo_ficha`) SÍ es
+    # elegible: el Banco de Inversiones es su fuente primaria y la vía MEF (abajo)
+    # decide con sus propios candados. Para obras el candado sigue intacto.
+    _exped = es_expediente_exp(exp)
+
     def _mef_sin_corroborar(c: dict) -> bool:
         return (c.get("origen") == "mef"
-                and not (c.get("ruc_match") or c.get("num_match") or c.get("ent_match")))
+                and not (c.get("ruc_match") or c.get("num_match") or c.get("ent_match"))
+                and not (c.get("solo_ficha") and _exped))
 
     best = next((c for c in ranked if not _mef_sin_corroborar(c)), None)
     if ranked and (best is None or ranked[0] is not best):
@@ -1892,6 +1981,13 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
         return {"estado": "resuelto", "cui": best["cui"], "via": "RUC",
                 "decision": "el RUC del emisor es ejecutor/supervisor de la obra",
                 "candidatos": candidatos, "obra": obra_best}
+
+    # ── VÍA MEF (ADR-010, solo EXPEDIENTES) ─────────────────────────────────
+    # El mejor candidato es una ficha del Banco de Inversiones sin registro de
+    # ejecución en InfoObras. No sigue a NOMBRE/PROBABLE (semántica de obra):
+    # decide con candados propios o va a revisión con la ficha visible.
+    if best and best.get("solo_ficha") and _exped:
+        return _via_mef_expediente(exp, best, ranked, candidatos, obra_best, loc_contra)
 
     # ── VÍA NÚMERO DE INSTITUCIÓN ────────────────────────────────────────────
     # «Mismo N° de I.E./C.E. → casi seguro la misma obra» (así lo define _puntuar,

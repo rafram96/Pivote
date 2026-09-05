@@ -38,6 +38,7 @@ class ViaResolucion(str, Enum):
     NUMERO = "numero"         # N° de I.E./C.E. del cert coincide y es único entre las obras
     CONTRATO = "contrato"     # contrato de expediente del MEF a nombre del emisor
     RESOLUCION = "resolucion" # resolución de aprobación del expediente nombra al emisor
+    MEF = "mef"               # expediente: nombre oficial en el Banco de Inversiones, sin ejecución en InfoObras
     MANUAL = "manual"         # el humano pegó el CUI tras revisión
     NA = "na"                 # obra privada/ajena a salud → no está en InfoObras
 

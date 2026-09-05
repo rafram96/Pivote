@@ -1606,6 +1606,8 @@ def construir_hoja_profesional(
         "NUMERO": "por el número de la institución educativa, único entre las obras halladas",
         "CONTRATO": "por el contrato de expediente del MEF a nombre del emisor",
         "RESOLUCION": "por la resolución de aprobación del expediente, que nombra al emisor",
+        "MEF": "por el nombre oficial del proyecto en el Banco de Inversiones del MEF "
+               "(sin registro de ejecución en InfoObras)",
     }
 
     def render_multi_obra(top: int, sub: list, multi_rubro=None) -> int:

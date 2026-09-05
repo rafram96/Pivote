@@ -303,6 +303,11 @@ class EtapaValidacionReal:
         return _res(self.nombre, estado, _met(n_exp, n_exp), observaciones)
 
 
+# Vías que identifican un EXPEDIENTE por el Banco de Inversiones sin que InfoObras
+# tenga (necesariamente) registro de ejecución: la verificación es solo contra el MEF.
+_VIAS_SOLO_MEF = frozenset({"MEF", "CONTRATO", "RESOLUCION"})
+
+
 # ── 2 · Identificación de obras (CUI) ────────────────────────────────────────
 
 class EtapaResolucionCuiReal:
@@ -697,24 +702,7 @@ class EtapaInfoObrasReal:
                         origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
                     # La RESOLUCIÓN que aprobó el expediente, leída (capa de texto u
                     # OCR local): fecha oficial para la Regla B y consultor nombrado.
-                    lectura = self._leer_resolucion_aprobacion(ctx, _e, cui, _vmef)
-                    if lectura:
-                        enr["resolucion_aprobacion"] = lectura
-                        if lectura.get("fecha"):
-                            _vmef.setdefault("resolucion", {})["fecha"] = lectura["fecha"]
-                        if lectura.get("coincide_emisor") == "nombra_otro":
-                            obs.append(pipeline.Observacion(
-                                codigo="RESOLUCION_ET", severidad=pipeline.Severidad.ADVERTENCIA,
-                                mensaje=("la resolución que aprobó el expediente nombra a otro "
-                                         f"consultor ({str(lectura.get('detalle_emisor') or '')[:80]}), "
-                                         "no al emisor del certificado — confirmar quién lo elaboró"),
-                                origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
-                        elif lectura.get("coincide_emisor") == "confirma":
-                            obs.append(pipeline.Observacion(
-                                codigo="RESOLUCION_ET", severidad=pipeline.Severidad.INFO,
-                                mensaje="la resolución que aprobó el expediente nombra al emisor "
-                                        "del certificado como consultor",
-                                origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+                    _aplicar_lectura(enr, _vmef, _e, np_, ne, cui)
             ctx.enriquecimiento[k] = enr
             cont["ok"] += 1
             if periodos:
@@ -826,6 +814,68 @@ class EtapaInfoObrasReal:
                     }
             return s
 
+        def _aplicar_lectura(enr, _vmef, _e, np_, ne, cui):
+            """Lee la resolución de aprobación (capa de texto u OCR local) y la anota
+            en el enriquecimiento: fecha oficial para la Regla B y consultor nombrado."""
+            lectura = self._leer_resolucion_aprobacion(ctx, _e, cui, _vmef)
+            if not lectura:
+                return
+            enr["resolucion_aprobacion"] = lectura
+            if lectura.get("fecha"):
+                _vmef.setdefault("resolucion", {})["fecha"] = lectura["fecha"]
+            if lectura.get("coincide_emisor") == "nombra_otro":
+                obs.append(pipeline.Observacion(
+                    codigo="RESOLUCION_ET", severidad=pipeline.Severidad.ADVERTENCIA,
+                    mensaje=("la resolución que aprobó el expediente nombra a otro "
+                             f"consultor ({str(lectura.get('detalle_emisor') or '')[:80]}), "
+                             "no al emisor del certificado — confirmar quién lo elaboró"),
+                    origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+            elif lectura.get("coincide_emisor") == "confirma":
+                obs.append(pipeline.Observacion(
+                    codigo="RESOLUCION_ET", severidad=pipeline.Severidad.INFO,
+                    mensaje="la resolución que aprobó el expediente nombra al emisor "
+                            "del certificado como consultor",
+                    origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+
+        def _procesar_sin_obra(_e, np_, ne, cui) -> bool:
+            """EXPEDIENTE cuyo CUI no tiene registro de ejecución en InfoObras (vías
+            MEF/CONTRATO/RESOLUCION, o el portal no lo devolvió): se verifica SOLO
+            contra el MEF (contrato + resolución de aprobación), que es su fuente.
+            Devuelve True si quedó verificado; False si no aplica o el MEF no
+            respondió (entonces sigue el camino normal: reintento / provisional)."""
+            k = _clave(np_, ne)
+            enr = ctx.enriquecimiento.get(k) or {}
+            _tipo_decl = tipo_evaluacion_del_espejo(ctx.espejo)
+            if not es_expediente_exp(_e, _tipo_decl, self.forzar_expedientes):
+                return False
+            _vmef = self._verificar_expediente_mef(_e, cui, "")
+            if not (_vmef and _vmef.get("verificado_en_mef")):
+                return False
+            enr["camino"] = "expediente"
+            enr["camino_fuente"] = fuente_camino(_e, _tipo_decl, self.forzar_expedientes)
+            enr.pop("paralizaciones", None)
+            enr.pop("sin_verificar", None)
+            enr["sin_registro_infoobras"] = True
+            enr["codigo_infoobras"] = None
+            enr["obra_nombre"] = ((enr.get("obra") or {}).get("nombre_obra")
+                                  if isinstance(enr.get("obra"), dict) else None)
+            enr["obra_ficha"] = {"cui": cui, "codigo_infoobras": None, "estado": None,
+                                 "monto": None, "fecha_inicio": None, "fecha_fin": None}
+            enr["valorizaciones"] = []
+            enr["modificaciones_plazo"] = []
+            enr["verificacion_expediente"] = _vmef
+            _ct = (_vmef.get("contrato") or {}).get("numero")
+            obs.append(pipeline.Observacion(
+                codigo="VERIF_MEF", severidad=pipeline.Severidad.INFO,
+                mensaje=f"expediente verificado contra el MEF (CUI {cui}"
+                        f"{f' · contrato {_ct}' if _ct else ''}) — el proyecto no tiene "
+                        "registro de ejecución en InfoObras",
+                origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+            _aplicar_lectura(enr, _vmef, _e, np_, ne, cui)
+            ctx.enriquecimiento[k] = enr
+            cont["ok"] += 1
+            return True
+
         # cert MULTI-OBRA: enriquece cada sub-obra resuelta con su ficha real (la
         # etapa de resolución solo verificó existencia por código). Se hace ANTES del
         # loop de cui único (esas experiencias tienen cui=None y se saltarían).
@@ -861,6 +911,11 @@ class EtapaInfoObrasReal:
             obra_id = enr.get("obra", {}).get("obra_id") if isinstance(enr.get("obra"), dict) else None
             obra = _fetch_obra(cui, cert_ini, cert_fin, obra_id)
             if obra is None:
+                # identificado por el Banco de Inversiones: que InfoObras no lo tenga
+                # es lo esperado → verificación directa contra el MEF, sin 2ª pasada
+                if str(enr.get("via") or "").upper() in _VIAS_SOLO_MEF \
+                        and _procesar_sin_obra(_e, np_, ne, cui):
+                    continue
                 fallidos.append((_e, np_, ne, cui, cert_ini, cert_fin, obra_id))
             else:
                 _procesar(_e, np_, ne, cui, cert_ini, cert_fin, obra)
@@ -875,6 +930,8 @@ class EtapaInfoObrasReal:
                 ctx.reportar(self.nombre, j, n_fall,
                              f"Reintentando la obra {j} de {n_fall} (el portal estaba inestable)")
                 obra = _fetch_obra(cui, cert_ini, cert_fin, obra_id)
+                if obra is None and _procesar_sin_obra(_e, np_, ne, cui):
+                    continue   # expediente: verificado solo contra el MEF
                 if obra is None:
                     cont["err"] += 1
                     # ventana DESCONOCIDA: no se clampa (sería NO CUMPLE falso).
