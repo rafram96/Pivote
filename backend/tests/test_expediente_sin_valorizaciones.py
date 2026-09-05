@@ -71,6 +71,12 @@ def test_expediente_sin_fuente_mef_no_pinta_valorizaciones(tmp_path):
     assert "POR VERIFICAR — ni el MEF ni InfoObras publican" in texto
     assert "VALORIZACIONES — en amarillo" not in texto
     assert "2022 / Marzo" not in texto            # ninguna fila de valorización
+    # la ficha habla del PROYECTO, no de una obra ejecutada por este cargo
+    assert "PROYECTO CUYO EXPEDIENTE TÉCNICO ELABORÓ ESTE CARGO" in texto
+    assert "OBRA EN INFOOBRAS (origen del análisis)" not in texto
+    assert "Nombre del proyecto" in texto
+    assert "Inicio de obra" not in texto and "Fin de obra" not in texto
+    assert "Ejecución posterior de la obra (contexto" in texto
 
 
 def test_obra_sigue_pintando_valorizaciones(tmp_path):

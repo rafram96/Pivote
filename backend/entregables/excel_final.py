@@ -978,8 +978,16 @@ def construir_hoja_profesional(
         fila `top`. Resalta en amarillo los meses dentro del periodo del
         certificado. Devuelve la última fila usada."""
         rr = top
+        # ADR-010 · el CAMINO con que el backend enrutó la experiencia decide qué es
+        # esta ficha: la obra que este cargo supervisó/ejecutó, o el proyecto cuyo
+        # EXPEDIENTE elaboró (y cuya construcción posterior es solo contexto).
+        from resolucion.cui import TIPO_EXPEDIENTES, normalizar_tipo_evaluacion
+        es_exped = (fx.get("camino") == "expediente"
+                    or normalizar_tipo_evaluacion(tipo_evaluacion) == TIPO_EXPEDIENTES)
         ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=10)
-        c = ws.cell(rr, 6, "OBRA EN INFOOBRAS (origen del análisis)")
+        c = ws.cell(rr, 6, ("PROYECTO CUYO EXPEDIENTE TÉCNICO ELABORÓ ESTE CARGO "
+                            "(InfoObras / MEF)" if es_exped else
+                            "OBRA EN INFOOBRAS (origen del análisis)"))
         c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
         rr += 1
 
@@ -1003,8 +1011,8 @@ def construir_hoja_profesional(
         # PRIMERO el nombre: es lo único que deja auditar de un vistazo si la obra
         # emparejada es la del certificado. Sin él, un CUI mal resuelto (un hospital
         # de otra región) pasa inadvertido detrás de un código y un monto correctos.
-        kv("Nombre de la obra", _sin_jerga(fx.get("obra_nombre") or
-                                           "— (InfoObras no devolvió el nombre)"))
+        kv("Nombre del proyecto" if es_exped else "Nombre de la obra",
+           _sin_jerga(fx.get("obra_nombre") or "— (InfoObras no devolvió el nombre)"))
         # #63: un CUI puede tener varios registros de obra (plan de contingencia,
         # obra principal, saldos, ET) — cuando los hay, la ficha lo DECLARA para
         # que el evaluador sepa que se eligió uno entre varios (caso LaFora: el
@@ -1015,18 +1023,31 @@ def construir_hoja_profesional(
                "del certificado (ver nombre arriba)")
         kv("Código InfoObras", fx.get("codigo_infoobras") or "—")
         kv("CUI", fx.get("cui") or "—")
-        kv("Estado de obra", _sin_jerga(fx.get("estado") or "—"))
-        kv("Monto informado en la ficha (S/)", fx.get("monto") if fx.get("monto") is not None else "—", FMT_SOLES)
-        kv("Inicio de obra", _fecha_iso(fx.get("fecha_inicio")) or "—", FMT_FECHA)
-        kv("Fin de obra", _fecha_iso(fx.get("fecha_fin")) or "—", FMT_FECHA)
+        if es_exped:
+            # La construcción es POSTERIOR al expediente: se menciona como contexto
+            # en una sola línea; sus fechas y montos no cuentan para este cargo.
+            _ini, _fin = _fecha_iso(fx.get("fecha_inicio")), _fecha_iso(fx.get("fecha_fin"))
+            _rango = (f"{_ini.strftime('%d/%m/%Y')} a {_fin.strftime('%d/%m/%Y')}"
+                      if _ini and _fin else "sin fechas publicadas")
+            kv("Ejecución posterior de la obra (contexto, no cuenta para el expediente)",
+               f"{_sin_jerga(fx.get('estado') or 'estado no publicado')} · {_rango}")
+        else:
+            kv("Estado de obra", _sin_jerga(fx.get("estado") or "—"))
+            kv("Monto informado en la ficha (S/)", fx.get("monto") if fx.get("monto") is not None else "—", FMT_SOLES)
+            kv("Inicio de obra", _fecha_iso(fx.get("fecha_inicio")) or "—", FMT_FECHA)
+            kv("Fin de obra", _fecha_iso(fx.get("fecha_fin")) or "—", FMT_FECHA)
         inventario = fx.get("inventario_documental") or {}
         documentos = inventario.get("documentos") if isinstance(inventario, dict) else None
         if isinstance(documentos, list):
+            # Para un expediente no cuentan las valorizaciones de la construcción.
             n_encontrados = len({str(d.get("id") or d.get("url") or i)
                                  for i, d in enumerate(documentos)
-                                 if isinstance(d, dict)})
-        elif isinstance(fx.get("documentos_encontrados"), int):
+                                 if isinstance(d, dict)
+                                 and not (es_exped and d.get("tipo") == "valorizacion")})
+        elif isinstance(fx.get("documentos_encontrados"), int) and not es_exped:
             n_encontrados = fx["documentos_encontrados"]
+        elif es_exped:
+            n_encontrados = 0
         else:
             n_encontrados = sum(int(v.get("docs") or 0)
                                 for v in (fx.get("valorizaciones") or [])
@@ -1037,7 +1058,9 @@ def construir_hoja_profesional(
         kv("Documentos encontrados", texto_encontrados)
         rr += 1
 
-        vals_crudas = fx.get("valorizaciones") or []
+        # Un expediente no tiene valorizaciones propias: las de la construcción
+        # posterior no se listan ni disparan controles de acumulado/monto/fechas.
+        vals_crudas = [] if es_exped else (fx.get("valorizaciones") or [])
         vals, vistas = [], set()
         for v in vals_crudas:
             huella = json.dumps(v, sort_keys=True, default=str, ensure_ascii=False)
@@ -1074,9 +1097,7 @@ def construir_hoja_profesional(
         # (ADR-010: parámetro del concurso), no la existencia de datos en el MEF:
         # antes, un expediente cuyo CUI no tenía contrato publicado caía a pintar
         # las valorizaciones de la CONSTRUCCIÓN como si fuera obra (caso real, 5-sep).
-        from resolucion.cui import TIPO_EXPEDIENTES, normalizar_tipo_evaluacion
-        es_exped = (fx.get("camino") == "expediente"
-                    or normalizar_tipo_evaluacion(tipo_evaluacion) == TIPO_EXPEDIENTES)
+        # `es_exped` se calculó al inicio de la ficha.
         if verif or aprob or es_exped:
             ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
             c = ws.cell(rr, 6, "EXPEDIENTE TÉCNICO — verificación (no hay valorizaciones: "
