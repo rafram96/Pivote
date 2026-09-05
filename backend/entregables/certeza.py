@@ -94,6 +94,22 @@ def _dic(v) -> dict:
     return v if isinstance(v, dict) else {}
 
 
+def normalizar_motivo_fuente(texto) -> str:
+    """Neutraliza solo afirmaciones históricas que la evidencia no prueba."""
+    salida = str(texto or "")
+    reemplazos = (
+        ("El MEF no publica la resolución de aprobación de este expediente",
+         "Este análisis no dispone de una resolución de aprobación utilizable"),
+        ("el MEF no publica contratos ni Formato 08-A para este",
+         "este análisis no dispone de contratos ni Formato 08-A para este"),
+        ("el proceso identificado no publica la fecha en que se",
+         "este análisis no dispone de la fecha en que se"),
+    )
+    for anterior, nuevo in reemplazos:
+        salida = salida.replace(anterior, nuevo)
+    return salida
+
+
 def via_de(enr: Optional[dict], exp: Optional[dict] = None) -> str:
     """La vía con que el backend identificó la obra, en MAYÚSCULAS ('' si no hay)."""
     return _texto(_dic(enr).get("via") or _dic(exp).get("via")).upper()
@@ -287,9 +303,14 @@ def _fecha(v) -> str:
     return t
 
 
-#: Lo que se lee cuando el MEF no publicó documentos del expediente.
-SIN_DOCUMENTOS_MEF = ("El MEF no publica contrato ni resolución de este "
-                      "expediente — cuenta por el certificado")
+#: Lo que se lee cuando la evidencia conservada no permite explicar la ausencia.
+SIN_DOCUMENTOS_MEF = ("Este análisis no dispone de contrato/resolución "
+                      "utilizable para el contraste")
+
+FUENTE_MEF_PRIVADA = ("No aplica consulta MEF/InfoObras a esta experiencia "
+                      "privada")
+FUENTE_MEF_SIN_IDENTIFICAR = ("Identificación del expediente pendiente; no hay "
+                              "respaldo MEF vinculado de forma verificable")
 
 _CONSULTOR = {
     "confirma": "Consultor según resolución: confirma al emisor del certificado",
@@ -310,11 +331,39 @@ def fuente_mef(enr: Optional[dict]) -> dict:
     ver = _dic(enr.get("verificacion_expediente"))
     resol_leida = _dic(enr.get("resolucion_aprobacion"))
     contrato_emisor = _dic(enr.get("contrato_emisor"))
-    if enr.get("sin_documentos_mef") or not (ver or resol_leida or contrato_emisor):
-        return {"sin_documentos": True, "contrato": SIN_DOCUMENTOS_MEF,
+    contrato = _dic(ver.get("contrato"))
+    resol_ver = _dic(ver.get("resolucion"))
+
+    # La vía privada se resuelve antes que cualquier expectativa de fuente
+    # pública. `NA` es un alias histórico admitido por el clasificador.
+    if via_de(enr) in _VIA_PRIVADA:
+        return {"sin_documentos": True, "contrato": FUENTE_MEF_PRIVADA,
                 "resolucion": "—", "consultor": "—"}
 
-    contrato = _dic(ver.get("contrato"))
+    hay_contrato = bool(
+        contrato_emisor
+        or contrato.get("numero")
+        or contrato.get("fecha")
+        or contrato.get("fecha_suscripcion")
+    )
+    hay_resolucion = bool(
+        resol_ver.get("numero")
+        or resol_ver.get("fecha")
+        or resol_ver.get("documento")
+        or resol_leida.get("numero")
+        or resol_leida.get("fecha")
+        or resol_leida.get("fecha_descartada")
+    )
+
+    # Una marca antigua describe una decisión del pipeline, no la evidencia
+    # disponible hoy. Si después se conservó un documento, este debe mostrarse.
+    if not (hay_contrato or hay_resolucion):
+        nivel = clasificar_identificacion({}, enr)["nivel"]
+        texto = (FUENTE_MEF_SIN_IDENTIFICAR
+                 if nivel == SIN_IDENTIFICAR else SIN_DOCUMENTOS_MEF)
+        return {"sin_documentos": True, "contrato": texto,
+                "resolucion": "—", "consultor": "—"}
+
     contratista = _dic(ver.get("contratista"))
     if contrato_emisor:
         # Vía CONTRATO: este es EL contrato que ata al emisor con el expediente.
@@ -356,15 +405,18 @@ def fuente_mef(enr: Optional[dict]) -> dict:
             partes.append(nota)
         texto_contrato = " · ".join(partes)
     else:
-        texto_contrato = "El MEF no publica el contrato de este expediente"
+        texto_contrato = "Este análisis no dispone de contrato utilizable"
 
     numero_res = _texto(_dic(ver.get("resolucion")).get("numero")
                         or resol_leida.get("numero"))
     fecha_res = _fecha(resol_leida.get("fecha")
                        or _dic(ver.get("resolucion")).get("fecha"))
+    documento_res = _texto(_dic(ver.get("resolucion")).get("documento"))
     descartada = _fecha(resol_leida.get("fecha_descartada"))
-    if numero_res or fecha_res or descartada:
-        texto_resol = "Resolución de aprobación N° " + (numero_res or "s/n")
+    if numero_res or fecha_res or documento_res or descartada:
+        texto_resol = ("Resolución de aprobación N° " + (numero_res or "s/n")
+                       if numero_res or fecha_res or descartada
+                       else "Resolución de aprobación: documento disponible")
         if fecha_res:
             texto_resol += f" del {fecha_res}"
         elif descartada:
@@ -374,7 +426,7 @@ def fuente_mef(enr: Optional[dict]) -> dict:
             texto_resol += (f" — fecha no legible con certeza (se descartó "
                             f"{descartada}{': ' + motivo if motivo else ''})")
     else:
-        texto_resol = "El MEF no publica la resolución que aprobó el expediente"
+        texto_resol = "Este análisis no dispone de resolución utilizable"
 
     consultor = _CONSULTOR.get(_texto(resol_leida.get("coincide_emisor")),
                                "Consultor según resolución: sin resolución leída")
@@ -430,7 +482,7 @@ def _respaldo_mef(enr: dict) -> str:
     """Una frase llana con lo que el MEF publica (o no) de este expediente."""
     panel = fuente_mef_panel(enr)
     if panel["estado"] == MEF_SIN_DOCUMENTOS:
-        return "el MEF no publica contrato ni resolución de este expediente"
+        return panel["texto"]
     partes: list[str] = []
     contrato = panel["contrato"]
     if contrato:
@@ -467,8 +519,9 @@ def detalle_identificacion(exp: Optional[dict], enr: Optional[dict]) -> str:
     resueltas, total = _sub_obras(enr)
 
     if nivel == PRIVADA:
-        return ("Obra privada: no existe registro público que consultar, la "
-                "experiencia se cuenta por el certificado")
+        return ("Obra privada: no aplica consulta MEF/InfoObras; la experiencia "
+                "se contrasta con el certificado y SUNAT no acredita por sí sola "
+                "el tiempo ni el cargo")
     if nivel == CITADO:
         return (f"CUI {cui} " + _VIA_CITADA_TEXTO.get(via, "citado en el certificado")
                 + "; " + _respaldo_mef(enr))
@@ -568,7 +621,8 @@ def fuente_mef_panel(enr: Optional[dict]) -> dict:
     resolucion = None
     numero_res = _texto(resol_ver.get("numero") or resol_leida.get("numero")) or None
     fecha_res = resol_leida.get("fecha") or resol_ver.get("fecha")
-    if numero_res or fecha_res or resol_leida.get("fecha_descartada"):
+    if (numero_res or fecha_res or resol_ver.get("documento")
+            or resol_leida.get("fecha_descartada")):
         resolucion = {"numero": numero_res, "fecha": fecha_res,
                       "coincide_emisor": resol_leida.get("coincide_emisor"),
                       "fecha_descartada": resol_leida.get("fecha_descartada"),

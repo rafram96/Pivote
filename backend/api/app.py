@@ -39,7 +39,7 @@ from entregables import (
 )
 from entregables.certeza import (
     alertas_experiencia, fuente_mef_panel, identificacion_panel,
-    resumen_certeza_profesional,
+    normalizar_motivo_fuente, resumen_certeza_profesional,
 )
 from orquestador import Motor, RepositorioArchivos, etapas_esqueleto, etapas_reales
 from orquestador.progreso import REGISTRO
@@ -1051,6 +1051,14 @@ def extraccion(job_id: str):
                 d["identificacion"] = identificacion_panel(e, evd)
                 d["alertas"] = alertas_experiencia(e, evd)
                 d["fuente_mef"] = fuente_mef_panel(evd)
+                cruces = evd.get("cruces_fechas")
+                if isinstance(cruces, list):
+                    d["cruces_fechas"] = [
+                        ({**cruce,
+                          "motivo": normalizar_motivo_fuente(cruce.get("motivo"))}
+                         if isinstance(cruce, dict) else cruce)
+                        for cruce in cruces
+                    ]
             experiencias.append(d)
         resultado = resultados.get(np_) or {}
         veredicto_efectivo = resultado.get("cumple_backend") or p.get("cumple")

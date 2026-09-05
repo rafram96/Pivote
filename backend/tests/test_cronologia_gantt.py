@@ -82,8 +82,15 @@ def _fichas() -> dict:
                  "obra_nombre": "Expediente técnico del puente ficticio de Valle Azul"},
         (1, 2): {"via": "CUI_TEXTO", "cui": "9000002",
                  "obra_nombre": "Expediente técnico del centro de salud ficticio Los Álamos",
+                 "seace": {"estado": "seleccionado",
+                           "proceso": {"fecha_firma": "2022-04-20"},
+                           "candado": {"senales": [
+                               {"nombre": "entidad", "fuerza": "fuerte", "sentido": "a_favor"},
+                               {"nombre": "objeto", "fuerza": "fuerte", "sentido": "a_favor"}]}},
                  "contrato_emisor": {"fecha": "2022-04-20"},
-                 "resolucion_aprobacion": {"fecha": "2022-12-05", "legible": True}},
+                 "resolucion_aprobacion": {"fecha": "2022-12-05", "legible": True,
+                                            "coincide_emisor": "confirma"},
+                 "verificacion_expediente": {"resolucion": {"fecha": "2022-12-05"}}},
         (1, 3): {"via": "REVISION"},
         (2, 1): {"via": "REVISION"},
         (2, 2): {"via": "REVISION"},
@@ -139,9 +146,16 @@ def test_la_seccion_2_es_la_linea_de_tiempo_con_su_leyenda(hoja_p1):
     assert textos.count("Naranja: traslape") == 1
     for pieza in ("verde", "violeta", "amarillo", "gris",
                   "C: firma del contrato", "R: resolución", "≈"):
-        assert pieza in textos, pieza
-    assert ("La línea de tiempo solo es concluyente cuando todas las "
-            "experiencias del profesional están identificadas") in textos
+        assert pieza.lower() in textos.lower(), pieza
+    assert ("Las barras representan los períodos declarados. Su color indica "
+            "la certeza de identificación del proyecto") in textos
+    from entregables.leyenda_gantt import COLORES_GANTT, MARCAS_GANTT, NOTAS_GANTT
+    assert "LEYENDA — COLORES Y MARCAS" in textos
+    for color, significado in COLORES_GANTT:
+        celda = next(c for fila in ws for c in fila if c.value == significado)
+        assert celda.fill.fgColor.rgb[-6:] == color
+    assert all(significado in textos for _, significado in MARCAS_GANTT)
+    assert all(nota in textos for nota in NOTAS_GANTT)
 
 
 def test_cabecera_del_bloque_cita_los_dias_de_reconciliar(hoja_p1):
@@ -153,8 +167,8 @@ def test_cabecera_del_bloque_cita_los_dias_de_reconciliar(hoja_p1):
     assert "ESPECIALISTA EN ESTRUCTURAS" in cabecera
     assert f"{esperado['dias_efectivos']} días efectivos" in cabecera
     assert f"({esperado['dias_traslape']} de traslape)" in cabecera
-    # 440 efectivos contra un mínimo de 1 año: la palabra es CUMPLE
-    assert cabecera.endswith("CUMPLE")
+    # Sin identificación persistida, el estado conservador es POR VERIFICAR.
+    assert cabecera.endswith("POR VERIFICAR")
     assert esperado["dias_efectivos"] == 440 and esperado["dias_traslape"] == 61
 
 
@@ -166,7 +180,7 @@ def test_el_eje_es_mensual_y_lleva_las_dos_filas_de_cabecera(hoja_p1):
     unidades = [ws.cell(fila + 2, 2 + i).value for i in range(17)]
     assert unidades == list("EFMAMJJASOND") + list("EFMAM")
     assert ws.cell(fila + 2, 19).value is None          # el eje termina en 17
-    assert ws.cell(fila + 2, 1).value == "PERIODO ACREDITADO"
+    assert ws.cell(fila + 2, 1).value == "PERÍODO DECLARADO"
     # fila de años: 2022 combinado sobre sus doce meses, 2023 sobre cinco
     assert ws.cell(fila + 1, 2).value == 2022
     assert ws.cell(fila + 1, 14).value == 2023
@@ -271,6 +285,9 @@ def test_un_profesional_con_veinte_anios_de_rango_usa_un_eje_de_anios(hoja_p1):
     _espejo, ws, _filas = hoja_p1
     fila = _fila_que_empieza(ws, "PROFESIONAL 2 · ")
     assert ws.cell(fila + 1, 1).value == "Eje: años"
+    assert ws.row_dimensions[fila + 1].height == 36
+    assert ws.cell(fila + 1, 2).alignment.textRotation == 90
+    assert ws.column_dimensions["B"].width == cronologia.ANCHO_UNIDAD
     anios = [ws.cell(fila + 1, 2 + i).value for i in range(23)]
     assert anios == list(range(2003, 2026))
     assert all(ws.cell(fila + 2, 2 + i).value is None for i in range(23))
@@ -298,7 +315,7 @@ def test_un_profesional_sin_periodos_computables_lo_dice_y_no_dibuja_eje():
                           "fecha_final": "POR VERIFICAR — ilegible"}],
     }]
     ws, filas = _hoja(espejo, {})
-    assert filas == 0
+    assert filas == 1
     textos = " | ".join(str(c.value) for f in ws.iter_rows() for c in f
                         if c.value is not None)
     assert "Sin periodos computables" in textos
@@ -318,6 +335,8 @@ def test_un_concurso_de_obras_conserva_la_tabla_comparativa():
     assert filas == 5
     # y conserva sus anchos de columna de siempre (A = 26, no el rótulo ancho)
     assert ws.column_dimensions["A"].width == 26
+    assert ws.page_setup.fitToWidth is None
+    assert ws.page_setup.orientation != ws.ORIENTATION_LANDSCAPE
 
 
 def test_sin_tipo_declarado_tambien_conserva_la_tabla():
@@ -346,8 +365,10 @@ def test_la_seccion_1_conserva_un_ancho_util_con_la_rejilla_de_la_linea():
     assert ws.column_dimensions["B"].width == cronologia.ANCHO_UNIDAD
     ancho_valor = sum(ws.column_dimensions[get_column_letter(i)].width or 0
                       for i in range(4, ws.max_column + 1))
-    # el campo más largo de un job real mide 139 caracteres: tiene que caber
+    # La ficha conserva el mínimo útil y el rango imprimible llega a su última
+    # columna real; el contenido se envuelve y conserva el área imprimible.
     assert ancho_valor >= 180
+    assert ws.print_area.startswith("'Cronología de expedientes'!$A$1:$CB$")
 
 
 # ── Layout puro (`entregables.cronologia`) ─────────────────────────────────
@@ -403,9 +424,13 @@ def test_la_prioridad_del_hito_de_firma():
         {"verificacion_expediente": {"contrato": {"fecha": "2019-01-01",
                                                   "elegido_por": "mas_barato"}}}
     ) is None
-    # sin nada del MEF, la firma del proceso SEACE
+    # sin nada del MEF, un proceso SEACE válido requiere identidad estructurada
     assert cronologia.hito_firma(
-        {"seace": {"proceso": {"fecha_firma": "2021-09-24"}}}
+        {"seace": {"estado": "seleccionado",
+                   "proceso": {"fecha_firma": "2021-09-24"},
+                   "candado": {"senales": [
+                       {"nombre": "entidad", "fuerza": "fuerte", "sentido": "a_favor"},
+                       {"nombre": "objeto", "fuerza": "fuerte", "sentido": "a_favor"}]}}}
     ) == date(2021, 9, 24)
 
 
@@ -426,7 +451,9 @@ def test_un_hito_fuera_del_eje_se_anuncia_en_el_rotulo():
         {"n": 1, "proyecto": "Expediente ficticio con resolución tardía",
          "fecha_inicial": "2022-01-01", "fecha_final": "2022-03-31"}]
     fichas = {(1, 1): {"via": "CUI_TEXTO", "cui": "9000009",
-                       "resolucion_aprobacion": {"fecha": "2025-06-18"}}}
+                       "resolucion_aprobacion": {"fecha": "2025-06-18",
+                                                  "coincide_emisor": "confirma"},
+                       "verificacion_expediente": {"resolucion": {"fecha": "2025-06-18"}}}}
     ws, _filas = _hoja(espejo, fichas)
     rotulo = ws.cell(_fila_que_empieza(ws, "1 · Expediente ficticio con"), 1).value
     assert "R 18/06/2025 fuera de rango" in rotulo

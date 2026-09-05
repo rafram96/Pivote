@@ -4,6 +4,34 @@
 
 ## Auditoría de las dos presentaciones (5-sep, Codex)
 
+Último ajuste de presentación: leyenda explícita del Gantt compartida entre
+hojas profesionales y cronología general (muestras de color, marcas y escala).
+Gate focal de 60 pruebas y regeneración del Excel más reciente; detalle en
+[`handoffs/current.md`](../handoffs/current.md). No cambia el cálculo.
+
+Estado vigente: plan de expedientes implementado por tres Sol nativos bajo
+revisión de Codex, sin Orca. Parte 5 compacta, Gantt final en cada hoja y
+coherencia de cálculo/fuentes/API. Suite completa **1281 passed, 25 skipped**;
+49 filas/12 Gantt en regeneración real de expedientes y paridad de valores y
+formato de la muestra de obras. Sin tocar UI Panel ni desplegar. Véase
+[cierre privado y límites](../../docs/comercial/auditorias/2026-09-05-rutas/cierre-expedientes-sol.md).
+El Excel guardado requiere regeneración. Los párrafos siguientes son históricos.
+
+Planificación posterior a la limpieza: [plan de expedientes](../../docs/comercial/auditorias/2026-09-05-rutas/plan-correccion-expedientes.md)
+listo para revisión, no implementado. Solo Excel de expedientes y coherencia
+de API; sin Orca, nueva delegación ni nuevas corridas.
+
+Limpieza posterior solicitada: corridas generadas enviadas a Papelera y scripts
+auxiliares retirados. Se conservan informes y pruebas de producto; sus resultados
+son históricos y no se reejecutaron durante la limpieza.
+
+Último resultado: cinco hallazgos del Gantt corregidos por Luna bajo plan
+cerrado y revisión del coordinador. **75 pruebas focales aprobadas**, ambas
+rutas regeneradas offline y PDF nativo comprobado. Sin cambios del Panel ni
+push/deploy. Los hallazgos ajenos a esta cronología siguen pendientes.
+Ver [cierre privado](../../docs/comercial/auditorias/2026-09-05-rutas/cierre-correcciones-gantt.md).
+Los párrafos siguientes conservan la auditoría histórica anterior al arreglo.
+
 Actualización: nueva revisión de `fcf362c`, 51 pruebas focales y render nativo
 de Excel; pendientes de hitos, alertas, rótulos y salida impresa documentados en
 [`revisión privada del Gantt`](../../docs/comercial/auditorias/2026-09-05-rutas/revision-cronologia.md).
@@ -1090,3 +1118,16 @@ Aparecieron al ordenar el Excel por camino (no se ven en su disposición origina
    `InfoObras/.ai/tasks/active.md` (fuente única).
 2. Filtro de secciones de descarga/Excel en modo camino A.
 3. Reunión de cotización con los 5 HTML de docs/nuevos_modulos/.
+## 2026-09-05 — admisión de hitos del Gantt (`luna_hitos`)
+
+`entregables/cronologia.py` reutiliza ahora el candado estructurado de
+`reglas.cruces_fechas` antes de admitir una firma SEACE como hito `C`. Un
+proceso rechazado por identidad ya no aparece como contrato de la experiencia;
+la vía `contrato_emisor` del MEF conserva su autoridad. `hito_resolucion` omite
+fechas plausibles descartadas por la lectura y resoluciones que nombran a otro
+consultor. Cobertura nueva en `tests/test_cronologia_hitos_admision.py`.
+
+Validación focal: test nuevo **5 passed**. En conjunto con
+`test_cronologia_gantt.py`: **28 passed, 1 failed**, por la expectativa
+concurrente de ancho (`ws.max_column == 4` frente a `MIN_COLUMNAS == 80`), sin
+editar ese test. Avisos: pytest no pudo escribir `.pytest_cache` (`WinError 5`).

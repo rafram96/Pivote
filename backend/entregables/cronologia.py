@@ -245,44 +245,55 @@ def unidades_con_traslape(eje: Sequence[Unidad],
 # ── Hitos documentales (MEF / SEACE) ────────────────────────────────────────
 
 def hito_firma(fx: Optional[dict]) -> Optional[date]:
-    """Fecha de firma del contrato del expediente, en orden de autoridad:
+    """Fecha de firma admitida por la misma autoridad que usa el cruce A.
 
-      1. `contrato_emisor.fecha` — la vía CONTRATO ya ató emisor y expediente.
-      2. `verificacion_expediente.contrato.fecha`, SOLO si ese contrato es del
-         emisor (`veredicto == "ok"` o `elegido_por == "emisor"`): los contratos
-         elegidos por heurística (`unico`, `mas_barato`) pueden ser de otro
-         consultor del mismo expediente y pintarían una «C» que no es suya.
-      3. La firma del proceso SEACE, si el proceso se localizó.
+    Un proceso SEACE seleccionado siempre pasa primero por el candado de
+    identidad, incluso cuando existe un contrato MEF que podría parecer una
+    alternativa. Solo si SEACE no está seleccionado se consulta la vía MEF.
     """
     fx = fx if isinstance(fx, dict) else {}
-    ce = fx.get("contrato_emisor")
-    if isinstance(ce, dict) and fecha(ce.get("fecha")):
-        return fecha(ce.get("fecha"))
-
-    ver = fx.get("verificacion_expediente")
-    contrato = (ver or {}).get("contrato") if isinstance(ver, dict) else None
-    if isinstance(contrato, dict):
-        del_emisor = (str(contrato.get("veredicto") or "").lower() == "ok"
-                      or str(contrato.get("elegido_por") or "") == "emisor")
-        if del_emisor and fecha(contrato.get("fecha")):
-            return fecha(contrato.get("fecha"))
-
     seace = fx.get("seace") if isinstance(fx.get("seace"), dict) else {}
-    proceso = seace.get("proceso") if isinstance(seace.get("proceso"), dict) else {}
-    return fecha(proceso.get("fecha_firma") or seace.get("fecha_suscripcion"))
+    if seace.get("estado") == "seleccionado":
+        from reglas.cruces_fechas import identidad_sostenida_sin_temporal
+        admitido, _motivo = identidad_sostenida_sin_temporal(seace.get("candado"))
+        if not admitido:
+            return None
+        proceso = (seace.get("proceso")
+                   if isinstance(seace.get("proceso"), dict) else {})
+        return fecha(proceso.get("fecha_firma") or seace.get("fecha_suscripcion"))
+
+    from reglas.cruces_fechas import firma_de_contrato_mef
+    return firma_de_contrato_mef(fx)[0]
 
 
 def hito_resolucion(fx: Optional[dict]) -> Optional[date]:
-    """Fecha de la resolución que aprobó el expediente (leída o verificada)."""
+    """Fecha válida de la resolución que aprobó ESTE expediente.
+
+    `fecha_descartada` conserva trazabilidad de una lectura implausible, pero
+    nunca es una fecha que deba dibujarse. Del mismo modo, una lectura que
+    identifica a otro consultor no puede convertirse en un hito confirmado de
+    la experiencia actual.
+    """
     fx = fx if isinstance(fx, dict) else {}
     lect = fx.get("resolucion_aprobacion")
-    if isinstance(lect, dict) and fecha(lect.get("fecha")):
-        return fecha(lect.get("fecha"))
-    ver = fx.get("verificacion_expediente")
-    res = (ver or {}).get("resolucion") if isinstance(ver, dict) else None
-    if isinstance(res, dict):
-        return fecha(res.get("fecha"))
-    return None
+    if isinstance(lect, dict):
+        if fecha(lect.get("fecha_descartada")):
+            return None
+        if lect.get("coincide_emisor") == "nombra_otro":
+            return None
+
+    from reglas.cruces_fechas import (
+        expediente_verificado, fecha_aprobacion_expediente,
+    )
+    if not (isinstance(lect, dict) and lect.get("coincide_emisor") == "confirma"):
+        admitido, _motivo = expediente_verificado(fx.get("verificacion_expediente"))
+        if not admitido:
+            return None
+
+    aprobacion, _fuente, inferida = fecha_aprobacion_expediente(fx)
+    if not aprobacion or inferida:
+        return None
+    return aprobacion
 
 
 # ── Rótulos ─────────────────────────────────────────────────────────────────

@@ -30,15 +30,17 @@ from typing import Optional
 
 import openpyxl
 from openpyxl.comments import Comment
+from openpyxl.worksheet.pagebreak import Break
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 import entregables.cronologia as cronologia
+from entregables.leyenda_gantt import COLORES_GANTT, MARCAS_GANTT, NOTAS_GANTT
 from entregables.certeza import (
     BUCKET_CONFIRMADO, BUCKET_INFERIDO, BUCKET_PRIVADA, BUCKET_SIN_IDENTIFICAR,
     COLOR_INFERIDO, COLOR_PRIVADA, COLOR_SIN_IDENTIFICAR, COLOR_VERIFICADO,
     alertas_experiencia, bucket_certeza, clasificar_identificacion,
-    es_provisional, fuente_mef,
+    es_provisional, fuente_mef, normalizar_motivo_fuente,
 )
 from reglas import (
     anios, dias_efectivos_profesional, dias_inclusivos, periodo_fechas,
@@ -250,11 +252,17 @@ def reconciliar_resultados_profesionales(espejo: dict,
     sin modificar el resolver.
     """
     from orquestador.etapas_reales import _minimo_exigido
-    from resolucion.cui import es_expediente_exp, tipo_evaluacion_del_espejo
+    from resolucion.cui import (TIPO_EXPEDIENTES, es_expediente_exp,
+                                tipo_evaluacion_del_espejo)
     from validacion.recalculo import fechas_calculo, regla_periodos_de
 
     enriquecimiento = enriquecimiento or {}
     tipo_evaluacion = tipo_evaluacion_del_espejo(espejo)   # ADR-010
+    # La correccion historica se activa solo cuando la convocatoria declaro su
+    # tipo. Un espejo antiguo sin tipo no se reclasifica por texto ni por CUI.
+    if tipo_evaluacion == TIPO_EXPEDIENTES:
+        from entregables.expedientes import reconciliar_expedientes
+        return reconciliar_expedientes(espejo, enriquecimiento)
     regla_periodos = regla_periodos_de(espejo)             # #93 · mes completo si lo dicen las bases
     salida: dict[int, dict] = {}
     for prof in (espejo or {}).get("profesionales", []):
@@ -583,24 +591,7 @@ FILL_TRASLAPE = PatternFill("solid", fgColor=COLOR_TRASLAPE)
 
 _GANTT_TITULO = "2 · LÍNEA DE TIEMPO POR PROFESIONAL"
 
-_GANTT_LEYENDA = (
-    "Cómo se lee: una fila por experiencia, ordenadas por fecha de inicio; la "
-    "barra ocupa las columnas del eje que toca el periodo declarado. "
-    "Colores de la barra — verde: el CUI está citado en el certificado o "
-    "confirmado por un documento del MEF · violeta: el CUI se dedujo del nombre "
-    "del proyecto · amarillo: sin identificar (o certificado de varias obras sin "
-    "ubicar) · gris: obra privada, fuera del registro público. "
-    "Marcas — C: firma del contrato · R: resolución que aprobó el expediente · "
-    "≈: el certificado consigna mes y año, se asume el mes completo. "
-    "Naranja: traslape (dos experiencias corriendo a la vez; esos días se "
-    "cuentan una sola vez).")
-
-_GANTT_FRASE = (
-    "La línea de tiempo solo es concluyente cuando todas las experiencias del "
-    "profesional están identificadas; las barras amarillas cuentan solo por el "
-    "certificado.")
-
-_GANTT_ROTULO_EJE = "PERIODO ACREDITADO"
+_GANTT_ROTULO_EJE = "PERÍODO DECLARADO"
 _GANTT_SIN_PERIODOS = ("Sin periodos computables: el certificado no consigna "
                        "fechas con las que se pueda dibujar una línea de tiempo.")
 
@@ -642,8 +633,22 @@ def _veredicto_gantt(prof: dict, datos: dict) -> str:
     return "POR VERIFICAR"
 
 
+def _rotulo_cruces(p: dict) -> str:
+    """Respuestas completas y estructuradas; el motivo sigue en comentario."""
+    return (f"\nInicio frente al contrato: {p.get('resp_a') or 'POR VERIFICAR'}\n"
+            f"Término frente a aprobación: {p.get('resp_b') or 'POR VERIFICAR'}")
+
+
+def _alto_rotulo_gantt(texto: str, ancho: int = 38) -> int:
+    """Altura estimada contando saltos explícitos y envoltura del rótulo."""
+    lineas = sum(max(1, -(-len(linea) // ancho))
+                 for linea in str(texto or "").splitlines())
+    return max(22, lineas * 13 + 4)
+
+
 def _bloques_linea_de_tiempo(espejo: dict, fichas: dict,
-                             tipo_evaluacion: Optional[str]) -> list[dict]:
+                             tipo_evaluacion: Optional[str],
+                             resultados: Optional[dict] = None) -> list[dict]:
     """Un bloque por profesional, ya resuelto: eje, filas, traslapes y totales.
 
     Todo lo que decide QUÉ se dibuja se resuelve aquí, con las fuentes únicas
@@ -660,14 +665,19 @@ def _bloques_linea_de_tiempo(espejo: dict, fichas: dict,
     from validacion.recalculo import fechas_calculo, regla_periodos_de
 
     regla = regla_periodos_de(espejo)
-    reconciliado = reconciliar_resultados_profesionales(espejo, None)
+    if resultados is None:
+        enriquecimiento = {
+            f"{np_}:{ne}": fx for (np_, ne), fx in fichas.items()
+            if isinstance(fx, dict)
+        }
+        resultados = reconciliar_resultados_profesionales(espejo, enriquecimiento)
     bloques: list[dict] = []
 
     profesionales = sorted((espejo or {}).get("profesionales", []) or [],
                            key=lambda p: _num(p.get("n_prof")))
     for prof in profesionales:
         np_ = prof.get("n_prof")
-        datos = reconciliado.get(np_) or {}
+        datos = resultados.get(np_) or {}
         total = prof.get("total_backend") if isinstance(
             prof.get("total_backend"), dict) else {}
         dias_ef = _num(total.get("dias_efectivos"), datos.get("dias_efectivos"))
@@ -693,6 +703,7 @@ def _bloques_linea_de_tiempo(espejo: dict, fichas: dict,
                 "cui": p["cui"], "inicio": ini, "fin": fin,
                 "deducida": bool(deducida and (ini or fin)),
                 "firma": firma, "resolucion": resolucion,
+                "cruces": p,
                 "color": clasificar_identificacion(e, fx)["color"],
                 "comentario": _sin_jerga(
                     "¿Empezó después de firmado el contrato? "
@@ -714,7 +725,9 @@ def _bloques_linea_de_tiempo(espejo: dict, fichas: dict,
         for f in crudas:
             celdas = cronologia.indices_periodo(eje, f["inicio"], f["fin"])
             marcas: dict[int, list[str]] = {}
-            notas: list[str] = []
+            # A/B procede de `presentacion_cruces`; el motivo completo queda en
+            # comentario, pero el estado nunca queda oculto tras un clic.
+            notas: list[str] = [_rotulo_cruces(f["cruces"])]
             if not celdas:
                 notas.append(cronologia.NOTA_SIN_FECHAS)
             elif f["deducida"]:
@@ -729,9 +742,12 @@ def _bloques_linea_de_tiempo(espejo: dict, fichas: dict,
                     notas.append(cronologia.nota_hito_fuera(marca, valor))
                 else:
                     marcas.setdefault(i, []).append(marca)
+            rotulo = cronologia.rotulo_experiencia(f["n"], f["proyecto"],
+                                                   f["cui"], notas)
+            rotulo = rotulo.replace(" · \nInicio frente al contrato:",
+                                    "\nInicio frente al contrato:")
             filas.append({
-                "rotulo": cronologia.rotulo_experiencia(f["n"], f["proyecto"],
-                                                        f["cui"], notas),
+                "rotulo": rotulo,
                 "celdas": celdas, "color": f["color"],
                 "marcas": cronologia.marcas_de_columna(marcas),
                 "comentario": f["comentario"],
@@ -759,12 +775,16 @@ def _pintar_linea_de_tiempo(ws, bloques: list[dict], fila: int,
     """Vuelca los bloques ya resueltos en la hoja. Devuelve `(filas, fila)`."""
     total_filas = 0
     for b in bloques:
+        # Separación visual antes de TODOS los profesionales, incluido el
+        # primero; no agrega datos ni altera los totales.
+        fila += 1
+        ws.row_breaks.append(Break(id=fila - 1))
         ws.merge_cells(start_row=fila, start_column=1, end_row=fila,
                        end_column=ncols)
         c = ws.cell(fila, 1, _sin_jerga(b["cabecera"]))
         c.font, c.fill = F_CERT, FILL_CERT
         c.alignment = Alignment(vertical="center", wrap_text=True)
-        ws.row_dimensions[fila].height = 18
+        ws.row_dimensions[fila].height = _alto_rotulo_gantt(b["cabecera"])
         fila += 1
 
         eje = b["eje"]
@@ -773,21 +793,37 @@ def _pintar_linea_de_tiempo(ws, bloques: list[dict], fila: int,
                            end_column=ncols)
             c = ws.cell(fila, 1, _GANTT_SIN_PERIODOS)
             c.font, c.fill, c.alignment = F_CELL, FILL_PEND, AL_WRAP
-            fila += 2
+            fila += 1
+            for f in b["filas"]:
+                cr = ws.cell(fila, 1, _sin_jerga(f["rotulo"]))
+                cr.font, cr.border = F_CELL, BORDER
+                cr.alignment = Alignment(vertical="center", wrap_text=True)
+                if f["comentario"]:
+                    cr.comment = Comment(f["comentario"], "Pivote")
+                ws.row_dimensions[fila].height = _alto_rotulo_gantt(cr.value)
+                fila += 1
+                total_filas += 1
+            fila += 1
             continue
 
         # Cabecera 1: los años, combinados sobre sus unidades.
         c = ws.cell(fila, 1, b["escala"])
         c.font, c.alignment = F_BOLD, AL_HEAD
+        fila_anios = fila
+        fila_anios_alta = False
         for i0, i1, anio in cronologia.tramos_de_anio(eje):
             if i1 > i0:
                 ws.merge_cells(start_row=fila, start_column=2 + i0,
                                end_row=fila, end_column=2 + i1)
             ca = ws.cell(fila, 2 + i0, anio)
+            alineacion = (Alignment(horizontal="center", vertical="center",
+                                    text_rotation=90)
+                          if i0 == i1 else AL_HEAD)
             ca.font, ca.fill, ca.border, ca.alignment = (F_HEAD, FILL_HEAD,
-                                                         BORDER, AL_HEAD)
+                                                         BORDER, alineacion)
             ca.number_format = "0"
-        ws.row_dimensions[fila].height = 14
+            fila_anios_alta |= i0 == i1
+        ws.row_dimensions[fila_anios].height = 36 if fila_anios_alta else 14
         fila += 1
 
         # Cabecera 2: la unidad (letra del mes, «T1»… o vacío en años).
@@ -803,7 +839,7 @@ def _pintar_linea_de_tiempo(ws, bloques: list[dict], fila: int,
         for f in b["filas"]:
             cr = ws.cell(fila, 1, _sin_jerga(f["rotulo"]))
             cr.font, cr.border = F_CELL, BORDER
-            cr.alignment = Alignment(vertical="center")
+            cr.alignment = Alignment(vertical="center", wrap_text=True)
             if f["comentario"]:
                 # Las respuestas de las dos reglas y su motivo NO se pierden al
                 # retirar la tabla comparativa: viajan aquí, a un clic del
@@ -816,24 +852,25 @@ def _pintar_linea_de_tiempo(ws, bloques: list[dict], fila: int,
             for i, marca in f["marcas"].items():
                 cm = ws.cell(fila, 2 + i, marca)
                 cm.font, cm.border, cm.alignment = F_MARCA, BORDER, AL_HEAD
-            ws.row_dimensions[fila].height = 14
+            ws.row_dimensions[fila].height = _alto_rotulo_gantt(cr.value)
             fila += 1
             total_filas += 1
 
         ct = ws.cell(fila, 1, b["rotulo_traslapes"])
         ct.font, ct.border = F_BOLD, BORDER
-        ct.alignment = Alignment(vertical="center")
+        ct.alignment = Alignment(vertical="center", wrap_text=True)
         for i in sorted(b["traslapes"]):
             cx = ws.cell(fila, 2 + i)
             cx.fill, cx.border = FILL_TRASLAPE, BORDER
-        ws.row_dimensions[fila].height = 14
+        ws.row_dimensions[fila].height = _alto_rotulo_gantt(ct.value)
         fila += 1
 
         ws.merge_cells(start_row=fila, start_column=1, end_row=fila,
                        end_column=ncols)
         ctot = ws.cell(fila, 1, b["total"])
         ctot.font, ctot.fill = F_BOLD, FILL_EFECTIVO
-        ctot.alignment = Alignment(vertical="center")
+        ctot.alignment = Alignment(vertical="center", wrap_text=True)
+        ws.row_dimensions[fila].height = _alto_rotulo_gantt(ctot.value)
         fila += 2
 
     return total_filas, fila
@@ -904,7 +941,8 @@ def presentacion_cruces(e: dict, fx: Optional[dict],
 
     fx = fx or {}
     tipo = _tipo_experiencia(e, fx, tipo_evaluacion)
-    if str(fx.get("via") or "").upper() == "PRIVADA":
+    via = str(fx.get("via") or "").upper()
+    if via == "PRIVADA" or (tipo == "expediente" and via == "NA"):
         pendiente = bool(fx.get("privada_pendiente"))
         rotulo_a = ("REVISIÓN — RUTA PRIVADA / SUNAT PENDIENTE" if pendiente
                     else "FUENTE PÚBLICA NO APLICA — OBRA PRIVADA")
@@ -935,6 +973,8 @@ def presentacion_cruces(e: dict, fx: Optional[dict],
              or seace.get("fecha_suscripcion"))
     aprobacion = (cb or {}).get("fecha_fuente")
     motivos = [x.get("motivo") for x in (ca, cb) if x and x.get("motivo")]
+    if tipo == "expediente":
+        motivos = [normalizar_motivo_fuente(m) for m in motivos]
     return {
         "n_exp": e.get("n"),
         "proyecto": fx.get("obra_nombre") or e.get("proyecto"),
@@ -1004,6 +1044,27 @@ def _cron_proyectos(espejo: dict, fichas: dict) -> list[dict]:
     return [por_clave[c] for c in orden]
 
 
+def _configurar_impresion_cronologia(ws, ncols: int, nfilas: int) -> None:
+    """Impresión de la cronología con el rango real y sin columnas de relleno."""
+    ultima = get_column_letter(max(1, ncols))
+    ws.print_area = f"A1:{ultima}{max(1, nfilas)}"
+    ws.freeze_panes = "B1"
+    ws.sheet_properties.pageSetUpPr.fitToPage = False
+    ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
+    ws.page_setup.paperSize = ws.PAPERSIZE_A3
+    ws.page_setup.fitToWidth = None
+    ws.page_setup.fitToHeight = None
+    anchos = [ws.column_dimensions[get_column_letter(i)].width or 8
+              for i in range(1, ncols + 1)]
+    ancho_estimado_pt = sum(anchos) * 5.25 + ncols * 0.75
+    ancho_papel_pt = 420 / 25.4 * 72 - (0.25 + 0.25) * 72
+    ws.page_setup.scale = max(10, min(100, int(0.95 * ancho_papel_pt / ancho_estimado_pt * 100)))
+    ws.page_margins.left = 0.25
+    ws.page_margins.right = 0.25
+    ws.page_margins.top = 0.45
+    ws.page_margins.bottom = 0.45
+    ws.print_options.horizontalCentered = False
+    ws.print_title_rows = "$1:$1"
 def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -> int:
     """Hoja «Cronología de expedientes». Devuelve el nº de filas comparadas.
 
@@ -1043,6 +1104,18 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
 
     r = 1
 
+    def _ancho_columnas(desde: int, hasta: int) -> float:
+        return sum(ws.column_dimensions[get_column_letter(i)].width or 8
+                   for i in range(desde, hasta + 1)) * 0.8
+
+    def _alto_con_ancho(texto, desde: int, hasta: int, minimo: int = 18) -> int:
+        if not linea_de_tiempo:
+            return minimo
+        ancho = max(18, _ancho_columnas(desde, hasta))
+        lineas = sum(max(1, -(-len(linea) // int(ancho)))
+                     for linea in str(texto or "").splitlines())
+        return max(minimo, lineas * 14 + 4)
+
     def banda(texto, font=F_PARTE, fill=FILL_PARTE, alto=20):
         nonlocal r
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=_NCOL)
@@ -1051,13 +1124,20 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
         c = ws.cell(r, 1, _sin_jerga(texto))
         c.font, c.fill, c.alignment = font, fill, Alignment(vertical="center",
                                                             wrap_text=True)
-        ws.row_dimensions[r].height = alto
+        if linea_de_tiempo:
+            ws.row_dimensions[r].height = max(alto, _alto_con_ancho(texto, 1, _NCOL))
+        else:
+            ws.row_dimensions[r].height = alto
         r += 1
 
     def parrafo(texto, fill=None, filas=None):
         nonlocal r
         texto = _sin_jerga(texto)
-        n = filas or max(1, -(-len(texto) // 190))
+        if linea_de_tiempo:
+            alto = _alto_con_ancho(texto, 1, _NCOL)
+            n = max(filas or 1, -(-alto // 14))
+        else:
+            n = filas or max(1, -(-len(texto) // 190))
         ws.merge_cells(start_row=r, start_column=1, end_row=r + n - 1,
                        end_column=_NCOL)
         c = ws.cell(r, 1, texto)
@@ -1079,6 +1159,10 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
         cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
         if fill:
             cv.fill = fill
+        if linea_de_tiempo:
+            ws.row_dimensions[r].height = max(
+                _alto_con_ancho(etiqueta, 1, 3),
+                _alto_con_ancho(valor, 4, _NCOL))
         r += 1
 
     banda("CRONOLOGÍA DE EXPEDIENTES Y CONTRATOS", F_DATOS, FILL_DATOS, 24)
@@ -1146,7 +1230,7 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
             if fuente:
                 campo("De dónde sale esa fecha", fuente)
         mods = p["modificaciones"] or []
-        if mods:
+        if mods and not linea_de_tiempo:
             for m in mods:
                 if not isinstance(m, dict):
                     continue
@@ -1169,10 +1253,17 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
         # La leyenda va UNA sola vez, antes del primer profesional: es la clave
         # de lectura de todos los bloques, no de cada uno.
         banda(_GANTT_TITULO)
-        parrafo(_GANTT_LEYENDA)
-        parrafo(_GANTT_FRASE, FILL_PEND)
+        banda("LEYENDA — COLORES Y MARCAS")
+        for color, significado in COLORES_GANTT:
+            parrafo(significado, PatternFill("solid", fgColor=color))
+        for _marca, significado in MARCAS_GANTT:
+            parrafo(significado)
+        for nota in NOTAS_GANTT:
+            parrafo(nota, FILL_PEND)
         r += 1
-        return _pintar_linea_de_tiempo(ws, bloques, r, _NCOL)[0]
+        filas, ultima = _pintar_linea_de_tiempo(ws, bloques, r, _NCOL)
+        _configurar_impresion_cronologia(ws, _NCOL, ultima)
+        return filas
 
     banda("2 · TABLA COMPARATIVA — periodo declarado frente a los hitos documentales")
     for i, h in enumerate(_CRON_HEAD, start=1):
@@ -1299,18 +1390,18 @@ def _conclusion_expedientes(prof: dict, dias_ef: int, traslape: int,
 
     dependientes = []
     if dias_inferidos:
-        dependientes.append(f"{dias_inferidos} dependen de un CUI inferido por "
-                            f"el nombre del proyecto")
+        dependientes.append(f"{dias_inferidos} días corresponden a identificación "
+                            f"inferida por nombre")
     if dias_sin_identificar:
-        dependientes.append(f"{dias_sin_identificar} provienen de experiencias "
-                            f"SIN identificar")
+        dependientes.append(f"{dias_sin_identificar} días corresponden a expedientes "
+                            f"sin identificar")
     texto = texto.rstrip().rstrip(".")     # `cumple_backend` ya trae su punto final
     if dependientes:
-        texto += (". De esos días efectivos, " + " y ".join(dependientes)
-                  + ": confirmar esa evidencia antes de firmar el veredicto")
-    elif not hay_provisional:
-        texto += (". Todos esos días están respaldados por un CUI citado en el "
-                  "certificado o confirmado por el MEF")
+        texto += (". Antes de descontar traslapes, " + " y ".join(dependientes)
+                  + "; la identificación no acredita por sí sola el tiempo ni el cargo")
+    else:
+        texto += (". La identificación del expediente no acredita por sí sola el "
+                  "tiempo ni el cargo")
     return texto + "."
 
 
@@ -1323,7 +1414,12 @@ def construir_hoja_profesional(
     certificados: Optional[dict] = None,
     tipo_evaluacion: Optional[str] = None,   # ADR-010 · `_meta.tipo_evaluacion`
     regla_periodos: str = "no_definida",     # #93 · `reglas_evaluacion.periodos_sin_dia`
+    bloque_gantt: Optional[dict] = None,
 ) -> None:
+    from resolucion.cui import TIPO_EXPEDIENTES, normalizar_tipo_evaluacion
+    from validacion.recalculo import fechas_calculo
+
+    es_exp_prof = normalizar_tipo_evaluacion(tipo_evaluacion) == TIPO_EXPEDIENTES
     cuis = cuis or {}
     fichas = fichas or {}
     revisiones = revisiones or {}
@@ -1422,16 +1518,7 @@ def construir_hoja_profesional(
                "del certificado (ver nombre arriba)")
         kv("Código InfoObras", fx.get("codigo_infoobras") or "—")
         kv("CUI", fx.get("cui") or "—")
-        if es_exped:
-            # La construcción es POSTERIOR al expediente: se menciona como contexto
-            # en una sola línea; sus fechas y montos no cuentan para este cargo.
-            _ini, _fin = _fecha_iso(fx.get("fecha_inicio")), _fecha_iso(fx.get("fecha_fin"))
-            _rango = (f"{_ini.strftime('%d/%m/%Y')} a {_fin.strftime('%d/%m/%Y')}"
-                      if _ini and _fin else "sin fechas publicadas")
-            kv("Ejecución de la obra registrada en InfoObras (contexto: no cuenta "
-               "para el expediente)",
-               f"{_sin_jerga(fx.get('estado') or 'estado no publicado')} · {_rango}")
-        else:
+        if not es_exped:
             kv("Estado de obra", _sin_jerga(fx.get("estado") or "—"))
             kv("Monto informado en la ficha (S/)", fx.get("monto") if fx.get("monto") is not None else "—", FMT_SOLES)
             kv("Inicio de obra", _fecha_iso(fx.get("fecha_inicio")) or "—", FMT_FECHA)
@@ -1506,13 +1593,12 @@ def construir_hoja_profesional(
             c.alignment = Alignment(vertical="center", wrap_text=True)
             rr += 1
             if not verif and not aprob:
-                # Sin fuente pública: se dice, no se disimula con datos de otra fase.
+                situacion_mef = fuente_mef(fx)
                 ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
-                c = ws.cell(rr, 6, "POR VERIFICAR — ni el MEF ni InfoObras publican contrato, "
-                                   "contratista o resolución de aprobación del expediente para "
-                                   "este CUI. La verificación queda en el propio certificado. "
-                                   "Las valorizaciones de la construcción no se muestran: "
-                                   "no respaldan ni descuentan la elaboración del expediente.")
+                c = ws.cell(rr, 6, " · ".join(x for x in (
+                    situacion_mef.get("contrato"), situacion_mef.get("resolucion"),
+                    "Los datos de ejecución no acreditan la elaboración del expediente."
+                ) if x and x != "—"))
                 c.font, c.fill, c.alignment = F_CELL, FILL_PEND, AL_WRAP
                 ws.row_dimensions[rr].height = 42
                 rr += 1
@@ -1631,7 +1717,7 @@ def construir_hoja_profesional(
         # modificaciones de plazo: contexto para el evaluador (explican por qué la
         # obra siguió "viva" más allá de sus valorizaciones). NO cuentan como avance.
         mods = fx.get("modificaciones_plazo") or []
-        if mods:
+        if mods and not es_exped:
             rr += 1
             ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=10)
             c = ws.cell(rr, 6, "MODIFICACIONES DE PLAZO — ampliaciones/suspensiones "
@@ -2592,8 +2678,12 @@ def construir_hoja_profesional(
         c = ws.cell(r, 1, "DATOS DE LA EXPERIENCIA (del certificado)")
         c.font, c.fill, c.alignment = F_DATOS, FILL_DATOS, AL_HEAD
         r += 1
-        periodo = (f"{ini.strftime('%d/%m/%Y')} – {fin.strftime('%d/%m/%Y')}"
-                   if (ini and fin) else "—")
+        if es_exp_prof:
+            literal_ini, literal_fin = e.get("fecha_inicial"), e.get("fecha_final")
+            periodo = (f"{literal_ini or '—'} – {literal_fin or '—'}")
+        else:
+            periodo = (f"{ini.strftime('%d/%m/%Y')} – {fin.strftime('%d/%m/%Y')}"
+                       if (ini and fin) else "—")
         io_ini = _fecha_iso((fx or {}).get("fecha_inicio"))
         io_fin = _fecha_iso((fx or {}).get("fecha_fin"))
         periodo_io = ("— (obra no ubicada en InfoObras)" if not io_ini else
@@ -2619,12 +2709,13 @@ def construir_hoja_profesional(
             ("TIPO DE DOCUMENTO", e.get("tipo_documento"), "tipo_documento"),
             ("PROYECTO U OBRA", e.get("proyecto"), "proyecto"),
             ("PERIODO (certificado)", periodo, "periodo"),
-            ("PERIODO (InfoObras)", periodo_io, None),
             ("CARGO QUE OCUPÓ", e.get("cargo_ocupado"), "cargo_ocupado"),
             # Si el certificado no citó código, la identificación nació en el
             # enriquecimiento del servidor y se presenta como inferencia.
             ("CÓDIGO (CUI/SNIP)", cui_text, "cui_inferido" if (cui and not cui_cert) else "cui"),
         ]
+        if not es_exp_prof:
+            filas_recap.insert(4, ("PERIODO (InfoObras)", periodo_io, None))
         for label, value, campo in filas_recap:
             cl = ws.cell(r, 1, label); cl.font, cl.fill, cl.border = F_BOLD, FILL_RECAP, BORDER
             cl.alignment = Alignment(vertical="top", wrap_text=True)
@@ -2647,7 +2738,11 @@ def construir_hoja_profesional(
         n_exp = e.get("n")
         rev = revisiones.get((n_prof, n_exp))
         en_revision = _es_revision_efectiva(rev)
-        ini, fin = _fecha_iso(e.get("fecha_inicial")), _fecha_iso(e.get("fecha_final"))
+        deducida_detalle = False
+        if es_exp_prof:
+            ini, fin, deducida_detalle = fechas_calculo(e, regla_periodos)
+        else:
+            ini, fin = _fecha_iso(e.get("fecha_inicial")), _fecha_iso(e.get("fecha_final"))
         fx = fichas.get((n_prof, n_exp))
         # CUI resuelto por el backend (etapa InfoObras); si no, el del espejo
         cui = cuis.get((n_prof, n_exp)) or (fx or {}).get("cui") or e.get("cui")
@@ -2664,7 +2759,7 @@ def construir_hoja_profesional(
             c.font, c.fill, c.border, c.alignment = F_HEAD, FILL_HEAD, BORDER, AL_HEAD
         r += 1
 
-        if not (ini and fin):
+        if not (ini and fin) or (es_exp_prof and fin < ini):
             fila("Fechas no computables (parciales o POR VERIFICAR) — revisar "
                  "contra el certificado original",
                  e.get("fecha_inicial"), e.get("fecha_final"), None)
@@ -2673,13 +2768,16 @@ def construir_hoja_profesional(
             sup_hitos = set(prof.get("supuestos") or []) | set(e.get("supuestos") or [])
             fill_periodo = (FILL_SUPUESTO if {"fecha_inicial", "fecha_final"} & sup_hitos
                             else FILL_CLAUDE)
-            fila("Periodo certificado", ini, fin, dias_inclusivos(ini, fin), fill=fill_periodo)
+            etiqueta_periodo = ("Período usado para cálculo (mes completo según bases)"
+                                if es_exp_prof and deducida_detalle else "Periodo certificado")
+            fila(etiqueta_periodo, ini, fin, dias_inclusivos(ini, fin), fill=fill_periodo)
 
             # periodos inactivos de la obra (dict con tipo, o tupla legacy=paralizado)
             # SOLO los que caen dentro del periodo que supervisó este profesional;
             # InfoObras trae las paralizaciones de toda la vida de la obra, pero las
             # de antes/después de su ventana no le aplican. Se recortan a [ini, fin].
-            periodos = paralizaciones.get((n_prof, n_exp), [])
+            periodos = ([] if es_exp_prof else
+                        paralizaciones.get((n_prof, n_exp), []))
             n_par = n_gap = n_fv = 0
             tuplas: list[tuple[date, date]] = []
             for p in periodos:
@@ -2769,8 +2867,9 @@ def construir_hoja_profesional(
         r = max(r, r_his + 1)
 
         # 5ª banda (W:Z): representante de obra (InfoObras), a la derecha del par
-        r_rep = render_representante(r_top, (fx or {}).get("representante_obra"))
-        r = max(r, r_rep + 1)
+        if not es_exp_prof:
+            r_rep = render_representante(r_top, (fx or {}).get("representante_obra"))
+            r = max(r, r_rep + 1)
 
         # imagen del certificado presentado (Fase 2): la skill recortó sus folios a
         # un PDF chico (principal primero); aquí se renderiza y embebe.
@@ -2790,7 +2889,7 @@ def construir_hoja_profesional(
 
         # cert multi-obra: cada obra hallada baja como SubExperiencia FULL-WIDTH
         # (ficha InfoObras + valorizaciones + cobertura), como un ítem normal.
-        if fx and fx.get("sub_obras"):
+        if fx and fx.get("sub_obras") and not es_exp_prof:
             render_subexperiencias(n_exp, fx["sub_obras"], ini, fin)
 
     # ── PARTE 5 (al FINAL): tabla por experiencia — declarado vs efectivo ──────
@@ -2893,93 +2992,57 @@ def construir_hoja_profesional(
     def _p5_head_exp():
         nonlocal r
         for ci, cf, val in [(1, 1, "N°"), (2, 8, "Proyecto / Expediente técnico"),
-                            (9, 11, "Cliente o Empleador"),
-                            (13, 13, "Objeto de contratación"),
-                            (14, 14, "Fuente / dato"),
-                            (15, 15, "Fecha de inicio · detalle"),
-                            (16, 16, "Fecha de fin"),
+                            (9, 13, "Emisor / cargo"),
+                            (14, 15, "Inicio cálculo"),
+                            (16, 17, "Fin cálculo"),
                             (18, 18, "Declarado (días)"), (19, 19, "Efectivo (días)")]:
             if cf > ci:
                 ws.merge_cells(start_row=r, start_column=ci, end_row=r, end_column=cf)
             c = ws.cell(r, ci, val)
             c.font, c.fill, c.border, c.alignment = F_HEAD, FILL_HEAD, BORDER, AL_WRAP
+        ws.merge_cells(start_row=r, start_column=20, end_row=r, end_column=26)
+        c = ws.cell(r, 20, "Observación breve")
+        c.font, c.fill, c.border, c.alignment = F_HEAD, FILL_HEAD, BORDER, AL_WRAP
         ws.row_dimensions[r].height = 30
         r += 1
 
     def _p5_exp(n, proyecto, cliente, objeto, ini, fin, deducida, decl, efec,
-                certeza, alertas, mef, supuestos=None):
-        """Un bloque de experiencia de la PARTE 5 de expedientes. Devuelve nada;
-        avanza `r` tantas filas como rótulos tenga el bloque."""
+                certeza, alertas, mef, supuestos=None, motivo=None):
+        """Fila compacta: las fuentes documentales permanecen en el detalle."""
         nonlocal r
         supuestos = set(supuestos or [])
-        # Los rótulos apilados: (etiqueta, valor, relleno). Solo se dibujan los
-        # que tienen algo que decir — una «Alerta» vacía sería ruido rojo.
-        detalle: list[tuple[str, str, Optional[PatternFill]]] = [
-            ("MEF · contrato", mef["contrato"], FILL_BACKEND),
-            ("MEF · resolución",
-             f"{mef['resolucion']} · {mef['consultor']}"
-             if not mef["sin_documentos"] else "—", FILL_BACKEND),
-            ("Identificación", certeza["etiqueta"],
-             _FILL_CERTEZA.get(certeza["color"])),
-        ]
+        emisor_cargo = f"{cliente or '—'}\n{objeto or '—'}"
+        observaciones = [certeza["etiqueta"]]
         if deducida:
-            detalle.append(("Fecha deducida",
-                            "Mes completo asumido según bases (el certificado "
-                            "consigna solo mes y año)", FILL_SUPUESTO))
-        if alertas:
-            detalle.append(("Alerta", "⚠ " + "; ".join(alertas), FILL_ALERTA))
-        filas = 1 + len(detalle)
-
+            observaciones.append("mes completo según bases")
+        if motivo:
+            observaciones.append((f"No computado — {motivo}" if efec is None
+                                  else f"Computado; pendiente: {motivo}"))
+        elif alertas:
+            observaciones.append("; ".join(alertas))
+        observacion = " · ".join(x for x in observaciones if x)
         for ci, cf, val, campo in [(1, 1, n, None), (2, 8, proyecto, "proyecto"),
-                                   (9, 11, cliente, "entidad_emisora"),
-                                   (13, 13, objeto, "cargo_ocupado")]:
-            ws.merge_cells(start_row=r, start_column=ci, end_row=r + filas - 1,
-                           end_column=cf)
+                                   (9, 13, emisor_cargo, "entidad_emisora"),
+                                   (14, 15, ini or "—", None),
+                                   (16, 17, fin or "—", None),
+                                   (18, 18, decl if decl is not None else "—", None),
+                                   (19, 19, efec if efec is not None else "No computado", None),
+                                   (20, 26, observacion, None)]:
+            if cf > ci:
+                ws.merge_cells(start_row=r, start_column=ci, end_row=r, end_column=cf)
             c = ws.cell(r, ci, val); c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
             if campo in supuestos and val not in (None, ""):
                 c.fill = FILL_SUPUESTO
-        # fila 1: el periodo con el que SE CUENTA (fechas_calculo), violeta
-        # cuando lo dedujo la regla de mes completo.
-        fill_fechas = FILL_SUPUESTO if deducida else FILL_CLAUDE
-        for ci, val in [(14, "Certificado"), (15, ini or "—"), (16, fin or "—")]:
-            c = ws.cell(r, ci, val)
-            c.font, c.fill, c.border, c.alignment = F_CELL, fill_fechas, BORDER, AL_WRAP
-            if ci == 14:
-                c.fill = FILL_CLAUDE
             if isinstance(val, date):
                 c.number_format = FMT_FECHA
-        for k, (rotulo, valor, fill) in enumerate(detalle, start=1):
-            cr = ws.cell(r + k, 14, rotulo)
-            cr.font, cr.border, cr.alignment = F_BOLD, BORDER, AL_WRAP
-            ws.merge_cells(start_row=r + k, start_column=15, end_row=r + k, end_column=16)
-            cv = ws.cell(r + k, 15, valor)
-            cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
-            if fill is not None:
-                cr.fill = cv.fill = fill
-            ws.row_dimensions[r + k].height = max(
-                15, (-(-len(str(valor)) // 30)) * 12 + 3)
-
-        for ci, val, fill in [(18, decl, FILL_CLAUDE), (19, efec, None)]:
-            ws.merge_cells(start_row=r, start_column=ci, end_row=r + filas - 1,
-                           end_column=ci)
-            c = ws.cell(r, ci, val); c.font, c.border, c.alignment = F_CELL, BORDER, AL_HEAD
-            if isinstance(val, (int, float)):
-                c.number_format = FMT_INT
-            if ci == 19:
-                # (c) el color de los días efectivos ES la certeza: cyan solo si
-                # la identificación está documentada; violeta si se infirió;
-                # gris si es privada; SIN relleno (y rotulado PROVISIONAL) si no
-                # se sabe qué obra es.
-                fill = {COLOR_VERIFICADO: FILL_EFECTIVO,
-                        COLOR_INFERIDO: FILL_SUPUESTO,
-                        COLOR_PRIVADA: FILL_PARTE,
-                        COLOR_SIN_IDENTIFICAR: None}.get(certeza["color"])
-            if fill is not None and val not in (None, ""):
-                c.fill = fill
-        lns = max(-(-len(str(proyecto)) // 74), -(-len(str(cliente)) // 43),
-                  -(-len(str(objeto)) // 14), 1)
-        ws.row_dimensions[r].height = max(15, lns * 13 + 3)
-        r += filas
+            if deducida and ci in (14, 16):
+                c.fill = FILL_SUPUESTO
+        ws.cell(r, 18).fill = FILL_CLAUDE if decl is not None else FILL_PEND
+        ws.cell(r, 19).fill = (_FILL_CERTEZA.get(certeza["color"]) or FILL_PEND)
+        ws.row_dimensions[r].height = max(30, -(-len(observacion) // 70) * 14 + 6,
+                                               -(-len(str(proyecto)) // 74) * 14 + 6,
+                                               len(emisor_cargo.splitlines()) * 14 + 6)
+        r += 1
 
     def _p5_tot_exp(label, efec_v, fill_e):
         _p5_tot(label, None, efec_v, fill_e)
@@ -3030,20 +3093,51 @@ def construir_hoja_profesional(
         # mes y año) y la conclusión leía el reconciliado: dos números distintos
         # para lo mismo (P5 439 vs 759, P9 574 vs 838, P12 926 vs 1056).
         _p5_head_exp()
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=26)
+        leyenda_p5 = ("Declarado = duración del período del certificado calculada con "
+                      "la regla vigente. Efectivo computado = aporte antes de descontar "
+                      "traslapes; computar no verifica por sí solo tiempo ni cargo.")
+        c_ley = ws.cell(r, 1, leyenda_p5)
+        c_ley.font, c_ley.fill, c_ley.alignment = F_CELL, FILL_RECAP, AL_WRAP
+        ws.row_dimensions[r].height = 32
+        r += 1
         _periodos_exp: list[tuple[date, date]] = []
         _paral_exp: dict[int, list[tuple[date, date]]] = {}
         _dias_por_nivel: dict[str, int] = {}
         _hay_provisional = False
         _filas_exp: list[tuple] = []
+        from entregables.expedientes import (motivo_periodo_no_computable,
+                                             reconciliar_expedientes)
+        enr_prof = {f"{n_prof}:{e.get('n')}": {
+            **(fichas.get((n_prof, e.get("n"))) or {}),
+            "sunat": sunat.get((n_prof, e.get("n"))),
+        } for e in prof.get("experiencias", [])}
+        espejo_prof = {"_meta": {"tipo_evaluacion": "expedientes"},
+                       "reglas_evaluacion": {"periodos_sin_dia": regla_periodos},
+                       "profesionales": [prof]}
+        reconciliado_prof = reconciliar_expedientes(espejo_prof, enr_prof).get(n_prof, {})
+        provisionales_exp = set(reconciliado_prof.get("veredicto_provisional") or [])
+        motivos_exclusion = {x.get("n"): x.get("motivo") for x in
+                             reconciliado_prof.get("experiencias_excluidas", [])}
         for e in prof.get("experiencias", []):
             ne = e.get("n")
             fx_ = fichas.get((n_prof, ne)) or {}
             # `enr` de esta experiencia: la proyección que viaja en `fichas` más
             # el bloque SUNAT, que llega por su propio canal.
             enr_ = {**fx_, "sunat": sunat.get((n_prof, ne))}
-            ini_, fin_, deducida_ = fechas_calculo(e, regla_periodos)
             certeza = clasificar_identificacion(e, enr_)
             alertas = alertas_experiencia(e, enr_)
+            ini_, fin_, deducida_ = fechas_calculo(e, regla_periodos)
+            motivo_periodo_ = (motivos_exclusion.get(ne)
+                               or motivo_periodo_no_computable(e, regla_periodos))
+            motivo_provisional_ = None
+            if ne in provisionales_exp and not motivo_periodo_:
+                if certeza.get("nivel") == "privada":
+                    motivo_provisional_ = "identificación del emisor privado pendiente"
+                elif enr_.get("sub_obras"):
+                    motivo_provisional_ = "sub-obras pendientes de identificación"
+                else:
+                    motivo_provisional_ = "identificación del expediente pendiente"
             if not (ini_ and fin_) or fin_ < ini_:
                 decl_ = efec_ = None
             else:
@@ -3067,16 +3161,17 @@ def construir_hoja_profesional(
             if es_provisional(certeza["nivel"]):
                 _hay_provisional = True
             _filas_exp.append((e, ne, ini_, fin_, deducida_, decl_, efec_,
-                               certeza, alertas, fuente_mef(enr_)))
+                               certeza, alertas, fuente_mef(enr_),
+                               motivo_periodo_ or motivo_provisional_))
 
         for (e, ne, ini_, fin_, deducida_, decl_, efec_, certeza, alertas,
-             mef) in _filas_exp:
-            mostrado = (f"{efec_} PROVISIONAL" if efec_ is not None
-                        and es_provisional(certeza["nivel"]) else efec_)
+             mef, motivo_periodo_) in _filas_exp:
+            mostrado = efec_
             _p5_exp(ne, e.get("proyecto") or "—", e.get("entidad_emisora") or "—",
                     e.get("cargo_ocupado") or "—", ini_, fin_, deducida_,
                     decl_, mostrado, certeza, alertas, mef,
-                    set(prof.get("supuestos") or []) | set(e.get("supuestos") or []))
+                    set(prof.get("supuestos") or []) | set(e.get("supuestos") or []),
+                    motivo=motivo_periodo_)
 
         res5 = (dias_efectivos_profesional(_periodos_exp, _paral_exp)
                 if _periodos_exp else None)
@@ -3086,17 +3181,19 @@ def construir_hoja_profesional(
         _d_inf = _dias_por_nivel.get(BUCKET_INFERIDO, 0)
         _d_sin = _dias_por_nivel.get(BUCKET_SIN_IDENTIFICAR, 0)
         _d_priv = _dias_por_nivel.get(BUCKET_PRIVADA, 0)
-        _p5_tot_exp("DÍAS CON CUI CITADO O CONFIRMADO POR EL MEF", _d_conf, FILL_OK)
-        _p5_tot_exp("DÍAS CON CUI INFERIDO POR NOMBRE", _d_inf, FILL_SUPUESTO)
-        _p5_tot_exp("DÍAS SIN IDENTIFICAR (provisionales)", _d_sin, FILL_PEND)
-        if _d_priv:
-            _p5_tot_exp("DÍAS DE OBRA PRIVADA (sin registro público)", _d_priv,
-                        FILL_PARTE)
-        _p5_tot_exp("(−) Traslapes entre experiencias", _traslape, FILL_BACKEND)
-        _p5_tot_exp("DÍAS EFECTIVOS DEL PROFESIONAL", _dias_ef, FILL_EFECTIVO)
-        _fill_anios = FILL_EFECTIVO
+        _suma_computada = sum(v for v in (x[6] for x in _filas_exp)
+                              if isinstance(v, (int, float)))
+        _p5_tot("TOTAL DECLARADO POR EXPERIENCIAS", sum(
+            v for v in (x[5] for x in _filas_exp) if isinstance(v, (int, float))), None)
+        _p5_tot_exp("SUMA COMPUTADA ANTES DE TRASLAPES", _suma_computada, FILL_CLAUDE)
+        _p5_tot_exp("(−) TRASLAPES ENTRE EXPERIENCIAS", _traslape, FILL_BACKEND)
+        _p5_tot_exp("TOTAL EFECTIVO NETO", _dias_ef, FILL_EFECTIVO)
+
+        _fill_anios = (FILL_PEND if reconciliado_prof.get("veredicto_provisional")
+                       else FILL_EFECTIVO)
         _conclusion = _conclusion_expedientes(
-            prof, _dias_ef, _traslape, _d_inf, _d_sin, _hay_provisional)
+            {**prof, "cumple_backend": reconciliado_prof.get("cumple_backend")},
+            _dias_ef, _traslape, _d_inf, _d_sin, _hay_provisional)
 
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=18)
     ca = ws.cell(r, 1, "AÑOS EFECTIVOS (días efectivos / 365)")
@@ -3236,6 +3333,31 @@ def construir_hoja_profesional(
             banda("⚠ FACTOR A NO EMBEBIDO — el recorte recibido corresponde a otro "
                   "factor de las bases; corregir la página de origen", F_AVISO, FILL_AVISO)
 
+    # Cierre visual de cada hoja de expedientes. El bloque ya fue resuelto por
+    # la misma fuente que alimenta la cronología general; Pillow solo lo pinta.
+    if _es_concurso_expedientes and bloque_gantt:
+        from entregables.gantt_profesional import renderizar_gantt_profesional
+        from openpyxl.drawing.image import Image as XLImage
+
+        r += 2
+        fila_gantt = r
+        banda("LÍNEA DE TIEMPO FINAL — PERÍODOS DECLARADOS Y CRUCES DOCUMENTALES",
+              F_PARTE, FILL_PARTE, 22)
+        ancho_px = int(sum((ws.column_dimensions[get_column_letter(i)].width or 8)
+                           * 7 + 5 for i in range(1, 27)))
+        contenido, img_ancho, img_alto = renderizar_gantt_profesional(
+            bloque_gantt, ancho=max(1100, ancho_px))
+        img = XLImage(contenido)
+        img.width = ancho_px
+        img.height = int(img_alto * ancho_px / img_ancho)
+        ws.add_image(img, f"A{r}")
+        filas_imagen = max(1, -(-img.height // 20))
+        for fr in range(r, r + filas_imagen):
+            ws.row_dimensions[fr].height = 15
+        r += filas_imagen
+        ws.print_area = f"A1:Z{r}"
+        ws.row_breaks.append(Break(id=fila_gantt - 1))
+
 
 # ── Entregable completo ──────────────────────────────────────────────────────
 
@@ -3306,22 +3428,29 @@ def generar_excel_final(
     construir_hoja_base_datos(wb.create_sheet("Base de Datos"), espejo, cuis,
                               revisiones)
 
-    for prof in espejo.get("profesionales", []):
-        nombre = etiqueta_hoja(prof.get("n_prof", 0), prof.get("cargo", ""))
-        certs_prof = {k: v for k, v in certificados.items() if k[0] == prof.get("n_prof")}
-        construir_hoja_profesional(wb.create_sheet(nombre), prof, paralizaciones,
-                                   cuis, fichas, revisiones, sunat, certs_prof,
-                                   tipo_evaluacion=_tipo_evaluacion_espejo(espejo),
-                                   regla_periodos=regla_periodos_de(espejo))
-
-    # T-011 · hoja ADITIVA, al final: el formato congelado (CLAUDE + Base de
-    # Datos + una por profesional) conserva su orden y su contenido exactos.
+    tipo_excel = _tipo_evaluacion_espejo(espejo)
     fichas_crono = dict(fichas)
     for clave, revision in revisiones.items():
         if _es_ruta_privada(revision):
             fichas_crono[clave] = {**(fichas_crono.get(clave) or {}),
                                    "via": "PRIVADA",
                                    "privada_pendiente": _es_privada_pendiente(revision)}
+    from resolucion.cui import TIPO_EXPEDIENTES
+    bloques_gantt = (_bloques_linea_de_tiempo(espejo, fichas_crono, tipo_excel)
+                     if tipo_excel == TIPO_EXPEDIENTES else [])
+    gantt_por_prof = {b.get("n_prof"): b for b in bloques_gantt}
+
+    for prof in espejo.get("profesionales", []):
+        nombre = etiqueta_hoja(prof.get("n_prof", 0), prof.get("cargo", ""))
+        certs_prof = {k: v for k, v in certificados.items() if k[0] == prof.get("n_prof")}
+        construir_hoja_profesional(wb.create_sheet(nombre), prof, paralizaciones,
+                                   cuis, fichas, revisiones, sunat, certs_prof,
+                                   tipo_evaluacion=tipo_excel,
+                                   regla_periodos=regla_periodos_de(espejo),
+                                   bloque_gantt=gantt_por_prof.get(prof.get("n_prof")))
+
+    # T-011 · hoja ADITIVA, al final: el formato congelado (CLAUDE + Base de
+    # Datos + una por profesional) conserva su orden y su contenido exactos.
     construir_hoja_cronologia(wb.create_sheet(HOJA_CRONOLOGIA), espejo,
                               fichas_crono)
 
@@ -3387,13 +3516,15 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                 or enr.get("inventario_documental") or enr.get("cruces_fechas")
                 or enr.get("resoluciones_candidatos")
                 or enr.get("sin_documentos_mef") or enr.get("contrato_emisor")
-                or str(enr.get("via") or "").upper() == "PRIVADA"):
+                or enr.get("via") or enr.get("cui") or enr.get("sub_obras")):
             # `obra_ficha` NO trae el nombre (solo código/CUI/estado/monto/fechas);
             # el nombre viaja suelto en `obra_nombre` (o en `obra.nombre_obra`) y sin
             # esta línea nunca llegaba al Excel — el evaluador no podía ver con qué
             # obra se emparejó el certificado.
             _obra = enr.get("obra") if isinstance(enr.get("obra"), dict) else {}
             fichas[(np_, ne)] = {**(enr.get("obra_ficha") or {}),
+                                 "cui": (enr.get("cui")
+                                         or (enr.get("obra_ficha") or {}).get("cui")),
                                  "obra_nombre": (enr.get("obra_nombre")
                                                  or _obra.get("nombre_obra")),
                                  "valorizaciones": enr.get("valorizaciones") or [],
@@ -3425,6 +3556,8 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                                  "documentos_encontrados": enr.get("documentos_encontrados"),
                                  "tipo_experiencia": enr.get("tipo_experiencia"),
                                  "via": enr.get("via"),
+                                 "sin_verificar": enr.get("sin_verificar"),
+                                 "sunat": enr.get("sunat"),
                                  # T-011: los cruces de fechas de la etapa REGLAS.
                                  # Viajan dentro de `fichas` (y no como argumento
                                  # nuevo) para no cambiar la firma de

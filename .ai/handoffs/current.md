@@ -1,9 +1,59 @@
 ---
-timestamp: "2026-09-05T01:00:00-05:00"
-agent: claude
+timestamp: "2026-09-05T16:55:32-05:00"
+agent: Codex
 ---
 
 # Handoff — punto de continuación
+
+Actualización posterior: leyenda explícita del Gantt con cinco muestras de
+color, C/R/≈, meses/trimestres y lectura de cruces, compartida entre imagen y
+cronología general mediante `entregables/leyenda_gantt.py`. **60 pruebas
+focales aprobadas**; comprobación de límites a 1100/1800 px y render sintético
+revisado. Regeneración del Excel más reciente con respaldo y fuentes intactas.
+Sin Orca, cambios de cómputo ni despliegue; no se repitió suite backend completa.
+
+Último resultado: expedientes implementado con tres Sol nativos, bajo plan
+cerrado y revisión de Codex; sin Orca. Parte 5 declarada/computada simplificada,
+Gantt final por profesional y correcciones de fechas, fuentes y estados.
+Gate completo: **1281 passed, 25 skipped**; dos rutas regeneradas offline,
+obras conserva valores/formato en la muestra; Excel nativo inspeccionado.
+Sin migrar jobs ni alterar UI Panel, sin commit/push/deploy. Regenerar los Excel
+guardados para ver el formato nuevo. Scratch propio retirado a Papelera.
+Detalle y límites: [cierre privado](../../docs/comercial/auditorias/2026-09-05-rutas/cierre-expedientes-sol.md).
+Las entradas siguientes conservan la secuencia histórica anterior al cierre.
+
+Última petición: [plan privado de corrección de expedientes](../../docs/comercial/auditorias/2026-09-05-rutas/plan-correccion-expedientes.md)
+preparado por Codex, sin Orca ni delegación. Solo planificación; implementación
+pendiente. Cubre los siete defectos del Excel, coherencia API y regresiones de
+obras/Gantt; la interfaz del Panel y la normalización de tipo histórico quedan
+fuera de este paquete.
+
+Limpieza posterior del 5-sep, a pedido del usuario: se retiraron las cinco
+corridas de auditoría (a Papelera) y seis scripts auxiliares. Informes, plan,
+código, tests y fuentes originales preservados. El cierre privado documenta
+la verificación realizada antes de limpiar, no artefactos aún presentes.
+
+## Cierre del Gantt supervisado por Codex (2026-09-05)
+
+Luna implementó el plan cerrado del coordinador. Admisión C/R alineada con
+evidencia estructurada; cruces visibles, período declarado, años y alturas
+legibles; impresión A3 de expedientes con escala y saltos por profesional.
+Gate integrado final: **75 passed**. Dos rutas regeneradas offline sin cambiar
+fuentes; obras conserva valores/colores salvo fecha de generación. Render
+nativo final comprobado. Los fallos parciales de abajo quedaron resueltos.
+Sin push/deploy; los demás hallazgos originales no se declaran cerrados.
+Detalle: [cierre privado](../../docs/comercial/auditorias/2026-09-05-rutas/cierre-correcciones-gantt.md).
+
+## Entrega `luna_hitos` (2026-09-05)
+
+Se corrigió la admisión de `C` y `R` en `entregables/cronologia.py`: la firma
+SEACE usa el mismo candado estructurado de los cruces; contratos MEF atados al
+emisor siguen permitidos; fechas de resolución descartadas o atribuidas a otro
+consultor no se dibujan. Test nuevo: **5 passed**. Gate focal junto a
+`test_cronologia_gantt.py`: **28 passed, 1 failed** por la expectativa de ancho
+concurrente (`ws.max_column == 4` vs `MIN_COLUMNAS == 80`); no se editó el test.
+Pytest avisó que no pudo escribir `.pytest_cache` (`WinError 5`). Handoff
+completo en [`2026-09-05_luna_hitos.md`](../../.ai/handoffs/2026-09-05_luna_hitos.md).
 
 ## Auditoría de rutas (5-sep, Codex)
 

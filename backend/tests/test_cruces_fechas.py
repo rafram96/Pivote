@@ -176,7 +176,7 @@ def test_regla_a_se_abstiene_si_el_proceso_no_publica_la_firma():
     seace["fecha_suscripcion"] = None
     cruce = evaluar_inicio_vs_contrato(seace, c)
     assert cruce.resultado == POR_CONFIRMAR
-    assert "no publica la fecha" in cruce.motivo
+    assert "no dispone de la fecha" in cruce.motivo
 
 
 # ── 3 · Regla B (expedientes) ────────────────────────────────────────────────
@@ -230,7 +230,7 @@ def test_regla_b_se_abstiene_sin_verificacion_mef():
     enr["verificacion_expediente"]["verificado_en_mef"] = False
     cruce = evaluar_termino_vs_aprobacion(enr, cert(fecha_final="2024-03-31"))
     assert cruce.resultado == POR_CONFIRMAR
-    assert "no publica contratos" in cruce.motivo
+    assert "no dispone de contratos" in cruce.motivo
 
 
 def test_regla_b_se_abstiene_si_el_contratista_no_coincide():
@@ -423,8 +423,8 @@ def test_regla_b_dice_que_el_mef_no_publica_la_resolucion():
     cruce = evaluar_termino_vs_aprobacion(enr, cert(tipo_experiencia="expediente",
                                                     fecha_final="2024-03-31"))
     assert cruce.resultado == POR_CONFIRMAR
-    assert cruce.motivo == ("El MEF no publica la resolución de aprobación de "
-                            "este expediente; no se puede comparar el término.")
+    assert cruce.motivo == ("Este análisis no dispone de una resolución de "
+                            "aprobación utilizable; no se puede comparar el término.")
     assert "figura solo con su número" not in cruce.motivo
 
 

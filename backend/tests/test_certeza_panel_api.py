@@ -94,7 +94,12 @@ def _enriquecimiento() -> dict:
         # 1 · CUI citado en el certificado; el MEF no publica nada del expediente
         "1:1": {"via": "CUI_TEXTO", "cui": "1111111",
                 "obra_nombre": "COLEGIO FICTICIO", "codigo_infoobras": "1",
-                "sin_documentos_mef": True},
+                "sin_documentos_mef": True,
+                "cruces_fechas": [{"regla": "FECHA_APROBACION_ET",
+                                    "resultado": "por_confirmar",
+                                    "motivo": ("El MEF no publica la resolución de "
+                                               "aprobación de este expediente; "
+                                               "no se puede comparar el término.")}]},
         # 2 · confirmado por el CONTRATO del MEF elegido POR EL EMISOR
         "1:2": {"via": "NOMBRE", "cui": "2222222",
                 "obra_nombre": "PUESTO DE SALUD FICTICIO", "codigo_infoobras": "2",
@@ -156,11 +161,7 @@ def _valor_total(ws, etiqueta: str):
     raise AssertionError(f"no se encontró la fila de totales {etiqueta!r}")
 
 
-def test_las_cubetas_son_las_mismas_que_las_del_excel(tmp_path):
-    """La función nueva NO puede contar distinto que el entregable.
-
-    Se genera la hoja por el mismo camino que el backfill y se comparan las seis
-    filas de totales de la PARTE 5 con lo que devuelve la función pura."""
+def test_la_aritmetica_api_es_la_misma_que_el_resumen_compacto(tmp_path):
     espejo, enr = _espejo(), _enriquecimiento()
     inyectar_veredicto_backend(espejo, enr)
     paral, cuis, fichas, sunat = desempaquetar_enriquecimiento(enr)
@@ -171,18 +172,13 @@ def test_las_cubetas_son_las_mismas_que_las_del_excel(tmp_path):
     certeza = resumen_certeza_profesional(
         espejo["profesionales"][0], enr, "mes_completo", "expedientes")
 
-    assert certeza["citado_confirmado"]["dias"] == _valor_total(
-        ws, "DÍAS CON CUI CITADO O CONFIRMADO POR EL MEF")
-    assert certeza["inferido"]["dias"] == _valor_total(
-        ws, "DÍAS CON CUI INFERIDO POR NOMBRE")
-    assert certeza["sin_identificar"]["dias"] == _valor_total(
-        ws, "DÍAS SIN IDENTIFICAR (provisionales)")
-    assert certeza["privada"]["dias"] == _valor_total(
-        ws, "DÍAS DE OBRA PRIVADA (sin registro público)")
+    suma = sum(certeza[c]["dias"] for c in
+               ("citado_confirmado", "inferido", "sin_identificar", "privada"))
+    assert suma == _valor_total(ws, "SUMA COMPUTADA ANTES DE TRASLAPES")
     assert certeza["dias_traslape"] == _valor_total(
-        ws, "(−) Traslapes entre experiencias")
+        ws, "(−) TRASLAPES ENTRE EXPERIENCIAS")
     assert certeza["dias_efectivos"] == _valor_total(
-        ws, "DÍAS EFECTIVOS DEL PROFESIONAL")
+        ws, "TOTAL EFECTIVO NETO")
 
 
 def test_las_cubetas_cuadran_con_los_dias_efectivos():
@@ -287,7 +283,8 @@ def test_espejo_explica_en_llano_por_que_un_cui_es_inferido(job):
     # el multi-obra dice CUÁNTAS obras faltan, no solo «sin identificar»
     assert "2 obras y ninguna ubicada" in exps[5]["identificacion"]["detalle"]
     # la privada no se presenta como un fallo del postor
-    assert "no existe registro público" in exps[6]["identificacion"]["detalle"]
+    assert "no aplica consulta MEF/InfoObras" in exps[6]["identificacion"]["detalle"]
+    assert "SUNAT no acredita por sí sola" in exps[6]["identificacion"]["detalle"]
 
 
 def test_espejo_trae_las_alertas_del_entregable(job):
@@ -324,7 +321,8 @@ def test_espejo_estructura_la_fuente_mef(job):
     assert "Contrato N° 030-2021" in ajeno["texto"]
 
     assert exps[1]["fuente_mef"]["contrato"] is None
-    assert "El MEF no publica contrato ni resolución" in exps[1]["fuente_mef"]["texto"]
+    assert "no dispone de contrato/resolución utilizable" in exps[1]["fuente_mef"]["texto"]
+    assert "no publica" not in exps[1]["fuente_mef"]["texto"].lower()
 
 
 def test_espejo_expone_la_evidencia_cruda_del_mef(job):
@@ -335,6 +333,20 @@ def test_espejo_expone_la_evidencia_cruda_del_mef(job):
     assert exps[5]["identificacion_incompleta"] is True
     for clave in ("camino", "contrato_emisor", "cruces_fechas"):
         assert clave in exps[7], clave
+
+
+def test_espejo_normaliza_copia_del_motivo_sin_alterar_resultado(job):
+    api, job_id = job
+    _, exps = _experiencias(api, job_id)
+    cruce = exps[1]["cruces_fechas"][0]
+    assert cruce == {
+        "regla": "FECHA_APROBACION_ET", "resultado": "por_confirmar",
+        "motivo": ("Este análisis no dispone de una resolución de aprobación "
+                   "utilizable; no se puede comparar el término.")}
+    modulo = importlib.import_module("api.app")
+    original = modulo.repo.cargar_enriquecimiento(job_id)["1:1"]["cruces_fechas"][0]
+    assert original["motivo"].startswith("El MEF no publica la resolución")
+    assert original["resultado"] == cruce["resultado"]
 
 
 def test_espejo_resume_la_certeza_del_profesional(job):

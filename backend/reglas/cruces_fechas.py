@@ -287,7 +287,7 @@ def expediente_verificado(verificacion: Optional[dict]) -> tuple[bool, str]:
         return False, ("esta experiencia no tiene verificación del expediente "
                        "contra el Banco de Inversiones del MEF")
     if not verificacion.get("verificado_en_mef"):
-        return False, ("el MEF no publica contratos ni Formato 08-A para este "
+        return False, ("este análisis no dispone de contratos ni Formato 08-A para este "
                        "proyecto, así que no hay expediente que cotejar")
     veredicto = ((verificacion.get("contratista") or {}).get("veredicto"))
     if veredicto != "ok":
@@ -488,7 +488,7 @@ def evaluar_inicio_vs_contrato(seace: Optional[dict], cert: Optional[dict],
     firma = _fecha((seace.get("proceso") or {}).get("fecha_firma")
                    or seace.get("fecha_suscripcion"))
     if not firma:
-        return abstener("el proceso identificado no publica la fecha en que se "
+        return abstener("este análisis no dispone de la fecha en que se "
                         "firmó el contrato.")
 
     pasa, porque = identidad_sostenida_sin_temporal(seace.get("candado"))
@@ -542,8 +542,8 @@ def _motivo_sin_fecha_de_aprobacion(enr: dict) -> str:
         return (f"La fecha leída en la resolución ({_dmy(descartada)}) no es "
                 f"plausible: {porque.strip().rstrip('.')}; se omite el cruce.")
     if not (res.get("numero") or res.get("documento") or res.get("fecha")):
-        return ("El MEF no publica la resolución de aprobación de este "
-                "expediente; no se puede comparar el término.")
+        return ("Este análisis no dispone de una resolución de aprobación "
+                "utilizable; no se puede comparar el término.")
     return ("El expediente está verificado en el MEF, pero la resolución que lo "
             "aprobó figura solo con su número, sin fecha; no se puede comparar "
             "contra el término declarado sin inventar el día.")

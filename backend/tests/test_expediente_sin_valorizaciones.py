@@ -68,7 +68,7 @@ def test_expediente_sin_fuente_mef_no_pinta_valorizaciones(tmp_path):
     hoja = wb[etiqueta_hoja(2, "GESTOR BIM")]
     texto = _texto_hoja(hoja)
     assert "EXPEDIENTE TÉCNICO — verificación" in texto
-    assert "POR VERIFICAR — ni el MEF ni InfoObras publican" in texto
+    assert "Identificación del expediente pendiente" in texto
     assert "VALORIZACIONES — en amarillo" not in texto
     assert "2022 / Marzo" not in texto            # ninguna fila de valorización
     # la ficha habla del PROYECTO, no de una obra ejecutada por este cargo
@@ -76,7 +76,7 @@ def test_expediente_sin_fuente_mef_no_pinta_valorizaciones(tmp_path):
     assert "OBRA EN INFOOBRAS (origen del análisis)" not in texto
     assert "Nombre del proyecto" in texto
     assert "Inicio de obra" not in texto and "Fin de obra" not in texto
-    assert "Ejecución de la obra registrada en InfoObras (contexto" in texto
+    assert "Ejecución de la obra registrada en InfoObras (contexto" not in texto
 
 
 def test_expediente_muestra_lo_que_dice_la_resolucion_leida(tmp_path):
