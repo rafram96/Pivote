@@ -414,7 +414,7 @@ def _senal_temporal(proceso: dict, cert: dict) -> Senal:
                          f"{ini.strftime('%d/%m/%Y')} pero el contrato del proceso "
                          f"se firmó el {firma.strftime('%d/%m/%Y')} — {holgura} días "
                          f"después (tolerancia: {TOLERANCIA_DIAS_FIRMA} días). "
-                         f"No se puede supervisar un contrato que aún no existe.")
+                         f"No se puede prestar el servicio de un contrato que aún no se ha firmado.")
 
     if vig_ini and vig_fin and fin:
         solape = (min(fin, vig_fin) - max(ini, vig_ini)).days + 1

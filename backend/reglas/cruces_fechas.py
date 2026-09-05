@@ -7,7 +7,11 @@ El certificado dice «el profesional trabajó del A al B». Las fuentes oficiale
 dicen cuándo NACIÓ y cuándo MURIÓ documentalmente ese encargo:
 
   Regla A · «nadie supervisa antes de que el contrato exista»
-            inicio declarado ≥ fecha de firma del contrato del proceso (SEACE).
+            inicio declarado ≥ fecha de firma del contrato del proceso (SEACE),
+            o —cuando SEACE no identificó el proceso— del contrato del
+            expediente publicado por el MEF, si ese contrato es del emisor de la
+            constancia. Un contrato de otra empresa no sirve de vara: se dice y
+            se calla.
 
   Regla B · «nadie sigue elaborando lo que ya está aprobado» (solo expedientes)
             término declarado ≤ fecha de la resolución que aprobó el expediente.
@@ -133,6 +137,29 @@ FUENTE_APROBACION_INFOOBRAS = (
     "documento del hito «Aprobación del proyecto» registrado en InfoObras")
 FUENTE_APROBACION_MEF = (
     "resolución de aprobación publicada en el Formato 08-A del MEF")
+
+# Fecha de la FIRMA con la que juega la Regla A: de dónde salió.
+FUENTE_FIRMA_SEACE = "proceso de contratación publicado (SEACE)"
+FUENTE_FIRMA_CONTRATO_MEF = "contrato del expediente (MEF)"
+
+# Primer año con cobertura en los datos abiertos de contrataciones. Solo por
+# DEBAJO de este año la ausencia de proceso se explica por la cobertura; para
+# una experiencia posterior el proceso simplemente no se halló, y decir «la
+# cobertura empieza en 2018» sobre un certificado de 2022 es falso.
+COBERTURA_SEACE_DESDE = 2018
+
+# Veredictos de `verificacion_expediente.contrato` que significan «este contrato
+# es del emisor de la constancia». `scraping.mef` rotula hoy `ok`; el rótulo
+# `coincide` y el campo `elegido_por` son la nomenclatura nueva. Se aceptan los
+# tres para no depender del orden en que aterricen los cambios.
+VEREDICTOS_CONTRATO_DEL_EMISOR = ("coincide", "ok")
+
+# Frase de cierre de la Regla A cuando dispara. Una experiencia de expediente NO
+# se «supervisa» ni «presta un servicio»: se elabora, y lo que falta es la firma.
+FRASE_SIN_CONTRATO_OBRA = (
+    "No se puede prestar el servicio de un contrato que todavía no existe.")
+FRASE_SIN_CONTRATO_EXPEDIENTE = (
+    "No se puede elaborar un expediente cuyo contrato aún no se ha firmado.")
 
 
 @dataclass(frozen=True)
@@ -316,51 +343,96 @@ def fecha_aprobacion_expediente(enr: Optional[dict]) -> tuple[Optional[date], st
 
 # ── Regla A · inicio declarado vs firma del contrato ─────────────────────────
 
-def evaluar_inicio_vs_contrato(seace: Optional[dict], cert: Optional[dict]) -> Cruce:
-    """«Nadie supervisa antes de que el contrato exista.»
+def es_experiencia_de_expediente(enr: Optional[dict], cert: Optional[dict]) -> bool:
+    """¿La experiencia es de ELABORACIÓN DE EXPEDIENTE?
 
-    `seace`: bloque `enriquecimiento[…]["seace"]`. `cert`: la experiencia del
-    espejo (se usa `fecha_inicial`).
+    Solo se usa para REDACTAR (elegir entre «prestar el servicio» y «elaborar el
+    expediente»); jamás para decidir si una regla se pronuncia. Por eso puede
+    mirar también lo que declara el certificado, que no es una fuente oficial.
+    """
+    enr, cert = enr or {}, cert or {}
+    seace = enr.get("seace") if isinstance(enr.get("seace"), dict) else {}
+    tipo = str(cert.get("tipo_experiencia") or "").strip().lower()
+    return bool("expediente" in tipo
+                or enr.get("verificacion_expediente")
+                or enr.get("aprobacion_expediente")
+                or seace.get("proceso_objeto") == "expediente")
+
+
+def motivo_sin_proceso_seace(cert: Optional[dict], es_expediente: bool) -> str:
+    """Por qué la Regla A no tiene contrato del proceso con el que comparar.
+
+    La coletilla «la cobertura empieza en 2018» SOLO es cierta cuando el
+    certificado termina antes de 2018; escribirla sobre una experiencia de 2022
+    le echa la culpa a la cobertura de una búsqueda que simplemente no halló el
+    proceso. Termina en PUNTO a propósito: el Excel concatena este motivo con el
+    de la Regla B y sin él las dos frases salían pegadas.
     """
     cert = cert or {}
-    inicio = _fecha(cert.get("fecha_inicial"))
+    termino = _fecha(cert.get("fecha_final")) or _fecha(cert.get("fecha_inicial"))
+    if termino and termino.year < COBERTURA_SEACE_DESDE:
+        return ("no se identificó el proceso de contratación de esta experiencia "
+                "en los datos abiertos del Estado (la cobertura empieza en "
+                f"{COBERTURA_SEACE_DESDE}), así que no hay contrato con el que "
+                "comparar el inicio declarado.")
+    sujeto = "de este expediente" if es_expediente else "de esta experiencia"
+    return (f"no se halló el proceso de contratación {sujeto} en los datos "
+            "abiertos de SEACE, así que no hay contrato con el que comparar el "
+            "inicio declarado.")
 
-    def abstener(motivo: str) -> Cruce:
-        return Cruce(REGLA_INICIO, POR_CONFIRMAR, motivo,
-                     fecha_declarada=inicio.isoformat() if inicio else None)
 
-    if not isinstance(seace, dict) or seace.get("estado") != "seleccionado":
-        return abstener("no se identificó el proceso de contratación de esta "
-                        "experiencia en los datos abiertos del Estado "
-                        "(la cobertura empieza en 2018), así que no hay contrato "
-                        "con el que comparar el inicio declarado")
-    if not inicio:
-        return abstener("el certificado no declara una fecha de inicio legible")
+def firma_de_contrato_mef(enr: Optional[dict]) -> tuple[Optional[date], Optional[str]]:
+    """Firma del contrato del expediente publicado por el MEF, para la Regla A.
 
-    firma = _fecha((seace.get("proceso") or {}).get("fecha_firma")
-                   or seace.get("fecha_suscripcion"))
-    if not firma:
-        return abstener("el proceso identificado no publica la fecha en que se "
-                        "firmó el contrato")
+    Devuelve `(firma, motivo_de_abstención)`:
+      · `(fecha, None)`  → hay contrato CON fecha y es del emisor de la
+        constancia: sirve de firma aunque SEACE no haya identificado el proceso.
+      · `(None, motivo)` → el MEF publica un contrato para el CUI, pero de otro
+        contratista: compararlo mediría el inicio declarado contra el encargo de
+        otra empresa (el mismo gate anti-circularidad de siempre).
+      · `(None, None)`   → no hay contrato publicado, o no trae fecha.
 
-    pasa, porque = identidad_sostenida_sin_temporal(seace.get("candado"))
-    if not pasa:
-        return Cruce(REGLA_INICIO, POR_CONFIRMAR,
-                     f"No se compara el inicio declarado ({_dmy(inicio)}) contra la "
-                     f"firma del contrato ({_dmy(firma)}): {porque}.",
-                     fecha_declarada=inicio.isoformat(),
-                     fecha_fuente=firma.isoformat(),
-                     fuente="proceso de contratación publicado (SEACE)")
+    Precedencia: `contrato_emisor` (el contrato que RESOLVIÓ la vía CONTRATO —
+    ya ató emisor y expediente, así que su identidad no está en discusión) manda
+    sobre el contrato que la ficha del MEF eligió por su cuenta, que con varios
+    contratos por CUI puede no ser el mismo.
+    """
+    enr = enr or {}
+    ce = enr.get("contrato_emisor")
+    if isinstance(ce, dict):
+        f = _fecha(ce.get("fecha"))
+        if f:
+            return f, None
+    ct = (enr.get("verificacion_expediente") or {}).get("contrato")
+    if not isinstance(ct, dict):
+        return None, None
+    f = _fecha(ct.get("fecha_suscripcion") or ct.get("fecha"))
+    if not f:
+        return None, None
+    # `veredicto == "ok"` = el contratista del contrato es el emisor;
+    # `elegido_por == "emisor"` = así se eligió entre los del expediente. Los
+    # otros `elegido_por` (`unico`, `mas_barato`) son heurísticas de selección,
+    # no evidencia de identidad — y contra ellas no se cruza nada.
+    del_emisor = (ct.get("veredicto") in VEREDICTOS_CONTRATO_DEL_EMISOR
+                  or ct.get("elegido_por") == "emisor")
+    if not del_emisor:
+        return None, ("el único contrato publicado por el MEF es de otro "
+                      "contratista; no se compara")
+    return f, None
 
+
+def _veredicto_inicio(inicio: date, firma: date, fuente: str, sujeto: str,
+                      es_expediente: bool) -> Cruce:
+    """Aritmética y redacción compartidas por las dos fuentes de firma."""
     dias = (firma - inicio).days          # > 0 → se firmó DESPUÉS del inicio
     comun = dict(fecha_declarada=inicio.isoformat(), fecha_fuente=firma.isoformat(),
-                 dias=dias, fuente="proceso de contratación publicado (SEACE)")
+                 dias=dias, fuente=fuente)
     if dias > TOLERANCIA_DIAS_INICIO:
         return Cruce(
             REGLA_INICIO, DISPARA,
-            f"El profesional declara haber iniciado el {_dmy(inicio)}, pero el "
-            f"contrato del proceso se firmó el {_dmy(firma)}: {dias} días después. "
-            f"No se puede prestar el servicio de un contrato que todavía no existe. "
+            f"El profesional declara haber iniciado el {_dmy(inicio)}, pero "
+            f"{sujeto} se firmó el {_dmy(firma)}: {dias} días después. "
+            f"{FRASE_SIN_CONTRATO_EXPEDIENTE if es_expediente else FRASE_SIN_CONTRATO_OBRA} "
             f"(Se admite un desfase de hasta {TOLERANCIA_DIAS_INICIO} días por la "
             f"entrega de terreno u orden de inicio.)", **comun)
     if dias > 0:
@@ -372,11 +444,109 @@ def evaluar_inicio_vs_contrato(seace: Optional[dict], cert: Optional[dict]) -> C
             f"inicio.", **comun)
     return Cruce(
         REGLA_INICIO, COINCIDE,
-        f"El contrato del proceso se firmó el {_dmy(firma)} y el profesional "
-        f"declara haber iniciado el {_dmy(inicio)}, después de esa firma.", **comun)
+        f"{sujeto[0].upper()}{sujeto[1:]} se firmó el {_dmy(firma)} y el "
+        f"profesional declara haber iniciado el {_dmy(inicio)}, después de esa "
+        f"firma.", **comun)
+
+
+def evaluar_inicio_vs_contrato(seace: Optional[dict], cert: Optional[dict],
+                               enr: Optional[dict] = None) -> Cruce:
+    """«Nadie supervisa antes de que el contrato exista.»
+
+    `seace`: bloque `enriquecimiento[…]["seace"]`. `cert`: la experiencia del
+    espejo (se usa `fecha_inicial`). `enr`: el enriquecimiento COMPLETO de la
+    experiencia — opcional, y solo para la segunda fuente de firma: cuando SEACE
+    no identificó el proceso pero el MEF publica el contrato del expediente y
+    ese contrato es del emisor de la constancia, esa firma es tan oficial como
+    la del proceso y la regla puede pronunciarse igual.
+    """
+    cert = cert or {}
+    enr = enr or {}
+    inicio = _fecha(cert.get("fecha_inicial"))
+    es_exp = es_experiencia_de_expediente(enr, cert)
+
+    def abstener(motivo: str) -> Cruce:
+        return Cruce(REGLA_INICIO, POR_CONFIRMAR, motivo,
+                     fecha_declarada=inicio.isoformat() if inicio else None)
+
+    if not isinstance(seace, dict) or seace.get("estado") != "seleccionado":
+        firma_mef, porque_mef = firma_de_contrato_mef(enr)
+        if firma_mef:
+            if not inicio:
+                return abstener("el certificado no declara una fecha de inicio "
+                                "legible.")
+            return _veredicto_inicio(
+                inicio, firma_mef, FUENTE_FIRMA_CONTRATO_MEF,
+                "el contrato del expediente publicado por el MEF", es_exp)
+        base = motivo_sin_proceso_seace(cert, es_exp)
+        if porque_mef:
+            return abstener(f"{base} Además, {porque_mef}.")
+        return abstener(base)
+    if not inicio:
+        return abstener("el certificado no declara una fecha de inicio legible.")
+
+    firma = _fecha((seace.get("proceso") or {}).get("fecha_firma")
+                   or seace.get("fecha_suscripcion"))
+    if not firma:
+        return abstener("el proceso identificado no publica la fecha en que se "
+                        "firmó el contrato.")
+
+    pasa, porque = identidad_sostenida_sin_temporal(seace.get("candado"))
+    if not pasa:
+        return Cruce(REGLA_INICIO, POR_CONFIRMAR,
+                     f"No se compara el inicio declarado ({_dmy(inicio)}) contra la "
+                     f"firma del contrato ({_dmy(firma)}): {porque}.",
+                     fecha_declarada=inicio.isoformat(),
+                     fecha_fuente=firma.isoformat(),
+                     fuente=FUENTE_FIRMA_SEACE)
+
+    return _veredicto_inicio(inicio, firma, FUENTE_FIRMA_SEACE,
+                             "el contrato del proceso", es_exp)
 
 
 # ── Regla B · término declarado vs aprobación del expediente ─────────────────
+
+def _referencia_termino(fin: date, aprob: date) -> str:
+    """Frase informativa que acompaña a una abstención con las DOS fechas ya en
+    la mano. No es un veredicto: nombra la distancia y se calla."""
+    dias = (fin - aprob).days
+    if dias == 0:
+        return (f"Referencia: el término declarado ({_dmy(fin)}) es el mismo día "
+                f"de la aprobación publicada ({_dmy(aprob)}).")
+    rel = "posterior" if dias > 0 else "anterior"
+    return (f"Referencia: el término declarado ({_dmy(fin)}) es {abs(dias)} días "
+            f"{rel} a la aprobación publicada ({_dmy(aprob)}).")
+
+
+def _motivo_sin_fecha_de_aprobacion(enr: dict) -> str:
+    """Por qué no hay fecha de aprobación con la que comparar el término.
+
+    Tres situaciones DISTINTAS que antes se contaban con la misma frase, y esa
+    frase («figura solo con su número») mentía en dos de ellas — el Excel llegó
+    a decir «figura solo con su número» con la celda de resolución en «—»:
+
+      1. el MEF no publica resolución alguna (`resolucion` sin número ni fecha);
+      2. la publica, pero solo con su número (la de siempre);
+      3. la fecha se LEYÓ y se descartó por implausible
+         (`resolucion_aprobacion.fecha_descartada` / `fecha_motivo`).
+    """
+    res = ((enr.get("verificacion_expediente") or {}).get("resolucion")) or {}
+    res = res if isinstance(res, dict) else {}
+    lectura = enr.get("resolucion_aprobacion")
+    lectura = lectura if isinstance(lectura, dict) else {}
+
+    descartada = _fecha(lectura.get("fecha_descartada"))
+    if descartada:
+        porque = str(lectura.get("fecha_motivo")
+                     or "no es coherente con el número ni con el contrato")
+        return (f"La fecha leída en la resolución ({_dmy(descartada)}) no es "
+                f"plausible: {porque.strip().rstrip('.')}; se omite el cruce.")
+    if not (res.get("numero") or res.get("documento") or res.get("fecha")):
+        return ("El MEF no publica la resolución de aprobación de este "
+                "expediente; no se puede comparar el término.")
+    return ("El expediente está verificado en el MEF, pero la resolución que lo "
+            "aprobó figura solo con su número, sin fecha; no se puede comparar "
+            "contra el término declarado sin inventar el día.")
 
 def evaluar_termino_vs_aprobacion(enr: Optional[dict], cert: Optional[dict]) -> Optional[Cruce]:
     """«Nadie sigue elaborando lo que ya está aprobado.»
@@ -407,7 +577,7 @@ def evaluar_termino_vs_aprobacion(enr: Optional[dict], cert: Optional[dict]) -> 
                      fuente=fuente or None, inferida=inferida)
 
     if not fin:
-        return abstener("el certificado no declara una fecha de término legible")
+        return abstener("el certificado no declara una fecha de término legible.")
 
     # La RESOLUCIÓN LEÍDA (validacion.resolucion_aprobacion) es la identidad más
     # directa que existe: el acto que aprobó el expediente dice quién lo elaboró.
@@ -428,13 +598,17 @@ def evaluar_termino_vs_aprobacion(enr: Optional[dict], cert: Optional[dict]) -> 
     else:
         pasa, porque = expediente_verificado(enr.get("verificacion_expediente"))
     if not pasa:
-        return abstener(f"No se compara el término declarado ({_dmy(fin)}) contra "
-                        f"la aprobación del expediente: {porque}.")
+        motivo = (f"No se compara el término declarado ({_dmy(fin)}) contra "
+                  f"la aprobación del expediente: {porque}.")
+        # La resolución NO nombra a nadie: la abstención se mantiene (no se sabe
+        # si esa aprobación es de este encargo), pero el evaluador merece ver el
+        # número que está dejando de usarse — es la diferencia entre «no se pudo
+        # comprobar» y «no se pudo comprobar, y por 80 días».
+        if lectura.get("coincide_emisor") == "no_nombra" and aprob:
+            motivo += " " + _referencia_termino(fin, aprob)
+        return abstener(motivo)
     if not aprob:
-        return abstener(
-            "El expediente está verificado en el MEF, pero la resolución que lo "
-            "aprobó figura solo con su número, sin fecha; no se puede comparar "
-            "contra el término declarado sin inventar el día.")
+        return abstener(_motivo_sin_fecha_de_aprobacion(enr))
 
     dias = (fin - aprob).days             # > 0 → siguió DESPUÉS de la aprobación
     comun = dict(fecha_declarada=fin.isoformat(), fecha_fuente=aprob.isoformat(),
@@ -472,7 +646,7 @@ def cruces_de_experiencia(enr: Optional[dict], cert: Optional[dict]) -> list[Cru
     experiencia es de expediente técnico.
     """
     enr = enr or {}
-    salida = [evaluar_inicio_vs_contrato(enr.get("seace"), cert)]
+    salida = [evaluar_inicio_vs_contrato(enr.get("seace"), cert, enr)]
     b = evaluar_termino_vs_aprobacion(enr, cert)
     if b is not None:
         salida.append(b)

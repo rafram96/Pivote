@@ -283,6 +283,259 @@ def test_cruces_de_experiencia_devuelve_ambas_reglas_en_un_expediente():
     assert reglas == [REGLA_INICIO, REGLA_TERMINO]
 
 
+# ── 3 bis · Los seis textos que la revisión de las 12 hojas encontró mal ─────
+#
+# Todo lo de aquí abajo son DATOS FICTICIOS (empresa «CONSORCIO EJEMPLO», CUI
+# 9999999): lo que se fija es la redacción, no ningún expediente real.
+
+
+def _ve_contrato(**over) -> dict:
+    """`verificacion_expediente` con SOLO el contrato del MEF: el caso en que
+    SEACE no identificó el proceso pero el 08-A sí publica el contrato."""
+    contrato = {"numero": "CONTRATO N° 001-2022-EJEMPLO", "fecha": "2022-08-18",
+                "objeto": "ELABORACIÓN DEL EXPEDIENTE TÉCNICO", "veredicto": "ok"}
+    contrato.update(over)
+    return {"cui": "9999999",
+            "verificacion_expediente": {"verificado_en_mef": True,
+                                        "contratista": {"valor": "CONSORCIO EJEMPLO",
+                                                        "veredicto": "ok"},
+                                        "contrato": contrato}}
+
+
+# 1 · Regla A cae al contrato del MEF cuando no hay proceso SEACE.
+
+def test_regla_a_usa_el_contrato_del_mef_cuando_no_hay_proceso_seace():
+    """Sin proceso en SEACE, el contrato del 08-A firmado por el EMISOR es una
+    firma tan oficial como la del proceso: la regla ya no se calla."""
+    c = cert(tipo_experiencia="expediente", fecha_inicial="2022-09-05",
+             fecha_final="2022-11-11")
+    cruce = evaluar_inicio_vs_contrato({"estado": "sin_procesos"}, c, _ve_contrato())
+    assert cruce.resultado == COINCIDE
+    assert cruce.fecha_fuente == "2022-08-18"
+    assert cruce.fuente == "contrato del expediente (MEF)"
+    assert "publicado por el MEF" in cruce.motivo
+
+
+def test_regla_a_dispara_con_el_contrato_del_mef():
+    c = cert(tipo_experiencia="expediente", fecha_inicial="2022-01-10",
+             fecha_final="2022-11-11")
+    cruce = evaluar_inicio_vs_contrato({"estado": "sin_procesos"}, c, _ve_contrato())
+    assert cruce.resultado == DISPARA
+    assert cruce.dias == 220
+    assert cruce.fuente == "contrato del expediente (MEF)"
+
+
+def test_regla_a_acepta_el_rotulo_nuevo_del_contrato_del_emisor():
+    """`veredicto=coincide` y `elegido_por=emisor` son la nomenclatura nueva; el
+    módulo no puede depender del orden en que aterricen los cambios."""
+    c = cert(tipo_experiencia="expediente", fecha_inicial="2022-09-05")
+    for over in ({"veredicto": "coincide"},
+                 {"veredicto": "no_verificable", "elegido_por": "emisor"}):
+        cruce = evaluar_inicio_vs_contrato({"estado": "sin_procesos"}, c,
+                                           _ve_contrato(**over))
+        assert cruce.resultado == COINCIDE, over
+        assert cruce.fecha_fuente == "2022-08-18"
+
+
+def test_regla_a_prefiere_el_contrato_que_resolvio_la_via():
+    """`contrato_emisor` es el contrato que ATÓ emisor y expediente: manda sobre
+    el que la ficha del MEF eligió por su cuenta, que puede ser otro."""
+    c = cert(tipo_experiencia="expediente", fecha_inicial="2022-09-05")
+    enr = _ve_contrato(veredicto="no_verificable")
+    enr["contrato_emisor"] = {"numero": "CONTRATO N° 007-2022-EJEMPLO",
+                              "contratista": "CONSORCIO EJEMPLO",
+                              "fecha": "2022-07-01"}
+    cruce = evaluar_inicio_vs_contrato({"estado": "sin_procesos"}, c, enr)
+    assert cruce.resultado == COINCIDE
+    assert cruce.fecha_fuente == "2022-07-01"
+    assert cruce.fuente == "contrato del expediente (MEF)"
+
+
+def test_regla_a_no_cruza_contra_un_contrato_elegido_por_heuristica():
+    """`elegido_por` «unico»/«mas_barato» son formas de escoger, no evidencia de
+    que ese contrato sea del emisor: contra eso no se cruza nada."""
+    c = cert(tipo_experiencia="expediente", fecha_inicial="2022-01-10",
+             fecha_final="2022-11-11")
+    for como in ("unico", "mas_barato"):
+        enr = _ve_contrato(veredicto="no_verificable", elegido_por=como)
+        cruce = evaluar_inicio_vs_contrato({"estado": "sin_procesos"}, c, enr)
+        assert cruce.resultado == POR_CONFIRMAR, como
+        assert "es de otro contratista" in cruce.motivo
+
+
+def test_regla_a_se_abstiene_si_el_contrato_del_mef_es_de_otro_contratista():
+    """Comparar contra el contrato de otra empresa es el fallo que el gate
+    anti-circularidad existe para evitar: se dice y no se compara."""
+    c = cert(tipo_experiencia="expediente", fecha_inicial="2022-01-10",
+             fecha_final="2022-11-11")
+    enr = _ve_contrato(veredicto="no_verificable")
+    cruce = evaluar_inicio_vs_contrato({"estado": "sin_procesos"}, c, enr)
+    assert cruce.resultado == POR_CONFIRMAR
+    assert cruce.fecha_fuente is None
+    assert ("el único contrato publicado por el MEF es de otro contratista; "
+            "no se compara") in cruce.motivo
+
+
+def test_regla_a_sin_enriquecimiento_se_comporta_como_antes():
+    """La firma tercera es OPCIONAL: los dos argumentos de siempre siguen
+    valiendo (scripts y jobs viejos llaman así)."""
+    c = cert(fecha_inicial="2015-01-01", fecha_final="2016-01-01")
+    assert evaluar_inicio_vs_contrato({"estado": "sin_procesos"}, c).resultado \
+        == POR_CONFIRMAR
+
+
+# 2 · «la cobertura empieza en 2018» solo para experiencias pre-2018.
+
+def test_motivo_sin_proceso_solo_culpa_a_la_cobertura_antes_de_2018():
+    viejo = cert(fecha_inicial="2015-01-01", fecha_final="2016-01-01")
+    m = evaluar_inicio_vs_contrato({"estado": "sin_procesos"}, viejo).motivo
+    assert "la cobertura empieza en 2018" in m
+
+    nuevo = cert(tipo_experiencia="expediente", fecha_inicial="2022-01-10",
+                 fecha_final="2022-11-11")
+    m2 = evaluar_inicio_vs_contrato({"estado": "sin_procesos"}, nuevo).motivo
+    assert "2018" not in m2
+    assert ("no se halló el proceso de contratación de este expediente en los "
+            "datos abiertos de SEACE") in m2
+
+
+def test_motivo_sin_proceso_en_el_borde_exacto_de_2018():
+    """El término manda (no el inicio): un servicio que arrancó en 2017 y cerró
+    en 2018 ya cae dentro de la cobertura."""
+    assert "cobertura" in evaluar_inicio_vs_contrato(
+        {"estado": "sin_procesos"},
+        cert(fecha_inicial="2016-01-01", fecha_final="2017-12-31")).motivo
+    assert "cobertura" not in evaluar_inicio_vs_contrato(
+        {"estado": "sin_procesos"},
+        cert(fecha_inicial="2017-06-01", fecha_final="2018-01-02")).motivo
+
+
+# 3 · Los tres textos distintos sobre la resolución en la Regla B.
+
+def test_regla_b_dice_que_el_mef_no_publica_la_resolucion():
+    """`resolucion` sin número ni fecha: decir «figura solo con su número» era
+    falso — y el Excel lo mostraba junto a una celda de resolución en «—»."""
+    enr = enr_expediente()
+    enr.pop("aprobacion_expediente")
+    enr["verificacion_expediente"]["resolucion"] = {
+        "veredicto": "no_verificable",
+        "detalle": "sin documento de aprobación en el 08-A del MEF"}
+    cruce = evaluar_termino_vs_aprobacion(enr, cert(tipo_experiencia="expediente",
+                                                    fecha_final="2024-03-31"))
+    assert cruce.resultado == POR_CONFIRMAR
+    assert cruce.motivo == ("El MEF no publica la resolución de aprobación de "
+                            "este expediente; no se puede comparar el término.")
+    assert "figura solo con su número" not in cruce.motivo
+
+
+def test_regla_b_mantiene_el_texto_de_la_resolucion_sin_fecha():
+    """Con número y sin fecha, el texto de siempre sigue siendo el correcto."""
+    enr = enr_expediente()
+    enr.pop("aprobacion_expediente")
+    cruce = evaluar_termino_vs_aprobacion(enr, cert(tipo_experiencia="expediente",
+                                                    fecha_final="2024-03-31"))
+    assert cruce.resultado == POR_CONFIRMAR
+    assert "figura solo con su número, sin fecha" in cruce.motivo
+
+
+def test_regla_b_explica_la_fecha_descartada_por_implausible():
+    """`fecha_descartada`/`fecha_motivo` (lectura de la resolución): la fecha se
+    leyó y se tiró; el evaluador tiene que ver cuál y por qué."""
+    enr = enr_expediente()
+    enr.pop("aprobacion_expediente")
+    enr["resolucion_aprobacion"] = {
+        "legible": True, "fecha": None, "coincide_emisor": "confirma",
+        "fecha_descartada": "2019-05-03",
+        "fecha_motivo": "es anterior al contrato que aprueba (18/08/2022)"}
+    cruce = evaluar_termino_vs_aprobacion(enr, cert(tipo_experiencia="expediente",
+                                                    fecha_final="2024-03-31"))
+    assert cruce.resultado == POR_CONFIRMAR
+    assert cruce.motivo == (
+        "La fecha leída en la resolución (03/05/2019) no es plausible: es "
+        "anterior al contrato que aprueba (18/08/2022); se omite el cruce.")
+
+
+# 4 · `coincide_emisor == "no_nombra"`: sigue POR VERIFICAR, pero con la cifra.
+
+def _enr_no_nombra(coincide: str = "no_nombra") -> dict:
+    """Expediente cuyo contratista MEF NO es el emisor (el gate falla) y cuya
+    resolución sí trae fecha, leída y sin nombrar a nadie."""
+    return {"cui": "9999999",
+            "verificacion_expediente": {
+                "verificado_en_mef": True,
+                "contratista": {"valor": "OTRA EMPRESA S.A.",
+                                "veredicto": "no_verificable"},
+                "resolucion": {"numero": "168-2022-EJEMPLO", "fecha": "2022-08-23",
+                               "veredicto": "ok"}},
+            "resolucion_aprobacion": {
+                "legible": True, "fecha": "2022-08-23",
+                "coincide_emisor": coincide,
+                "detalle_emisor": ("CONSORCIO TERCERO"
+                                   if coincide == "nombra_otro" else None)}}
+
+
+def test_regla_b_no_nombra_mantiene_la_abstencion_pero_da_la_referencia():
+    c = cert(tipo_experiencia="expediente", fecha_final="2022-11-11")
+    cruce = evaluar_termino_vs_aprobacion(_enr_no_nombra(), c)
+    assert cruce.resultado == POR_CONFIRMAR
+    assert cruce.respuesta == "POR VERIFICAR"
+    assert "comparar con otro encargo" in cruce.motivo
+    assert ("Referencia: el término declarado (11/11/2022) es 80 días posterior "
+            "a la aprobación publicada (23/08/2022).") in cruce.motivo
+
+
+def test_regla_b_referencia_dice_anterior_cuando_toca():
+    c = cert(tipo_experiencia="expediente", fecha_final="2022-08-03")
+    cruce = evaluar_termino_vs_aprobacion(_enr_no_nombra(), c)
+    assert "es 20 días anterior a la aprobación publicada (23/08/2022)" in cruce.motivo
+
+
+def test_regla_b_nombra_otro_no_lleva_referencia():
+    """Ahí ya se nombra al otro consultor: la cifra no aporta y confundiría."""
+    c = cert(tipo_experiencia="expediente", fecha_final="2022-11-11")
+    cruce = evaluar_termino_vs_aprobacion(_enr_no_nombra("nombra_otro"), c)
+    assert cruce.resultado == POR_CONFIRMAR
+    assert "CONSORCIO TERCERO" in cruce.motivo
+    assert "Referencia:" not in cruce.motivo
+
+
+# 5 · La frase de cierre de la Regla A cambia con el tipo de experiencia.
+
+def test_regla_a_usa_la_frase_de_expediente_en_un_expediente():
+    c = cert(tipo_experiencia="expediente", fecha_inicial="2021-06-01")
+    proc = proceso(tipo="expediente")
+    cruce = evaluar_inicio_vs_contrato(bloque_seace(proc, c), c)
+    assert cruce.resultado == DISPARA
+    assert ("No se puede elaborar un expediente cuyo contrato aún no se ha "
+            "firmado.") in cruce.motivo
+    assert "supervisar" not in cruce.motivo
+
+
+def test_regla_a_conserva_la_frase_generica_en_una_supervision():
+    c = cert(fecha_inicial="2021-06-01")           # tipo_experiencia=supervision
+    cruce = evaluar_inicio_vs_contrato(bloque_seace(proceso(), c), c)
+    assert cruce.resultado == DISPARA
+    assert ("No se puede prestar el servicio de un contrato que todavía no "
+            "existe.") in cruce.motivo
+
+
+# 6 · Las dos oraciones del Excel ya no salen pegadas.
+
+def test_los_motivos_de_las_dos_reglas_se_concatenan_con_punto():
+    """El Excel une los motivos de A y B con un espacio; sin el punto final del
+    de A salía «…comparar el inicio declarado No se compara el término…»."""
+    c = cert(tipo_experiencia="expediente", fecha_inicial="2022-09-05",
+             fecha_final="2022-11-11")
+    enr = enr_expediente()
+    enr["verificacion_expediente"]["contratista"]["veredicto"] = "no_verificable"
+    cruces = cruces_de_experiencia(enr, c)
+    unido = " ".join(x.motivo for x in cruces)
+    assert "declarado No se compara" not in unido
+    assert "declarado. No se compara el término declarado" in unido
+    for x in cruces:
+        assert x.motivo.rstrip().endswith("."), x.motivo
+
+
 # ── 4 · Cableado en la etapa REGLAS ──────────────────────────────────────────
 
 def _espejo_una_experiencia(exp: dict) -> dict:
@@ -631,7 +884,9 @@ def test_bloque_por_profesional_en_un_job_sin_datos(tmp_path):
     notas = " ".join(str(x[0].value) for x in ws.iter_rows(min_row=fila,
                                                            min_col=1, max_col=1)
                      if x[0].value)
-    assert "no se identificó el proceso" in notas
+    # Experiencia de 2021-2023: la coletilla de cobertura NO aplica.
+    assert "no se halló el proceso de contratación" in notas
+    assert "2018" not in notas
 
 
 def test_bloque_por_profesional_sin_jerga(tmp_path):
