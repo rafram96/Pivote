@@ -849,8 +849,9 @@ class EtapaInfoObrasReal:
             if not es_expediente_exp(_e, _tipo_decl, self.forzar_expedientes):
                 return False
             _vmef = self._verificar_expediente_mef(_e, cui, "")
-            if not (_vmef and _vmef.get("verificado_en_mef")):
-                return False
+            verificado = bool(_vmef and _vmef.get("verificado_en_mef"))
+            if not verificado and str(enr.get("via") or "").upper() not in _VIAS_SOLO_MEF:
+                return False   # obra flaky de InfoObras: sigue el camino normal
             enr["camino"] = "expediente"
             enr["camino_fuente"] = fuente_camino(_e, _tipo_decl, self.forzar_expedientes)
             enr.pop("paralizaciones", None)
@@ -863,6 +864,24 @@ class EtapaInfoObrasReal:
                                  "monto": None, "fecha_inicio": None, "fecha_fin": None}
             enr["valorizaciones"] = []
             enr["modificaciones_plazo"] = []
+            if not verificado:
+                # Identificado en el Banco de Inversiones (vía MEF/CONTRATO/RESOLUCION)
+                # pero el MEF no publica contrato ni resolución de ese expediente (típico
+                # de proyectos anteriores a Invierte.pe). No es un fallo transitorio que
+                # merezca «sin verificar»: la experiencia está identificada y cuenta por
+                # el certificado; el Excel lo dice en el bloque EXPEDIENTE («POR
+                # VERIFICAR — ni el MEF ni InfoObras publican…»).
+                enr.pop("verificacion_expediente", None)
+                enr["sin_documentos_mef"] = True
+                obs.append(pipeline.Observacion(
+                    codigo="VERIF_MEF", severidad=pipeline.Severidad.INFO,
+                    mensaje=f"expediente identificado en el Banco de Inversiones (CUI {cui}); "
+                            "el MEF no publica contrato ni resolución de aprobación y InfoObras "
+                            "no registra ejecución — cuenta por el certificado, sin contraste",
+                    origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+                ctx.enriquecimiento[k] = enr
+                cont["ok"] += 1
+                return True
             enr["verificacion_expediente"] = _vmef
             _ct = (_vmef.get("contrato") or {}).get("numero")
             obs.append(pipeline.Observacion(
