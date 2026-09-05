@@ -35,6 +35,12 @@ Cuarta entrega: un expediente sin fuente MEF ya no cae a pintar valorizaciones
 en la hoja P ni a descargar la fase de ejecución; la skill pregunta el tipo de
 concurso al inicio. Gate: **1068 passed, 25 skipped**.
 
+Quinta entrega (5-sep): lectura de la resolución de aprobación del expediente
+(descarga del 08-A + OCR local) → fecha oficial para la Regla B, consultor
+nombrado contrastado con el emisor, filas en la hoja P, campos nuevos en el
+contrato para la resolución citada en el certificado, Tesseract en Docker.
+Gate: **1083 passed, 25 skipped**.
+
 ## Adopción RAF y arquitectura visual canónica (20-ago)
 
 Pivote ya está adoptado como proyecto RAF (`.ai/project.json`, perfil `repo`) y

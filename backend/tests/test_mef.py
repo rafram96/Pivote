@@ -150,7 +150,11 @@ def test_verificar_expediente_contratista_no_cotejable():
     b = mef.verificar_expediente(exp, mef.parsear_ficha_08a(_html("2324482")),
                                  mef.normalizar_contratos(_contratos("2324482")))
     assert b["contratista"]["veredicto"] == "no_verificable"
-    assert b["contrato"]["veredicto"] == "ok"   # el contrato igual existe en el MEF
+    # el contrato existe en el MEF, pero eso no lo vincula con ESTE certificado:
+    # el veredicto del contrato sigue al del contratista (antes decía «ok» por
+    # mera existencia y el Excel lo pintaba como ✔ Coincide).
+    assert b["contrato"]["veredicto"] == "no_verificable"
+    assert b["contrato"]["numero"]
 
 
 def test_verificar_expediente_sin_datos_degrada():

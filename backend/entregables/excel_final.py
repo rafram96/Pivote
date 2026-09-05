@@ -1158,6 +1158,29 @@ def construir_hoja_profesional(
                     _fila("Fecha del contrato", _ffmt)
                 _fila("Resolución de aprobación", rs.get("numero") or rs.get("documento"),
                       rs.get("veredicto"))
+                # Lo que dice la propia resolución, leída del PDF (capa de texto u
+                # OCR local): fecha oficial y consultor nombrado. Es el contraste
+                # que faltaba para los expedientes: la fecha alimenta la Regla B y el
+                # consultor confirma o desmiente al emisor del certificado.
+                lect = fx.get("resolucion_aprobacion")
+                if isinstance(lect, dict):
+                    if lect.get("legible"):
+                        _f_res = _fecha_iso(lect.get("fecha"))
+                        _fila("Fecha de la resolución (leída del documento)",
+                              _f_res or "no se pudo leer una fecha", None, FMT_FECHA)
+                        cons = ", ".join(lect.get("consultores") or [])[:160]
+                        _ver_cons = {"confirma": "ok", "nombra_otro": "discrepancia"}.get(
+                            lect.get("coincide_emisor"))
+                        _fila("Consultor según la resolución",
+                              cons or "la resolución no nombra a quien elaboró el expediente",
+                              _ver_cons)
+                        if lect.get("numero_citado_coincide") is not None:
+                            _fila("N° de resolución citado en el certificado",
+                                  lect.get("numero_citado") or "—",
+                                  "ok" if lect["numero_citado_coincide"] else "discrepancia")
+                    else:
+                        _fila("Lectura de la resolución",
+                              "el PDF es un escaneo sin texto reconocible — se adjunta en el ZIP")
                 _fila("CUI confirmado (MEF)", verif.get("cui_confirmado"))
                 fuentes = ", ".join(verif.get("fuentes") or [])
                 if fuentes:
@@ -2740,6 +2763,12 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                                  "representante_obra": enr.get("representante_obra"),
                                  "aprobacion_expediente": enr.get("aprobacion_expediente"),
                                  "verificacion_expediente": enr.get("verificacion_expediente"),
+                                 # Resolución de aprobación LEÍDA (fecha, consultor) y
+                                 # camino con que se enrutó (ADR-010): deciden el bloque
+                                 # expediente/obra de la ficha y sus filas de contraste.
+                                 "resolucion_aprobacion": enr.get("resolucion_aprobacion"),
+                                 "camino": enr.get("camino"),
+                                 "camino_fuente": enr.get("camino_fuente"),
                                  "seace": enr.get("seace"),
                                  "inventario_documental": enr.get("inventario_documental"),
                                  "documentos_encontrados": enr.get("documentos_encontrados"),
@@ -2808,16 +2837,35 @@ def inyectar_cruces_fechas(espejo: dict, enriquecimiento: Optional[dict]) -> int
     fuentes; no toca red ni disco. Solo RELLENA: una experiencia que ya trae
     `cruces_fechas` se respeta tal cual (lo que se entregó es lo que se guardó).
     Devuelve cuántas experiencias se completaron."""
-    from reglas.cruces_fechas import cruces_de_experiencia
+    from reglas.cruces_fechas import REGLA_TERMINO, cruces_de_experiencia
     enr_todo = enriquecimiento if isinstance(enriquecimiento, dict) else None
     if enr_todo is None:
         return 0
+
+    def _cruces_consideran_resolucion(enr: dict) -> bool:
+        """¿Los cruces guardados ya vieron la resolución LEÍDA? Si la lectura llegó
+        después (job procesado antes de esta capacidad, o relectura), se recalculan:
+        es evidencia oficial nueva, la misma que usaría una corrida en vivo."""
+        lect = enr.get("resolucion_aprobacion")
+        if not isinstance(lect, dict) or not lect.get("legible"):
+            return True
+        for c in enr.get("cruces_fechas") or []:
+            if not isinstance(c, dict) or c.get("regla") != REGLA_TERMINO:
+                continue
+            if lect.get("fecha") and c.get("fecha_fuente") == lect["fecha"]:
+                return True
+            if "nombra como consultor" in str(c.get("motivo") or ""):
+                return True
+        return False
+
     n = 0
     for prof in (espejo or {}).get("profesionales", []):
         for e in prof.get("experiencias", []):
             k = f"{prof.get('n_prof')}:{e.get('n')}"
             enr = enr_todo.get(k)
-            if not isinstance(enr, dict) or enr.get("cruces_fechas"):
+            if not isinstance(enr, dict):
+                continue
+            if enr.get("cruces_fechas") and _cruces_consideran_resolucion(enr):
                 continue
             enr["cruces_fechas"] = [c.como_dict()
                                     for c in cruces_de_experiencia(enr, e)]

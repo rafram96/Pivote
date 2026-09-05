@@ -304,7 +304,11 @@ def verificar_expediente(exp: dict, ficha: dict, contratos: list[dict]) -> dict:
             "numero": c["numero"], "monto": c["monto"],
             "fecha": c["fecha_suscripcion"].isoformat() if c["fecha_suscripcion"] else None,
             "objeto": c["objeto"][:120] or None,
-            "veredicto": "ok",   # el contrato existe en el MEF (autoritativo)
+            # El contrato solo «coincide» si su contratista es el emisor del
+            # certificado. Que exista un contrato para el CUI no dice nada sobre
+            # ESTE certificado: antes se rotulaba «ok» por mera existencia y el
+            # Excel lo mostraba como ✔ Coincide (fragilidad 4, 4-sep-2026).
+            "veredicto": ver_ct,
         }
         if c.get("url_pdf"):
             bloque["contrato"]["pdf"] = c["url_pdf"]
@@ -314,7 +318,9 @@ def verificar_expediente(exp: dict, ficha: dict, contratos: list[dict]) -> dict:
         bloque["fuentes"].append("MEF-08A")
         bloque["verificado_en_mef"] = True
         bloque["resolucion"] = {"numero": res.get("numero"), "documento": res.get("documento"),
-                                "veredicto": "ok"}
+                                # `url` viaja para que la etapa descargue y LEA la
+                                # resolución (fecha oficial + consultor nombrado).
+                                "url": res.get("url"), "veredicto": "ok"}
     else:
         bloque["resolucion"] = {"veredicto": "no_verificable",
                                 "detalle": "sin documento de aprobación en el 08-A del MEF"}

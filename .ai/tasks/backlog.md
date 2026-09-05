@@ -884,3 +884,33 @@ faltantes de `excel_final`, detector de ciclos propio en vez de pydeps).
 - **FUERA de alcance**: `resolucion/cui.py` — núcleo de decisión con semántica en movimiento (circularidad del solape abierta). Reingresa como T-REFACTOR-005 cuando la golden lleve 2 semanas quieta (doc §6, condición de reingreso).
 - **Reglas inquebrantables (doc §3)**: R1 función parcheada y llamador en el mismo módulo — es la regla que decide dónde cae cada corte; R2 las fachadas re-exportan también los ~19 símbolos privados que consumen tests y `app.py`; R3 un PR = un monolito; R4 cero cambios de comportamiento (bugs hallados → backlog, PR aparte); R5 los tests monolíticos se parten en el mismo PR.
 - **Criterio de Aceptación (por PR, doc §4)**: V1 pytest verde con cero `skipped` nuevos + V2 diff normalizado de Excel/ZIP = 0 sobre jobs `ff44d2833590`/`371fa5a1e704` vía `tools/utils/regenerar_excel_final.py` (obligatorio en PRs 2-3) + V3 `golden_cui.py --con-base --solo-cache` con diff EXACTAMENTE cero (PRs 5-6; en refactor no aplica el criterio suave) + V4 ciclos de import sin subir.
+
+---
+id: T-TAREA-RESOLUCION-APROBACION
+tipo: tarea
+zona: validacion/ (resolucion_aprobacion.py) + scraping/ (ocr_local.py) + orquestador/ + entregables/
+agente_origen: claude
+estado: primera entrega versionada (2026-09-05); pendientes abajo
+depende_de: []
+---
+**Lectura de la resolución que aprobó el expediente (08-A del MEF) — prioridad
+alta de Rafael (5-sep): «totalmente crucial para los expedientes».**
+
+Hecho: descarga + lectura (capa de texto u OCR local con el mismo Tesseract de la
+skill) de la resolución de cada expediente verificado; fecha oficial → Regla B;
+consultor nombrado contrastado con el emisor por frase completa junto a un rol
+(confirma / nombra_otro / no_nombra); filas nuevas en la hoja P; recálculo de
+cruces al regenerar el Excel; campos `resolucion_aprobacion_numero/fecha` en el
+contrato para que la skill capture la resolución citada en el certificado;
+Tesseract en el Dockerfile. Medido sobre el job real: 11 de 22 expedientes con
+resolución legible; 3 confirman al emisor, 4 nombran a otro, 4 no nombran.
+
+Pendiente:
+- [ ] Leer la resolución de los CANDIDATOS de las experiencias en revisión (hoy
+      solo de los CUI ya resueltos) y mostrarla en la tarjeta de revisión.
+- [ ] Sanidad temporal: una resolución muy posterior al periodo del certificado
+      (> 2 años) suele ser OTRO expediente del mismo CUI (reformulación, saldo).
+- [ ] Panel: mostrar fecha y consultor de la resolución en Profesionales.
+- [ ] ADR de la decisión «el backend lee documentos oficiales con OCR local»,
+      con `ai-cli new decision` cuando `Pivote/.ai` valide.
+- [ ] Afinar `consultores_nombrados`: aún deja fragmentos de OCR.

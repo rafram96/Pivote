@@ -154,6 +154,10 @@ const ExperienciaProf = z.object({
   nivel_categoria: txt,          // nivel hospitalario del proyecto ("II-1", "Centro de Salud"…)
   area_construida_m2: monto,
   monto_contrato_soles: monto,
+  // Expedientes: resolución que aprobó el expediente, SI el certificado la cita
+  // (número y fecha literales). El backend la cruza con la del MEF.
+  resolucion_aprobacion_numero: txt,
+  resolucion_aprobacion_fecha: fecha,
   entidad_contratante: txt,      // dueño de la obra (≠ emisor del cert) → score CUI
   ubicacion: txt,                // dpto/prov/distrito si el cert lo cita → score CUI
   observaciones: txt,

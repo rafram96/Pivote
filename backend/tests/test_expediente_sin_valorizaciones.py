@@ -79,6 +79,29 @@ def test_expediente_sin_fuente_mef_no_pinta_valorizaciones(tmp_path):
     assert "Ejecución posterior de la obra (contexto" in texto
 
 
+def test_expediente_muestra_lo_que_dice_la_resolucion_leida(tmp_path):
+    ficha = {"cui": "2234021", "codigo_infoobras": 1, "estado": "Finalizado",
+             "camino": "expediente", "camino_fuente": "declarado",
+             "verificacion_expediente": {
+                 "verificado_en_mef": True, "cui_confirmado": "2234021",
+                 "contratista": {"valor": "CONSORCIO ESPERANZA", "veredicto": "ok"},
+                 "contrato": {"numero": "045-2023-UNMSM", "veredicto": "ok"},
+                 "resolucion": {"numero": "005401-2025-R/UNMSM", "veredicto": "ok",
+                                "fecha": "2025-03-10"}},
+             "resolucion_aprobacion": {
+                 "legible": True, "fecha": "2025-03-10",
+                 "consultores": ["CONSORCIO ESPERANZA"], "coincide_emisor": "confirma",
+                 "cita_cui": True, "numero_citado_coincide": True,
+                 "numero_citado": "005401-2025-R/UNMSM", "texto_fuente": "ocr",
+                 "resumen": "Resolución de aprobación del 10/03/2025. Nombra al emisor…"}}
+    salida = generar_excel_final(_espejo(), tmp_path / "r.xlsx", {}, fichas={(2, 1): ficha})
+    texto = _texto_hoja(openpyxl.load_workbook(salida)[etiqueta_hoja(2, "GESTOR BIM")])
+    assert "Fecha de la resolución (leída del documento)" in texto
+    assert "Consultor según la resolución" in texto and "CONSORCIO ESPERANZA" in texto
+    assert "N° de resolución citado en el certificado" in texto
+    assert "VALORIZACIONES — en amarillo" not in texto
+
+
 def test_obra_sigue_pintando_valorizaciones(tmp_path):
     espejo = _espejo()
     espejo["_meta"]["tipo_evaluacion"] = "obras"

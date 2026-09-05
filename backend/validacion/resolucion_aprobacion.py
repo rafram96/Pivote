@@ -58,14 +58,18 @@ _RE_ROL = re.compile(rf"\b({_ROLES})\b")
 _ARTICULOS = r"(?:EL|LA|LOS|LAS|DEL|DE\s+LA|EMPRESA|ING\.?|ARQ\.?|SR\.?|SRA\.?|CONSULTOR(?:A)?)?\s*"
 _RE_NOMBRE_TRAS_ROL = re.compile(
     rf"\b(?:{_ROLES})\s*[:,]?\s*{_ARTICULOS}"
-    r"([A-Z][A-Z0-9 .&+\-]{3,90}?)(?=\s*[,;()\"*]|\s+(?:QUE|CON|PARA|POR|MEDIANTE|SEGUN|EN|Y|DEL|DE)\s|$)")
+    r"([A-Z][A-Z0-9 .&+\-]{3,90}?)(?=\s*[,;()\"*]|\s+(?:QUE|CON|PARA|POR|MEDIANTE|SEGUN|EN|Y|DEL|DE|"
+    r"CELEBRAN|SUSCRIBEN|SUSCRIBIO|REMITE|PRESENTA|SOLICITA|COMUNICA|INFORMA|EL|LA)\s|$)")
 _RE_NOMBRE_ANTES_ROL = re.compile(
     r"([A-Z][A-Z0-9 .&+\-]{3,80}?)\s*[-–,]?\s*(?:ENTIDAD\s+PRIVADA\s+SUPERVISORA|"
     r"COMO\s+CONSULTOR(?:A)?|EN\s+CALIDAD\s+DE\s+CONSULTOR(?:A)?)")
 _GENERICOS = {"OBRA", "PARA", "ELABORACION", "EXPEDIENTE", "TECNICO", "SERVICIO",
               "CONSULTORIA", "PROYECTO", "INVERSION", "ENTIDAD", "UNIDAD", "ESPECIALISTA",
               "RESPONSABLE", "OFICINA", "GERENCIA", "SUPERVISION", "EJECUCION", "PUBLICA",
-              "PRIVADA", "DE", "LA", "EL", "DEL", "LOS", "LAS"}
+              "PRIVADA", "DE", "LA", "EL", "DEL", "LOS", "LAS", "QUE", "REPRESENTANTE",
+              "LEGAL", "COMUN", "SUPERVISOR", "SUPERVISORA", "CONTRATO", "FINANCIA",
+              "EMPRESA", "CONSULTOR", "CONSULTORA", "CONTRATISTA", "PROYECTISTA",
+              "CUANDO", "ASI", "HAYA", "DETERMINADO", "MEDIANTE", "SEGUN", "DICHO", "DICHA"}
 UMBRAL_FRASE = 88          # parecido mínimo del nombre COMPLETO dentro de la ventana
 VENTANA_ROL = 140          # caracteres a cada lado de un rol donde buscar el nombre
 

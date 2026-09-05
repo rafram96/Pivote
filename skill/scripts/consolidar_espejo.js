@@ -858,6 +858,9 @@ function consolidar(WS, opts = {}) {
         nivel_categoria: pick(e.nivel_categoria),
         area_construida_m2: numify(e.area_construida_m2),
         monto_contrato_soles: numify(e.monto_contrato_soles),
+        // Expedientes: resolución de aprobación citada en el certificado (literal).
+        resolucion_aprobacion_numero: pick(e.resolucion_aprobacion_numero),
+        resolucion_aprobacion_fecha: fechaOk(pick(e.resolucion_aprobacion_fecha)),
         entidad_contratante: pick(e.entidad_contratante),
         ubicacion: pick(e.ubicacion),
         observaciones: obsExp || pick(j.observaciones),

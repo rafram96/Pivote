@@ -292,6 +292,11 @@ class ExperienciaProf(_Model):
     nivel_categoria: Optional[str] = None  # nivel hospitalario del proyecto ("II-1", "Centro de Salud"…)
     area_construida_m2: Optional[float] = Field(default=None, ge=0)
     monto_contrato_soles: Optional[float] = Field(default=None, ge=0)
+    # Expedientes: si el certificado cita la resolución que aprobó el expediente
+    # («aprobado mediante Resolución N° … de fecha …»), su número y fecha
+    # literales. El backend los cruza con la resolución publicada en el MEF.
+    resolucion_aprobacion_numero: Optional[str] = None
+    resolucion_aprobacion_fecha: FechaFlexible = None
     entidad_contratante: Optional[str] = None  # dueño de la obra (≠ emisor del cert) → score CUI
     ubicacion: Optional[str] = None       # dpto/prov/distrito si el cert lo cita → score CUI
     observaciones: Optional[str] = None

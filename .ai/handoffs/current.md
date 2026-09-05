@@ -75,6 +75,23 @@ pregunta el tipo de concurso al inicio si el usuario no lo dijo con los PDF. Gat
 **1068 passed, 25 skipped**. Cierra el pendiente de ADR-010 «filtro de secciones
 de descarga por camino».
 
+## Nota (2026-09-05, Claude) — la resolución de aprobación del expediente ya se lee
+
+Prioridad alta de Rafael. El backend descarga la resolución del 08-A del MEF de
+cada expediente verificado y la lee (capa de texto u OCR local: `scraping/ocr_local.py`,
+mismo Tesseract y modo que la skill). `validacion/resolucion_aprobacion.py`
+extrae fecha oficial, consultores nombrados y cita del CUI, y contrasta al emisor
+por frase completa junto a un rol. Efectos: la Regla B usa la fecha leída (gana a
+la deducida de InfoObras); si la resolución nombra a otro consultor la regla se
+abstiene con la razón escrita y se emite ADVERTENCIA `RESOLUCION_ET`; la hoja P
+muestra fecha y consultor con ✔/✗; los cruces se recalculan al regenerar si la
+lectura es posterior; `contrato.veredicto` ya no es «ok» por mera existencia. La
+skill captura la resolución citada en el certificado (`resolucion_aprobacion_numero/fecha`,
+contrato aditivo en 3 copias). Tesseract entra al Dockerfile. Gate: **1083 passed,
+25 skipped**; skill 60; Panel `tsc` limpio. Job real regenerado: 11 resoluciones
+leídas; la Regla B dispara en dos experiencias que declaran término posterior a la
+aprobación. Pendientes en `tasks/backlog.md` (T-TAREA-RESOLUCION-APROBACION).
+
 **Para la corrida de expedientes**: invocar la skill diciendo que el concurso es
 de expedientes y pasar `--tipo expedientes` al consolidar; revisar a mano las
 vías CODIGO y PROBABLE; en la verificación MEF mirar el veredicto del

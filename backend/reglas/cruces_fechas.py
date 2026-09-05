@@ -277,6 +277,9 @@ def fecha_aprobacion_expediente(enr: Optional[dict]) -> tuple[Optional[date], st
 
     Orden de preferencia, y el porqué de cada uno:
 
+    0. `verificacion_expediente.resolucion.fecha` — la fecha escrita en la propia
+       resolución del MEF, leída del PDF (capa de texto u OCR local). Es la
+       fecha oficial de aprobación; no es deducida.
     1. `aprobacion_expediente.fecha` — el documento del hito «Aprobación del
        proyecto» de InfoObras. Trae día completo, pero se deduce del nombre del
        archivo (`…AAAAMMDD…`), que es la fecha de REGISTRO del documento y puede
@@ -290,12 +293,20 @@ def fecha_aprobacion_expediente(enr: Optional[dict]) -> tuple[Optional[date], st
     Sin ninguna de las dos → `(None, "", False)`.
     """
     enr = enr or {}
+    res = ((enr.get("verificacion_expediente") or {}).get("resolucion")) or {}
+    if isinstance(res, dict):
+        # 0. La fecha LEÍDA del propio documento (OCR/capa de texto de la
+        #    resolución, `validacion.resolucion_aprobacion`): es la fecha oficial
+        #    escrita en el acto que aprobó el expediente, no una deducción. Gana
+        #    a la del hito de InfoObras, que sale del nombre del archivo.
+        f = _fecha(res.get("fecha"))
+        if f:
+            return f, FUENTE_APROBACION_MEF, False
     aprob = enr.get("aprobacion_expediente")
     if isinstance(aprob, dict):
         f = _fecha(aprob.get("fecha"))
         if f:
             return f, FUENTE_APROBACION_INFOOBRAS, True
-    res = ((enr.get("verificacion_expediente") or {}).get("resolucion")) or {}
     if isinstance(res, dict):
         f = fecha_en_texto(res.get("documento")) or fecha_en_texto(res.get("numero"))
         if f:
@@ -398,7 +409,24 @@ def evaluar_termino_vs_aprobacion(enr: Optional[dict], cert: Optional[dict]) -> 
     if not fin:
         return abstener("el certificado no declara una fecha de término legible")
 
-    pasa, porque = expediente_verificado(enr.get("verificacion_expediente"))
+    # La RESOLUCIÓN LEÍDA (validacion.resolucion_aprobacion) es la identidad más
+    # directa que existe: el acto que aprobó el expediente dice quién lo elaboró.
+    #   · nombra al emisor → identidad confirmada por documento oficial: se compara;
+    #   · nombra a OTRO   → comparar sería medir contra el encargo de otra empresa:
+    #                        abstención con la razón escrita;
+    #   · no nombra a nadie → decide el gate del contrato (como antes).
+    lectura = enr.get("resolucion_aprobacion")
+    lectura = lectura if isinstance(lectura, dict) else {}
+    if lectura.get("coincide_emisor") == "nombra_otro":
+        return abstener(
+            f"No se compara el término declarado ({_dmy(fin)}) contra la aprobación: "
+            "la resolución que aprobó el expediente nombra como consultor a "
+            f"{str(lectura.get('detalle_emisor') or 'otra empresa')[:90]}, no a quien "
+            "emitió la constancia; confirmar quién elaboró este expediente.")
+    if lectura.get("coincide_emisor") == "confirma":
+        pasa, porque = True, ""
+    else:
+        pasa, porque = expediente_verificado(enr.get("verificacion_expediente"))
     if not pasa:
         return abstener(f"No se compara el término declarado ({_dmy(fin)}) contra "
                         f"la aprobación del expediente: {porque}.")

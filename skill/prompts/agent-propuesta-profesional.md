@@ -105,6 +105,14 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
        objeto + ubicación.
      - **NO** le pegues la metadata desprendible (m², nº de pisos, monto, SNIP/CUI):
        esa va a `area_construida_m2`, `monto_contrato_soles`, `cui`.
+   - **Expedientes técnicos — resolución de aprobación citada**: si el certificado
+     dice que el expediente fue aprobado con una resolución («aprobado mediante
+     Resolución Gerencial N° 274-2019-GRH/GR de fecha 18 de junio de 2019»), copia
+     el número LITERAL en `resolucion_aprobacion_numero` y la fecha en
+     `resolucion_aprobacion_fecha` (ISO; si solo hay mes/año, `"YYYY-MM (anotación)"`).
+     Si el certificado no la cita, `null` en ambos: **no la busques ni la deduzcas**.
+     El backend la cruza con la resolución publicada en el MEF; un número que
+     coincide es la evidencia más fuerte de que el certificado habla de ese proyecto.
    - `cui`: si el texto cita "CUI NNNN" o "SNIP NNNN", pon **solo los dígitos**
      aquí. Si el cert muestra **ambos** (un SNIP de 6 díg y un CUI de 7 díg del
      mismo proyecto), captura **siempre el CUI de 7 díg** (código único estable) —

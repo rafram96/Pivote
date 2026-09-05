@@ -489,10 +489,14 @@ class EtapaInfoObrasReal:
                  dir_descargas: Optional[Path] = None,
                  descargar: Optional[Callable] = None,
                  verificador_mef: Optional[Callable] = None,
-                 consulta_ocds: Optional[Callable] = None):
+                 consulta_ocds: Optional[Callable] = None,
+                 lector_resolucion: Optional[Callable] = None):
         self._fetcher = fetcher
         self.dir_descargas = dir_descargas
         self._descargar = descargar
+        # Lectura de la resolución de aprobación (red + OCR local). Inyectable en
+        # tests; None → `validacion.resolucion_aprobacion.leer_resolucion`.
+        self._lector_resolucion = lector_resolucion
         # Verificación de expedientes contra el MEF (módulo T-003). Inyectable en
         # tests; en producción usa scraping.mef.verificar_cui (best-effort, red).
         self._verificar_mef = verificador_mef
@@ -521,6 +525,34 @@ class EtapaInfoObrasReal:
                 return self._fetcher(cui)
         from scraping.infoobras import fetch_by_cui
         return fetch_by_cui(cui, cert_ini, cert_fin, obra_id)
+
+    def _leer_resolucion_aprobacion(self, ctx, exp: dict, cui, vmef: dict) -> Optional[dict]:
+        """Descarga y lee la resolución de aprobación del 08-A (si el MEF la publica).
+
+        Devuelve el bloque `resolucion_aprobacion` o None. Best-effort y acotado:
+        solo si hay URL, carpeta de datos y no se desactivó con
+        `PIVOTE_LEER_RESOLUCION=0`. Sin Tesseract en el host, un escaneo queda
+        como «sin texto» (nunca inventa una fecha). Inyectable vía `_lector_resolucion`."""
+        if (os.getenv("PIVOTE_LEER_RESOLUCION", "1") or "1").strip() in ("0", "no", "false"):
+            return None
+        res = vmef.get("resolucion") if isinstance(vmef.get("resolucion"), dict) else {}
+        url = res.get("url")
+        if not url or self.dir_descargas is None:
+            return None
+        destino = carpeta_job(Path(self.dir_descargas), ctx.job.job_id) / "resoluciones"
+        emisor = str(exp.get("entidad_emisora") or exp.get("nombre_emisor") or "").strip()
+        lector = self._lector_resolucion
+        if lector is None:
+            from validacion.resolucion_aprobacion import leer_resolucion as lector
+        try:
+            lectura = lector(url, destino, emisor=emisor, cui=cui, numero=res.get("numero"),
+                             numero_citado=exp.get("resolucion_aprobacion_numero"))
+            if isinstance(lectura, dict):
+                lectura["numero_citado"] = exp.get("resolucion_aprobacion_numero")
+            return lectura
+        except Exception as ex:  # noqa: BLE001 — leer un PDF nunca tumba el análisis
+            logger.debug("resolución de aprobación CUI %s: %s", cui, ex)
+            return None
 
     def _verificar_expediente_mef(self, exp: dict, cui, codsnip="") -> Optional[dict]:
         """Verifica un expediente contra el MEF (contrato/contratista/resolución).
@@ -656,6 +688,26 @@ class EtapaInfoObrasReal:
                         mensaje=f"expediente verificado contra el MEF (CUI {cui}"
                                 f"{f' · contrato {_ct}' if _ct else ''})",
                         origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+                    # La RESOLUCIÓN que aprobó el expediente, leída (capa de texto u
+                    # OCR local): fecha oficial para la Regla B y consultor nombrado.
+                    lectura = self._leer_resolucion_aprobacion(ctx, _e, cui, _vmef)
+                    if lectura:
+                        enr["resolucion_aprobacion"] = lectura
+                        if lectura.get("fecha"):
+                            _vmef.setdefault("resolucion", {})["fecha"] = lectura["fecha"]
+                        if lectura.get("coincide_emisor") == "nombra_otro":
+                            obs.append(pipeline.Observacion(
+                                codigo="RESOLUCION_ET", severidad=pipeline.Severidad.ADVERTENCIA,
+                                mensaje=("la resolución que aprobó el expediente nombra a otro "
+                                         f"consultor ({str(lectura.get('detalle_emisor') or '')[:80]}), "
+                                         "no al emisor del certificado — confirmar quién lo elaboró"),
+                                origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+                        elif lectura.get("coincide_emisor") == "confirma":
+                            obs.append(pipeline.Observacion(
+                                codigo="RESOLUCION_ET", severidad=pipeline.Severidad.INFO,
+                                mensaje="la resolución que aprobó el expediente nombra al emisor "
+                                        "del certificado como consultor",
+                                origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
             ctx.enriquecimiento[k] = enr
             cont["ok"] += 1
             if periodos:

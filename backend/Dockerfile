@@ -12,6 +12,12 @@ ENV TZ=America/Lima \
 
 WORKDIR /app
 
+# Tesseract (español + OSD) para leer en el servidor las resoluciones de
+# aprobación del MEF cuando vienen escaneadas. Mismo motor y modo que la skill.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-spa tesseract-ocr-osd \
+    && rm -rf /var/lib/apt/lists/*
+
 # Solo requirements primero → cachea la capa de dependencias.
 # psycopg2-binary, rapidfuzz y openpyxl traen wheels: no hacen falta libs del SO.
 COPY backend/requirements.txt ./requirements.txt

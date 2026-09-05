@@ -87,3 +87,9 @@
   desaparecía del total sin más rastro que un «fecha sin leer» en el motivo. Un
   dato con regla de interpretación (fechas parciales, tipos, etiquetas) se lee
   desde UNA función y todos los consumidores la importan.
+- **Emparejar razones sociales por palabras sueltas contra un documento que habla
+  del mismo lugar**: los consorcios se llaman como la obra («Consorcio Santiago»,
+  «Consorcio Salud Chocope») y la resolución de aprobación nombra ese lugar en
+  cada párrafo. Un criterio por tokens dio 10 «aciertos» que eran topónimos; por
+  frase completa junto al rol quedaron 2 reales. Comparar nombres de empresa
+  siempre como frase, y cerca de la palabra que les da rol (consultor, contratista).
