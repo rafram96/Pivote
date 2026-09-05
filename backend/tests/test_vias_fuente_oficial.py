@@ -111,8 +111,11 @@ def _contrato(numero, contratista, objeto="ELABORACION DEL EXPEDIENTE TECNICO"):
 
 
 def test_contrato_de_expediente_a_nombre_del_emisor_promueve():
+    # el CUI tiene DOS contratos de expediente: el más barato es de otro consultor
+    # (es el que elige la ficha) y el del emisor es el segundo → igual promueve
     etapa = EtapaInfoObrasReal(contratos_mef=_contratos(
-        {"2425571": [_contrato("082-2021", "CONSORCIO CONSULTOR PARACAS")]}),
+        {"2425571": [{**_contrato("013-2021", "OTRO CONSULTOR EIRL"), "monto": 10.0},
+                     {**_contrato("082-2021", "CONSORCIO CONSULTOR PARACAS"), "monto": 500.0}]}),
         ficha_08a=lambda cui: None)
     ctx = _ctx(ENR_REV, EXP_CONS)
     obs = etapa._promover_expedientes_por_fuente_oficial(ctx)

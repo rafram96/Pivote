@@ -244,6 +244,21 @@ def normalizar_contratos(raw: list) -> list[dict]:
     return out
 
 
+def contratos_de_expediente(contratos: list[dict]) -> list[dict]:
+    """TODOS los contratos de elaboración de expediente/estudio del CUI (sin los de
+    supervisión/evaluación/ejecución de obra), del más barato al más caro. Un CUI
+    puede tener varios (original, actualización, componentes): para saber si el
+    emisor de un certificado fue contratista hay que mirarlos todos, no solo el
+    que elige `contrato_de_expediente` para la ficha. Función PURA."""
+    # «Consultoría DE OBRA para la elaboración del expediente» ES un contrato de
+    # expediente (así se llama la contratación en OSCE); lo que se excluye es la
+    # supervisión/evaluación/ejecución de la obra, no la palabra «obra».
+    exp = [c for c in contratos or [] if re.search(r"expediente|estudio", c.get("objeto") or "", re.I)
+           and not re.search(r"supervisi|evaluaci|ejecuci[oó]n\s+de\s+(?:la\s+)?obra",
+                             c.get("objeto") or "", re.I)]
+    return sorted(exp, key=lambda c: (c.get("monto") if c.get("monto") is not None else float("inf")))
+
+
 def contrato_de_expediente(contratos: list[dict]) -> Optional[dict]:
     """Entre los contratos del CUI, elige el de ELABORACIÓN del expediente (no el
     de supervisión/ejecución de obra). Prefiere objeto 'expediente' sin

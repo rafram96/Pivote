@@ -1076,7 +1076,7 @@ class EtapaInfoObrasReal:
             return obs
         if self._verificar_mef is None and self._contratos_mef_fn is None and self._ficha_08a is None:
             return obs
-        from scraping.mef import _nombres_coinciden, contrato_de_expediente
+        from scraping.mef import _nombres_coinciden, contratos_de_expediente
         tipo_decl = tipo_evaluacion_del_espejo(ctx.espejo)
         for e, (np_, ne) in ctx.items_experiencia():
             k = _clave(np_, ne)
@@ -1097,27 +1097,29 @@ class EtapaInfoObrasReal:
             positivos: list[tuple[str, str, str]] = []
             for c in candidatos[:max_candidatos]:
                 cui = str(c["cui"])
+                # (a) CUALQUIER contrato de expediente del CUI a nombre del emisor: un
+                # CUI puede tener varios (original, actualización, componente) y el
+                # más barato —el que elige la ficha— no tiene por qué ser el suyo.
                 try:
-                    ce = contrato_de_expediente(self._contratos_mef(cui))
+                    ces = contratos_de_expediente(self._contratos_mef(cui))
                 except Exception as ex:  # noqa: BLE001
                     logger.debug("contratos MEF %s: %s", cui, ex)
-                    ce = None
-                if ce and _nombres_coinciden(emisor, ce.get("contratista") or ""):
+                    ces = []
+                ce = next((x for x in ces
+                           if _nombres_coinciden(emisor, x.get("contratista") or "")), None)
+                if ce:
                     positivos.append((cui, "CONTRATO",
                                       f"el contrato de expediente {ce.get('numero')} del MEF "
                                       f"está a nombre de {ce.get('contratista')}"))
                     continue
-                try:
-                    info = self._resolucion_08a(cui)
-                except Exception as ex:  # noqa: BLE001
-                    logger.debug("08-A %s: %s", cui, ex)
-                    info = None
-                if info and info.get("url"):
+                # (b) alguna de las resoluciones de aprobación del 08-A nombra al emisor
+                for info in self._resoluciones_08a(cui):
                     lect = self._leer_resolucion_aprobacion(ctx, e, cui, {"resolucion": info})
                     if lect and lect.get("coincide_emisor") == "confirma":
                         positivos.append((cui, "RESOLUCION",
                                           f"la resolución de aprobación {info.get('numero') or ''} "
                                           "nombra al emisor del certificado como consultor".replace("  ", " ")))
+                        break
             cuis = {p[0] for p in positivos}
             if len(cuis) != 1:
                 if len(cuis) > 1:
@@ -1144,17 +1146,36 @@ class EtapaInfoObrasReal:
                 origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
         return obs
 
-    def _resolucion_08a(self, cui: str) -> Optional[dict]:
-        """`{url, numero, documento}` de la resolución de aprobación del 08-A de un
-        CUI, o None. Inyectable (`ficha_08a`); por defecto consulta el MEF solo si
-        la verificación MEF está cableada (modo real)."""
+    def _resoluciones_08a(self, cui: str, maximo: int = 2) -> list[dict]:
+        """Resoluciones de aprobación del 08-A de un CUI: `[{url, numero, documento}]`,
+        la mejor candidata primero y luego los demás documentos de aprobación (un
+        expediente suele tener original + modificatorias; cualquiera puede nombrar al
+        consultor). Inyectable (`ficha_08a`, que puede devolver dict o lista); por
+        defecto consulta el MEF solo si la verificación MEF está cableada."""
         if self._ficha_08a is not None:
-            return self._ficha_08a(cui)
-        if self._verificar_mef is None:
-            return None
-        from scraping import mef
-        html = mef.fetch_ficha_08a(cui)
-        return (mef.parsear_ficha_08a(html) or {}).get("resolucion") if html else None
+            r = self._ficha_08a(cui)
+        elif self._verificar_mef is None:
+            return []
+        else:
+            from scraping import mef
+            html = mef.fetch_ficha_08a(cui)
+            ficha = mef.parsear_ficha_08a(html) if html else {}
+            r = [ficha.get("resolucion")] + [
+                {"url": d.get("url"), "numero": None, "documento": d.get("label")}
+                for d in (ficha.get("documentos") or []) if str(d.get("es_aprobacion")) == "True"]
+        lista = r if isinstance(r, list) else ([r] if r else [])
+        out, vistas = [], set()
+        for d in lista:
+            if not isinstance(d, dict) or not d.get("url") or d["url"] in vistas:
+                continue
+            vistas.add(d["url"])
+            out.append(d)
+        return out[:maximo]
+
+    def _resolucion_08a(self, cui: str) -> Optional[dict]:
+        """La mejor resolución de aprobación del 08-A (compatibilidad)."""
+        res = self._resoluciones_08a(cui, maximo=1)
+        return res[0] if res else None
 
     def _leer_resoluciones_de_candidatos(self, ctx, max_candidatos: int = 2) -> int:
         if (os.getenv("PIVOTE_LEER_RESOLUCION", "1") or "1").strip() in ("0", "no", "false"):

@@ -1109,3 +1109,9 @@ instrumento — ver nota):
 → comparar contra `golden_cui_baseline.json`. Criterio: mal-resueltos nunca
 suben, cero correcto→incorrecto. Nunca relajar compuertas para "ganar" casos
 (ADR-005).
+
+## 2026-09-05 — Medición de las vías NUMERO/CONTRATO/RESOLUCION sobre una corrida real
+- Job resubido (`scripts/resubir_job.py`): pendientes **21 → 11** (49 experiencias, 12 profesionales; profesionales con pendientes 9 → 8; ningún CUI resuelto cambió).
+- Fixes que salieron de la medición: `mef.contratos_de_expediente` (todos los contratos ET, no el más barato; «consultoría de obra para la elaboración del expediente» ES contrato de expediente), `EtapaInfoObrasReal._resoluciones_08a` (hasta 2 documentos de aprobación por candidato).
+- Los 11 restantes: sin candidato o con contrato/resolución que nombra a otro consultor → no resolubles con fuentes oficiales; el Excel muestra la evidencia.
+- Suite: 1097 passed, 25 skipped. Pre-pase aplicable offline a un job ya corrido (ver handoff raíz `.ai/handoffs/2026-09-05_claude.md`).
