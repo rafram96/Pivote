@@ -380,3 +380,295 @@ def fuente_mef(enr: Optional[dict]) -> dict:
                                "Consultor según resolución: sin resolución leída")
     return {"sin_documentos": False, "contrato": texto_contrato,
             "resolucion": texto_resol, "consultor": consultor}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Proyección para el PANEL
+# ─────────────────────────────────────────────────────────────────────────────
+# El Excel pinta HEX; el Panel quiere un nombre de color estable. Ambos leen la
+# MISMA clasificación (`clasificar_identificacion`), así que la leyenda del
+# entregable y la del panel no pueden divergir.
+
+VERDE = "verde"
+VIOLETA = "violeta"
+AMARILLO = "amarillo"
+GRIS = "gris"
+
+_NOMBRE_POR_COLOR = {
+    COLOR_VERIFICADO: VERDE,
+    COLOR_INFERIDO: VIOLETA,
+    COLOR_SIN_IDENTIFICAR: AMARILLO,
+    COLOR_PRIVADA: GRIS,
+}
+
+
+def color_nombre(color: Optional[str]) -> str:
+    """HEX de la paleta → nombre de color del Panel (`verde`/`violeta`/
+    `amarillo`/`gris`). Lo desconocido cae en `amarillo`, igual que
+    `bucket_certeza` cae en «sin identificar»: nunca se inventa un verde."""
+    return _NOMBRE_POR_COLOR.get(_texto(color).upper(), AMARILLO)
+
+
+_VIA_CITADA_TEXTO = {
+    "CUI_TEXTO": "citado en el texto del certificado",
+    "CODIGO": "citado como código de obra en el certificado",
+    "MANUAL": "confirmado a mano por el evaluador",
+}
+_VIA_INFERIDA_TEXTO = {
+    "NOMBRE": "inferido por el nombre del proyecto",
+    "NUMERO": "inferido por el número que cita el certificado",
+    "MEF": "inferido por búsqueda en el banco de inversiones del MEF",
+    "PROBABLE": "inferido por coincidencia probable",
+}
+_VIA_MEF_TEXTO = {
+    "CONTRATO": "confirmado por el contrato que publica el MEF",
+    "RESOLUCION": "confirmado por la resolución de aprobación que publica el MEF",
+}
+
+
+def _respaldo_mef(enr: dict) -> str:
+    """Una frase llana con lo que el MEF publica (o no) de este expediente."""
+    panel = fuente_mef_panel(enr)
+    if panel["estado"] == MEF_SIN_DOCUMENTOS:
+        return "el MEF no publica contrato ni resolución de este expediente"
+    partes: list[str] = []
+    contrato = panel["contrato"]
+    if contrato:
+        if contrato["del_emisor"]:
+            partes.append("el MEF publica un contrato a nombre del emisor "
+                          "del certificado")
+        elif contrato["contratista"]:
+            partes.append("el MEF publica contrato a nombre de otro contratista "
+                          f"({contrato['contratista']})")
+        else:
+            partes.append("el MEF publica un contrato del expediente, sin "
+                          "confirmar que sea del emisor")
+    resol = panel["resolucion"]
+    if resol:
+        partes.append({
+            "confirma": "la resolución de aprobación nombra al emisor",
+            "nombra_otro": "la resolución de aprobación nombra a OTRO consultor",
+            "no_nombra": "la resolución de aprobación no nombra al consultor",
+        }.get(_texto(resol.get("coincide_emisor")),
+              "el MEF publica la resolución que aprobó el expediente"))
+    return "; ".join(partes)
+
+
+def detalle_identificacion(exp: Optional[dict], enr: Optional[dict]) -> str:
+    """POR QUÉ esta experiencia tiene esa certeza, en llano: la vía con que se
+    llegó al CUI y el respaldo documental del MEF.
+
+    Ej.: «CUI 2412686 inferido por el nombre del proyecto; el MEF publica
+    contrato a nombre de otro contratista»."""
+    exp, enr = _dic(exp), _dic(enr)
+    nivel = clasificar_identificacion(exp, enr)["nivel"]
+    via = via_de(enr, exp)
+    cui = _cui_de(enr, exp)
+    resueltas, total = _sub_obras(enr)
+
+    if nivel == PRIVADA:
+        return ("Obra privada: no existe registro público que consultar, la "
+                "experiencia se cuenta por el certificado")
+    if nivel == CITADO:
+        return (f"CUI {cui} " + _VIA_CITADA_TEXTO.get(via, "citado en el certificado")
+                + "; " + _respaldo_mef(enr))
+    if nivel == CONFIRMADO_MEF:
+        base = (f"CUI {cui} " if cui else "Expediente ") + _VIA_MEF_TEXTO.get(
+            via, "confirmado por un documento que el MEF publica a nombre del emisor")
+        return base + "; " + _respaldo_mef(enr)
+    if nivel == MULTI_OBRA:
+        base = (f"Certificado de {total} obras: {resueltas} identificadas en el "
+                "registro público")
+        if total - resueltas > 0:
+            base += f", {total - resueltas} sin ubicar"
+        return base + "; " + _respaldo_mef(enr)
+    if nivel == INFERIDO:
+        return (f"CUI {cui} " + _VIA_INFERIDA_TEXTO.get(via, "inferido por el backend")
+                + "; " + _respaldo_mef(enr))
+    # sin_identificar: se dice QUÉ faltó, no solo que faltó.
+    if total and resueltas == 0:
+        return (f"Certificado de {total} obras y ninguna ubicada en el registro "
+                "público; los días se cuentan como provisionales")
+    if via == "REVISION":
+        return ("El backend no pudo ubicar la obra en el registro público y la "
+                "dejó para revisión manual; los días se cuentan como provisionales")
+    if via in _VIA_CITADA:
+        return ("El certificado cita un código pero no se leyó un CUI válido; "
+                "los días se cuentan como provisionales")
+    return ("Sin CUI y sin coincidencia en el registro público; los días se "
+            "cuentan como provisionales")
+
+
+def identificacion_panel(exp: Optional[dict], enr: Optional[dict]) -> dict:
+    """`{"nivel", "etiqueta", "color", "detalle"}` — lo mismo que pinta el Excel,
+    con el color por nombre y el porqué ya redactado."""
+    certeza = clasificar_identificacion(exp, enr)
+    return {"nivel": certeza["nivel"], "etiqueta": certeza["etiqueta"],
+            "color": color_nombre(certeza["color"]),
+            "detalle": detalle_identificacion(exp, enr)}
+
+
+#: Valores posibles de `fuente_mef_panel()["estado"]`.
+MEF_SIN_DOCUMENTOS = "sin_documentos"
+MEF_CONTRATO = "contrato"
+MEF_RESOLUCION = "resolucion"
+MEF_AMBOS = "ambos"
+
+
+def fuente_mef_panel(enr: Optional[dict]) -> dict:
+    """Lo que el MEF publica del expediente, estructurado para el Panel.
+
+    ``{"estado", "contrato": {...}|None, "resolucion": {...}|None, "texto"}``.
+    `texto` es exactamente lo que imprime la PARTE 5 del Excel (`fuente_mef`),
+    para que panel y entregable no puedan contar historias distintas.
+    """
+    enr = _dic(enr)
+    textos = fuente_mef(enr)
+    texto = " · ".join(t for t in (textos["contrato"], textos["resolucion"],
+                                  textos["consultor"]) if _texto(t) and t != "—")
+
+    if textos["sin_documentos"]:
+        return {"estado": MEF_SIN_DOCUMENTOS, "contrato": None,
+                "resolucion": None, "texto": texto}
+
+    ver = _dic(enr.get("verificacion_expediente"))
+    contrato_ver = _dic(ver.get("contrato"))
+    contratista = _dic(ver.get("contratista"))
+    contrato_emisor = _dic(enr.get("contrato_emisor"))
+    resol_leida = _dic(enr.get("resolucion_aprobacion"))
+    resol_ver = _dic(ver.get("resolucion"))
+
+    contrato = None
+    if contrato_emisor:
+        # Vía CONTRATO: este contrato ATA al emisor con el expediente.
+        contrato = {"numero": contrato_emisor.get("numero"),
+                    "contratista": contrato_emisor.get("contratista"),
+                    "fecha": contrato_emisor.get("fecha"),
+                    "del_emisor": True, "otros": []}
+    elif (contrato_ver.get("numero") or contrato_ver.get("fecha")
+          or contrato_ver.get("fecha_suscripcion")):
+        # El contratista del MEF vive en `contratista.valor`; `declarado` es lo
+        # que dice el certificado y `emisor_certificado.empresa` el último recurso.
+        nombre = _texto(contratista.get("valor") or contratista.get("declarado")
+                        or _dic(ver.get("emisor_certificado")).get("empresa")) or None
+        # Solo `elegido_por == "emisor"` (o un veredicto `ok`) ata el contrato al
+        # emisor: `unico`/`mas_barato` son heurísticas de selección, no evidencia.
+        del_emisor = (_texto(contrato_ver.get("elegido_por")) == "emisor"
+                      or _texto(contrato_ver.get("veredicto")).lower() in _VEREDICTO_OK
+                      or _texto(contratista.get("veredicto")).lower() in _VEREDICTO_OK)
+        contrato = {"numero": contrato_ver.get("numero"),
+                    "contratista": nombre,
+                    "fecha": (contrato_ver.get("fecha_suscripcion")
+                              or contrato_ver.get("fecha")),
+                    "del_emisor": bool(del_emisor),
+                    "otros": [str(x) for x in
+                              (contrato_ver.get("otros_contratos_expediente") or [])
+                              if _texto(x)]}
+
+    resolucion = None
+    numero_res = _texto(resol_ver.get("numero") or resol_leida.get("numero")) or None
+    fecha_res = resol_leida.get("fecha") or resol_ver.get("fecha")
+    if numero_res or fecha_res or resol_leida.get("fecha_descartada"):
+        resolucion = {"numero": numero_res, "fecha": fecha_res,
+                      "coincide_emisor": resol_leida.get("coincide_emisor"),
+                      "fecha_descartada": resol_leida.get("fecha_descartada"),
+                      "fecha_motivo": resol_leida.get("fecha_motivo")}
+
+    if contrato and resolucion:
+        estado = MEF_AMBOS
+    elif contrato:
+        estado = MEF_CONTRATO
+    elif resolucion:
+        estado = MEF_RESOLUCION
+    else:
+        # No vino marcado `sin_documentos_mef` pero tampoco hay documento legible:
+        # se declara la ausencia, nunca un respaldo que no existe.
+        estado = MEF_SIN_DOCUMENTOS
+    return {"estado": estado, "contrato": contrato, "resolucion": resolucion,
+            "texto": texto}
+
+
+# ── Cubetas de días por certeza (misma aritmética que la PARTE 5) ────────────
+#: Cubeta de `bucket_certeza` → clave del resumen que consume el Panel.
+CLAVE_RESUMEN = {
+    BUCKET_CONFIRMADO: "citado_confirmado",
+    BUCKET_INFERIDO: "inferido",
+    BUCKET_SIN_IDENTIFICAR: "sin_identificar",
+    BUCKET_PRIVADA: "privada",
+}
+
+
+def resumen_certeza_profesional(prof: Optional[dict],
+                                enr_todo: Optional[dict],
+                                regla_periodos: str,
+                                tipo_evaluacion: Optional[str] = None) -> dict:
+    """Días del profesional repartidos por certeza de identificación.
+
+    Reproduce la aritmética de la PARTE 5 de expedientes (`excel_final._p5_exp`
+    / `_p5_tot_exp`): una sola fuente de fechas (`fechas_calculo` con la regla
+    de las bases), paralizaciones recortadas al periodo — y nunca en un
+    expediente ni en una obra privada —, y ALT11 (`dias_efectivos_profesional`)
+    para el total y el traslape. El Excel NO se refactoriza: hay un test que
+    compara ambas salidas para que no se separen.
+
+    `enr_todo` es el enriquecimiento completo del job (`{"N:M": {...}}`), tal
+    como lo persiste el orquestador. Devuelve::
+
+        {"citado_confirmado": {"experiencias": n, "dias": d}, "inferido": {...},
+         "sin_identificar": {...}, "privada": {...},
+         "dias_efectivos": d, "dias_traslape": d}
+
+    `experiencias` cuenta TODAS las de esa cubeta (también las de fechas
+    ilegibles, que no aportan días): el Panel debe poder decir «1 experiencia,
+    0 días» sin que la fila desaparezca.
+    """
+    from reglas.calculo import (dias_efectivos_profesional, dias_inclusivos,
+                                periodo_fechas, restar_paralizaciones)
+    from resolucion.cui import es_expediente_exp
+    from validacion.recalculo import fechas_calculo
+
+    prof = _dic(prof)
+    enr_todo = enr_todo if isinstance(enr_todo, dict) else {}
+    np_ = prof.get("n_prof")
+
+    periodos: list = []
+    paral_por_idx: dict = {}
+    dias = {clave: 0 for clave in CLAVE_RESUMEN.values()}
+    conteo = {clave: 0 for clave in CLAVE_RESUMEN.values()}
+
+    for exp in prof.get("experiencias") or []:
+        exp = _dic(exp)
+        enr = _dic(enr_todo.get(f"{np_}:{exp.get('n')}"))
+        cubeta = CLAVE_RESUMEN[bucket_certeza(clasificar_identificacion(exp, enr))]
+        conteo[cubeta] += 1
+
+        ini, fin, _deducida = fechas_calculo(exp, regla_periodos)
+        if not (ini and fin) or fin < ini:
+            continue
+        idx = len(periodos)
+        periodos.append((ini, fin))
+
+        # La ejecución física no descuenta tiempo de un expediente, y a una obra
+        # privada no le aplican las fuentes públicas.
+        clamp: list = []
+        privada = _texto(enr.get("via")).upper() == "PRIVADA"
+        if not (privada or es_expediente_exp(exp, tipo_evaluacion)):
+            for p in enr.get("paralizaciones") or []:
+                try:
+                    p_i, p_f = periodo_fechas(p)
+                except (ValueError, TypeError, KeyError, IndexError):
+                    continue        # dato corrupto del portal: no tumba el panel
+                c_i, c_f = max(p_i, ini), min(p_f, fin)
+                if c_f >= c_i:
+                    clamp.append((c_i, c_f))
+        if clamp:
+            paral_por_idx[idx] = clamp
+        dias[cubeta] += sum(dias_inclusivos(a, b) for a, b
+                            in restar_paralizaciones((ini, fin), clamp))
+
+    res = dias_efectivos_profesional(periodos, paral_por_idx) if periodos else None
+    salida = {clave: {"experiencias": conteo[clave], "dias": dias[clave]}
+              for clave in CLAVE_RESUMEN.values()}
+    salida["dias_efectivos"] = res.dias_efectivos if res else 0
+    salida["dias_traslape"] = res.dias_traslape if res else 0
+    return salida

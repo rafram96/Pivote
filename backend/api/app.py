@@ -37,12 +37,18 @@ from entregables import (
     generar_excel_final, mapear_certificados, reconciliar_resultados_profesionales,
     regenerar_excel_final, _zip_carpeta,
 )
+from entregables.certeza import (
+    alertas_experiencia, fuente_mef_panel, identificacion_panel,
+    resumen_certeza_profesional,
+)
 from orquestador import Motor, RepositorioArchivos, etapas_esqueleto, etapas_reales
 from orquestador.progreso import REGISTRO
+from resolucion.cui import TIPO_EXPEDIENTES, tipo_evaluacion_del_espejo
 from schemas import pipeline
 from schemas.espejo import JsonEspejo
 from schemas.nombres import nombre_descarga
 from scraping.renipress import buscar_renipress
+from validacion.recalculo import regla_periodos_de
 
 # Carpeta de datos: definible en el .env de la raíz (PIVOTE_DATA_DIR). Rutas
 # relativas quedan ancladas a backend/ — no al CWD (ver backend/config.py).
@@ -995,6 +1001,12 @@ def extraccion(job_id: str):
     espejo = _espejo_o_404(job_id)
     enr = repo.cargar_enriquecimiento(job_id) or {}
     resultados = reconciliar_resultados_profesionales(espejo, enr)
+    # ADR-010 · la certeza de identificación solo tiene sentido en un concurso de
+    # ELABORACIÓN DE EXPEDIENTES (es lo que decide la PARTE 5 de esa hoja). En
+    # «obras» la respuesta queda EXACTAMENTE como estaba.
+    tipo_eval = tipo_evaluacion_del_espejo(espejo)
+    certeza_aplica = tipo_eval == TIPO_EXPEDIENTES
+    regla_periodos = regla_periodos_de(espejo)
     profesionales = []
     for p in espejo.get("profesionales", []):
         np_ = p.get("n_prof")
@@ -1023,11 +1035,29 @@ def extraccion(job_id: str):
                 d["seace"] = ev.get("seace")
                 d["sub_obras"] = ev.get("sub_obras")
                 d["multi_rubro"] = ev.get("multi_rubro")
+                # Evidencia del MEF que la PARTE 5 del Excel ya lee: se expone
+                # cruda para que el Panel pueda enlazar el documento y contrastar
+                # fechas sin re-derivar nada.
+                d["resolucion_aprobacion"] = ev.get("resolucion_aprobacion")
+                d["camino"] = ev.get("camino")
+                d["sin_documentos_mef"] = ev.get("sin_documentos_mef")
+                d["contrato_emisor"] = ev.get("contrato_emisor")
+                d["identificacion_incompleta"] = ev.get("identificacion_incompleta")
+                d["cruces_fechas"] = ev.get("cruces_fechas")
+            if certeza_aplica:
+                # Misma clasificación (y mismos textos) que pinta el entregable:
+                # una sola fuente de verdad para Excel y Panel.
+                evd = ev if isinstance(ev, dict) else {}
+                d["identificacion"] = identificacion_panel(e, evd)
+                d["alertas"] = alertas_experiencia(e, evd)
+                d["fuente_mef"] = fuente_mef_panel(evd)
             experiencias.append(d)
         resultado = resultados.get(np_) or {}
         veredicto_efectivo = resultado.get("cumple_backend") or p.get("cumple")
         texto_efectivo = str(veredicto_efectivo or "").upper()
         estado_efectivo = _estado_veredicto(texto_efectivo)
+        certeza = (resumen_certeza_profesional(p, enr, regla_periodos, tipo_eval)
+                   if certeza_aplica else None)
         profesionales.append({
             "n_prof": np_,
             "cargo": p.get("cargo"),
@@ -1047,9 +1077,10 @@ def extraccion(job_id: str):
                 "anios": resultado.get("anios_efectivos"),
                 "provisional": bool(resultado.get("veredicto_provisional")),
             },
+            "certeza": certeza,
             "experiencias": experiencias,
         })
-    return {"profesionales": profesionales}
+    return {"profesionales": profesionales, "tipo_evaluacion": tipo_eval}
 
 
 @app.get("/api/pivote/jobs/{job_id}/resumen")
@@ -1060,6 +1091,10 @@ def resumen(job_id: str):
 
     enr = repo.cargar_enriquecimiento(job_id)
     resultados = reconciliar_resultados_profesionales(espejo, enr)
+    # ADR-010 · igual que en /espejo: el desglose por certeza es de expedientes.
+    tipo_eval = tipo_evaluacion_del_espejo(espejo)
+    certeza_aplica = tipo_eval == TIPO_EXPEDIENTES
+    regla_periodos = regla_periodos_de(espejo)
     veredictos = []
     for p in espejo.get("profesionales", []):
         total = p.get("total") or {}
@@ -1093,6 +1128,9 @@ def resumen(job_id: str):
             "minimo_anios": d.get("minimo_anios"),
             "motivo_backend": motivo,
             "fuente": "verificación determinística" if d else None,
+            "certeza": (resumen_certeza_profesional(p, enr or {}, regla_periodos,
+                                                    tipo_eval)
+                        if certeza_aplica else None),
         })
 
     alertas = []
@@ -1139,6 +1177,7 @@ def resumen(job_id: str):
     return {
         "job_id": job_id,
         "postor": job.postor or job.analisis_id,
+        "tipo_evaluacion": tipo_eval,
         "confiabilidad": job.confiabilidad,
         "hallazgos_criticos": [
             o.model_dump(mode="json") for o in job.hallazgos_criticos
