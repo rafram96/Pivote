@@ -491,7 +491,8 @@ class EtapaInfoObrasReal:
                  verificador_mef: Optional[Callable] = None,
                  consulta_ocds: Optional[Callable] = None,
                  lector_resolucion: Optional[Callable] = None,
-                 ficha_08a: Optional[Callable] = None):
+                 ficha_08a: Optional[Callable] = None,
+                 contratos_mef: Optional[Callable] = None):
         self._fetcher = fetcher
         self.dir_descargas = dir_descargas
         self._descargar = descargar
@@ -501,6 +502,8 @@ class EtapaInfoObrasReal:
         # `{url, numero, documento}` de la resolución del 08-A de un CUI candidato.
         # Inyectable; None → MEF real solo si la verificación MEF está cableada.
         self._ficha_08a = ficha_08a
+        # Contratos del DWH del MEF por CUI (vía CONTRATO). Inyectable; None → real.
+        self._contratos_mef_fn = contratos_mef
         # Verificación de expedientes contra el MEF (módulo T-003). Inyectable en
         # tests; en producción usa scraping.mef.verificar_cui (best-effort, red).
         self._verificar_mef = verificador_mef
@@ -826,6 +829,12 @@ class EtapaInfoObrasReal:
         # cert MULTI-OBRA: enriquece cada sub-obra resuelta con su ficha real (la
         # etapa de resolución solo verificó existencia por código). Se hace ANTES del
         # loop de cui único (esas experiencias tienen cui=None y se saltarían).
+        # Expedientes en revisión: antes de consultar InfoObras, intentar identificar
+        # la obra por FUENTE OFICIAL del MEF (contrato de expediente a nombre del
+        # emisor, o resolución de aprobación que lo nombra). Lo que se promueve
+        # entra al bucle de abajo como una experiencia resuelta más.
+        obs.extend(self._promover_expedientes_por_fuente_oficial(ctx))
+
         for _e, (np_, ne) in ctx.items_experiencia():
             enr = ctx.enriquecimiento.get(_clave(np_, ne)) or {}
             if enr.get("via") == "MULTI_OBRA" and enr.get("sub_obras"):
@@ -1040,6 +1049,101 @@ class EtapaInfoObrasReal:
                   else (EE.OK_CON_REVISION if cont["rev"] else EE.OK))
         return _res(self.nombre, estado, _met(total, cont["ok"], cont["rev"], cont["err"]), obs)
 
+    def _contratos_mef(self, cui: str) -> list[dict]:
+        """Contratos normalizados del DWH del MEF para un CUI. Inyectable
+        (`contratos_mef`); por defecto consulta el MEF solo en modo real."""
+        if self._contratos_mef_fn is not None:
+            return list(self._contratos_mef_fn(cui) or [])
+        if self._verificar_mef is None:
+            return []
+        from scraping import mef
+        return mef.normalizar_contratos(mef.fetch_contratos(cui))
+
+    def _promover_expedientes_por_fuente_oficial(self, ctx, max_candidatos: int = 3
+                                                 ) -> list[pipeline.Observacion]:
+        """Vías CONTRATO y RESOLUCION para expedientes que el resolver dejó en revisión.
+
+        Por cada candidato: (a) si el MEF publica un contrato DE EXPEDIENTE del CUI
+        cuyo contratista es el emisor del certificado → CONTRATO; (b) si la
+        resolución de aprobación del CUI nombra al emisor como consultor → RESOLUCION.
+        Se promueve SOLO si exactamente un CUI recibe señal: dos candidatos con señal,
+        o ninguno, dejan la experiencia en revisión. Medido en la corrida real del
+        5-sep-2026: rescata 4 de 21 pendientes; ninguno con dos candidatos positivos.
+        Decisión del desarrollador (5-sep): no habrá golden; se promueve con fuente
+        oficial y condiciones estrictas."""
+        obs: list[pipeline.Observacion] = []
+        if (os.getenv("PIVOTE_LEER_RESOLUCION", "1") or "1").strip() in ("0", "no", "false"):
+            return obs
+        if self._verificar_mef is None and self._contratos_mef_fn is None and self._ficha_08a is None:
+            return obs
+        from scraping.mef import _nombres_coinciden, contrato_de_expediente
+        tipo_decl = tipo_evaluacion_del_espejo(ctx.espejo)
+        for e, (np_, ne) in ctx.items_experiencia():
+            k = _clave(np_, ne)
+            enr = ctx.enriquecimiento.get(k) or {}
+            if enr.get("cui") or enr.get("via") != "REVISION":
+                continue
+            if not es_expediente_exp(e, tipo_decl, self.forzar_expedientes):
+                continue
+            emisor = str(e.get("entidad_emisora") or e.get("nombre_emisor") or "").strip()
+            if not emisor:
+                continue
+            candidatos, vistos = [], set()
+            for c in (enr.get("candidatos") or []):
+                cc = str(c.get("cui") or "")
+                if cc and cc not in vistos:
+                    vistos.add(cc)
+                    candidatos.append(c)
+            positivos: list[tuple[str, str, str]] = []
+            for c in candidatos[:max_candidatos]:
+                cui = str(c["cui"])
+                try:
+                    ce = contrato_de_expediente(self._contratos_mef(cui))
+                except Exception as ex:  # noqa: BLE001
+                    logger.debug("contratos MEF %s: %s", cui, ex)
+                    ce = None
+                if ce and _nombres_coinciden(emisor, ce.get("contratista") or ""):
+                    positivos.append((cui, "CONTRATO",
+                                      f"el contrato de expediente {ce.get('numero')} del MEF "
+                                      f"está a nombre de {ce.get('contratista')}"))
+                    continue
+                try:
+                    info = self._resolucion_08a(cui)
+                except Exception as ex:  # noqa: BLE001
+                    logger.debug("08-A %s: %s", cui, ex)
+                    info = None
+                if info and info.get("url"):
+                    lect = self._leer_resolucion_aprobacion(ctx, e, cui, {"resolucion": info})
+                    if lect and lect.get("coincide_emisor") == "confirma":
+                        positivos.append((cui, "RESOLUCION",
+                                          f"la resolución de aprobación {info.get('numero') or ''} "
+                                          "nombra al emisor del certificado como consultor".replace("  ", " ")))
+            cuis = {p[0] for p in positivos}
+            if len(cuis) != 1:
+                if len(cuis) > 1:
+                    _traza_seguro("promocion_ambigua", k=k, cuis=sorted(cuis))
+                continue
+            cui, via, detalle = positivos[0]
+            cand = next(c for c in candidatos if str(c["cui"]) == cui)
+            enr.update({
+                "cui": cui, "via": via,
+                "obra": {"cui": cui, "nombre_obra": cand.get("nombre_obra"),
+                         "departamento": cand.get("departamento"),
+                         "obra_id": cand.get("obra_id")},
+                "decision": f"identificado por fuente oficial del MEF: {detalle}",
+            })
+            ctx.enriquecimiento[k] = enr
+            for it in ctx.job.items_revision:
+                if it.n_prof == np_ and it.n_exp == ne and not it.resuelto:
+                    it.resuelto = True
+                    it.motivo = (str(it.motivo or "").rstrip(" .") +
+                                 f" · RESUELTO AUTOMÁTICAMENTE ({via}): {detalle}")
+            obs.append(pipeline.Observacion(
+                codigo="VIA_" + via, severidad=pipeline.Severidad.INFO,
+                mensaje=f"obra identificada por fuente oficial del MEF (CUI {cui}): {detalle}",
+                origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+        return obs
+
     def _resolucion_08a(self, cui: str) -> Optional[dict]:
         """`{url, numero, documento}` de la resolución de aprobación del 08-A de un
         CUI, o None. Inyectable (`ficha_08a`); por defecto consulta el MEF solo si
@@ -1145,6 +1249,15 @@ def _estado_seccion(secciones: dict, avisos: list[str], nombre: str,
     secciones[nombre] = {
         "estado": estado, "esperados": esperados, "descargados": descargados,
     }
+
+
+def _traza_seguro(evento: str, **datos) -> None:
+    """Evento de traza sin depender de que exista una traza activa."""
+    try:
+        from observabilidad.traza import actual
+        actual().ev(evento, **datos)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def frases_resoluciones_candidatos(lecturas: list[dict]) -> list[str]:

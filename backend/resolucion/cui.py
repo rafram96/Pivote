@@ -119,7 +119,7 @@ DEPTO_ALIAS = {"HVCA": "HUANCAVELICA"}
 _RE_EST = re.compile(
     r"(hospital[^,(]*|puesto de salud[^,(]*|centro de salud[^,(]*|"
     r"establecimiento de salud[^,(]*|centro asistencial[^,(]*|"
-    r"policl[ií]nico[^,(;]*|centro materno[^,(;]*|"
+    r"policl[ií]nico[^,(;]*|centro materno[^,(;]*|cl[ií]nica[^,(;]*|"
     r"\binsn\b[^,(;]*|\binen\b[^,(;]*)", re.I)
 
 _META = re.compile(
@@ -1893,6 +1893,38 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
                 "decision": "el RUC del emisor es ejecutor/supervisor de la obra",
                 "candidatos": candidatos, "obra": obra_best}
 
+    # ── VÍA NÚMERO DE INSTITUCIÓN ────────────────────────────────────────────
+    # «Mismo N° de I.E./C.E. → casi seguro la misma obra» (así lo define _puntuar,
+    # la señal MÁS fuerte para obras educativas). Sin embargo solo sumaba puntos, y
+    # un nombre sin tokens distintivos ("MEJORAMIENTO DEL SERVICIO EDUCATIVO EN LA
+    # I.E. N° 22489") no pasaba la compuerta de nombre: dos casos reales con el
+    # candidato correcto a la vista (mismo número, presente en InfoObras y en el
+    # MEF, puntaje 170+) se iban a revisión. Condiciones, todas obligatorias:
+    #   · el número del certificado está en la obra (num_match) y NINGÚN otro CUI
+    #     del ranking lo comparte (si dos obras llevan el mismo número —mejoramiento
+    #     y ampliación de la misma escuela— el número no distingue);
+    #   · el candidato llegó por InfoObras (no es un solo-MEF sin corroborar);
+    #   · sin contradicción de ubicación (loc_contra) — el rubro ya vetó antes;
+    #   · puntaje de nombre ≥ 70, el mismo mínimo de la vía NOMBRE.
+    #   · la obra no introduce un rubro que el certificado no menciona: «renovación
+    #     de alcantarillado en la I.E. 14325» comparte número con «construcción de
+    #     la I.E. 14325» y es otra intervención (visto en el replay del 5-sep).
+    #   · el departamento de la obra, si se conoce, está entre los que el
+    #     certificado declara (en el nombre o en `ubicacion`).
+    _deptos_cert = ubicacion(proyecto) | ubicacion(str(exp.get("ubicacion") or ""))
+    _dep_best = norm(str((best or {}).get("departamento") or ""))
+    _depto_ok = not _deptos_cert or not _dep_best or _dep_best in _deptos_cert
+    if best and best.get("num_match") and not loc_contra and _depto_ok \
+            and best.get("origen") in (None, "infoobras", "ambos") \
+            and best["score"] >= 70 \
+            and not (rubros_de(best.get("nombre_obra") or "") - rubros_de(proyecto)) \
+            and not any(c.get("num_match") and c["cui"] != best["cui"] for c in ranked):
+        _traza().ev("via_numero", cui=best["cui"], score=best["score"])
+        return {"estado": "resuelto", "cui": best["cui"], "via": "NUMERO",
+                "decision": "el número de la institución educativa del certificado "
+                            "coincide con la obra y ninguna otra obra lo comparte",
+                "candidatos": candidatos, "obra": obra_best}
+
     # ── GUARD DE EMPATE ENTRE CUIs DISTINTOS (F7) ────────────────────────────
     # Si el mejor candidato ELEGIBLE y otro CUI distinto quedan a ≤ DELTA puntos y
     # NINGUNA señal DURA los separa (RUC / N° de institución / entidad ≈ ficha MEF
@@ -1989,6 +2021,23 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
                     "identifique la obra (solo palabras genéricas y el nombre de la "
                     "entidad) y ninguna señal dura confirma al candidato — elegir "
                     "en revisión"),
+                "candidatos": candidatos, "obra": None}
+
+    # ── RUBRO AÑADIDO POR LA OBRA (abstención) ──────────────────────────────
+    # La obra hallada nombra un rubro que el certificado no menciona: «renovación
+    # de la red de ALCANTARILLADO en la I.E. 14325» frente a «construcción de la
+    # I.E. 14325». Comparten el establecimiento y el número, pero es OTRA
+    # intervención. El veto de rubro no la frena porque la obra también es
+    # educativa; aquí se manda a revisión con la obra a la vista (nunca resuelve).
+    _rub_cert = rubros_de(proyecto)
+    _rub_extra = (rubros_de((best or {}).get("nombre_obra") or "") - _rub_cert) if best else set()
+    if best and _rub_cert and _rub_extra and not best.get("ruc_match"):
+        _traza().ev("rubro_anadido_por_obra", cui=best["cui"], extra=sorted(_rub_extra))
+        return {"estado": "revision", "cui": None, "via": "NOMBRE",
+                "decision": _con_pista_mef(exp,
+                    "la obra hallada corresponde al mismo lugar pero añade un rubro que el "
+                    f"certificado no menciona ({', '.join(sorted(_rub_extra))}) — puede ser "
+                    "otra intervención en el mismo establecimiento; confirmar"),
                 "candidatos": candidatos, "obra": None}
 
     if best and gate and best["score"] >= 70:

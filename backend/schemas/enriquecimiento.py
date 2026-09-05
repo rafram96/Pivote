@@ -35,6 +35,9 @@ class ViaResolucion(str, Enum):
     RUC = "ruc"               # cruce RUC ejecutor/supervisor de la obra → determinístico
     DEDUP = "dedup"           # heredado de un hermano con el mismo folio (mismo cert)
     NOMBRE = "nombre"         # ranking difuso + compuerta de establecimiento
+    NUMERO = "numero"         # N° de I.E./C.E. del cert coincide y es único entre las obras
+    CONTRATO = "contrato"     # contrato de expediente del MEF a nombre del emisor
+    RESOLUCION = "resolucion" # resolución de aprobación del expediente nombra al emisor
     MANUAL = "manual"         # el humano pegó el CUI tras revisión
     NA = "na"                 # obra privada/ajena a salud → no está en InfoObras
 

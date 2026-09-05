@@ -93,3 +93,9 @@
   cada párrafo. Un criterio por tokens dio 10 «aciertos» que eran topónimos; por
   frase completa junto al rol quedaron 2 reales. Comparar nombres de empresa
   siempre como frase, y cerca de la palabra que les da rol (consultor, contratista).
+- **Mismo establecimiento, otra intervención**: al abrir la vía por número de
+  institución, el replay resolvió «renovación de alcantarillado en la I.E. 14325»
+  para un certificado de «construcción de la I.E. 14325». El número identifica el
+  lugar, no la obra. Toda señal de identidad por lugar (número, nombre de colegio,
+  topónimo) necesita que la obra no añada un rubro ausente en el certificado. Y
+  antes de promover una vía nueva: replay offline sobre un job real, siempre.

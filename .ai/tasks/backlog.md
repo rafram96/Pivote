@@ -916,3 +916,7 @@ Pendiente:
 - [ ] ADR de la decisión «el backend lee documentos oficiales con OCR local»,
       con `ai-cli new decision` cuando `Pivote/.ai` valide.
 - [ ] Afinar `consultores_nombrados`: aún deja fragmentos de OCR.
+- [x] Vías NUMERO / CONTRATO / RESOLUCION implementadas (5-sep, decisión de Rafael:
+      sin golden, promover con fuente oficial y condiciones estrictas).
+- [ ] Medir sobre la siguiente corrida real cuántas experiencias resuelven las
+      vías nuevas y si alguna resolvió mal (replay + Excel).

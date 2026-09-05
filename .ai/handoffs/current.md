@@ -107,6 +107,24 @@ prosa, sin nombres de una letra, quitando roles pegados. Privadas: sin cambios,
 por decisión de Rafael. Gate: **1087 passed, 25 skipped**. Job real actualizado
 (motivos de revisión y Excel).
 
+## Nota (2026-09-05, Claude) — tres vías nuevas de resolución automática (decisión de Rafael)
+
+Rafael: «no hay golden ni habrá; tiene que bajar mucho más de 21 a 15». Se
+promueve con fuente oficial y condiciones estrictas:
+- **NUMERO** (resolver, `_compuertas`): el N° de I.E./C.E. del certificado coincide
+  con la obra, ninguna otra obra del ranking lo comparte, el candidato viene de
+  InfoObras, sin contradicción de ubicación (nombre o `ubicacion`), la obra no añade
+  un rubro ausente en el certificado, puntaje ≥ 70.
+- **CONTRATO** y **RESOLUCION** (etapa InfoObras, pre-pase sobre expedientes en
+  revisión): contrato DE EXPEDIENTE del MEF a nombre del emisor, o resolución de
+  aprobación que lo nombra. Solo si exactamente un candidato recibe señal.
+- Nueva abstención: si la obra hallada añade un rubro que el certificado no
+  menciona (alcantarillado en la I.E. X vs construcción de la I.E. X) → revisión.
+- `_RE_EST` reconoce «clínica»: RENIPRESS deja de buscar con la frase entera.
+Vocabulario `via` ampliado en enriquecimiento, Excel y Panel. Replay offline del
+job real: NUMERO rescata 1:2 y 12:5 y NO toma 12:3 (otra intervención). Gate:
+**1097 passed, 25 skipped**; Panel `tsc` limpio.
+
 **Para la corrida de expedientes**: invocar la skill diciendo que el concurso es
 de expedientes y pasar `--tipo expedientes` al consolidar; revisar a mano las
 vías CODIGO y PROBABLE; en la verificación MEF mirar el veredicto del
