@@ -159,10 +159,26 @@ propenso a errores en propuestas grandes):
   **incluye el bloque `postor`**: `formularios`, `oferta_economica`,
   `experiencia_postor`, `isos_certificaciones`, `consorciados`),
   `evaluacion.json` (agent-evaluador), `_prof/profesional_NN.json` (uno por prof).
-- `node scripts/consolidar_espejo.js <carpeta_analisis>` → escribe `espejo.json`
-  uniendo todo, normalizando los alias/typos de los subagentes (cada uno diverge)
-  y dejando `_backend` en `null`. Auto-detecta N de `_prof/`; si falta el bloque
-  postor del mapa, lo deja vacío + un aviso en `observaciones_claude`.
+- `node scripts/consolidar_espejo.js <carpeta_analisis> [--tipo expedientes|obras]`
+  → escribe `espejo.json` uniendo todo, normalizando los alias/typos de los
+  subagentes (cada uno diverge) y dejando `_backend` en `null`. Auto-detecta N de
+  `_prof/`; si falta el bloque postor del mapa, lo deja vacío + un aviso en
+  `observaciones_claude`.
+
+  > **Tipo de concurso (ADR-010) — `_meta.tipo_evaluacion`.** El backend verifica
+  > los expedientes contra el contrato y la resolución de aprobación del MEF, y
+  > las obras contra las valorizaciones de InfoObras. Ese enrutado lo decide
+  > **para todo el análisis** el campo `_meta.tipo_evaluacion` (`"expedientes"` |
+  > `"obras"`), no el texto de cada certificado. El consolidador lo toma, en este
+  > orden: (1) `--tipo` si el usuario dijo de qué es el concurso al invocar la
+  > skill — pásalo SIEMPRE que lo haya dicho; (2) lo que `agent-bases` leyó del
+  > objeto de la convocatoria (`metadata_concurso.tipo_evaluacion`); (3) una
+  > inferencia determinística sobre ese objeto. Si ninguna decide, el consolidador
+  > emite el crítico `tipo_evaluacion_indeterminado` (exit 1): **pregúntale al
+  > usuario** «¿el concurso es de expedientes técnicos o de supervisión/ejecución
+  > de obra?» y vuelve a consolidar con `--tipo`. No lo adivines desde los
+  > certificados de la propuesta: un tipo equivocado verifica todo contra la
+  > fuente incorrecta.
 
   > ⛔ **GATE — si el consolidador termina en `⛔ INCOMPLETO` (exit code 1), PARA.**
   > No sigas al Paso 5, no subas por MCP y no le digas al usuario que el análisis

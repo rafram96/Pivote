@@ -31,7 +31,34 @@ Claude Code; el servidor verifica fuentes, recalcula y genera entregables.
 
 - Claude Code con sesión activa y Node.js;
 - acceso a los puertos del Panel y backend;
-- espacio para los archivos temporales.
+- espacio para los archivos temporales;
+- **para el OCR local (recomendado): Python 3, Tesseract y Poppler.**
+
+Las propuestas reales suelen ser escaneos sin capa de texto. Con estas
+herramientas instaladas, la skill hace el OCR en la propia computadora
+(Camino A: rápido y sin costo de tokens). Sin ellas, la skill **funciona
+igual** pero lee cada página con la visión del modelo (Camino B), lo que en
+una propuesta de cientos de folios consume una parte importante del límite
+del plan de Claude. Decida antes de la entrega cuál de los dos caminos
+operará el evaluador.
+
+Para el Camino A:
+
+- **Tesseract** con el idioma **`spa`** y el archivo **`osd.traineddata`**
+  (detección de orientación). Ambos vienen en el instalador estándar de
+  Windows si se marca el idioma español; sin `osd`, el script termina con
+  `NO_TESSDATA` y cae al Camino B. Verifique con:
+
+  ```powershell
+  tesseract --list-langs
+  ```
+
+  Deben aparecer `spa` y `osd`.
+- **Poppler** (`pdfimages`, `pdfinfo`, `pdftoppm`) en el `PATH`, o en su
+  defecto el paquete Python `pymupdf`. Con cualquiera de los dos el script
+  renderiza las páginas; si no encuentra ninguno, termina con `NO_RENDERER`
+  y cae al Camino B.
+- **Python 3** invocable como `python3` o `python`.
 
 ## 3. Preparar el código
 
@@ -223,7 +250,23 @@ Registre `mcp-server\mcp.js` en la configuración MCP de Claude Code con:
 ```text
 SERVER_URL=http://<IP-FIJA-DEL-SERVIDOR>:8001
 REQUEST_TIMEOUT=60000
+UPLOAD_TIMEOUT=600000
+ANALISIS_DIR=C:\Users\<USUARIO>\InfoObras\analisis
 ```
+
+**`ANALISIS_DIR` es obligatoria para la subida automática.** El transporte
+normal es `subir_analisis(carpeta_analisis)`: el conector lee el espejo, el
+Excel y el ZIP de constancias directamente del disco (los ZIP reales pesan
+decenas de MB y no viajan de otra forma), y **solo puede leer carpetas dentro
+de esa raíz**. Debe apuntar a la carpeta donde la skill guarda los análisis —
+por defecto `%USERPROFILE%\InfoObras\analisis`. Si falta o apunta a otro
+lugar, la subida automática falla y el evaluador queda limitado a la carga
+manual por el Panel. `UPLOAD_TIMEOUT` da margen a esa transferencia; con solo
+`REQUEST_TIMEOUT`, un ZIP grande puede cortarse a los 60 segundos.
+
+El archivo `mcp-server\cowork-config-ejemplo.json` trae un bloque completo
+listo para copiar, incluidas las variables opcionales (`ONPREM_TOKEN`,
+`NODE_EXTRA_CA_CERTS`, `LOG_FILE`).
 
 Use rutas absolutas y doble barra inversa en JSON. Tokens y certificados se
 guardan solo en configuración local. Reinicie Claude Code y pruebe la conexión.
@@ -282,3 +325,5 @@ no suba respaldos al repositorio.
 | Base MEF vencida | refresco, bitácora y tarea programada |
 | Disco lleno | respaldar/retirar análisis autorizados o mover disco de Docker |
 | MCP devuelve 401 | renovar sesión o token del conector |
+| Subida automática falla, carga manual funciona | `ANALISIS_DIR` del MCP: definida y conteniendo la carpeta del análisis |
+| OCR cae siempre al Camino B (visión) | `tesseract --list-langs` (`spa` y `osd`) y Poppler/`pymupdf` presentes |

@@ -21,7 +21,10 @@ ESPEJO_MIN = {
     "postor": {},
     "profesionales": [
         {"n_prof": 1, "cargo": "JEFE DE SUPERVISIÓN",
-         "experiencias": [{"n": 1}, {"n": 2}]},
+         "experiencias": [
+             {"n": 1, "ruc_emisor": "20123456789"},
+             {"n": 2},
+         ]},
     ],
 }
 
@@ -212,3 +215,30 @@ def test_resolver_revision_inexistente_falla_claro():
     job = motor.correr(motor.crear_job(ESPEJO_MIN).job_id)
     with pytest.raises(ValueError, match="no hay ItemRevision"):
         motor.resolver_revision(job.job_id, n_prof=9, n_exp=9, dato={})
+
+
+def test_corregir_ruc_recalcula_solo_sunat_reglas_y_excel():
+    registro = []
+    motor, repo = hacer_motor(registro)
+    job = motor.correr(motor.crear_job(ESPEJO_MIN).job_id)
+
+    registro.clear()
+    job = motor.corregir_ruc(job.job_id, 1, 1, "20987654321")
+
+    assert [nombre for nombre, _ in registro] == [
+        Etapa.SUNAT, Etapa.REGLAS, Etapa.EXCEL, Etapa.PERSISTENCIA,
+    ]
+    assert all(items == {(1, 1)} for _, items in registro)
+    assert repo.cargar_espejo(job.job_id)["profesionales"][0][
+        "experiencias"][0]["ruc_emisor"] == "20987654321"
+    assert job.estado == JobEstado.COMPLETADO
+
+
+def test_corregir_ruc_rechaza_dato_o_experiencia_invalida():
+    motor, _ = hacer_motor([])
+    job = motor.correr(motor.crear_job(ESPEJO_MIN).job_id)
+
+    with pytest.raises(ValueError, match="11 dígitos"):
+        motor.corregir_ruc(job.job_id, 1, 1, "123")
+    with pytest.raises(ValueError, match="no existe experiencia"):
+        motor.corregir_ruc(job.job_id, 1, 99, "20987654321")

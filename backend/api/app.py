@@ -615,6 +615,43 @@ def _guardar_certificados(
     return len(certificados)
 
 
+def _aplicar_tipo_evaluacion(datos: dict, form_valor: Optional[str]) -> Optional[str]:
+    """ADR-010 · deja `_meta.tipo_evaluacion` canónico antes de crear el job.
+
+    Precedencia: parámetro del espejo (lo declaró la skill leyendo las bases) >
+    form-field del dropzone/MCP (override manual). Un valor fuera del vocabulario
+    cerrado es 422: el enrutado expediente/obra no puede quedar ambiguo en
+    silencio, porque decide qué fuentes se consultan para TODO el análisis.
+    Devuelve el tipo aplicado o None (sin parámetro → env/texto, como antes).
+    """
+    from resolucion.cui import normalizar_tipo_evaluacion
+
+    meta = datos.get("_meta")
+    if not isinstance(meta, dict):
+        meta = {}
+        datos["_meta"] = meta
+    declarado = meta.get("tipo_evaluacion")
+    if declarado not in (None, ""):
+        tipo = normalizar_tipo_evaluacion(declarado)
+        if tipo is None:
+            raise HTTPException(422, {
+                "error": "tipo_evaluacion del espejo no reconocido",
+                "valor": str(declarado)[:60],
+                "permitidos": ["expedientes", "obras"]})
+        meta["tipo_evaluacion"] = tipo
+        return tipo
+    if form_valor not in (None, ""):
+        tipo = normalizar_tipo_evaluacion(form_valor)
+        if tipo is None:
+            raise HTTPException(422, {
+                "error": "tipo_evaluacion no reconocido",
+                "valor": str(form_valor)[:60],
+                "permitidos": ["expedientes", "obras"]})
+        meta["tipo_evaluacion"] = tipo
+        return tipo
+    return None
+
+
 @app.post("/api/pivote/analizar", status_code=201)
 async def analizar(
     tareas: BackgroundTasks,
@@ -623,6 +660,7 @@ async def analizar(
     excel: UploadFile = File(...),
     origen: str = Form("dropzone"),
     certificados: UploadFile | None = File(None),
+    tipo_evaluacion: str | None = Form(None),
 ):
     if repo.cargar_concurso(concurso_id) is None:
         raise HTTPException(404, "concurso no existe")
@@ -640,6 +678,7 @@ async def analizar(
                 for err in e.errors()[:30]
             ],
         })
+    _aplicar_tipo_evaluacion(datos, tipo_evaluacion)
 
     contenido_excel = await _leer_limitado(excel, _MAX_EXCEL, "el Excel")
     contenido_certs = (
@@ -700,7 +739,21 @@ def _sembrar_ledger_legado(job: pipeline.Job) -> None:
     repo.guardar(job)
 
 
-def _resolver_revision_background(job_id: str, n_prof: int, n_exp: int, body: dict):
+def _marcar_correccion(
+        job: pipeline.Job, correccion_id: str, estado: str) -> None:
+    correccion = next(
+        (c for c in job.correcciones_humanas
+         if c.correccion_id == correccion_id), None)
+    if correccion is None:
+        return
+    correccion.estado = estado
+    if estado == "aplicada":
+        correccion.aplicado_en = datetime.now(timezone.utc)
+
+
+def _resolver_revision_background(
+        job_id: str, n_prof: int, n_exp: int, body: dict,
+        correccion_id: str):
     """Re-ejecuta la experiencia fuera del request y deja un estado consultable."""
     with _lock_descargas(job_id):
         try:
@@ -713,6 +766,7 @@ def _resolver_revision_background(job_id: str, n_prof: int, n_exp: int, body: di
             job.descargas_estado = "pendiente"
             job.revision_estado = "completada"
             job.revision_error = None
+            _marcar_correccion(job, correccion_id, "aplicada")
             repo.guardar(job)
         except Exception as exc:  # el fallo debe sobrevivir al log y llegar al panel
             logger.exception("falló revisión background job=%s item=%s:%s", job_id, n_prof, n_exp)
@@ -720,6 +774,7 @@ def _resolver_revision_background(job_id: str, n_prof: int, n_exp: int, body: di
             if job:
                 job.revision_estado = "error"
                 job.revision_error = str(exc) or type(exc).__name__
+                _marcar_correccion(job, correccion_id, "error")
                 repo.guardar(job)
             return
     _asegurar_descargas(job_id)  # solo intentará fuentes lógicas nuevas
@@ -741,11 +796,106 @@ def resolver_revision(job_id: str, tareas: BackgroundTasks, body: dict):
                 404, f"no hay ItemRevision pendiente para prof={n_prof} exp={n_exp}")
         if job.revision_estado == "en_curso":
             raise HTTPException(409, "ya hay una revisión guardándose para este análisis")
+        enr = repo.cargar_enriquecimiento(job_id) or {}
+        anterior = (enr.get(f"{n_prof}:{n_exp}") or {}).get("cui")
+        correccion_id = uuid.uuid4().hex[:12]
+        job.correcciones_humanas.append(pipeline.CorreccionHumana(
+            correccion_id=correccion_id,
+            n_prof=n_prof,
+            n_exp=n_exp,
+            campo="cui",
+            accion=("no_existe" if body.get("accion") == "no_existe"
+                    else "confirmado"),
+            valor_anterior=str(anterior) if anterior else None,
+            valor_corregido=(str(body.get("cui")) if body.get("cui") else None),
+            creado_en=datetime.now(timezone.utc),
+        ))
         job.revision_estado = "en_curso"
         job.revision_item = f"{n_prof}:{n_exp}"
         job.revision_error = None
         repo.guardar(job)
-    tareas.add_task(_resolver_revision_background, job_id, n_prof, n_exp, dict(body))
+    tareas.add_task(
+        _resolver_revision_background, job_id, n_prof, n_exp, dict(body),
+        correccion_id)
+    return json.loads(job.model_dump_json())
+
+
+def _corregir_ruc_background(
+        job_id: str, n_prof: int, n_exp: int, ruc: str,
+        correccion_id: str) -> None:
+    """Recalcula SUNAT y el Excel sin tocar el corpus de descargas."""
+    with _lock_descargas(job_id):
+        try:
+            job = motor.corregir_ruc(job_id, n_prof, n_exp, ruc)
+            if job.estado == pipeline.JobEstado.ERROR:
+                raise RuntimeError("el reanálisis terminó con un error estructural")
+            job.revision_estado = "completada"
+            job.revision_error = None
+            _marcar_correccion(job, correccion_id, "aplicada")
+            repo.guardar(job)
+        except Exception as exc:  # el estado debe sobrevivir al request 202
+            logger.exception(
+                "falló corrección RUC job=%s item=%s:%s", job_id, n_prof, n_exp)
+            job = repo.cargar(job_id)
+            if job:
+                job.revision_estado = "error"
+                job.revision_error = str(exc) or type(exc).__name__
+                _marcar_correccion(job, correccion_id, "error")
+                repo.guardar(job)
+
+
+@app.post("/api/pivote/jobs/{job_id}/correcciones/ruc", status_code=202)
+def corregir_ruc(job_id: str, tareas: BackgroundTasks, body: dict):
+    """Corrige el RUC de una experiencia y regenera resultados/Excel.
+
+    No reejecuta InfoObras ni cambia el ledger de descargas. El CUI se corrige
+    por la cola de revisión, donde sí se recalculan las fuentes de la obra.
+    """
+    n_prof, n_exp = body.get("n_prof"), body.get("n_exp")
+    if not isinstance(n_prof, int) or not isinstance(n_exp, int):
+        raise HTTPException(400, "n_prof y n_exp son obligatorios")
+    ruc_bruto = str(body.get("ruc") or "").strip()
+    ruc = "".join(c for c in ruc_bruto if c.isdigit())
+    if len(ruc) != 11 or any(c.isalpha() for c in ruc_bruto):
+        raise HTTPException(400, "el RUC debe tener exactamente 11 dígitos")
+
+    with _lock_descargas(job_id):
+        job = _job_o_404(job_id)
+        if job.revision_estado == "en_curso":
+            raise HTTPException(409, "ya hay una corrección guardándose para este análisis")
+        espejo = _espejo_o_404(job_id)
+        profesional = next(
+            (p for p in espejo.get("profesionales", [])
+             if p.get("n_prof") == n_prof), None)
+        experiencia = next(
+            (e for e in (profesional or {}).get("experiencias", [])
+             if e.get("n") == n_exp), None)
+        if experiencia is None:
+            raise HTTPException(
+                404, f"no existe experiencia para prof={n_prof} exp={n_exp}")
+        anterior = "".join(
+            c for c in str(experiencia.get("ruc_emisor") or "") if c.isdigit())
+        if anterior == ruc:
+            raise HTTPException(409, "ese RUC ya está aplicado a la experiencia")
+
+        correccion_id = uuid.uuid4().hex[:12]
+        job.correcciones_humanas.append(pipeline.CorreccionHumana(
+            correccion_id=correccion_id,
+            n_prof=n_prof,
+            n_exp=n_exp,
+            campo="ruc_emisor",
+            accion="corregido",
+            valor_anterior=anterior or None,
+            valor_corregido=ruc,
+            creado_en=datetime.now(timezone.utc),
+        ))
+        job.revision_estado = "en_curso"
+        job.revision_item = f"{n_prof}:{n_exp}"
+        job.revision_error = None
+        repo.guardar(job)
+
+    tareas.add_task(
+        _corregir_ruc_background, job_id, n_prof, n_exp, ruc, correccion_id)
     return json.loads(job.model_dump_json())
 
 

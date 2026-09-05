@@ -183,15 +183,91 @@ def _es_registro_expediente(nombre_obra) -> bool:
     return bool(_RE_REGISTRO_ET.search(norm(str(nombre_obra or ""))))
 
 
-def es_expediente_exp(exp: dict) -> bool:
-    """Clasificación expediente/obra mirando TODA la evidencia de la experiencia,
-    no solo `proyecto`. Caso real (San Isidro P1:E2): el certificado dice "se ha
-    desempeñado … en la Elaboración del Expediente Técnico: «MEJORAMIENTO …»" y
-    la skill guarda en `proyecto` solo el nombre entre comillas — la palabra
-    "expediente" vive en el DESEMPEÑO (objeto/cargo), y clasificar solo por el
-    nombre enruta el expediente como obra (descarga valorizaciones en vez del
-    contrato/resolución del MEF). Campos: proyecto + objeto + cargo_ocupado
-    (NO observaciones: mencionan "expediente" de pasada)."""
+# ── Tipo de evaluación del concurso (ADR-010) ────────────────────────────────
+# Vocabulario CERRADO del parámetro que la skill declara en `_meta.tipo_evaluacion`
+# leyendo el objeto de la convocatoria: "expedientes" (camino A: contrato +
+# resolución 08-A del MEF) u "obras" (camino B: valorizaciones de InfoObras).
+# El cliente confirmó que un concurso completo es de un solo tipo (ADR-010).
+TIPO_EXPEDIENTES = "expedientes"
+TIPO_OBRAS = "obras"
+_ALIAS_TIPO_EVALUACION = {
+    "expedientes": TIPO_EXPEDIENTES, "expediente": TIPO_EXPEDIENTES,
+    "expediente tecnico": TIPO_EXPEDIENTES, "expedientes tecnicos": TIPO_EXPEDIENTES,
+    "a": TIPO_EXPEDIENTES, "camino a": TIPO_EXPEDIENTES,
+    "obras": TIPO_OBRAS, "obra": TIPO_OBRAS, "supervision": TIPO_OBRAS,
+    "supervision de obra": TIPO_OBRAS, "ejecucion": TIPO_OBRAS,
+    "ejecucion de obra": TIPO_OBRAS, "b": TIPO_OBRAS, "camino b": TIPO_OBRAS,
+}
+# Clave PRIVADA con la que el orquestador estampa el tipo en cada experiencia EN
+# MEMORIA (mismo patrón que `_fichas_mef` / `_solo_geo_propia`): así el veto de
+# fase del resolver y las sub-obras derivadas lo ven sin cambiar sus firmas. No
+# se persiste: `ExperienciaProf` es `extra="forbid"`.
+CLAVE_TIPO_EVALUACION = "_tipo_evaluacion"
+
+
+def normalizar_tipo_evaluacion(valor) -> Optional[str]:
+    """`"expedientes"` | `"obras"` | None. Tolera mayúsculas, acentos y los alias
+    de la tabla; cualquier otra cosa es None (desconocido ≠ obras)."""
+    if valor is None:
+        return None
+    clave = re.sub(r"[^a-z ]", " ", norm(str(valor)).lower())
+    clave = re.sub(r"\s+", " ", clave).strip()
+    return _ALIAS_TIPO_EVALUACION.get(clave)
+
+
+def tipo_evaluacion_del_espejo(espejo: Optional[dict]) -> Optional[str]:
+    """Tipo declarado por la skill en `_meta.tipo_evaluacion` (ADR-010), ya
+    normalizado. None si el espejo no lo trae (espejos anteriores al parámetro)."""
+    if not isinstance(espejo, dict):
+        return None
+    meta = espejo.get("_meta")
+    if not isinstance(meta, dict):
+        return None
+    return normalizar_tipo_evaluacion(meta.get("tipo_evaluacion"))
+
+
+def estampar_tipo_evaluacion(espejo: Optional[dict]) -> Optional[str]:
+    """Escribe `CLAVE_TIPO_EVALUACION` en cada experiencia del espejo EN MEMORIA
+    y devuelve el tipo. Sin tipo declarado no toca nada (las experiencias
+    siguen clasificándose por texto)."""
+    tipo = tipo_evaluacion_del_espejo(espejo)
+    if tipo is None:
+        return None
+    for prof in (espejo or {}).get("profesionales") or []:
+        for exp in (prof or {}).get("experiencias") or []:
+            if isinstance(exp, dict):
+                exp[CLAVE_TIPO_EVALUACION] = tipo
+    return tipo
+
+
+def es_expediente_exp(exp: dict, tipo_evaluacion: Optional[str] = None,
+                      forzar: bool = False) -> bool:
+    """¿La experiencia se verifica por el camino de EXPEDIENTE (A) o de OBRA (B)?
+
+    Precedencia (ADR-010): parámetro declarado > override operativo > texto.
+      1. `tipo_evaluacion` explícito, o el estampado en la experiencia
+         (`CLAVE_TIPO_EVALUACION`): el objeto de la convocatoria, leído por la
+         skill de las bases. Decide para TODO el concurso — el cliente confirmó
+         que un concurso es homogéneo — y no depende de que el certificado
+         conserve la palabra «expediente».
+      2. `forzar` (`PIVOTE_FORZAR_EXPEDIENTES`): override global del proceso;
+         queda para replays de espejos anteriores al parámetro.
+      3. Texto de la experiencia (fallback histórico, ADR-006). Caso real
+         (San Isidro P1:E2): el certificado dice "se ha desempeñado … en la
+         Elaboración del Expediente Técnico: «MEJORAMIENTO …»" y la skill guarda
+         en `proyecto` solo el nombre entre comillas — la palabra "expediente"
+         vive en el DESEMPEÑO (cargo), y clasificar solo por el nombre enruta el
+         expediente como obra (descarga valorizaciones en vez del
+         contrato/resolución del MEF). Campos: proyecto + cargo_ocupado (`objeto`
+         se conserva por compatibilidad con experiencias derivadas; NO
+         observaciones: mencionan "expediente" de pasada).
+    """
+    tipo = normalizar_tipo_evaluacion(tipo_evaluacion) \
+        or normalizar_tipo_evaluacion((exp or {}).get(CLAVE_TIPO_EVALUACION))
+    if tipo is not None:
+        return tipo == TIPO_EXPEDIENTES
+    if forzar:
+        return True
     texto = " ".join(str(exp.get(k) or "") for k in
                      ("proyecto", "objeto", "cargo_ocupado"))
     return _es_experiencia_expediente(texto)
@@ -1923,6 +1999,10 @@ def _exp_derivada(exp_madre: dict, sub: dict) -> dict:
     d["fecha_inicial"] = sub.get("fecha_inicial") or exp_madre.get("fecha_inicial")
     d["fecha_final"] = sub.get("fecha_final") or exp_madre.get("fecha_final")
     d["_solo_geo_propia"] = True
+    # ADR-010: el tipo del concurso es uno para todo el análisis; la sub-obra lo
+    # hereda para que el veto de fase del resolver decida igual que la madre.
+    if exp_madre.get(CLAVE_TIPO_EVALUACION) is not None:
+        d[CLAVE_TIPO_EVALUACION] = exp_madre[CLAVE_TIPO_EVALUACION]
     return d
 
 

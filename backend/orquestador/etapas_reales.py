@@ -34,7 +34,9 @@ from validacion import (a_observaciones, anotar_cargo_nucleo, aplicar_reglas_for
                         verificar_espejo)
 from resolucion import (ConsultaInfoObras, resolver_con_dedup, resolver_obras,
                         rubros_mixtos)
-from resolucion.cui import establecimiento, rubros_de
+from resolucion.cui import (es_expediente_exp, establecimiento,
+                            estampar_tipo_evaluacion, rubros_de,
+                            tipo_evaluacion_del_espejo)
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
 from entregables import (completar_revisiones_privadas, desempaquetar_enriquecimiento,
                          generar_excel_final, inyectar_veredicto_backend,
@@ -340,6 +342,11 @@ class EtapaResolucionCuiReal:
             except Exception:  # noqa: BLE001 — avisar jamás puede tumbar el análisis
                 pass
 
+        # ADR-010 · el tipo del concurso (`_meta.tipo_evaluacion`) se estampa EN
+        # MEMORIA en cada experiencia: así el veto de fase del resolver y las
+        # sub-obras derivadas enrutan por el parámetro declarado, no por si el
+        # certificado conservó la palabra «expediente». No se persiste.
+        estampar_tipo_evaluacion(ctx.espejo)
         pares = list(ctx.items_experiencia())
 
         # dato humano primero (re-disparo): CUI pegado a mano = resuelto MANUAL
@@ -573,10 +580,11 @@ class EtapaInfoObrasReal:
             # valorizaciones + nombre de expediente + el hito "Aprobación del proyecto"
             # trajo el documento. Solo entonces cuenta por el periodo del certificado
             # (no se le aplica el clamp fuera_de_ventana ni se manda a revisión).
-            from resolucion.cui import es_expediente_exp
             _avances = getattr(obra, "avances", []) or []
             _aprob_exp = getattr(obra, "aprobacion_expediente", None)
-            _es_exped = self.forzar_expedientes or es_expediente_exp(_e)
+            # ADR-010: parámetro del espejo > env > texto del certificado.
+            _es_exped = es_expediente_exp(_e, tipo_evaluacion_del_espejo(ctx.espejo),
+                                          self.forzar_expedientes)
             es_exp_aprobado = (not _avances and _aprob_exp is not None and _es_exped)
             # Las paralizaciones pertenecen a la EJECUCIÓN física. Un expediente
             # se verifica con contrato/aprobación y nunca hereda días parados de
@@ -832,7 +840,6 @@ class EtapaInfoObrasReal:
         # T-004 F2: localizar las Bases Integradas y el contrato del proceso que
         # corresponde a CADA experiencia. Esto es independiente de que InfoObras
         # haya devuelto obra_id: SEACE se consulta por CUI y jamás cruza de tipo.
-        from resolucion.cui import es_expediente_exp
         from scraping.seace_abierto import (
             clasificar_proceso, codigo_convocatoria, doc_bases_integradas,
             doc_contrato_firmado, seleccionar_proceso, tipo_esperado,
@@ -875,7 +882,8 @@ class EtapaInfoObrasReal:
 
             texto = " ".join(str(_e.get(c) or "") for c in
                              ("proyecto", "objeto", "cargo_ocupado", "descripcion"))
-            es_exped = self.forzar_expedientes or es_expediente_exp(_e)
+            es_exped = es_expediente_exp(_e, tipo_evaluacion_del_espejo(ctx.espejo),
+                                         self.forzar_expedientes)   # ADR-010
             tipo = tipo_esperado(es_exped, texto)
             ini, fin = _fecha_iso(_e.get("fecha_inicial")), _fecha_iso(_e.get("fecha_final"))
             seleccion = seleccionar_proceso(

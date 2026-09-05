@@ -9,6 +9,8 @@ Implementa las garantías de docs/backend/orquestador.md §4:
     RESOLUCION_CUI; REGLAS espera a las tres).
   - Human-in-the-loop: resolver_revision() re-ejecuta SOLO esa experiencia
     desde la etapa del item hacia abajo (solo_items), sin tocar el resto.
+  - corregir_ruc() actualiza el dato fuente y re-ejecuta solo SUNAT, reglas,
+    Excel y persistencia; no toca InfoObras ni vuelve a descargar documentos.
   - Progreso: notifica ProgresoJob tras cada etapa (callback inyectable —
     el websocket del panel se conecta ahí).
 """
@@ -177,6 +179,88 @@ class Motor:
         for nombre in aguas_abajo:
             # La rama paralela se corre secuencial en el re-disparo (1 item: no
             # vale la pena el pool) — y solo si la etapa pertenece al tramo.
+            res = self._ejecutar(nombre, ctx)
+            self._registrar(job, res, parcial=True)
+            self._repo.guardar_enriquecimiento(job.job_id, ctx.enriquecimiento)
+            if res.estado == pipeline.EstadoEtapa.ERROR:
+                self._checkpoint(job)
+                return self._abortar(job)
+
+        job.estado = (
+            pipeline.JobEstado.REQUIERE_REVISION
+            if job.pendientes_humano
+            else pipeline.JobEstado.COMPLETADO
+        )
+        self._checkpoint(job)
+        return job
+
+    def corregir_ruc(
+        self, job_id: str, n_prof: int, n_exp: int, ruc: str
+    ) -> pipeline.Job:
+        """Corrige el RUC del emisor y recalcula únicamente sus consumidores.
+
+        El RUC de esta acción es una decisión humana sobre la identidad SUNAT.
+        No se usa para volver a decidir el CUI ni autoriza nuevas descargas: una
+        corrección de obra sigue entrando por ``resolver_revision``.
+        """
+        if not (isinstance(ruc, str) and len(ruc) == 11 and ruc.isdigit()):
+            raise ValueError("el RUC debe tener exactamente 11 dígitos")
+
+        job = self._cargar(job_id)
+        espejo = self._repo.cargar_espejo(job_id) or {}
+        profesional = next(
+            (p for p in espejo.get("profesionales", []) if p.get("n_prof") == n_prof),
+            None,
+        )
+        experiencia = next(
+            (e for e in (profesional or {}).get("experiencias", [])
+             if e.get("n") == n_exp),
+            None,
+        )
+        if experiencia is None:
+            raise ValueError(
+                f"no existe experiencia para prof={n_prof} exp={n_exp}")
+
+        experiencia["ruc_emisor"] = ruc
+        self._repo.guardar_espejo(job_id, espejo)
+
+        enriquecimiento = self._repo.cargar_enriquecimiento(job_id)
+        clave = f"{n_prof}:{n_exp}"
+        datos_item = enriquecimiento.get(clave)
+        if isinstance(datos_item, dict):
+            # Una consulta fallida no puede dejar visible la ficha del RUC
+            # anterior mientras se procesa el nuevo.
+            datos_item.pop("sunat", None)
+            datos_item.pop("vinculacion_postor_emisor", None)
+
+        ctx = Contexto(
+            job=job,
+            espejo=espejo,
+            solo_items={(n_prof, n_exp)},
+            enriquecimiento=enriquecimiento,
+            reportar=self._reporter_de(job_id),
+        )
+        etapas = (
+            pipeline.Etapa.SUNAT,
+            pipeline.Etapa.REGLAS,
+            pipeline.Etapa.EXCEL,
+            pipeline.Etapa.PERSISTENCIA,
+        )
+        referencia = f"prof={n_prof} exp={n_exp}"
+        for nombre in etapas:
+            # Retira hallazgos del dato anterior para no mostrar a la vez la
+            # conclusión vieja y la recalculada.
+            job.observaciones = [
+                o for o in job.observaciones
+                if not (o.origen == nombre and o.referencia == referencia)
+            ]
+            existente = job.etapa(nombre)
+            if existente is not None:
+                existente.observaciones = [
+                    o for o in existente.observaciones
+                    if o.referencia != referencia
+                ]
+
             res = self._ejecutar(nombre, ctx)
             self._registrar(job, res, parcial=True)
             self._repo.guardar_enriquecimiento(job.job_id, ctx.enriquecimiento)

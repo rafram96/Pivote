@@ -109,6 +109,12 @@ class Meta(_ModelLax):
     slug: Optional[str] = None
     concurso: Optional[str] = None
     postor: Optional[str] = None
+    # ADR-010 · tipo de evaluación del concurso, declarado por la skill leyendo el
+    # objeto de la convocatoria: "expedientes" (camino A) | "obras" (camino B).
+    # Decide el enrutado de TODA la verificación; sin él, el backend cae al env
+    # `PIVOTE_FORZAR_EXPEDIENTES` y luego al texto de cada experiencia. Se
+    # normaliza en `resolucion.cui.normalizar_tipo_evaluacion` (alias tolerados).
+    tipo_evaluacion: Optional[str] = None
     version_contrato: Optional[str] = None
     generado_por: Optional[str] = None
     representante_comun: Optional[str] = None

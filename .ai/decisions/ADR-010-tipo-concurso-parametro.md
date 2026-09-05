@@ -78,3 +78,38 @@ global `PIVOTE_FORZAR_EXPEDIENTES=1`. Ambos tienen problemas estructurales:
 - Pendiente al implementar: el filtro de secciones de descarga por camino
   (hoy camino A aún baja secciones de obra — tarea ya en backlog) se engancha
   a este mismo parámetro.
+
+## Implementación mínima (2026-09-05, Claude)
+
+Estado pasa a **implementado (mínimo)**; el texto histórico de arriba no se
+edita. Lo que quedó en código:
+
+- **Contrato (3 copias, aditivo)**: `_meta.tipo_evaluacion` con vocabulario
+  `"expedientes"` | `"obras"` en `backend/schemas/espejo.py` (Pydantic),
+  `skill/schemas/espejo.js` (zod) y `Panel-InfoObras/frontend/src/lib/pivote/espejo.ts`.
+  Los espejos viejos siguen válidos (campo ausente).
+- **Backend, un solo punto de decisión**: `resolucion.cui.es_expediente_exp(exp,
+  tipo_evaluacion=None, forzar=False)` con precedencia parámetro > env
+  `PIVOTE_FORZAR_EXPEDIENTES` > texto. `normalizar_tipo_evaluacion` tolera alias
+  y acentos; lo desconocido es `None`, nunca «obras». La etapa de resolución
+  estampa el tipo EN MEMORIA en cada experiencia (`_tipo_evaluacion`, mismo
+  patrón que `_fichas_mef`) para que el veto de fase del resolver y las sub-obras
+  derivadas enruten igual. Consumidores actualizados: las dos etapas de
+  InfoObras/SEACE, `reconciliar_resultados_profesionales`, la hoja «Cronología»
+  y las tarjetas de la hoja P.
+- **Endpoint**: `POST /api/pivote/analizar` acepta el form-field opcional
+  `tipo_evaluacion`; el espejo manda, el form completa, un valor fuera del
+  vocabulario responde 422.
+- **Skill**: `consolidar_espejo.js <carpeta> [--tipo expedientes|obras]`
+  escribe `_meta.tipo_evaluacion` con precedencia flag > `agent-bases`
+  (`metadata_concurso.tipo_evaluacion`, ahora obligatorio en el prompt) >
+  inferencia determinística sobre el objeto de la convocatoria. Sin tipo emite el
+  crítico `tipo_evaluacion_indeterminado` (exit 1) y el orquestador debe
+  preguntar al usuario. `SKILL.md` lo documenta.
+- **Gate**: backend 1037 passed / 25 skipped; skill `node --test` 60 passed;
+  Panel `tsc --noEmit` limpio. Resolver de CUI intacto en su selección
+  (la golden no aplica: el tipo solo gobierna la verificación, punto 4).
+
+Pendiente del ADR que NO entró aquí: la observación INFO de discrepancia
+parámetro↔texto (telemetría), el rótulo del tipo en Excel/Panel y el filtro de
+secciones de descarga por camino.

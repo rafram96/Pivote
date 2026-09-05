@@ -1,8 +1,79 @@
+---
+timestamp: "2026-09-05T01:00:00-05:00"
+agent: claude
+---
+
 # Handoff — punto de continuación
 
-> Actualizado: **2026-08-14**. Si eres un agente nuevo: lee esto completo,
+> Actualizado: **2026-08-20**. Si eres un agente nuevo: lee esto completo,
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.
+
+## Nota (2026-09-05, Claude) — ADR-010 implementada en su versión mínima
+
+Motivo: el cliente validará por su cuenta una propuesta de EXPEDIENTES y no se
+puede depender de `PIVOTE_FORZAR_EXPEDIENTES`. Se implementó el parámetro
+`_meta.tipo_evaluacion` en las tres copias del contrato, un único punto de
+decisión `es_expediente_exp(exp, tipo, forzar)` con precedencia parámetro > env
+> texto, estampado en memoria para el resolver, form-field opcional en
+`/analizar`, y `consolidar_espejo.js --tipo` con inferencia determinística y
+crítico bloqueante si no se determina. `agent-bases` debe emitir
+`metadata_concurso.tipo_evaluacion`. Gate: 1037 passed / 25 skipped; skill 60
+tests; Panel `tsc` limpio. Resolver intacto; golden no aplica. Detalle y lo que
+quedó fuera: cola de `decisions/ADR-010`.
+
+**Para la corrida de expedientes**: invocar la skill diciendo que el concurso es
+de expedientes y pasar `--tipo expedientes` al consolidar; revisar a mano las
+vías CODIGO y PROBABLE; en la verificación MEF mirar el veredicto del
+contratista, no el del contrato. Ver `InfoObras/.ai/handoffs/2026-09-04_claude.md`.
+
+## Nota (2026-08-20, Codex) — arquitectura ejecutiva detallada
+
+La arquitectura canónica se amplió a la revisión **2** para mostrar el valor
+técnico y operativo real de Pivote: **20 componentes**, **39 conexiones
+etiquetadas** y **7 escenarios**. El mapa separa el análisis documental en la
+PC, el contrato espejo y MCP, el control on-prem, las nueve etapas, el escudo de
+integridad, el resolver CUI, los cruces y reglas, cada familia de fuente estatal,
+la plataforma MEF local, la trazabilidad, Excel, ZIP y operación.
+
+Se asignaron posiciones y colores Catppuccin por capa. La mayor granularidad no
+representa microservicios nuevos: son capacidades verificadas en entrypoints,
+módulos, clientes, schemas y despliegue. La revisión se guardó mediante
+`raf-ai architecture set --expected-revision 1` después de validar el draft;
+el envelope canónico no se editó a mano.
+
+## Nota (2026-08-20, Codex) — adopción RAF y arquitectura visual
+
+Se ejecutó `raf-ai init` con perfil `repo` y soporte para Claude, Codex y Agy;
+la operación creó únicamente los archivos RAF ausentes y conservó la base de
+conocimiento y los cambios locales existentes. El proyecto quedó registrado con
+ID `pivote`.
+
+La arquitectura canónica se generó desde el código y se guardó por la API de
+revisión de RAF en `.ai/architecture/architecture.json`, revisión **1**:
+9 componentes, 13 conexiones etiquetadas y 3 escenarios. Incluye los límites de
+runtime de Skill, MCP, Panel, API, motor, resolver CUI, fuentes oficiales, datos
+y entregables. `arquitectura.json` en la raíz es solo una referencia histórica.
+
+Para regenerarla desde este checkout: leer primero el estado actual con
+`raf-ai architecture get --json`, producir solo `ArchitectureData`, validar el
+borrador y guardarlo con `raf-ai architecture set <archivo>
+--expected-revision <revision>`. Nunca editar directamente el envelope canónico.
+
+## Nota (2026-08-16, Codex) — correcciones RUC/CUI y trazabilidad en Panel
+
+Se añadió `POST /api/pivote/jobs/{job_id}/correcciones/ruc`: valida el RUC,
+actualiza `ruc_emisor` en el espejo y ejecuta solo SUNAT → reglas → Excel →
+persistencia para esa experiencia. No llama InfoObras, no altera descargas y no
+reinicia el ZIP. Tanto esta acción como la resolución CUI registran una entrada
+persistente en `Job.correcciones_humanas` con estado consultable.
+
+En Panel-InfoObras, Profesionales muestra/edita el RUC por experiencia; Revisión
+se reorganizó como mesa de decisiones ancha y explícita; y Resultados/Descargas
+indican que el Excel incorpora las correcciones, distinguiendo el efecto sobre
+el ZIP. El mock cubre el mismo contrato. Gate: backend **1004 passed, 25
+skipped**; Panel `npx tsc --noEmit` y `next build` aprobados. El resolver CUI no
+cambió, por lo que no aplica golden. Sin datos de cliente en los repos.
 
 ## Nota (2026-08-14, Codex) — plan #89–#100 implementado y verificado
 

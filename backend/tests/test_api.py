@@ -329,6 +329,11 @@ def test_revision_responde_202_y_deja_estado_consultable(cliente, monkeypatch):
     final = cliente.get(f"/api/pivote/jobs/{job_id}").json()
     assert final["revision_estado"] == "completada"
     assert final["items_revision"][0]["resuelto"] is True
+    correccion = final["correcciones_humanas"][-1]
+    assert correccion["campo"] == "cui"
+    assert correccion["valor_corregido"] == "2418877"
+    assert correccion["estado"] == "aplicada"
+    assert correccion["aplicado_en"] is not None
 
 
 def test_revision_background_persiste_error_consultable(cliente, monkeypatch):
@@ -356,6 +361,65 @@ def test_revision_background_persiste_error_consultable(cliente, monkeypatch):
     assert final["revision_estado"] == "error"
     assert final["revision_error"] == "fallo controlado de revisión"
     assert final["items_revision"][0]["resuelto"] is False
+
+
+def test_correccion_ruc_reanaliza_y_deja_trazabilidad(cliente, monkeypatch):
+    """El RUC corregido se persiste sin reiniciar las descargas del job."""
+    from api import app as modulo
+
+    cid = cliente.post(
+        "/api/pivote/concursos", json={"nomenclatura": "RUC-PANEL"}
+    ).json()["concurso_id"]
+    job_id = _subir(cliente, cid).json()["job_id"]
+    previo = cliente.get(f"/api/pivote/jobs/{job_id}").json()
+    estado_descargas = previo["descargas_estado"]
+
+    r = cliente.post(
+        f"/api/pivote/jobs/{job_id}/correcciones/ruc",
+        json={"n_prof": 1, "n_exp": 1, "ruc": "20987654321"},
+    )
+
+    assert r.status_code == 202
+    final = cliente.get(f"/api/pivote/jobs/{job_id}").json()
+    assert final["revision_estado"] == "completada"
+    assert final["descargas_estado"] == estado_descargas
+    assert final["correcciones_humanas"][-1] == {
+        "correccion_id": final["correcciones_humanas"][-1]["correccion_id"],
+        "n_prof": 1,
+        "n_exp": 1,
+        "campo": "ruc_emisor",
+        "accion": "corregido",
+        "valor_anterior": "20123456789",
+        "valor_corregido": "20987654321",
+        "estado": "aplicada",
+        "creado_en": final["correcciones_humanas"][-1]["creado_en"],
+        "aplicado_en": final["correcciones_humanas"][-1]["aplicado_en"],
+    }
+    experiencia = cliente.get(
+        f"/api/pivote/jobs/{job_id}/espejo"
+    ).json()["profesionales"][0]["experiencias"][0]
+    assert experiencia["ruc_emisor"] == "20987654321"
+    assert modulo.repo.cargar_espejo(job_id)["profesionales"][0][
+        "experiencias"][0]["ruc_emisor"] == "20987654321"
+
+
+def test_correccion_ruc_valida_formato_y_evitar_repetir(cliente):
+    cid = cliente.post(
+        "/api/pivote/concursos", json={"nomenclatura": "RUC-VALIDACION"}
+    ).json()["concurso_id"]
+    job_id = _subir(cliente, cid).json()["job_id"]
+
+    invalido = cliente.post(
+        f"/api/pivote/jobs/{job_id}/correcciones/ruc",
+        json={"n_prof": 1, "n_exp": 1, "ruc": "123"},
+    )
+    repetido = cliente.post(
+        f"/api/pivote/jobs/{job_id}/correcciones/ruc",
+        json={"n_prof": 1, "n_exp": 1, "ruc": "20123456789"},
+    )
+
+    assert invalido.status_code == 400
+    assert repetido.status_code == 409
 
 
 def test_revision_no_purga_una_descarga_documental_previa(cliente, monkeypatch):

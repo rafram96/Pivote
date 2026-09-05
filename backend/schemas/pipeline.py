@@ -104,6 +104,24 @@ class ItemRevision(_Model):
     fechas: Optional[str] = None
 
 
+class CorreccionHumana(_Model):
+    """Dato corregido desde el Panel y estado de su reanálisis acotado.
+
+    Vive en el job para que el Panel pueda explicar qué resultados y
+    entregables ya incorporan decisiones humanas, sin inspeccionar bitácoras.
+    """
+    correccion_id: str
+    n_prof: int = Field(ge=1)
+    n_exp: int = Field(ge=1)
+    campo: str                              # cui | ruc_emisor
+    accion: str                             # confirmado | no_existe | corregido
+    valor_anterior: Optional[str] = None
+    valor_corregido: Optional[str] = None
+    estado: str = "en_curso"               # en_curso | aplicada | error
+    creado_en: datetime
+    aplicado_en: Optional[datetime] = None
+
+
 # ── Métrica y resultado por etapa (el checkpoint) ────────────────────────────
 class MetricaEtapa(_Model):
     items_total: int = Field(default=0, ge=0)
@@ -186,6 +204,7 @@ class Job(_ModelLax):
     revision_estado: Optional[str] = None   # en_curso | completada | error
     revision_item: Optional[str] = None     # "n_prof:n_exp"
     revision_error: Optional[str] = None
+    correcciones_humanas: list[CorreccionHumana] = Field(default_factory=list)
     creado_en: Optional[datetime] = None
     actualizado_en: Optional[datetime] = None
 

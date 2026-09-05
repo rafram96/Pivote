@@ -55,6 +55,8 @@ Thumbs.db
 *.json
 
 # --- excepciones: código/config que SÍ se versiona ---
+!/.ai/project.json
+!/.ai/architecture/architecture.json
 !**/package.json
 !**/package-lock.json
 !**/tsconfig.json

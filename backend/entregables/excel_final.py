@@ -212,9 +212,10 @@ def reconciliar_resultados_profesionales(espejo: dict,
     sin modificar el resolver.
     """
     from orquestador.etapas_reales import _minimo_exigido
-    from resolucion.cui import es_expediente_exp
+    from resolucion.cui import es_expediente_exp, tipo_evaluacion_del_espejo
 
     enriquecimiento = enriquecimiento or {}
+    tipo_evaluacion = tipo_evaluacion_del_espejo(espejo)   # ADR-010
     salida: dict[int, dict] = {}
     for prof in (espejo or {}).get("profesionales", []):
         np_ = prof.get("n_prof")
@@ -237,7 +238,7 @@ def reconciliar_resultados_profesionales(espejo: dict,
             periodos.append((ini, fin))
             datos_exp = enriquecimiento.get(f"{np_}:{ne}") or {}
             privada = str(datos_exp.get("via") or "").upper() == "PRIVADA"
-            expediente = es_expediente_exp(exp)
+            expediente = es_expediente_exp(exp, tipo_evaluacion)
 
             # La ejecución física no descuenta tiempo de un expediente y las
             # fuentes públicas no aplican a una obra privada.
@@ -542,7 +543,24 @@ def _cron_cruce(cruces, regla) -> Optional[dict]:
     return None
 
 
-def _tipo_experiencia(e: dict, fx: dict) -> str:
+def _tipo_evaluacion_espejo(espejo: Optional[dict]) -> Optional[str]:
+    """`_meta.tipo_evaluacion` normalizado (ADR-010) o None. Import diferido: el
+    resolver importa a su vez utilidades de este paquete."""
+    from resolucion.cui import tipo_evaluacion_del_espejo
+    return tipo_evaluacion_del_espejo(espejo)
+
+
+def _tipo_experiencia(e: dict, fx: dict, tipo_evaluacion: Optional[str] = None) -> str:
+    # ADR-010: el tipo declarado del concurso manda sobre la lectura del texto.
+    # Es el mismo criterio con que el backend enrutó la verificación, así la
+    # cronología no contradice a la ficha (un expediente enrutado como tal no
+    # puede decir «NO APLICA» por perder la palabra en el nombre).
+    from resolucion.cui import TIPO_EXPEDIENTES, TIPO_OBRAS, normalizar_tipo_evaluacion
+    declarado = normalizar_tipo_evaluacion(tipo_evaluacion)
+    if declarado == TIPO_EXPEDIENTES:
+        return "expediente"
+    if declarado == TIPO_OBRAS:
+        return "ejecucion"
     explicito = str(fx.get("tipo_experiencia") or e.get("tipo_experiencia") or "").lower()
     texto = " ".join((explicito, str(e.get("proyecto") or ""))).lower()
     if re.search(r"expediente\s+t[eé]cnico|estudio\s+definitivo", texto):
@@ -556,8 +574,12 @@ def _tipo_experiencia(e: dict, fx: dict) -> str:
     return "indeterminada"
 
 
-def presentacion_cruces(e: dict, fx: Optional[dict]) -> dict:
+def presentacion_cruces(e: dict, fx: Optional[dict],
+                        tipo_evaluacion: Optional[str] = None) -> dict:
     """Los cruces de UNA experiencia, ya traducidos a lo que se pinta.
+
+    `tipo_evaluacion` es el parámetro del concurso (ADR-010, `_meta`); cuando
+    viene, decide si la experiencia es de expediente u obra por encima del texto.
 
     ⚠ FUENTE ÚNICA de la presentación: la consumen la hoja «Cronología de
     expedientes» (vista de conjunto del Comité) **y** el bloque por profesional
@@ -569,7 +591,7 @@ def presentacion_cruces(e: dict, fx: Optional[dict]) -> dict:
     from reglas.cruces_fechas import REGLA_INICIO, REGLA_TERMINO, RESPUESTA
 
     fx = fx or {}
-    tipo = _tipo_experiencia(e, fx)
+    tipo = _tipo_experiencia(e, fx, tipo_evaluacion)
     if str(fx.get("via") or "").upper() == "PRIVADA":
         pendiente = bool(fx.get("privada_pendiente"))
         rotulo_a = ("REVISIÓN — RUTA PRIVADA / SUNAT PENDIENTE" if pendiente
@@ -815,9 +837,12 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
     r += 1
 
     filas = 0
+    from resolucion.cui import tipo_evaluacion_del_espejo
+    tipo_evaluacion = tipo_evaluacion_del_espejo(espejo)   # ADR-010
     for prof in espejo.get("profesionales", []):
         for e in prof.get("experiencias", []):
-            p = presentacion_cruces(e, fichas.get((prof.get("n_prof"), e.get("n"))))
+            p = presentacion_cruces(e, fichas.get((prof.get("n_prof"), e.get("n"))),
+                                    tipo_evaluacion)
             valores = [prof.get("nombre"), p["n_exp"], p["proyecto"], p["cui"],
                        p["inicio"], p["fin"], p["firma"], p["aprobacion"],
                        p["resp_a"], p["resp_b"], p["motivo"]]
@@ -893,6 +918,7 @@ def construir_hoja_profesional(
     revisiones: Optional[dict] = None,
     sunat: Optional[dict] = None,
     certificados: Optional[dict] = None,
+    tipo_evaluacion: Optional[str] = None,   # ADR-010 · `_meta.tipo_evaluacion`
 ) -> None:
     cuis = cuis or {}
     fichas = fichas or {}
@@ -2451,7 +2477,7 @@ def construir_hoja_profesional(
             return cv
 
         for e in prof.get("experiencias", []):
-            p = presentacion_cruces(e, fichas.get((n_prof, e.get("n"))))
+            p = presentacion_cruces(e, fichas.get((n_prof, e.get("n"))), tipo_evaluacion)
             # La tarjeta muestra SOLO lo que aplica a su tipo (pedido de Rafael,
             # 6-ago): en una obra las filas de término/aprobación nunca dicen
             # nada — el tipo va en el título y esas filas se omiten. La vara es
@@ -2585,7 +2611,8 @@ def generar_excel_final(
         nombre = etiqueta_hoja(prof.get("n_prof", 0), prof.get("cargo", ""))
         certs_prof = {k: v for k, v in certificados.items() if k[0] == prof.get("n_prof")}
         construir_hoja_profesional(wb.create_sheet(nombre), prof, paralizaciones,
-                                   cuis, fichas, revisiones, sunat, certs_prof)
+                                   cuis, fichas, revisiones, sunat, certs_prof,
+                                   tipo_evaluacion=_tipo_evaluacion_espejo(espejo))
 
     # T-011 · hoja ADITIVA, al final: el formato congelado (CLAUDE + Base de
     # Datos + una por profesional) conserva su orden y su contenido exactos.

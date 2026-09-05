@@ -240,7 +240,15 @@ const Observacion = z.object({
 const JsonEspejo = z.object({
   // `slug`: nombre CORTO del concurso ("huachocolpa") para los archivos que
   // descarga el evaluador. Lo elige el orquestador (ver SKILL.md, Paso 4).
-  _meta: z.object({ analisis_id: z.string().min(1), slug: txt }).passthrough(),
+  _meta: z.object({
+    analisis_id: z.string().min(1),
+    slug: txt,
+    // ADR-010 · tipo de evaluación del concurso, leído del objeto de la
+    // convocatoria: "expedientes" (camino A) | "obras" (camino B). El backend
+    // enruta TODA la verificación por este valor; si falta cae al texto de cada
+    // experiencia (frágil). Lo escribe `consolidar_espejo.js`.
+    tipo_evaluacion: z.enum(["expedientes", "obras"]).nullable().optional(),
+  }).passthrough(),
   postor: z.object({
     detalle: txt,
     formularios: z.array(Formulario).default([]),

@@ -112,8 +112,23 @@ aplica).
 
 ## Salida
 JSON: `_meta` (con `subagente: "agent-bases"`), `metadata_concurso` (incluye
-**`pagina_factores`** y **`paginas_personal_clave`**), `factores_evaluacion`, `personal_clave[]`,
+**`pagina_factores`**, **`paginas_personal_clave`** y **`tipo_evaluacion`**), `factores_evaluacion`, `personal_clave[]`,
 `reglas_evaluacion`, `observaciones_claude[]`.
+
+**`tipo_evaluacion`** (en `metadata_concurso`, OBLIGATORIO): de qué es el
+concurso, leído del **objeto de la convocatoria** (carátula, numeral «Objeto» o
+«Denominación de la contratación»), con vocabulario cerrado:
+- `"expedientes"` → el objeto es elaborar un **expediente técnico**, estudio
+  definitivo, estudio de preinversión o ficha técnica (consultoría de proyecto).
+- `"obras"` → el objeto es **supervisar o ejecutar una obra** (consultoría de obra
+  para la supervisión, ejecución, inspección).
+- `null` + observación `critical` SOLO si el objeto mezcla ambas cosas (p. ej.
+  «elaboración del expediente técnico y ejecución de la obra») o no aparece.
+Copia además el objeto literal en `metadata_concurso.objeto`. El backend enruta
+TODA la verificación de las experiencias por este valor (contrato y resolución
+del MEF para expedientes; valorizaciones de InfoObras para obras), así que un
+valor equivocado aquí hace que cada certificado se verifique contra la fuente
+incorrecta. No lo deduzcas de los certificados de la propuesta: sale de las bases.
 Cada entrada de `personal_clave` incluye: `numero`, `cargos_similares_validos`,
 `profesiones_aceptadas`, `tiempo_minimo_experiencia`, `tipos_obra_validos`,
 `aplica` (Factor A), `acreditacion_formacion` y **`folio`** = la página física del PDF donde aparece la
@@ -122,6 +137,8 @@ continúa, usa rango. Añade `fuente: "bases" | "terminos_de_referencia"` para q
 la procedencia sobreviva a la consolidación. Lo consume el recorte TDR.
 
 ## Checklist antes de devolver
+- [ ] `metadata_concurso.tipo_evaluacion` = `"expedientes"` | `"obras"` según el
+      objeto de la convocatoria (o `null` + observación critical si es mixto/ausente).
 - [ ] `personal_clave` tiene una entrada por cada cargo del cuadro (ninguno omitido).
 - [ ] `fecha_presentacion_oferta` en ISO o `null` + observación critical.
 - [ ] `cargos_similares_validos` no vacío para los cargos que sí los tienen.

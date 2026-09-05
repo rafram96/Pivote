@@ -1,6 +1,58 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-08-14** · rama de trabajo: `demo`
+> Última actualización: **2026-09-05** · rama de trabajo: `demo`
+
+## ADR-010 implementada: el tipo de concurso viaja en el espejo (5-sep)
+
+El enrutado expediente/obra ya no depende de que el certificado conserve la
+palabra «expediente» ni de una variable de entorno global. La skill declara
+`_meta.tipo_evaluacion` (`expedientes` | `obras`) leyendo el objeto de la
+convocatoria, o el usuario lo fija con `--tipo` al consolidar; el backend lo
+prefiere sobre `PIVOTE_FORZAR_EXPEDIENTES` y sobre el texto, y lo aplica en las
+etapas de InfoObras/SEACE, en el veto de fase del resolver, en las sub-obras y
+en la cronología del Excel. Sin tipo, el consolidador emite un crítico y no deja
+subir. Contrato aditivo en las tres copias; `/analizar` acepta el form-field.
+Gate: backend **1037 passed, 25 skipped**; skill 60 tests; Panel `tsc` limpio.
+Detalle en el ADR. Sin commit todavía; la corrección de RUC del 16-ago también
+sigue sin versionar.
+
+## Adopción RAF y arquitectura visual canónica (20-ago)
+
+Pivote ya está adoptado como proyecto RAF (`.ai/project.json`, perfil `repo`) y
+dispone de un mapa visual canónico en `.ai/architecture/architecture.json`,
+revisión **2**. El mapa fue contrastado con la skill, las siete tools del MCP,
+los endpoints FastAPI, las nueve etapas del pipeline, el resolver, el compose y
+la documentación de datos e integraciones. Contiene **20 componentes**, **39
+conexiones etiquetadas** y **7 escenarios**.
+
+La revisión 2 expone con mayor detalle las capacidades que explican el valor
+real del sistema: fábrica de subagentes, contrato espejo, escudo de integridad,
+resolver con abstención, verificación multifuente, reglas determinísticas,
+plataforma MEF local, trazabilidad por job, dos fábricas de entregables y plano
+operativo on-prem. Los nodos tienen layout y color por capa para que el canvas
+se lea como una arquitectura ejecutiva y técnica, sin inventar microservicios.
+
+El archivo raíz `arquitectura.json` se conserva como referencia histórica; las
+actualizaciones que deba leer raf-IDE se hacen exclusivamente mediante
+`raf-ai architecture get/validate/set`, no editando el envelope canónico a mano.
+La adopción conservó todos los documentos `.ai/` previos y los cambios de código
+que ya estaban en el árbol de trabajo.
+
+## Correcciones humanas RUC/CUI visibles y reanálisis acotado (16-ago)
+
+El Panel permite corregir el RUC del emisor desde cada experiencia. El backend
+persiste la decisión en `Job.correcciones_humanas` y reejecuta únicamente
+SUNAT, reglas, Excel y persistencia para ese ítem: no vuelve a resolver el CUI,
+no consulta InfoObras y no modifica el ledger/ZIP de descargas. Las decisiones
+de CUI de la cola de revisión usan el mismo historial y conservan su flujo
+preexistente de recálculo y descarga única por fuente lógica.
+
+La vista de revisión es ahora una mesa de decisiones ancha: separa contexto,
+motivo, candidatos, CUI manual y «sin CUI aplicable». Resultados y Descargas
+muestran cuándo el Excel ya incorpora correcciones del Panel; Descargas aclara
+además si el ZIP se conserva o incorpora una fuente lógica nueva por cambio de
+CUI. Gate: **1004 passed, 25 skipped**; Panel TypeScript y build productivo
+aprobados. `resolucion/cui.py` quedó intacto, por lo que no aplica golden.
 
 ## Correcciones de auditoría implementadas localmente (14-ago)
 

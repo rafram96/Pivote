@@ -459,7 +459,9 @@ function taller(evaluacion, postorMapa) {
   fs.mkdirSync(path.join(ws, "_prof"));
   const w = (rel, obj) => fs.writeFileSync(path.join(ws, rel), JSON.stringify(obj), "utf-8");
   w("bases.json", {
-    metadata_concurso: { nomenclatura: "CP-02-2025", entidad: "GORE X" },
+    // `tipo_evaluacion` declarado (ADR-010): sin él el consolidador grita, y
+    // estos talleres prueban OTRAS cosas. El caso sin tipo tiene su propio test.
+    metadata_concurso: { nomenclatura: "CP-02-2025", entidad: "GORE X", tipo_evaluacion: "obras" },
     personal_clave: HECHOS.map((h) => ({
       numero: h.n_prof, cargo: h.cargo, cargos_similares_validos: ["A", "B"],
       tiempo_minimo_experiencia: "5 años", profesiones_aceptadas: ["Ingeniero Civil"],
@@ -685,5 +687,83 @@ test("PARTE 2 · si el evaluador se salta un contrato, el otro NO se corre", () 
   assert.strictEqual(ep[0].pct_objeto, null, "el contrato no juzgado queda vacío, no hereda el del otro");
   assert.strictEqual(ep[1].pct_objeto, 0.5);
   assert.strictEqual(ep[1].contrato, "Contrato N° 014-2020");
+  fs.rmSync(ws, { recursive: true, force: true });
+});
+
+// ── ADR-010 · tipo de evaluación del concurso (`_meta.tipo_evaluacion`) ──────
+// El backend enruta TODA la verificación por este valor. Antes se deducía del
+// texto de cada certificado y bastaba perder la frase «Elaboración del expediente
+// técnico» (caso San Isidro, 51/68 mal enrutadas) para verificar un expediente
+// contra valorizaciones de obra. El consolidador lo declara o grita.
+const {
+  normalizarTipoEvaluacion, inferirTipoEvaluacion, tipoEvaluacion,
+} = require("./consolidar_espejo");
+
+test("ADR-010 · normaliza alias, mayúsculas y acentos; lo desconocido es null", () => {
+  for (const v of ["expedientes", "Expediente", "EXPEDIENTE TÉCNICO", "A", "camino a"]) {
+    assert.strictEqual(normalizarTipoEvaluacion(v), "expedientes", v);
+  }
+  for (const v of ["obras", "Obra", "supervisión de obra", "B", "ejecución"]) {
+    assert.strictEqual(normalizarTipoEvaluacion(v), "obras", v);
+  }
+  for (const v of [null, undefined, "", "mixto", "consultoría", "expedientes y obras"]) {
+    assert.strictEqual(normalizarTipoEvaluacion(v), null, String(v));
+  }
+});
+
+test("ADR-010 · infiere del objeto de la convocatoria solo con marcadores inequívocos", () => {
+  assert.strictEqual(inferirTipoEvaluacion(
+    "Contratación del servicio de consultoría para la elaboración del expediente técnico del proyecto «Mejoramiento…»"),
+    "expedientes");
+  assert.strictEqual(inferirTipoEvaluacion(
+    "CONSULTORÍA DE OBRA PARA LA SUPERVISIÓN DE LA OBRA: MEJORAMIENTO DEL HOSPITAL X"),
+    "obras");
+  // llave en mano: expediente Y ejecución → no adivina
+  assert.strictEqual(inferirTipoEvaluacion(
+    "Elaboración del expediente técnico y ejecución de la obra …"), null);
+  assert.strictEqual(inferirTipoEvaluacion(""), null);
+  assert.strictEqual(inferirTipoEvaluacion(undefined), null);
+});
+
+test("ADR-010 · precedencia: flag > agent-bases > objeto; flag inválido revienta", () => {
+  const bases = { metadata_concurso: {
+    tipo_evaluacion: "obras",
+    objeto: "elaboración del expediente técnico …",
+  } };
+  assert.deepStrictEqual(tipoEvaluacion(bases, "expedientes"), { valor: "expedientes", fuente: "parametro" });
+  assert.deepStrictEqual(tipoEvaluacion(bases, undefined), { valor: "obras", fuente: "agent-bases" });
+  assert.deepStrictEqual(tipoEvaluacion({ metadata_concurso: { objeto: bases.metadata_concurso.objeto } }),
+    { valor: "expedientes", fuente: "objeto_convocatoria" });
+  assert.deepStrictEqual(tipoEvaluacion({}), { valor: null, fuente: null });
+  assert.throws(() => tipoEvaluacion(bases, "mixto"), /--tipo/);
+});
+
+test("ADR-010 e2e · sin tipo declarado el consolidador GRITA; con --tipo lo escribe en _meta", () => {
+  const ws = taller(SANA);
+  const patch = (rel, fn) => {
+    const p = path.join(ws, rel);
+    const obj = JSON.parse(fs.readFileSync(p, "utf-8"));
+    fn(obj);
+    fs.writeFileSync(p, JSON.stringify(obj), "utf-8");
+  };
+  patch("bases.json", (b) => { delete b.metadata_concurso.tipo_evaluacion; });
+
+  const sinTipo = main(ws);
+  const crit = sinTipo.observaciones_claude.filter((o) => o.severidad === "critical");
+  assert.ok(crit.some((o) => o.tipo === "tipo_evaluacion_indeterminado"),
+    `esperaba tipo_evaluacion_indeterminado, hubo: ${tipos(sinTipo.observaciones_claude).join(", ")}`);
+  assert.strictEqual(sinTipo._meta.tipo_evaluacion, null);
+
+  const conFlag = main(ws, { tipo: "Expedientes" });
+  assert.strictEqual(conFlag._meta.tipo_evaluacion, "expedientes");
+  assert.strictEqual(conFlag._meta.tipo_evaluacion_fuente, "parametro");
+  assert.deepStrictEqual(
+    conFlag.observaciones_claude.filter((o) => o.tipo === "tipo_evaluacion_indeterminado"), []);
+
+  // el schema de la skill acepta el campo (paridad con Pydantic/zod del Panel)
+  const { JsonEspejo } = require("../schemas/espejo");
+  const guardado = JSON.parse(fs.readFileSync(path.join(ws, "espejo.json"), "utf-8"));
+  const res = JsonEspejo.safeParse(guardado);
+  assert.ok(res.success, JSON.stringify(res.error && res.error.issues && res.error.issues.slice(0, 3)));
   fs.rmSync(ws, { recursive: true, force: true });
 });

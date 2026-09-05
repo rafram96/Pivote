@@ -723,11 +723,67 @@ function reportar(outPath, espejo, avisos) {
  * convierte en exit code. `main` queda como envoltorio para quien solo quiere el
  * espejo (los tests) sin tocarle el código de salida al proceso.
  */
-function consolidar(WS) {
+// ── ADR-010 · tipo de evaluación del concurso ("expedientes" | "obras") ──────
+// El backend enruta TODA la verificación por este valor (camino A: contrato +
+// resolución 08-A del MEF; camino B: valorizaciones de InfoObras). Antes se
+// deducía del texto de cada certificado, y bastaba que la skill perdiera la
+// frase «Elaboración del expediente técnico» para verificar un expediente como
+// obra. Precedencia: flag explícito del usuario > lo que agent-bases leyó del
+// objeto de la convocatoria > inferencia determinística sobre ese objeto.
+const TIPOS_EVALUACION = ["expedientes", "obras"];
+const ALIAS_TIPO = {
+  expedientes: "expedientes", expediente: "expedientes", a: "expedientes",
+  "camino a": "expedientes", "expediente tecnico": "expedientes",
+  obras: "obras", obra: "obras", b: "obras", "camino b": "obras",
+  supervision: "obras", "supervision de obra": "obras", ejecucion: "obras",
+};
+const sinAcentos = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "");
+
+function normalizarTipoEvaluacion(v) {
+  if (v === undefined || v === null) return null;
+  const clave = sinAcentos(v).toLowerCase().replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
+  return ALIAS_TIPO[clave] || null;
+}
+
+/** Inferencia DETERMINÍSTICA sobre el objeto de la convocatoria (no sobre los
+ *  certificados). Solo decide con marcadores inequívocos; ante mezcla o
+ *  ausencia devuelve null y el consolidador avisa en vez de adivinar. */
+function inferirTipoEvaluacion(objeto) {
+  const t = sinAcentos(objeto).toLowerCase();
+  if (!t.trim()) return null;
+  const exped = /expediente(s)?\s+tecnico|estudio(s)?\s+definitivo|estudio(s)?\s+de\s+pre\s?inversion|ficha\s+tecnica|elaboracion\s+del?\s+(proyecto|expediente)/.test(t);
+  const obra = /supervisi[o]n\s+de\s+(la\s+)?(obra|ejecucion)|ejecucion\s+de\s+(la\s+)?obra|inspeccion\s+de\s+(la\s+)?obra/.test(t);
+  if (exped && !obra) return "expedientes";
+  if (obra && !exped) return "obras";
+  return null; // "expediente técnico y ejecución de obra" (llave en mano) → que decida el humano
+}
+
+/** Devuelve { valor, fuente } — `fuente` documenta de dónde salió para la traza. */
+function tipoEvaluacion(bases, flag) {
+  const explicito = normalizarTipoEvaluacion(flag);
+  if (flag !== undefined && flag !== null && flag !== "" && !explicito) {
+    throw new Error(`--tipo "${flag}" no reconocido; usa expedientes | obras`);
+  }
+  if (explicito) return { valor: explicito, fuente: "parametro" };
+  const mc = (bases && bases.metadata_concurso) || {};
+  const leido = normalizarTipoEvaluacion(mc.tipo_evaluacion);
+  if (leido) return { valor: leido, fuente: "agent-bases" };
+  const inferido = inferirTipoEvaluacion(mc.objeto);
+  if (inferido) return { valor: inferido, fuente: "objeto_convocatoria" };
+  return { valor: null, fuente: null };
+}
+
+function consolidar(WS, opts = {}) {
   const bases = rd(path.join(WS, "bases.json"));
   const roster = rd(path.join(WS, "roster_bundles.json"));
   const ev = rd(path.join(WS, "evaluacion.json"));
   const avisos = []; // observaciones_claude que generamos si falta data
+  const tipoEval = tipoEvaluacion(bases, opts.tipo);
+  if (!tipoEval.valor) avisos.push({
+    severidad: "critical", tipo: "tipo_evaluacion_indeterminado",
+    mensaje: "No se pudo determinar si el concurso es de EXPEDIENTES u OBRAS: agent-bases no lo declaró y el objeto de la convocatoria no lo dice de forma inequívoca. Sin este dato el backend enruta cada certificado por su texto (frágil). Vuelve a consolidar con --tipo expedientes | obras tras confirmarlo con el usuario.",
+    referencia: "_meta.tipo_evaluacion",
+  });
   // Mapas normalizados de la evaluación (los avisos de forma los emite auditarEvaluacion).
   const { PE, EE } = normalizarEval(ev);
   const factoresNormalizados = normalizarFactores(
@@ -1006,6 +1062,9 @@ function consolidar(WS) {
       analisis_id: pick(bases.metadata_concurso && bases.metadata_concurso.analisis_id, path.basename(path.resolve(WS))),
       concurso: pick(bases.metadata_concurso && bases.metadata_concurso.nomenclatura),
       objeto: pick(bases.metadata_concurso && bases.metadata_concurso.objeto),
+      // ADR-010 · "expedientes" | "obras" | null (ver tipoEvaluacion arriba).
+      tipo_evaluacion: tipoEval.valor,
+      tipo_evaluacion_fuente: tipoEval.fuente,
       entidad: pick(bases.metadata_concurso && bases.metadata_concurso.entidad),
       entidad_ruc: pick(bases.metadata_concurso && bases.metadata_concurso.entidad_ruc),
       cui: pick(bases.metadata_concurso && bases.metadata_concurso.cui),
@@ -1067,17 +1126,36 @@ function consolidar(WS) {
   return { espejo, criticos };
 }
 
-const main = (WS) => consolidar(WS).espejo;
+const main = (WS, opts) => consolidar(WS, opts).espejo;
 
 module.exports = {
   normalizarEval, normalizarFactores, auditarEvaluacion, extraerCuiLiteral, reglasEvaluacionDe,
   consolidar, main,
+  normalizarTipoEvaluacion, inferirTipoEvaluacion, tipoEvaluacion, TIPOS_EVALUACION,
 };
 
+/** `node consolidar_espejo.js <carpeta> [--tipo expedientes|obras]` (también `--tipo=`). */
+function parseArgs(argv) {
+  const out = { WS: null, tipo: undefined };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--tipo") { out.tipo = argv[++i]; continue; }
+    if (a.startsWith("--tipo=")) { out.tipo = a.slice("--tipo=".length); continue; }
+    if (!out.WS) out.WS = a;
+  }
+  return out;
+}
+
 if (require.main === module) {
-  const WS = process.argv[2];
-  if (!WS) { console.error("uso: node scripts/consolidar_espejo.js <carpeta_analisis>"); process.exit(2); }
-  const { criticos } = consolidar(WS);
+  const { WS, tipo } = parseArgs(process.argv.slice(2));
+  if (!WS) { console.error("uso: node scripts/consolidar_espejo.js <carpeta_analisis> [--tipo expedientes|obras]"); process.exit(2); }
+  let criticos;
+  try {
+    ({ criticos } = consolidar(WS, { tipo }));
+  } catch (e) {
+    if (/--tipo/.test(String(e && e.message))) { console.error(`⛔ ${e.message}`); process.exit(2); }
+    throw e;
+  }
   // El gate: sin esto el candado es decorativo — quien mira el exit code (o la
   // primera línea) concluye que todo salió bien y sigue al Paso 5.
   if (criticos.length) process.exitCode = 1;
