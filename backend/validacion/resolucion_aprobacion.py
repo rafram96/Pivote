@@ -55,9 +55,15 @@ _ROLES = (r"CONSULTOR(?:A|IA)?(?:\s+DE\s+OBRA)?|CONTRATISTA|PROYECTISTA|ELABORAD
           r"ENTIDAD\s+PRIVADA\s+SUPERVISORA|EMPRESA\s+PRIVADA|A\s+FAVOR\s+DE(?:L|\s+LA)?|"
           r"SUSCRITO\s+CON|SUSCRIBIO\s+EL\s+CONTRATO\s+CON")
 _RE_ROL = re.compile(rf"\b({_ROLES})\b")
+# Roles tras los que el texto escribe un NOMBRE («el consultor X», «a favor del
+# contratista Y»). «Entidad privada supervisora» y «empresa privada» quedan fuera
+# de esta lista: en resoluciones de obras por impuestos son términos genéricos
+# seguidos de oración, y capturaban verbos como nombres.
+_ROLES_CON_NOMBRE = (r"CONSULTOR(?:A|IA)?(?:\s+DE\s+OBRA)?|CONTRATISTA|PROYECTISTA|"
+                     r"ELABORAD[OA]\s+POR|A\s+FAVOR\s+DE(?:L|\s+LA)?|SUSCRIBIO\s+EL\s+CONTRATO\s+CON")
 _ARTICULOS = r"(?:EL|LA|LOS|LAS|DEL|DE\s+LA|EMPRESA|ING\.?|ARQ\.?|SR\.?|SRA\.?|CONSULTOR(?:A)?)?\s*"
 _RE_NOMBRE_TRAS_ROL = re.compile(
-    rf"\b(?:{_ROLES})\s*[:,]?\s*{_ARTICULOS}"
+    rf"\b(?:{_ROLES_CON_NOMBRE})\s*[:,*\"]?\s*{_ARTICULOS}"
     r"([A-Z][A-Z0-9 .&+\-]{3,90}?)(?=\s*[,;()\"*]|\s+(?:QUE|CON|PARA|POR|MEDIANTE|SEGUN|EN|Y|DEL|DE|"
     r"CELEBRAN|SUSCRIBEN|SUSCRIBIO|REMITE|PRESENTA|SOLICITA|COMUNICA|INFORMA|EL|LA)\s|$)")
 _RE_NOMBRE_ANTES_ROL = re.compile(
@@ -69,7 +75,40 @@ _GENERICOS = {"OBRA", "PARA", "ELABORACION", "EXPEDIENTE", "TECNICO", "SERVICIO"
               "PRIVADA", "DE", "LA", "EL", "DEL", "LOS", "LAS", "QUE", "REPRESENTANTE",
               "LEGAL", "COMUN", "SUPERVISOR", "SUPERVISORA", "CONTRATO", "FINANCIA",
               "EMPRESA", "CONSULTOR", "CONSULTORA", "CONTRATISTA", "PROYECTISTA",
-              "CUANDO", "ASI", "HAYA", "DETERMINADO", "MEDIANTE", "SEGUN", "DICHO", "DICHA"}
+              "CUANDO", "ASI", "HAYA", "DETERMINADO", "MEDIANTE", "SEGUN", "DICHO", "DICHA",
+              # verbos y conectores que el texto pone justo después del rol
+              "TRASLADA", "CUMPLIRA", "CUMPLE", "REMITE", "REMITEN", "PRESENTA", "PRESENTO",
+              "SOLICITA", "COMUNICA", "INFORMA", "SUSCRIBE", "APRUEBA", "DECLARA", "DISPONE",
+              "RESUELVE", "OTORGA", "SENALA", "INDICA", "ADJUNTA", "DESIGNADO", "DESIGNADA",
+              "ARTICULO", "REALIZA", "EJECUTA", "ELABORA", "ELABORO", "EMITE", "DEBERA", "DEBE",
+              "PUEDE", "SALVO", "CASOS", "EQUIPO", "EVALUADOR", "EXTREMOS", "IMPREVISIBLE",
+              "IMPREVISIBLES", "PARTE", "TRAVES", "EFECTOS", "CONFORME", "PLAZO", "DIAS"}
+_SUFIJO_EMPRESA = re.compile(r"\b(S\s?A\s?C|S\s?A|E\s?I\s?R\s?L|S\s?R\s?L|CONSORCIO|CIA|LTDA|CORPORATION|INC)\b")
+
+
+def _plausible_nombre(n: str) -> bool:
+    """¿Parece una razón social o una persona, y no un pedazo de oración? Exige
+    sufijo legal/consorcio o al menos dos palabras con contenido, y que la
+    primera palabra no sea un conector ni un verbo."""
+    toks = [t for t in re.split(r"[^A-Z0-9]+", n) if t]
+    if not toks or toks[0] in _GENERICOS or len(toks[0]) < 2:
+        return False
+    if re.search(r"\.\s+[A-Z]{3,}", n):        # «… CULMINADOS. LA SUPERVISION …» = otra oración
+        return False
+    if any(t in _PROSA for t in toks):          # una razón social no lleva verbos ni pronombres
+        return False
+    contenido = [t for t in toks if t not in _GENERICOS and len(t) >= 3]
+    return bool(_SUFIJO_EMPRESA.search(n)) or len(contenido) >= 2
+
+
+# Palabras de oración que NO aparecen dentro de una razón social ni de un nombre
+# de persona: si el fragmento capturado las trae, es prosa, no un nombre.
+_PROSA = {"SE", "QUE", "REQUIERE", "PREVIAMENTE", "OPINION", "FAVORABLE", "PARA", "CON",
+          "POR", "SUS", "SU", "ESTE", "ESTA", "ESTOS", "ESTAS", "DONDE", "CUAL", "CUALES",
+          "SERA", "SERAN", "HA", "HAN", "SIDO", "SER", "ESTAR", "FUE", "FUERON", "TIENE",
+          "TIENEN", "TENDRA", "HACE", "HACER", "ANTE", "BAJO", "SOBRE", "TRAS", "ENTRE",
+          "MISMO", "MISMA", "CADA", "TODO", "TODA", "TODOS", "TODAS", "ASIMISMO", "ADEMAS",
+          "TAMBIEN", "LUEGO", "ENTONCES", "SIN", "COMO", "CUANDO", "PORQUE", "AUNQUE"}
 UMBRAL_FRASE = 88          # parecido mínimo del nombre COMPLETO dentro de la ventana
 VENTANA_ROL = 140          # caracteres a cada lado de un rol donde buscar el nombre
 
@@ -128,9 +167,13 @@ def consultores_nombrados(T: str) -> list[str]:
     vistos: list[str] = []
 
     def _agregar(nombre: str) -> None:
-        n = re.sub(r"\s+", " ", nombre).strip(" .,-")
-        toks = [t for t in re.split(r"[^A-Z0-9]+", n) if t]
-        if len(n) < 4 or not any(t not in _GENERICOS and len(t) >= 3 for t in toks):
+        n = re.sub(r"\s+", " ", nombre).strip(" .,-*\"")
+        # «CONTRATISTA JORGE …» (rol pegado al nombre) → quitar los genéricos iniciales
+        toks = n.split(" ")
+        while toks and toks[0] in _GENERICOS:
+            toks.pop(0)
+        n = " ".join(toks)
+        if len(n) < 4 or not _plausible_nombre(n):
             return
         if all(fuzz.ratio(n, v) < 90 for v in vistos):
             vistos.append(n[:90])

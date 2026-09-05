@@ -1116,6 +1116,25 @@ def _checkpoint_fase(r: dict, exp: dict, consulta: Consulta) -> dict:
                              f" · el CUI tiene {len(hermanos)} registros de obra; "
                              f"se usó el de la fase del certificado ({fase_cert})")
         return nuevo
+    if fase_cert == "EXPEDIENTE":
+        # Certificado de ELABORACIÓN DEL EXPEDIENTE y el CUI solo tiene registros
+        # de construcción (contingencia, principal, saldo). Eso no contradice la
+        # identidad: es el mismo proyecto, y su fase de expediente casi nunca se
+        # registra en InfoObras (se verifica contra el MEF: contrato y resolución
+        # de aprobación, ADR-010). Antes se mandaba a revisión «elegir el registro
+        # correcto» aunque el certificado citara el CUI exacto y el MEF lo
+        # confirmara con el mismo nombre (caso real, 5-sep). Se conserva la
+        # resolución y se deja escrito qué registra InfoObras.
+        nuevo = dict(r)
+        nuevo["registros_cui"] = len(hermanos)
+        nuevo["decision"] = (
+            str(r.get("decision") or "").rstrip() +
+            f" · InfoObras registra este CUI solo en su fase de "
+            f"{(fase_obra or 'ejecución de obra').lower()}; el expediente se verifica "
+            "contra el contrato y la resolución de aprobación del MEF")
+        _traza().ev("checkpoint_fase_expediente_sin_registro", cui=r["cui"],
+                    fase_obra=fase_obra, registros=len(hermanos))
+        return nuevo
     if fase_obra is not None and fase_obra != fase_cert:
         # contradicción sin hermano que la resuelva → el humano elige entre los
         # registros reales del CUI (visibles, nunca un descarte silencioso)

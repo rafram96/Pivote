@@ -490,13 +490,17 @@ class EtapaInfoObrasReal:
                  descargar: Optional[Callable] = None,
                  verificador_mef: Optional[Callable] = None,
                  consulta_ocds: Optional[Callable] = None,
-                 lector_resolucion: Optional[Callable] = None):
+                 lector_resolucion: Optional[Callable] = None,
+                 ficha_08a: Optional[Callable] = None):
         self._fetcher = fetcher
         self.dir_descargas = dir_descargas
         self._descargar = descargar
         # Lectura de la resolución de aprobación (red + OCR local). Inyectable en
         # tests; None → `validacion.resolucion_aprobacion.leer_resolucion`.
         self._lector_resolucion = lector_resolucion
+        # `{url, numero, documento}` de la resolución del 08-A de un CUI candidato.
+        # Inyectable; None → MEF real solo si la verificación MEF está cableada.
+        self._ficha_08a = ficha_08a
         # Verificación de expedientes contra el MEF (módulo T-003). Inyectable en
         # tests; en producción usa scraping.mef.verificar_cui (best-effort, red).
         self._verificar_mef = verificador_mef
@@ -1022,12 +1026,80 @@ class EtapaInfoObrasReal:
                     origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
             ctx.enriquecimiento[k] = enr
 
+        # Experiencias de EXPEDIENTE que quedaron en revisión: la resolución de
+        # aprobación de cada candidato es evidencia oficial de quién elaboró ESE
+        # expediente. No resuelve (regla de oro: sin golden no se promueve), pero
+        # convierte un «por confirmar» mudo en «la resolución del candidato X nombra
+        # a Y», en el ítem de revisión (Panel) y en la hoja P.
+        self._leer_resoluciones_de_candidatos(ctx)
+
         total = sum(1 for _ in ctx.items_experiencia())
         # Las métricas de descarga (archivos/bytes/reintentos) las RELLENA la
         # descarga diferida (post-pipeline) sobre esta misma etapa — aquí van en 0.
         estado = (EE.ERROR_PARCIAL if cont["err"]
                   else (EE.OK_CON_REVISION if cont["rev"] else EE.OK))
         return _res(self.nombre, estado, _met(total, cont["ok"], cont["rev"], cont["err"]), obs)
+
+    def _resolucion_08a(self, cui: str) -> Optional[dict]:
+        """`{url, numero, documento}` de la resolución de aprobación del 08-A de un
+        CUI, o None. Inyectable (`ficha_08a`); por defecto consulta el MEF solo si
+        la verificación MEF está cableada (modo real)."""
+        if self._ficha_08a is not None:
+            return self._ficha_08a(cui)
+        if self._verificar_mef is None:
+            return None
+        from scraping import mef
+        html = mef.fetch_ficha_08a(cui)
+        return (mef.parsear_ficha_08a(html) or {}).get("resolucion") if html else None
+
+    def _leer_resoluciones_de_candidatos(self, ctx, max_candidatos: int = 2) -> int:
+        if (os.getenv("PIVOTE_LEER_RESOLUCION", "1") or "1").strip() in ("0", "no", "false"):
+            return 0
+        if self._ficha_08a is None and self._verificar_mef is None:
+            return 0
+        tipo_decl = tipo_evaluacion_del_espejo(ctx.espejo)
+        leidas = 0
+        for e, (np_, ne) in ctx.items_experiencia():
+            k = _clave(np_, ne)
+            enr = ctx.enriquecimiento.get(k) or {}
+            if enr.get("cui") or enr.get("via") != "REVISION":
+                continue
+            if not es_expediente_exp(e, tipo_decl, self.forzar_expedientes):
+                continue
+            lecturas = []
+            vistos_cui: set[str] = set()
+            candidatos = []
+            for c in (enr.get("candidatos") or []):
+                cc = str(c.get("cui") or "")
+                if cc and cc not in vistos_cui:       # el mismo CUI puede venir repetido
+                    vistos_cui.add(cc)
+                    candidatos.append(c)
+            for c in candidatos[:max_candidatos]:
+                try:
+                    info = self._resolucion_08a(str(c["cui"]))
+                except Exception as ex:  # noqa: BLE001
+                    logger.debug("08-A candidato %s: %s", c.get("cui"), ex)
+                    continue
+                if not info or not info.get("url"):
+                    continue
+                lect = self._leer_resolucion_aprobacion(ctx, e, str(c["cui"]), {"resolucion": info})
+                if not lect:
+                    continue
+                lecturas.append({"cui": str(c["cui"]), "nombre_obra": c.get("nombre_obra"),
+                                 **{kk: lect.get(kk) for kk in
+                                    ("numero", "fecha", "legible", "coincide_emisor",
+                                     "detalle_emisor", "consultores", "resumen")}})
+            if not lecturas:
+                continue
+            enr["resoluciones_candidatos"] = lecturas
+            ctx.enriquecimiento[k] = enr
+            leidas += 1
+            frases = frases_resoluciones_candidatos(lecturas)
+            item = next((it for it in ctx.job.items_revision
+                         if it.n_prof == np_ and it.n_exp == ne and not it.resuelto), None)
+            if item is not None and frases:
+                item.motivo = (str(item.motivo or "").rstrip(" .") + " · " + "; ".join(frases))
+        return leidas
 
 
 _NOTAS_DESCARGA = ("_ERROR.TXT", "_NO_DISPONIBLE.TXT", "SIN_DOCUMENTOS.TXT")
@@ -1073,6 +1145,31 @@ def _estado_seccion(secciones: dict, avisos: list[str], nombre: str,
     secciones[nombre] = {
         "estado": estado, "esperados": esperados, "descargados": descargados,
     }
+
+
+def frases_resoluciones_candidatos(lecturas: list[dict]) -> list[str]:
+    """Lo que dice la resolución de aprobación de cada candidato, en una frase
+    para el evaluador (ítem de revisión del Panel y hoja P). Puro."""
+    out: list[str] = []
+    for l in lecturas or []:
+        cui = l.get("cui")
+        f = str(l.get("fecha") or "")
+        fecha = f"{f[8:10]}/{f[5:7]}/{f[0:4]}" if len(f) == 10 else None
+        if not l.get("legible"):
+            out.append(f"el candidato {cui} tiene resolución de aprobación, pero es un "
+                       "escaneo sin texto reconocible")
+        elif l.get("coincide_emisor") == "confirma":
+            out.append(f"la resolución de aprobación del candidato {cui}"
+                       f"{f' ({fecha})' if fecha else ''} nombra al emisor del certificado "
+                       "como consultor del expediente")
+        elif l.get("coincide_emisor") == "nombra_otro":
+            out.append(f"la resolución de aprobación del candidato {cui}"
+                       f"{f' ({fecha})' if fecha else ''} nombra a "
+                       f"{str(l.get('detalle_emisor') or 'otra empresa')[:70]}, no al emisor")
+        else:
+            out.append(f"el candidato {cui} tiene resolución de aprobación"
+                       f"{f' del {fecha}' if fecha else ''} que no nombra a quien elaboró el expediente")
+    return out
 
 
 SECCIONES_EXPEDIENTE = frozenset({"Aprobación del expediente", "Verificación MEF"})

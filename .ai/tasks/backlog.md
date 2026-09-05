@@ -906,8 +906,10 @@ Tesseract en el Dockerfile. Medido sobre el job real: 11 de 22 expedientes con
 resolución legible; 3 confirman al emisor, 4 nombran a otro, 4 no nombran.
 
 Pendiente:
-- [ ] Leer la resolución de los CANDIDATOS de las experiencias en revisión (hoy
-      solo de los CUI ya resueltos) y mostrarla en la tarjeta de revisión.
+- [x] Leer la resolución de los CANDIDATOS de las experiencias en revisión y
+      mostrarla en el ítem de revisión (Panel) y en la hoja P (5-sep, 2ª entrega).
+- [x] Checkpoint de fase: un certificado de EXPEDIENTE con CUI citado ya no cae a
+      revisión porque InfoObras solo registre la construcción (5-sep, 2ª entrega).
 - [ ] Sanidad temporal: una resolución muy posterior al periodo del certificado
       (> 2 años) suele ser OTRO expediente del mismo CUI (reformulación, saldo).
 - [ ] Panel: mostrar fecha y consultor de la resolución en Profesionales.

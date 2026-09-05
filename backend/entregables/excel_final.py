@@ -1330,7 +1330,8 @@ def construir_hoja_profesional(
             rr += 1
         return rr - 1
 
-    def render_revision(top: int, motivo: str, accion: Optional[str] = None) -> int:
+    def render_revision(top: int, motivo: str, accion: Optional[str] = None,
+                        lecturas: Optional[list] = None) -> int:
         """Bloque para una experiencia que NO se cruzó: explica por qué quedó en
         revisión humana, en vez de dejar la columna de la obra vacía. El marcador
         especial "[PRIVADA]" pinta el bloque de cliente/obra privada (no es
@@ -1371,6 +1372,33 @@ def construir_hoja_profesional(
                            f"{accion or _ACCION_SIN_OBRA}.")
         c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
         rr += 4
+        # Lo que dice la resolución de aprobación de cada candidato (expedientes):
+        # evidencia oficial para decidir sin salir del Excel.
+        for lect in (lecturas or []):
+            if not isinstance(lect, dict):
+                continue
+            f = str(lect.get("fecha") or "")
+            fecha = f"{f[8:10]}/{f[5:7]}/{f[0:4]}" if len(f) == 10 else "sin fecha legible"
+            ver = lect.get("coincide_emisor")
+            if not lect.get("legible"):
+                dice = "resolución de aprobación escaneada sin texto reconocible"
+                fill = FILL_PEND
+            elif ver == "confirma":
+                dice = f"resolución del {fecha}: nombra al emisor del certificado como consultor"
+                fill = FILL_OK
+            elif ver == "nombra_otro":
+                dice = (f"resolución del {fecha}: nombra a "
+                        f"{str(lect.get('detalle_emisor') or 'otra empresa')[:70]}, no al emisor")
+                fill = FILL_ALERTA
+            else:
+                dice = f"resolución del {fecha}: no nombra a quien elaboró el expediente"
+                fill = FILL_PEND
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=10)
+            c = ws.cell(rr, 6, f"Candidato CUI {lect.get('cui')} — "
+                               f"{_sin_jerga(str(lect.get('nombre_obra') or ''))[:70]} → {dice}")
+            c.font, c.fill, c.border, c.alignment = F_CELL, fill, BORDER, AL_WRAP
+            ws.row_dimensions[rr].height = 30
+            rr += 1
         return rr - 1
 
     def render_aviso_revision(top: int, motivo: str, accion: Optional[str] = None) -> int:
@@ -2321,7 +2349,8 @@ def construir_hoja_profesional(
             r_right = render_seace(top, fx["seace"])
             r = max(r, r_right + 1)
         elif motivo_rev:
-            r_right = render_revision(r_top, motivo_rev, accion_rev)
+            r_right = render_revision(r_top, motivo_rev, accion_rev,
+                                      (fx or {}).get("resoluciones_candidatos"))
             r = max(r, r_right + 1)
 
         # 3ª banda (M:P): emisor del certificado (SUNAT) + ALT04, al lado de valorizaciones
@@ -2749,6 +2778,7 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                 or enr.get("representante_obra") or enr.get("aprobacion_expediente")
                 or enr.get("verificacion_expediente") or enr.get("seace")
                 or enr.get("inventario_documental") or enr.get("cruces_fechas")
+                or enr.get("resoluciones_candidatos")
                 or str(enr.get("via") or "").upper() == "PRIVADA"):
             # `obra_ficha` NO trae el nombre (solo código/CUI/estado/monto/fechas);
             # el nombre viaja suelto en `obra_nombre` (o en `obra.nombre_obra`) y sin
@@ -2767,6 +2797,7 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                                  # camino con que se enrutó (ADR-010): deciden el bloque
                                  # expediente/obra de la ficha y sus filas de contraste.
                                  "resolucion_aprobacion": enr.get("resolucion_aprobacion"),
+                                 "resoluciones_candidatos": enr.get("resoluciones_candidatos"),
                                  "camino": enr.get("camino"),
                                  "camino_fuente": enr.get("camino_fuente"),
                                  "seace": enr.get("seace"),

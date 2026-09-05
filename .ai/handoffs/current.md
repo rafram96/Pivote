@@ -92,6 +92,21 @@ contrato aditivo en 3 copias). Tesseract entra al Dockerfile. Gate: **1083 passe
 leídas; la Regla B dispara en dos experiencias que declaran término posterior a la
 aprobación. Pendientes en `tasks/backlog.md` (T-TAREA-RESOLUCION-APROBACION).
 
+## Nota (2026-09-05, Claude) — candidatos con su resolución y checkpoint de fase
+
+Segunda entrega de la lectura de resoluciones. (1) Las experiencias de expediente
+que quedan en revisión leen la resolución de aprobación de sus candidatos (máx. 2,
+sin repetir CUI) y lo dicen en el ítem de revisión y en el bloque «EXPERIENCIA EN
+REVISIÓN» de la hoja P: «la resolución del candidato X nombra a Y, no al emisor» /
+«nombra al emisor» / «no nombra a quien elaboró». No resuelve (regla de oro).
+(2) `_checkpoint_fase`: un certificado de ELABORACIÓN DEL EXPEDIENTE con CUI
+citado y confirmado por el MEF ya no cae a revisión porque InfoObras solo registre
+la contingencia/ejecución; se conserva la identidad y se anota qué registra
+InfoObras (caso real 7:1). (3) Extracción de nombres endurecida: sin verbos ni
+prosa, sin nombres de una letra, quitando roles pegados. Privadas: sin cambios,
+por decisión de Rafael. Gate: **1087 passed, 25 skipped**. Job real actualizado
+(motivos de revisión y Excel).
+
 **Para la corrida de expedientes**: invocar la skill diciendo que el concurso es
 de expedientes y pasar `--tipo expedientes` al consolidar; revisar a mano las
 vías CODIGO y PROBABLE; en la verificación MEF mirar el veredicto del
