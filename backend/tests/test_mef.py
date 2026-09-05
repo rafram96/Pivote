@@ -165,3 +165,53 @@ def test_verificar_expediente_sin_datos_degrada():
     assert b["verificado_en_mef"] is False
     assert b["resolucion"]["veredicto"] == "no_verificable"
     assert "detalle" in b
+
+
+# ── elección del contrato cuando el CUI tiene VARIOS de expediente ───────────
+# (5-sep-2026) Un CUI puede tener varios contratos de elaboración, cada uno con
+# distinto contratista. La ficha mostraba siempre el más barato aunque fuera de
+# otra empresa, y el Excel lo rotulaba «Por confirmar» pese a que la experiencia
+# ya estaba resuelta por el contrato del emisor. Nombres FICTICIOS.
+
+def _c(numero, contratista, monto, objeto="ELABORACION DEL EXPEDIENTE TECNICO DEL PROYECTO"):
+    return {"numero": numero, "contratista": contratista, "monto": monto, "objeto": objeto,
+            "nomenclatura": "", "fecha_suscripcion": date(2022, 3, 15),
+            "valor_referencial": None, "url_pdf": None}
+
+
+DOS_CONTRATOS = [
+    _c("13-2022", "CONSULTORA ANDINA DEL SUR S.A.C.", 100_000.0),      # el más barato
+    _c("01-2022", "GRUPO PROYECTA INGENIEROS E.I.R.L.", 250_000.0),    # el del emisor
+]
+
+
+def test_verificar_expediente_prefiere_el_contrato_del_emisor_aunque_no_sea_el_barato():
+    exp = {"cui": "2999001", "entidad_emisora": "GRUPO PROYECTA INGENIEROS EIRL"}
+    b = mef.verificar_expediente(exp, {}, DOS_CONTRATOS)
+    assert b["contrato"]["numero"] == "01-2022"
+    assert b["contrato"]["elegido_por"] == "emisor"
+    # «coincide» para el evaluador: el Excel mapea "ok" → ✔ Coincide
+    assert b["contrato"]["veredicto"] == "ok"
+    assert b["contratista"]["veredicto"] == "ok"
+    assert b["contrato"]["otros_contratos_expediente"] == [
+        "13-2022 — CONSULTORA ANDINA DEL SUR S.A.C."]
+    assert b["contrato"]["monto"] == 250_000.0
+    assert b["contrato"]["fecha"] == "2022-03-15"
+
+
+def test_verificar_expediente_sin_emisor_coincidente_conserva_el_mas_barato():
+    exp = {"cui": "2999001", "entidad_emisora": "OTRA FIRMA TOTALMENTE DISTINTA"}
+    b = mef.verificar_expediente(exp, {}, DOS_CONTRATOS)
+    assert b["contrato"]["numero"] == "13-2022"          # exactamente lo de antes
+    assert b["contrato"]["elegido_por"] == "mas_barato"
+    assert b["contrato"]["veredicto"] == "no_verificable"
+    assert b["contrato"]["otros_contratos_expediente"] == [
+        "01-2022 — GRUPO PROYECTA INGENIEROS E.I.R.L."]
+
+
+def test_verificar_expediente_con_un_solo_contrato_dice_unico():
+    exp = {"cui": "2999001", "entidad_emisora": "OTRA FIRMA TOTALMENTE DISTINTA"}
+    b = mef.verificar_expediente(exp, {}, [DOS_CONTRATOS[0]])
+    assert b["contrato"]["elegido_por"] == "unico"
+    assert b["contrato"]["otros_contratos_expediente"] == []
+    assert b["contrato"]["veredicto"] == "no_verificable"

@@ -176,3 +176,36 @@ def test_experiencia_de_obra_no_entra_a_la_promocion():
     ctx = _ctx(ENR_REV, exp, tipo="obras")
     etapa._promover_expedientes_por_fuente_oficial(ctx)
     assert ctx.enriquecimiento["1:1"].get("cui") is None
+
+
+def test_via_contrato_guarda_el_contrato_que_coincidio():
+    """El contrato que RESOLVIÓ queda en el enriquecimiento: la ficha del Excel
+    elige el suyo por separado y, con varios contratos en el CUI, podría no ser
+    este. Sin `contrato_emisor` la vía CONTRATO no dejaba rastro auditable."""
+    from datetime import date
+
+    etapa = EtapaInfoObrasReal(contratos_mef=_contratos(
+        {"2425571": [{**_contrato("013-2021", "OTRO CONSULTOR EIRL"), "monto": 10.0},
+                     {**_contrato("082-2021", "CONSORCIO CONSULTOR PARACAS"),
+                      "monto": 500.0, "fecha_suscripcion": date(2021, 5, 4)}]}),
+        ficha_08a=lambda cui: None)
+    ctx = _ctx(ENR_REV, EXP_CONS)
+    etapa._promover_expedientes_por_fuente_oficial(ctx)
+    assert ctx.enriquecimiento["1:1"]["contrato_emisor"] == {
+        "numero": "082-2021", "contratista": "CONSORCIO CONSULTOR PARACAS",
+        "fecha": "2021-05-04"}
+
+
+def test_via_resolucion_no_inventa_contrato_emisor(tmp_path):
+    def lector(url, destino, **kw):
+        return {"legible": True, "fecha": "2021-06-18", "coincide_emisor": "confirma",
+                "consultores": ["CONSORCIO CONSULTOR PARACAS"], "resumen": "…"}
+
+    etapa = EtapaInfoObrasReal(dir_descargas=tmp_path, contratos_mef=_contratos({}),
+                               ficha_08a=lambda cui: ({"url": "https://mef/r.pdf", "numero": "274-2021"}
+                                                      if cui == "2425571" else None),
+                               lector_resolucion=lector)
+    ctx = _ctx(ENR_REV, EXP_CONS)
+    etapa._promover_expedientes_por_fuente_oficial(ctx)
+    assert ctx.enriquecimiento["1:1"]["via"] == "RESOLUCION"
+    assert "contrato_emisor" not in ctx.enriquecimiento["1:1"]

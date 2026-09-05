@@ -304,8 +304,24 @@ def verificar_expediente(exp: dict, ficha: dict, contratos: list[dict]) -> dict:
             "cargo_firmante": str(exp.get("cargo_emisor") or "").strip() or None,
         },
     }
-    c = contrato_de_expediente(contratos)
+    # ELECCIÓN DEL CONTRATO (5-sep-2026). Un CUI puede tener VARIOS contratos de
+    # expediente (original, actualización, componentes) y cada uno con distinto
+    # contratista. Hasta hoy la ficha mostraba siempre el más barato — el que elige
+    # `contrato_de_expediente` — aunque estuviera a nombre de otra empresa, y el
+    # Excel lo rotulaba «Por confirmar» pese a que la vía CONTRATO ya había
+    # resuelto la experiencia mirando TODOS (casos reales 7:3 y 10:3). Ahora se
+    # prefiere el contrato cuyo contratista ES el emisor del certificado; si
+    # ninguno lo es, se conserva exactamente la elección de antes.
+    ces = contratos_de_expediente(contratos)
+    c_emisor = next((x for x in ces
+                     if _nombres_coinciden(identidad_contratista, x.get("contratista") or "")),
+                    None) if identidad_contratista else None
+    c = c_emisor or contrato_de_expediente(contratos)
     if c:
+        elegido_por = ("emisor" if c_emisor is not None
+                       else ("unico" if len(ces) <= 1 else "mas_barato"))
+        otros = [f"{x['numero']} — {x.get('contratista') or 'sin contratista'}"
+                 for x in ces if x is not c][:5]
         bloque["fuentes"].append("MEF-SEACE")
         bloque["verificado_en_mef"] = True
         ver_ct = ("ok" if _nombres_coinciden(identidad_contratista, c["contratista"])
@@ -323,7 +339,15 @@ def verificar_expediente(exp: dict, ficha: dict, contratos: list[dict]) -> dict:
             # certificado. Que exista un contrato para el CUI no dice nada sobre
             # ESTE certificado: antes se rotulaba «ok» por mera existencia y el
             # Excel lo mostraba como ✔ Coincide (fragilidad 4, 4-sep-2026).
+            # Con `elegido_por == "emisor"` el veredicto es "ok" por construcción
+            # (se eligió justamente porque el contratista es el emisor) → el Excel
+            # lo pinta «✔ Coincide», que es lo que el evaluador tiene que leer.
             "veredicto": ver_ct,
+            # POR QUÉ este contrato y no otro, y cuáles son los otros: sin esto el
+            # evaluador no podía saber si el N° mostrado era el del emisor o el de
+            # un tercero que también trabajó el mismo CUI.
+            "elegido_por": elegido_por,
+            "otros_contratos_expediente": otros,
         }
         if c.get("url_pdf"):
             bloque["contrato"]["pdf"] = c["url_pdf"]

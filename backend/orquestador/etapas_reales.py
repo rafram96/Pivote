@@ -398,8 +398,38 @@ class EtapaResolucionCuiReal:
                                 "experiencia por especialidad se necesita el anexo de "
                                 "desglose. El tiempo total del vínculo no cambia.",
                         origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+                # IDENTIFICACIÓN INCOMPLETA (5-sep-2026, casos reales 9:1 y 12:4).
+                # El "identificador es el portafolio" vale cuando el portafolio se
+                # identificó; con 0 de N obras halladas no hay NADA verificado y la
+                # experiencia se estaba entregando en silencio como si lo estuviera.
+                # · 0 de N  → marca + item de revisión (hay acción humana pendiente:
+                #             confirmar cada obra o pegar sus CUI).
+                # · k de N (0<k<N) → solo la marca: el respaldo del vínculo es el
+                #             certificado y algo SÍ se verificó (ADR-011).
+                if n_res < len(sub):
+                    enr_mo["identificacion_incompleta"] = True
                 ctx.enriquecimiento[_clave(np_, ne)] = enr_mo
                 ok += 1
+                if n_res == 0 and len(sub) >= 1:
+                    ya_mo = any(it.n_prof == np_ and it.n_exp == ne and not it.resuelto
+                                for it in ctx.job.items_revision)
+                    if not ya_mo:
+                        prof_mo = next((p for p in ctx.espejo.get("profesionales", [])
+                                        if p.get("n_prof") == np_), {})
+                        cands_mo: list[dict] = []
+                        for s in sub:
+                            for c in (s.get("candidatos") or []):
+                                cands_mo.append(c)
+                        ctx.job.items_revision.append(pipeline.ItemRevision(
+                            n_prof=np_, n_exp=ne, etapa=self.nombre,
+                            motivo=f"ninguna de las {len(sub)} obras del certificado se "
+                                   "identificó con seguridad — confirmar cada una",
+                            accion_sugerida="elegir candidato o pegar CUI",
+                            candidatos=cands_mo[:3],
+                            profesional=prof_mo.get("nombre"), cargo=prof_mo.get("cargo"),
+                            proyecto=e.get("proyecto"),
+                            fechas=f"{e.get('fecha_inicial')} → {e.get('fecha_final')}",
+                        ))
                 # PARCIAL (1 de N): la experiencia cuenta igual —su respaldo es el
                 # certificado— pero el conteo deja la brecha a la vista (ADR-011).
                 sev = (pipeline.Severidad.INFO if n_res == len(sub)
@@ -557,8 +587,12 @@ class EtapaInfoObrasReal:
         if lector is None:
             from validacion.resolucion_aprobacion import leer_resolucion as lector
         try:
+            # la firma del contrato del expediente acota la plausibilidad de la fecha
+            # leída: una resolución no puede aprobar un expediente antes de contratarlo
+            _fc = (vmef.get("contrato") or {}).get("fecha") if isinstance(vmef.get("contrato"), dict) else None
             lectura = lector(url, destino, emisor=emisor, cui=cui, numero=res.get("numero"),
-                             numero_citado=exp.get("resolucion_aprobacion_numero"))
+                             numero_citado=exp.get("resolucion_aprobacion_numero"),
+                             fecha_contrato=_fc)
             if isinstance(lectura, dict):
                 lectura["numero_citado"] = exp.get("resolucion_aprobacion_numero")
             return lectura
@@ -1170,7 +1204,8 @@ class EtapaInfoObrasReal:
                 if cc and cc not in vistos:
                     vistos.add(cc)
                     candidatos.append(c)
-            positivos: list[tuple[str, str, str]] = []
+            # (cui, via, detalle, contrato_que_coincidió | None)
+            positivos: list[tuple[str, str, str, Optional[dict]]] = []
             for c in candidatos[:max_candidatos]:
                 cui = str(c["cui"])
                 # (a) CUALQUIER contrato de expediente del CUI a nombre del emisor: un
@@ -1186,7 +1221,7 @@ class EtapaInfoObrasReal:
                 if ce:
                     positivos.append((cui, "CONTRATO",
                                       f"el contrato de expediente {ce.get('numero')} del MEF "
-                                      f"está a nombre de {ce.get('contratista')}"))
+                                      f"está a nombre de {ce.get('contratista')}", ce))
                     continue
                 # (b) alguna de las resoluciones de aprobación del 08-A nombra al emisor
                 for info in self._resoluciones_08a(cui):
@@ -1194,14 +1229,15 @@ class EtapaInfoObrasReal:
                     if lect and lect.get("coincide_emisor") == "confirma":
                         positivos.append((cui, "RESOLUCION",
                                           f"la resolución de aprobación {info.get('numero') or ''} "
-                                          "nombra al emisor del certificado como consultor".replace("  ", " ")))
+                                          "nombra al emisor del certificado como consultor".replace("  ", " "),
+                                          None))
                         break
             cuis = {p[0] for p in positivos}
             if len(cuis) != 1:
                 if len(cuis) > 1:
                     _traza_seguro("promocion_ambigua", k=k, cuis=sorted(cuis))
                 continue
-            cui, via, detalle = positivos[0]
+            cui, via, detalle, ce_ok = positivos[0]
             cand = next(c for c in candidatos if str(c["cui"]) == cui)
             enr.update({
                 "cui": cui, "via": via,
@@ -1210,6 +1246,16 @@ class EtapaInfoObrasReal:
                          "obra_id": cand.get("obra_id")},
                 "decision": f"identificado por fuente oficial del MEF: {detalle}",
             })
+            # El contrato QUE RESOLVIÓ, guardado aparte: la ficha del Excel elige su
+            # contrato por su cuenta (`verificar_expediente`) y, si el CUI tiene
+            # varios, podría no ser este. Dejarlo aquí es la trazabilidad de la vía.
+            if ce_ok:
+                _f = ce_ok.get("fecha_suscripcion")
+                enr["contrato_emisor"] = {
+                    "numero": ce_ok.get("numero"),
+                    "contratista": ce_ok.get("contratista"),
+                    "fecha": _f.isoformat() if hasattr(_f, "isoformat") else (_f or None),
+                }
             ctx.enriquecimiento[k] = enr
             for it in ctx.job.items_revision:
                 if it.n_prof == np_ and it.n_exp == ne and not it.resuelto:
