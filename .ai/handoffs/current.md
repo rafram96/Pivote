@@ -5,6 +5,22 @@ agent: claude
 
 # Handoff — punto de continuación
 
+## Auditoría de rutas (5-sep, Codex)
+
+Actualización posterior al Gantt `fcf362c`: regeneradas ambas rutas, 51 pruebas
+focales y exportación nativa de Excel inspeccionada. Hallazgos y límites en
+[`revisión privada de cronología`](../../docs/comercial/auditorias/2026-09-05-rutas/revision-cronologia.md).
+Sin correcciones de producto; las hojas profesionales conservan valores/colores
+de la auditoría inicial. Esta comprobación visual corresponde al Excel, no al Panel.
+
+El usuario pide claridad por separado para expedientes y ejecución, Excel
+primero. Hay diagnóstico reproducible, sin correcciones de producto, en
+[`informe privado de rutas`](../../docs/comercial/auditorias/2026-09-05-rutas/informe.md).
+El informe separa problemas actuales del generador, compatibilidad de jobs
+históricos y oportunidades de rendimiento. Gates focales: 118 passed;
+TypeScript limpio. Comprobación del Panel por código/API; captura visual
+no completada por desconexión del runtime de Orca.
+
 > Actualizado: **2026-08-20**. Si eres un agente nuevo: lee esto completo,
 > luego `context/current_state.md` y los ADRs. No necesitas ninguna
 > conversación previa.

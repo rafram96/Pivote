@@ -2,6 +2,21 @@
 
 > Última actualización: **2026-09-05** · rama de trabajo: `demo`
 
+## Auditoría de las dos presentaciones (5-sep, Codex)
+
+Actualización: nueva revisión de `fcf362c`, 51 pruebas focales y render nativo
+de Excel; pendientes de hitos, alertas, rótulos y salida impresa documentados en
+[`revisión privada del Gantt`](../../docs/comercial/auditorias/2026-09-05-rutas/revision-cronologia.md).
+Sin cambios de producto. La evidencia de abajo es la auditoría anterior.
+
+Se comprobó por separado Excel de expedientes y obras, con prioridad sobre el
+Panel. Auditoría sin correcciones de producto: nueve casos sintéticos y dos
+regeneraciones reales offline; 118 pruebas focales aprobadas y TypeScript
+limpio. El detalle y artefactos permanecen privados en
+[`docs/comercial/auditorias/2026-09-05-rutas/informe.md`](../../docs/comercial/auditorias/2026-09-05-rutas/informe.md).
+Consultar el informe antes de tomar los tests verdes como evidencia de ausencia
+de contradicciones: contiene reproducciones que esos tests no cubren.
+
 ## ADR-010 implementada: el tipo de concurso viaja en el espejo (5-sep)
 
 El enrutado expediente/obra ya no depende de que el certificado conserve la
