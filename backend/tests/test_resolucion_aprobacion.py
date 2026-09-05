@@ -18,7 +18,7 @@ from pathlib import Path
 from reglas.cruces_fechas import fecha_aprobacion_expediente
 from validacion.resolucion_aprobacion import (
     coincide_emisor, consultores_nombrados, fecha_emision, interpretar_resolucion,
-    leer_resolucion, limpiar_razon_social, normalizar,
+    leer_resolucion, limpiar_razon_social, normalizar, plausibilidad_fecha,
 )
 
 CABECERA = ("RESOLUCION GERENCIAL REGIONAL N° 274-2019-GRH/GR. Huaraz, 18 de junio de 2019. "
@@ -162,3 +162,139 @@ def test_regla_b_prefiere_la_fecha_leida_de_la_resolucion():
     assert f == date(2019, 6, 18)
     assert inferida is False
     assert "MEF" in fuente.upper() or "resoluci" in fuente.lower()
+
+
+# ── Plausibilidad de la fecha (fechas imposibles vistas en corrida real) ──────
+# Reproducen, con datos ficticios, los dos casos que dispararon una alerta roja
+# falsa: una resolución «…-2025» leída con fecha de 2011 (fecha citada en el
+# cuerpo) y una «…-2026» leída con fecha del año anterior.
+
+CABECERA_2025 = ("RESOLUCION RECTORAL N° 004321-2025-R/UNIV. Lima, 22 de marzo de 2011. "
+                 "VISTO: el expediente administrativo; Lima, 14 de agosto de 2025; "
+                 "CONSIDERANDO: que la Oficina General de Infraestructura ")
+
+
+def test_plausibilidad_acepta_fecha_coherente_con_el_numero():
+    ok, motivo = plausibilidad_fecha(date(2025, 8, 14), numero="004321-2025-R/UNIV")
+    assert ok is True and motivo is None
+    # ±1 año: una resolución de enero puede numerarse con el año anterior
+    assert plausibilidad_fecha(date(2026, 1, 5), numero="004321-2025-R/UNIV")[0] is True
+    # número con año de dos cifras («-25» → 2025)
+    assert plausibilidad_fecha(date(2025, 8, 14), numero="N° 123-25-GM-MDT")[0] is True
+
+
+def test_plausibilidad_descarta_fecha_de_otro_ano_que_el_numero():
+    ok, motivo = plausibilidad_fecha(date(2011, 3, 22), numero="004321-2025-R/UNIV")
+    assert ok is False
+    assert motivo == ("el año de la fecha no corresponde al año del número de "
+                      "la resolución (2025)")
+    # el segundo caso real: resolución 2026 leída con fecha de 2025 pasa (±1),
+    # pero una de 2019 no
+    assert plausibilidad_fecha(date(2019, 4, 29), numero="002-2026-GM-MDX")[0] is False
+    # numeración anual: «002-2026» no puede ser de abril de 2025 (caso real, OCR 5/6)
+    assert plausibilidad_fecha(date(2025, 4, 29), numero="002-2026-GM-MDX")[0] is False
+    assert plausibilidad_fecha(date(2025, 12, 30), numero="002-2026-GM-MDX")[0] is True
+
+
+def test_plausibilidad_descarta_fecha_anterior_al_contrato_futura_o_prehistorica():
+    ok, motivo = plausibilidad_fecha(date(2024, 1, 10), fecha_contrato="2024-05-03")
+    assert ok is False
+    assert motivo == ("la fecha es anterior a la firma del contrato del "
+                      "expediente (03/05/2024)")
+    # el contrato también se acepta como `date`
+    assert plausibilidad_fecha(date(2024, 1, 10), fecha_contrato=date(2024, 5, 3))[0] is False
+    assert plausibilidad_fecha(date(2024, 6, 1), fecha_contrato="2024-05-03")[0] is True
+    # futura respecto de «hoy» (inyectable para que el test no envejezca)
+    assert plausibilidad_fecha(date(2030, 1, 1), hoy=date(2026, 9, 5)) == (
+        False, "la fecha es posterior a hoy")
+    assert plausibilidad_fecha(date(1998, 7, 1)) == (
+        False, "fecha fuera del rango de Invierte.pe")
+
+
+def test_fecha_emision_sin_numero_ni_contrato_se_comporta_como_antes():
+    T = normalizar(CABECERA_2025)
+    assert fecha_emision(T) == date(2011, 3, 22)     # primera del encabezado
+    assert fecha_emision(normalizar(CABECERA)) == date(2019, 6, 18)
+
+
+def test_fecha_emision_salta_la_implausible_y_toma_la_siguiente():
+    T = normalizar(CABECERA_2025)
+    assert fecha_emision(T, numero="004321-2025-R/UNIV") == date(2025, 8, 14)
+    # si la única fecha del encabezado es implausible, no inventa ninguna
+    solo_mala = normalizar("RESOLUCION N° 004321-2025-R/UNIV. Lima, 22 de marzo de 2011. "
+                           "CONSIDERANDO: que la Oficina General de Infraestructura evaluó "
+                           "el expediente técnico y emitió opinión favorable; SE RESUELVE: ")
+    assert fecha_emision(solo_mala, numero="004321-2025-R/UNIV") is None
+    # el contrato también descarta: ambas fechas son previas a la firma
+    assert fecha_emision(T, fecha_contrato="2026-01-15") is None
+
+
+def test_interpretar_publica_la_fecha_descartada_y_el_motivo():
+    texto = (CABECERA_2025 + "QUE, mediante Contrato N° 088-2025-UNIV la Universidad y el "
+             "consultor CONSORCIO ESPERANZA suscribieron la elaboración del expediente "
+             "técnico del proyecto con CUI 2234021; SE RESUELVE: APROBAR el expediente …")
+    r = interpretar_resolucion(texto, "Consorcio Esperanza", "2234021", "004321-2025")
+    assert r["fecha"] == "2025-08-14"                      # la segunda, plausible
+    assert r["fecha_descartada"] == "2011-03-22"           # trazabilidad
+    assert "no corresponde al año del número" in r["fecha_motivo"]
+    assert ("La fecha leída (22/03/2011) no es plausible para la resolución "
+            "004321-2025 y se omitió") in r["resumen"]
+    assert "Resolución de aprobación del 14/08/2025." in r["resumen"]
+
+
+def test_interpretar_sin_ninguna_fecha_plausible_deja_fecha_en_none():
+    texto = ("RESOLUCION RECTORAL N° 004321-2025-R/UNIV. Lima, 22 de marzo de 2011. "
+             "CONSIDERANDO: QUE, mediante Contrato N° 088-2025-UNIV la Universidad y el "
+             "consultor CONSORCIO ESPERANZA suscribieron la elaboración del expediente "
+             "técnico del proyecto con CUI 2234021; SE RESUELVE: APROBAR el expediente …")
+    r = interpretar_resolucion(texto, "Consorcio Esperanza", "2234021", "004321-2025")
+    assert r["legible"] is True and r["fecha"] is None
+    assert r["fecha_descartada"] == "2011-03-22"
+    assert r["fecha_motivo"] and "2025" in r["fecha_motivo"]
+    assert "no es plausible" in r["resumen"]
+    assert "no muestra una fecha legible" not in r["resumen"]
+    assert r["coincide_emisor"] == "confirma"      # el resto de la lectura sigue igual
+    # sin número ni contrato la fecha de 2011 se publica como antes
+    r2 = interpretar_resolucion(texto, "Consorcio Esperanza", "2234021")
+    assert r2["fecha"] == "2011-03-22" and r2["fecha_descartada"] is None
+
+
+def test_texto_ilegible_trae_los_campos_de_traza_vacios():
+    r = interpretar_resolucion("   ", "Consorcio Esperanza", cui="1")
+    assert r["fecha_descartada"] is None and r["fecha_motivo"] is None
+
+
+def test_leer_resolucion_descarta_la_fecha_implausible_del_encabezado(tmp_path):
+    def descargar(url, ruta: Path) -> bool:
+        ruta.write_bytes(b"%PDF-1.4 fake")
+        return True
+
+    def extraer(ruta: Path):
+        return (CABECERA_2025 + "y el consultor CONSORCIO ESPERANZA elaboró el expediente "
+                "técnico; SE RESUELVE: APROBAR …", "ocr", 3)
+
+    out = leer_resolucion("https://mef/x.pdf", tmp_path / "res", emisor="Consorcio Esperanza",
+                          cui="2234021", numero="004321-2025-R/UNIV",
+                          descargar=descargar, extraer_texto=extraer)
+    assert out and out["fecha"] == "2025-08-14"
+    assert out["fecha_descartada"] == "2011-03-22"
+    assert "no corresponde al año del número" in out["fecha_motivo"]
+    assert "no es plausible" in out["resumen"]
+
+
+def test_leer_resolucion_usa_la_fecha_del_contrato_del_expediente(tmp_path):
+    def descargar(url, ruta: Path) -> bool:
+        ruta.write_bytes(b"%PDF-1.4 fake")
+        return True
+
+    def extraer(ruta: Path):
+        return (CABECERA_2025 + "y el consultor CONSORCIO ESPERANZA elaboró el expediente "
+                "técnico; SE RESUELVE: APROBAR …", "capa", 1)
+
+    out = leer_resolucion("https://mef/y.pdf", tmp_path / "res2", emisor="Consorcio Esperanza",
+                          cui="2234021", numero="004321-2025-R/UNIV",
+                          fecha_contrato="2025-10-01",
+                          descargar=descargar, extraer_texto=extraer)
+    # 22/03/2011 cae por el año del número y 14/08/2025 por ser previa al contrato
+    assert out and out["fecha"] is None
+    assert out["fecha_descartada"] == "2011-03-22"

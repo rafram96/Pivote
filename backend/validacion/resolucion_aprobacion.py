@@ -22,7 +22,13 @@ Trampas que esta implementación evita (todas vistas en la medición):
     SUPERVISORA»): se mira la ventana a ambos lados del rol;
   · un CUI puede tener varios expedientes (original, saldo de obra): la fecha se
     entrega como dato; el contraste con el periodo lo hace la Regla B, que ya
-    se abstiene ante incoherencias.
+    se abstiene ante incoherencias;
+  · la fecha del encabezado puede ser IMPOSIBLE (una resolución «…-2025» leída
+    con fecha 22/03/2011, porque el OCR tomó una fecha citada en el cuerpo):
+    `plausibilidad_fecha` la descarta contra el año del número, la firma del
+    contrato y el día de hoy, y se sigue con la siguiente candidata; si ninguna
+    sirve, `fecha` va en None y el motivo queda en `fecha_motivo` (mejor sin
+    fecha que con una que dispare una alerta roja falsa de miles de días).
 
 Funciones PURAS salvo `leer_resolucion`, que descarga y lee (red + OCR) con
 descargador y extractor inyectables para los tests.
@@ -32,9 +38,9 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from rapidfuzz import fuzz
 
@@ -47,6 +53,10 @@ _RE_FECHA_LARGA = re.compile(
     r"\b(\d{1,2})\s+DE\s+(ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|SETIEMBRE|"
     r"SEPTIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE)\s+DE(?:L)?\s+(\d{4})\b")
 _RE_FECHA_CORTA = re.compile(r"\b(\d{1,2})[/.](\d{1,2})[/.](\d{4})\b")
+# Año declarado por el número de la resolución: «274-2019-GRH/GR» → 2019;
+# si no hay año de 4 cifras, un segmento de 2 («123-25-GM» → 2025).
+_RE_ANIO_4 = re.compile(r"\b(19\d{2}|20\d{2})\b")
+_RE_ANIO_2 = re.compile(r"-(\d{2})(?=$|[^0-9])")
 _RE_SUFIJO_LEGAL = re.compile(
     r"\b(S\.?\s?A\.?\s?C\.?|S\.?\s?A\.?|E\.?\s?I\.?\s?R\.?\s?L\.?|S\.?\s?R\.?\s?L\.?|"
     r"SOCIEDAD ANONIMA CERRADA|SOCIEDAD ANONIMA|EMPRESA INDIVIDUAL DE RESPONSABILIDAD LIMITADA)\b\.?")
@@ -144,21 +154,118 @@ def fechas_en_texto(T: str) -> list[tuple[int, date]]:
     return sorted(out)
 
 
-def fecha_emision(T: str) -> Optional[date]:
-    """Fecha de la resolución: la primera del encabezado («Lima, 23 de mayo de
-    2017») que NO venga precedida de «DE FECHA» (esas citan otros documentos).
-    Si no hay ninguna así en las primeras 1.500 letras, la primera del texto."""
+def _a_fecha(valor: Any) -> Optional[date]:
+    """`date` desde un `date`, un `datetime` o un ISO («2025-04-29»). None si no."""
+    if valor is None:
+        return None
+    if isinstance(valor, datetime):
+        return valor.date()
+    if isinstance(valor, date):
+        return valor
+    try:
+        return date.fromisoformat(str(valor)[:10])
+    except (ValueError, TypeError):
+        return None
+
+
+def anio_de_numero(numero: str) -> Optional[int]:
+    """Año que declara el número de una resolución («005401-2025-R/UNMSM» → 2025).
+
+    Primero un año de 4 dígitos (19xx/20xx); si no hay, un segmento de 2 dígitos
+    («-25-», «-25» al final) que se lee como 20YY solo cuando está entre 00 y 49
+    («-75» sería un correlativo, no un año)."""
+    n = normalizar(numero or "")
+    m = _RE_ANIO_4.search(n)
+    if m:
+        return int(m.group(1))
+    for m2 in _RE_ANIO_2.finditer(n):
+        yy = int(m2.group(1))
+        if 0 <= yy <= 49:
+            return 2000 + yy
+    return None
+
+
+def plausibilidad_fecha(fecha: Any, *, numero: Optional[str] = None,
+                        fecha_contrato: Any = None,
+                        hoy: Any = None) -> tuple[bool, Optional[str]]:
+    """¿Esa fecha puede ser la de ESTA resolución? `(plausible, motivo)`. Pura.
+
+    Nació de dos lecturas reales imposibles: una resolución «…-2025» fechada en
+    2011 (el OCR tomó una fecha citada en el cuerpo) y otra «…-2026» fechada en
+    2025. Esas fechas alimentan la Regla B y produjeron una alerta roja falsa de
+    miles de días, así que se descartan antes de publicarlas.
+
+    Descarta cuando: el año no cuadra con el año del número (±1 año, porque una
+    resolución de enero puede numerarse con el año anterior), la fecha es previa
+    a la firma del contrato del expediente, es futura, o es anterior a
+    Invierte.pe (2000). `motivo` es texto llano para el evaluador."""
+    f = _a_fecha(fecha)
+    if f is None:
+        return False, "no hay una fecha legible"
+    anio = anio_de_numero(numero) if numero else None
+    # La numeración de resoluciones se reinicia cada año: una «002-2026» se emite en
+    # 2026 (o en los días de cambio de año: diciembre anterior / enero siguiente).
+    # Aceptar ±1 año completo dejaba pasar «002-2026» fechada 29/04/2025 (caso real).
+    _anio_ok = (anio is None or f.year == anio
+                or (f.year == anio - 1 and f.month == 12)
+                or (f.year == anio + 1 and f.month == 1))
+    if not _anio_ok:
+        return False, ("el año de la fecha no corresponde al año del número de "
+                       f"la resolución ({anio})")
+    fc = _a_fecha(fecha_contrato)
+    if fc is not None and f < fc:
+        return False, ("la fecha es anterior a la firma del contrato del "
+                       f"expediente ({fc.strftime('%d/%m/%Y')})")
+    if f > (_a_fecha(hoy) or date.today()):
+        return False, "la fecha es posterior a hoy"
+    if f.year < 2000:
+        return False, "fecha fuera del rango de Invierte.pe"
+    return True, None
+
+
+def _candidatas_encabezado(T: str) -> list[date]:
+    """Fechas del encabezado en orden de preferencia: primero las que NO vienen
+    precedidas de «DE FECHA» (esas citan otros documentos), después el resto de
+    la ventana. Si el encabezado no trae ninguna, la primera del texto."""
     fechas = fechas_en_texto(T)
     if not fechas:
-        return None
+        return []
+    propias, citadas = [], []
     for pos, f in fechas:
         if pos > 1500:
             break
         antes = T[max(0, pos - 14):pos]
-        if "DE FECHA" in antes or "FECHA " in antes:
-            continue
-        return f
-    return fechas[0][1]
+        (citadas if ("DE FECHA" in antes or "FECHA " in antes) else propias).append(f)
+    orden = propias + citadas
+    return orden or [fechas[0][1]]
+
+
+def _emision_con_traza(T: str, *, numero: Optional[str] = None,
+                       fecha_contrato: Any = None
+                       ) -> tuple[Optional[date], Optional[date], Optional[str]]:
+    """`(fecha, fecha_descartada, motivo)`: la primera candidata PLAUSIBLE del
+    encabezado y, si antes se descartó alguna, cuál fue y por qué."""
+    descartada: Optional[date] = None
+    motivo: Optional[str] = None
+    for f in _candidatas_encabezado(T):
+        ok, por_que = plausibilidad_fecha(f, numero=numero, fecha_contrato=fecha_contrato)
+        if ok:
+            return f, descartada, motivo
+        if descartada is None:
+            descartada, motivo = f, por_que
+    return None, descartada, motivo
+
+
+def fecha_emision(T: str, *, numero: Optional[str] = None,
+                  fecha_contrato: Any = None) -> Optional[date]:
+    """Fecha de la resolución: la primera del encabezado («Lima, 23 de mayo de
+    2017») que NO venga precedida de «DE FECHA» (esas citan otros documentos).
+    Si no hay ninguna así en las primeras 1.500 letras, la primera del texto.
+
+    Con `numero` y/o `fecha_contrato` recorre esas candidatas en orden y devuelve
+    la primera PLAUSIBLE (ver `plausibilidad_fecha`); None si ninguna lo es. Sin
+    esos datos el comportamiento es el de siempre."""
+    return _emision_con_traza(T, numero=numero, fecha_contrato=fecha_contrato)[0]
 
 
 def consultores_nombrados(T: str) -> list[str]:
@@ -210,15 +317,25 @@ def coincide_emisor(T: str, emisor: str) -> tuple[str, Optional[str]]:
 
 
 def interpretar_resolucion(texto: str, emisor: str, cui: Optional[str] = None,
-                           numero_citado: Optional[str] = None) -> dict:
-    """Interpreta el texto (capa u OCR) de una resolución de aprobación. Puro."""
+                           numero_citado: Optional[str] = None,
+                           fecha_contrato: Any = None, *,
+                           numero: Optional[str] = None) -> dict:
+    """Interpreta el texto (capa u OCR) de una resolución de aprobación. Puro.
+
+    `numero` (por defecto el `numero_citado`) y `fecha_contrato` solo se usan
+    para descartar fechas imposibles (`plausibilidad_fecha`); si la fecha leída
+    no es plausible, `fecha` queda en None y el motivo se publica en
+    `fecha_descartada` / `fecha_motivo` para que el evaluador lo vea."""
     T = normalizar(texto)
+    numero_ref = numero or numero_citado
     if len(T) < 200:
         return {"legible": False, "fecha": None, "consultores": [],
                 "coincide_emisor": "sin_texto", "detalle_emisor": None,
                 "cita_cui": False, "numero_citado_coincide": None,
+                "fecha_descartada": None, "fecha_motivo": None,
                 "resumen": "El documento no se pudo leer (escaneo sin texto reconocible)."}
-    f = fecha_emision(T)
+    f, descartada, motivo = _emision_con_traza(T, numero=numero_ref,
+                                               fecha_contrato=fecha_contrato)
     consultores = consultores_nombrados(T)
     veredicto, detalle = coincide_emisor(T, emisor)
     cita_cui = bool(cui) and re.sub(r"\D", "", str(cui)) in T
@@ -228,8 +345,14 @@ def interpretar_resolucion(texto: str, emisor: str, cui: Optional[str] = None,
         if len(nc) >= 3:
             numero_ok = nc in re.sub(r"[^A-Z0-9]", "", T)
     partes = []
-    partes.append(f"Resolución de aprobación del {f.strftime('%d/%m/%Y')}." if f
-                  else "La resolución no muestra una fecha legible.")
+    if f:
+        partes.append(f"Resolución de aprobación del {f.strftime('%d/%m/%Y')}.")
+    elif not descartada:
+        partes.append("La resolución no muestra una fecha legible.")
+    if descartada:
+        de_la_res = f" para la resolución {numero_ref}" if numero_ref else ""
+        partes.append(f"La fecha leída ({descartada.strftime('%d/%m/%Y')}) no es "
+                      f"plausible{de_la_res} y se omitió.")
     if veredicto == "confirma":
         partes.append("Nombra al emisor del certificado como consultor del expediente.")
     elif veredicto == "nombra_otro":
@@ -243,11 +366,14 @@ def interpretar_resolucion(texto: str, emisor: str, cui: Optional[str] = None,
     return {"legible": True, "fecha": f.isoformat() if f else None,
             "consultores": consultores, "coincide_emisor": veredicto,
             "detalle_emisor": detalle, "cita_cui": cita_cui,
-            "numero_citado_coincide": numero_ok, "resumen": " ".join(partes)}
+            "numero_citado_coincide": numero_ok,
+            "fecha_descartada": descartada.isoformat() if descartada else None,
+            "fecha_motivo": motivo, "resumen": " ".join(partes)}
 
 
 def leer_resolucion(url: str, destino_dir, *, emisor: str, cui: Optional[str],
                     numero: Optional[str] = None, numero_citado: Optional[str] = None,
+                    fecha_contrato: Any = None,
                     descargar: Optional[Callable[[str, Path], bool]] = None,
                     extraer_texto: Optional[Callable[[Path], tuple[str, str, int]]] = None,
                     max_pag: int = 4) -> Optional[dict]:
@@ -257,6 +383,10 @@ def leer_resolucion(url: str, destino_dir, *, emisor: str, cui: Optional[str],
     `descargar(url, ruta) -> bool` y `extraer_texto(ruta) -> (texto, fuente, paginas)`
     son inyectables (tests offline); por defecto usan `scraping.mef.descargar_pdf`
     y `scraping.ocr_local.texto_pdf`.
+
+    `numero` (el del 08-A) y `fecha_contrato` (date o ISO de la firma del contrato
+    del expediente) se usan para descartar fechas imposibles: ver
+    `plausibilidad_fecha` y los campos `fecha_descartada` / `fecha_motivo`.
     """
     try:
         destino_dir = Path(destino_dir)
@@ -274,7 +404,8 @@ def leer_resolucion(url: str, destino_dir, *, emisor: str, cui: Optional[str],
             from scraping.ocr_local import texto_pdf
             extraer_texto = lambda r: texto_pdf(r, max_pag=max_pag)  # noqa: E731
         texto, fuente, paginas = extraer_texto(ruta)
-        out = interpretar_resolucion(texto, emisor, cui, numero_citado)
+        out = interpretar_resolucion(texto, emisor, cui, numero_citado, fecha_contrato,
+                                     numero=numero or numero_citado)
         out.update({"numero": numero, "url": url, "archivo": ruta.name,
                     "paginas": paginas, "texto_fuente": fuente})
         return out
