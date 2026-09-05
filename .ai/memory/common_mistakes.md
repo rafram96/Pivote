@@ -70,3 +70,9 @@
   documentos con prefijos hash fuera de cada experiencia. En entregables humanos,
   preservar la navegación; eliminar solicitudes repetidas mediante caché por obra
   y materializar el árbol con hardlinks/copias.
+- **Una contradicción que dispara por AUSENCIA de dato**: la señal «el código calzó
+  solo contra el SNIP» se definió como `codigo != codUniqInv`, y una obra antigua
+  registrada SOLO con SNIP (sin CUI) la disparaba — dos tests reventaron y en
+  producción habría mandado a revisión resoluciones legítimas. Una contradicción
+  exige el dato en ambos lados (la obra TIENE otro CUI); la ausencia es
+  desconocido, no contradicción. Es la misma regla del guard de estado MEF.

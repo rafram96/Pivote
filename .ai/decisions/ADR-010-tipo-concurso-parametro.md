@@ -110,6 +110,8 @@ edita. Lo que quedó en código:
   Panel `tsc --noEmit` limpio. Resolver de CUI intacto en su selección
   (la golden no aplica: el tipo solo gobierna la verificación, punto 4).
 
-Pendiente del ADR que NO entró aquí: la observación INFO de discrepancia
-parámetro↔texto (telemetría), el rótulo del tipo en Excel/Panel y el filtro de
-secciones de descarga por camino.
+Segunda entrega (mismo día): cada experiencia registra en el enriquecimiento
+`camino` (`expediente` | `obra`) y `camino_fuente` (`declarado` | `forzado` |
+`texto`), y la hoja CLAUDE del Excel rotula «Tipo de concurso» en palabras del
+evaluador. Pendiente del ADR: la observación INFO de discrepancia parámetro↔texto,
+el rótulo en el Panel y el filtro de secciones de descarga por camino.

@@ -16,6 +16,13 @@ Gate: backend **1037 passed, 25 skipped**; skill 60 tests; Panel `tsc` limpio.
 Detalle en el ADR. Sin commit todavía; la corrección de RUC del 16-ago también
 sigue sin versionar.
 
+Misma jornada, segunda entrega: el CUI citado deja de resolver a ciegas cuando
+la obra del código no comparte ningún término con el certificado y además
+contradice departamento o rubro, o calzó solo contra un SNIP ajeno (revisión con
+la obra a la vista; también en sub-obras). Cada experiencia registra `camino` y
+`camino_fuente`; el Excel rotula el tipo de concurso. Gate: **1046 passed, 25
+skipped**. Commits `19a4b9c` y el siguiente en `demo`.
+
 ## Adopción RAF y arquitectura visual canónica (20-ago)
 
 Pivote ya está adoptado como proyecto RAF (`.ai/project.json`, perfil `repo`) y

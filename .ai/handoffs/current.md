@@ -22,6 +22,21 @@ crítico bloqueante si no se determina. `agent-bases` debe emitir
 tests; Panel `tsc` limpio. Resolver intacto; golden no aplica. Detalle y lo que
 quedó fuera: cola de `decisions/ADR-010`.
 
+## Nota (2026-09-05, Claude) — un CUI mal transcrito ya no adquiere autoridad sola
+
+El Paso 0 resolvía cualquier código citado que existiera en InfoObras aunque el
+nombre no compartiera un solo término; solo lo frenaban la contradicción triple
+de #59 o la función MEF de #69. Las sub-obras por código se aceptaban sin cotejo.
+Ahora `_cotejo_codigo` + `_codigo_dudoso` mandan a revisión, con la obra del
+código a la vista, cuando no hay afinidad de nombre Y además (a) el código calzó
+solo contra el SNIP de una obra que tiene otro CUI, o (b) la obra contradice el
+departamento o el rubro que el certificado declara. Abstención pura; Fortaleza
+(componente sin departamento) y COAR (afinidad ≥ 1) siguen resolviendo, con
+tests. Auditabilidad de #50: `enr["camino"]` y `enr["camino_fuente"]` por
+experiencia; la hoja CLAUDE rotula el tipo de concurso. Gate: **1046 passed, 25
+skipped**. Lección: una señal de contradicción no puede disparar por AUSENCIA de
+dato (obra sin CUI propio ≠ CUI distinto); se anotó en `memory/common_mistakes.md`.
+
 **Para la corrida de expedientes**: invocar la skill diciendo que el concurso es
 de expedientes y pasar `--tipo expedientes` al consolidar; revisar a mano las
 vías CODIGO y PROBABLE; en la verificación MEF mirar el veredicto del

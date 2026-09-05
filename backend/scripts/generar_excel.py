@@ -501,6 +501,17 @@ def construir_hoja_evaluacion(ws, espejo: dict,
 
     # ── Encabezado ──
     b.kv("Postor:", p.get("detalle") or espejo["_meta"].get("postor", ""))
+    # ADR-010 / #50 · con qué tipo de concurso corrió el análisis, en palabras
+    # del evaluador. Un análisis que salió raro tiene que poder explicarse aquí,
+    # sin leer logs. Solo cuando la skill lo declaró; los espejos viejos no lo traen.
+    _tipo_concurso = {
+        "expedientes": "Elaboración de expedientes técnicos — la experiencia se "
+                       "verifica contra el contrato y la aprobación del expediente",
+        "obras": "Supervisión o ejecución de obra — la experiencia se verifica "
+                 "contra las valorizaciones de la obra",
+    }.get(str((espejo.get("_meta") or {}).get("tipo_evaluacion") or "").strip().lower())
+    if _tipo_concurso:
+        b.kv("Tipo de concurso:", _tipo_concurso)
     b.kv("Concurso:", espejo["_meta"].get("concurso", ""))
     meta = espejo.get("_meta") or {}
     if meta.get("estado_entregable"):

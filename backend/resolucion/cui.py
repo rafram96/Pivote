@@ -1364,6 +1364,22 @@ def _paso_codigo_citado(exp: dict, consulta: Consulta, base=None) -> Optional[di
     # obra física. El golden auditado confirma este CUI como CORRECTO (verdad=2429909
     # vía PROBABLE). El veto de ubicación (F8) actúa SOLO sobre resoluciones POR
     # NOMBRE, donde la evidencia es inferida, nunca sobre un CUI citado exacto.
+    # Un código citado exacto pero sin NINGÚN término en común con el certificado
+    # y con una contradicción declarada (ubicación o rubro), o que solo calzó
+    # contra un SNIP, es la firma de un dígito mal leído que cayó sobre otro CUI
+    # real. No se descarta (el humano puede confirmarlo): va a revisión con la
+    # obra del código a la vista. Abstención pura — nunca promueve.
+    if cui_exacto and not nombre_ok:
+        motivo_dudoso = _codigo_dudoso(_cotejo_codigo(o, proyecto, codigo, deptos_cert))
+        if motivo_dudoso:
+            _traza().ev("cui_citado_dudoso", codigo=codigo, motivo=motivo_dudoso,
+                        obra=(o.get("nombrObra") or "")[:80])
+            return {"estado": "revision", "cui": None, "via": "CUI_TEXTO",
+                    "decision": (f"{motivo_dudoso} — puede tratarse de un dígito mal "
+                                 "leído del código; confirmar la obra"),
+                    "candidatos": [{"cui": cui_out, "nombre_obra": (o.get("nombrObra") or ""),
+                                    "departamento": o.get("nombrDepartamento"), "score": 50}],
+                    "obra": None}
     if cui_exacto or nombre_ok:
         via = "CUI_TEXTO" if nombre_ok else "PROBABLE"
         decision = ("código CUI verificado contra la obra" if nombre_ok else
@@ -1381,6 +1397,74 @@ def _paso_codigo_citado(exp: dict, consulta: Consulta, base=None) -> Optional[di
             "candidatos": [{"cui": cui_out, "nombre_obra": (o.get("nombrObra") or ""),
                             "departamento": o.get("nombrDepartamento"), "score": 50}],
             "obra": None}
+
+
+def _cotejo_codigo(o: dict, proyecto: str, codigo: str, deptos_cert: set[str]) -> dict:
+    """Señales de CONTRADICCIÓN entre el registro que devolvió un código citado y
+    el certificado. Sirve al Paso 0 (experiencia) y a las sub-obras por código.
+
+    Un código escrito en el certificado es evidencia fuerte, pero lo transcribió
+    un OCR o un modelo: un dígito cambiado puede caer sobre OTRO CUI real. Este
+    cotejo no puntúa ni promueve; solo dice si la obra hallada contradice al
+    certificado en algo que un componente legítimo del mismo proyecto no
+    contradiría."""
+    full = norm(o.get("nombrObra") or "")
+    toks = _tokens_clave(establecimiento(proyecto))
+    n_hit = len(toks & _palabras(full))
+    dep_obra = norm(o.get("nombrDepartamento") or "")
+    cod_uniq = re.sub(r"\D", "", str(o.get("codUniqInv") or ""))
+    return {
+        # el certificado tiene términos propios y NINGUNO aparece en la obra
+        "sin_afinidad": bool(toks) and n_hit == 0,
+        # el certificado declara departamento y la obra está en otro
+        "contra_dep": bool(deptos_cert) and bool(dep_obra) and dep_obra not in deptos_cert,
+        "contra_rubro": _rubro_contradice(rubros_de(proyecto), o.get("nombrObra") or ""),
+        # el código calzó contra el SNIP de una obra que TIENE su propio CUI, distinto
+        # (los espacios CUI/SNIP se solapan). Una obra antigua registrada solo con
+        # SNIP —sin codUniqInv— no cuenta: ahí el SNIP es su único código legítimo.
+        "solo_snip": bool(codigo) and bool(cod_uniq) and codigo != cod_uniq,
+    }
+
+
+def _codigo_dudoso(c: dict) -> Optional[str]:
+    """Motivo de ABSTENCIÓN para un código citado, o None si no hay razón.
+
+    Regla (más estricta que #59, que exige tres contradicciones a la vez, pero
+    nunca al revés): sin ningún término del nombre en común Y además (a) el calce
+    fue solo contra el SNIP —un CUI mal leído calza con SNIPs ajenos, caso
+    Yanahuanca→Ferreñafe— o (b) la obra contradice la ubicación o el rubro que el
+    certificado sí declara. Los casos documentados como CORRECTOS sobreviven:
+    Fortaleza (componente de una red integrada, sin departamento en el cert, mismo
+    rubro) y COAR (afinidad de nombre ≥ 1) no cumplen ninguna de las dos."""
+    if not c.get("sin_afinidad"):
+        return None
+    if c.get("solo_snip"):
+        return ("el código citado solo calzó con el SNIP de una obra cuyo nombre no "
+                "comparte ningún término con el certificado")
+    if c.get("contra_dep") and c.get("contra_rubro"):
+        return ("la obra del código citado no comparte ningún término con el "
+                "certificado y además está en otro departamento y es de otro rubro")
+    if c.get("contra_dep"):
+        return ("la obra del código citado no comparte ningún término con el "
+                "certificado y está en otro departamento que el declarado")
+    if c.get("contra_rubro"):
+        return ("la obra del código citado no comparte ningún término con el "
+                "certificado y es de otro rubro que el declarado")
+    return None
+
+
+def fuente_camino(exp: dict, tipo_evaluacion: Optional[str] = None,
+                  forzar: bool = False) -> str:
+    """De dónde salió la decisión expediente/obra de esta experiencia (ADR-010,
+    auditabilidad pedida en #50): `declarado` (parámetro del concurso),
+    `forzado` (env `PIVOTE_FORZAR_EXPEDIENTES`) o `texto` (heurística sobre el
+    certificado). Misma precedencia que `es_expediente_exp`."""
+    if normalizar_tipo_evaluacion(tipo_evaluacion) \
+            or normalizar_tipo_evaluacion((exp or {}).get(CLAVE_TIPO_EVALUACION)):
+        return "declarado"
+    if forzar:
+        return "forzado"
+    return "texto"
 
 
 def _con_pista_mef(exp: dict, motivo: str) -> str:
@@ -2084,10 +2168,26 @@ def resolver_obras(obras: list[dict], consulta: Consulta, base=None,
         if registros:
             ob = _elegir_obra(registros)
             cui_out = _cui_de(ob) or cui
-            res = {"cui": cui_out, "estado": "resuelto", "via": "CODIGO",
-                   "obra": {"cui": cui_out, "nombre_obra": ob.get("nombrObra"),
-                            "departamento": ob.get("nombrDepartamento"),
-                            "obra_id": ob.get("codigoObra") or ob.get("obraId")}}
+            obra_ob = {"cui": cui_out, "nombre_obra": ob.get("nombrObra"),
+                       "departamento": ob.get("nombrDepartamento"),
+                       "obra_id": ob.get("codigoObra") or ob.get("obraId")}
+            # Mismo cotejo que el Paso 0 de la experiencia: la sub-obra citó un
+            # código, pero si la obra hallada no comparte ningún término con su
+            # nombre y además contradice ubicación/rubro (o solo calzó contra un
+            # SNIP), se abstiene con la obra a la vista. La geografía es SOLO la
+            # del nombre de la sub-obra (un paquete cruza provincias).
+            motivo_dudoso = _codigo_dudoso(_cotejo_codigo(
+                ob, o.get("proyecto") or "", cui, ubicacion(o.get("proyecto") or "")))
+            if motivo_dudoso:
+                _traza().ev("subobra_codigo_dudoso", cui=cui, motivo=motivo_dudoso,
+                            obra=(ob.get("nombrObra") or "")[:80])
+                res = {"cui": None, "estado": "revision", "via": "CODIGO",
+                       "decision": (f"{motivo_dudoso} — puede tratarse de un dígito "
+                                    "mal leído del código; confirmar la obra"),
+                       "candidatos": [{**obra_ob, "score": 50}], "obra": None}
+            else:
+                res = {"cui": cui_out, "estado": "resuelto", "via": "CODIGO",
+                       "obra": obra_ob}
         else:
             res = {"cui": cui, "estado": "no_encontrado", "obra": None}
         cache[clave] = res

@@ -35,7 +35,7 @@ from validacion import (a_observaciones, anotar_cargo_nucleo, aplicar_reglas_for
 from resolucion import (ConsultaInfoObras, resolver_con_dedup, resolver_obras,
                         rubros_mixtos)
 from resolucion.cui import (es_expediente_exp, establecimiento,
-                            estampar_tipo_evaluacion, rubros_de,
+                            estampar_tipo_evaluacion, fuente_camino, rubros_de,
                             tipo_evaluacion_del_espejo)
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
 from entregables import (completar_revisiones_privadas, desempaquetar_enriquecimiento,
@@ -583,8 +583,12 @@ class EtapaInfoObrasReal:
             _avances = getattr(obra, "avances", []) or []
             _aprob_exp = getattr(obra, "aprobacion_expediente", None)
             # ADR-010: parámetro del espejo > env > texto del certificado.
-            _es_exped = es_expediente_exp(_e, tipo_evaluacion_del_espejo(ctx.espejo),
-                                          self.forzar_expedientes)
+            _tipo_decl = tipo_evaluacion_del_espejo(ctx.espejo)
+            _es_exped = es_expediente_exp(_e, _tipo_decl, self.forzar_expedientes)
+            # Auditabilidad (#50): el espejo/enriquecimiento debe permitir
+            # reconstruir por qué cada experiencia tomó el camino que tomó.
+            enr["camino"] = "expediente" if _es_exped else "obra"
+            enr["camino_fuente"] = fuente_camino(_e, _tipo_decl, self.forzar_expedientes)
             es_exp_aprobado = (not _avances and _aprob_exp is not None and _es_exped)
             # Las paralizaciones pertenecen a la EJECUCIÓN física. Un expediente
             # se verifica con contrato/aprobación y nunca hereda días parados de
