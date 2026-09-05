@@ -37,6 +37,30 @@ experiencia; la hoja CLAUDE rotula el tipo de concurso. Gate: **1046 passed, 25
 skipped**. Lección: una señal de contradicción no puede disparar por AUSENCIA de
 dato (obra sin CUI propio ≠ CUI distinto); se anotó en `memory/common_mistakes.md`.
 
+## Nota (2026-09-05, Claude) — puntaje mudo y días perdidos en la corrida real
+
+Revisión del Panel sobre el job real de expedientes (12 profesionales). El Panel
+no estaba desactualizado: mostraba fielmente dos defectos del backend.
+1. **Factor A nunca se recalculaba**: `_recalcular_factor_a` y
+   `_participantes_factor_a` buscaban `factor == "A"` literal y el consolidador
+   emite `"A — Experiencia específica…"` desde #88 (16-ago). Resultado: puntaje
+   None, total condicionado para siempre, Panel «—» y tarjetas de factores en
+   blanco. Nuevo `_letra_factor` tolera letra sola, «Factor A» y «A — nombre».
+2. **Fechas de solo mes y año descartadas en silencio**:
+   `reconciliar_resultados_profesionales` (alimenta `/resumen`, Panel y Excel) y
+   el Paso 5 leían solo ISO completo; el recálculo sí deducía el mes completo
+   autorizado por las bases (`periodos_sin_dia`), pero nadie lo consumía. Dos
+   profesionales bajo el mínimo por eso (439 de 759 días; 534 de 838). Nuevo
+   `validacion.recalculo.fechas_calculo` es el único criterio de fechas para
+   contar días, usado por pipeline, Excel y API.
+3. `/resumen` ahora expone `aplica`, `estado_puntaje`, `puntaje_confirmado` y
+   `puntaje_maximo_posible` por factor y el rango total; el Panel pinta «Por
+   verificar» con el rango en vez de casilla vacía. `reconciliar_puntajes` trata
+   como piso 0 al factor condicionado con máximo conocido (el del Comité).
+Reproducido sobre el job real: prof. 5 pasa de 439 a 759 días, prof. 9 de 534 a
+838, Factor A a 60 definitivo. Gate: **1065 passed, 25 skipped**; Panel `tsc`
+limpio. Para ver el efecto hay que reiniciar el backend y resubir el análisis.
+
 **Para la corrida de expedientes**: invocar la skill diciendo que el concurso es
 de expedientes y pasar `--tipo expedientes` al consolidar; revisar a mano las
 vías CODIGO y PROBABLE; en la verificación MEF mirar el veredicto del

@@ -12,8 +12,17 @@ def reconciliar_puntajes(espejo: dict) -> dict:
             factor["estado_puntaje"] = "no_aplica"
             continue
         puntaje = factor.get("puntaje")
-        pmin = factor.get("puntaje_confirmado", puntaje)
-        pmax = factor.get("puntaje_maximo_posible", puntaje)
+        pmin = factor.get("puntaje_confirmado")
+        if pmin is None:
+            pmin = puntaje
+        pmax = factor.get("puntaje_maximo_posible")
+        if pmax is None:
+            pmax = puntaje
+        # Un factor condicionado con máximo conocido (p. ej. el que valora el
+        # Comité, 0–25) tiene piso 0 aunque el evaluador no haya escrito el
+        # confirmado: NO es «sin cota». Sin cota es solo no conocer el máximo.
+        if pmin is None and isinstance(pmax, (int, float)):
+            pmin = 0
         if isinstance(pmin, (int, float)):
             minimo += float(pmin)
         else:

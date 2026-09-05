@@ -23,6 +23,14 @@ la obra a la vista; también en sub-obras). Cada experiencia registra `camino` y
 `camino_fuente`; el Excel rotula el tipo de concurso. Gate: **1046 passed, 25
 skipped**. Commits `19a4b9c` y el siguiente en `demo`.
 
+Tercera entrega (corrida real): el Factor A no se recalculaba porque el backend
+buscaba `factor == "A"` y el consolidador emite «A — nombre»; y las fechas de
+solo mes y año se descartaban del cómputo de días en Excel/API aunque las bases
+autorizaran mes completo (dos profesionales bajo el mínimo por eso). Ambos
+corregidos con criterio único `fechas_calculo` y `_letra_factor`; `/resumen`
+expone el estado condicionado y el Panel lo pinta como «Por verificar» con
+rango. Gate: **1065 passed, 25 skipped**.
+
 ## Adopción RAF y arquitectura visual canónica (20-ago)
 
 Pivote ya está adoptado como proyecto RAF (`.ai/project.json`, perfil `repo`) y

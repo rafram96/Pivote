@@ -152,6 +152,36 @@ def fecha_para_calculo(v, *, extremo: str, regla: str) -> tuple[Optional[date], 
     return date(anio, mes, dia), True
 
 
+def regla_periodos_de(espejo: Optional[dict]) -> str:
+    """`periodos_sin_dia` declarada por las bases: `mes_completo` | `no_definida`."""
+    return str(((espejo or {}).get("reglas_evaluacion") or {})
+               .get("periodos_sin_dia") or "no_definida")
+
+
+def fechas_calculo(exp: dict, regla: str) -> tuple[Optional[date], Optional[date], bool]:
+    """Fechas con las que se CUENTA una experiencia, en este orden: las que el
+    recálculo ya dejó en `_backend.fecha_*_calculo`; si no, la fecha cierta del
+    certificado; si no, el borde mensual que autorizan las bases
+    (`periodos_sin_dia == "mes_completo"`). Devuelve `(inicio, fin, deducida)`.
+
+    Un consumidor que solo lea el literal ISO descarta EN SILENCIO los
+    certificados que consignan solo mes y año, aunque las bases digan cómo
+    contarlos: en una corrida real dos profesionales quedaron bajo el mínimo por
+    eso (439 días contados de 758 acreditables). Todo cómputo de días efectivos
+    debe pasar por aquí, no por `_fecha_iso`."""
+    calculo = exp.get("_backend") if isinstance(exp.get("_backend"), dict) else {}
+    ini = fecha_dura(calculo.get("fecha_inicial_calculo"))
+    fin = fecha_dura(calculo.get("fecha_final_calculo"))
+    deducida = bool(calculo.get("fechas_deducidas")) and (ini is not None or fin is not None)
+    if ini is None:
+        ini, d = fecha_para_calculo(exp.get("fecha_inicial"), extremo="inicio", regla=regla)
+        deducida = deducida or d
+    if fin is None:
+        fin, d = fecha_para_calculo(exp.get("fecha_final"), extremo="fin", regla=regla)
+        deducida = deducida or d
+    return ini, fin, deducida
+
+
 def _vacio(v) -> bool:
     """Vacío = None o cadena en blanco. El 0 NO es vacío (0.0 años es un dato)."""
     return v is None or (isinstance(v, str) and not v.strip())

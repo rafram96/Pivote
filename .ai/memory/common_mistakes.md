@@ -76,3 +76,14 @@
   producción habría mandado a revisión resoluciones legítimas. Una contradicción
   exige el dato en ambos lados (la obra TIENE otro CUI); la ausencia es
   desconocido, no contradicción. Es la misma regla del guard de estado MEF.
+- **Comparar una etiqueta por igualdad literal**: `factor == "A"` dejó de encontrar
+  el Factor A cuando el consolidador pasó a emitir «A — Experiencia…» (#88). El
+  puntaje quedó mudo tres semanas sin que ningún test lo viera, porque los tests
+  usaban la etiqueta corta. Cuando dos módulos comparten un identificador que
+  también es texto para humanos, extraer la clave con una función tolerante y
+  probarla con el formato REAL que produce el emisor.
+- **Dos parsers de fecha para el mismo dato**: el recálculo deducía «mes completo»
+  y el reconciliador de días solo leía ISO de 10 caracteres; la experiencia
+  desaparecía del total sin más rastro que un «fecha sin leer» en el motivo. Un
+  dato con regla de interpretación (fechas parciales, tipos, etiquetas) se lee
+  desde UNA función y todos los consumidores la importan.

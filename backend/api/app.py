@@ -1118,9 +1118,16 @@ def resumen(job_id: str):
         })
 
     re_ = espejo.get("resumen_evaluacion") or {}
+    # Contrato v1.4: un factor puede estar CONDICIONADO (puntaje None con un rango
+    # confirmado/máximo). Sin estos campos el Panel solo veía el None y pintaba
+    # un puntaje mudo, indistinguible de «no aplica».
     factores = [
         {"factor": f.get("factor"), "criterio": f.get("criterio"),
-         "puntaje": f.get("puntaje"), "detalle": f.get("detalle")}
+         "puntaje": f.get("puntaje"), "detalle": f.get("detalle"),
+         "aplica": f.get("aplica"),
+         "estado_puntaje": f.get("estado_puntaje"),
+         "puntaje_confirmado": f.get("puntaje_confirmado"),
+         "puntaje_maximo_posible": f.get("puntaje_maximo_posible")}
         for f in re_.get("factores", [])
     ]
     conteo_alertas = {
@@ -1141,6 +1148,10 @@ def resumen(job_id: str):
         "conteo_alertas": conteo_alertas,
         "factores": factores,
         "puntaje_total": re_.get("puntaje_total"),
+        "puntaje_confirmado": re_.get("puntaje_confirmado"),
+        "puntaje_maximo_posible": re_.get("puntaje_maximo_posible"),
+        "estado_puntaje": re_.get("estado_puntaje"),
+        "nota_puntaje": re_.get("nota"),
     }
 
 

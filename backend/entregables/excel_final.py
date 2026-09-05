@@ -213,9 +213,11 @@ def reconciliar_resultados_profesionales(espejo: dict,
     """
     from orquestador.etapas_reales import _minimo_exigido
     from resolucion.cui import es_expediente_exp, tipo_evaluacion_del_espejo
+    from validacion.recalculo import fechas_calculo, regla_periodos_de
 
     enriquecimiento = enriquecimiento or {}
     tipo_evaluacion = tipo_evaluacion_del_espejo(espejo)   # ADR-010
+    regla_periodos = regla_periodos_de(espejo)             # #93 · mes completo si lo dicen las bases
     salida: dict[int, dict] = {}
     for prof in (espejo or {}).get("profesionales", []):
         np_ = prof.get("n_prof")
@@ -228,7 +230,10 @@ def reconciliar_resultados_profesionales(espejo: dict,
 
         for exp in prof.get("experiencias", []):
             ne = exp.get("n")
-            ini, fin = _fecha_iso(exp.get("fecha_inicial")), _fecha_iso(exp.get("fecha_final"))
+            # Mismas fechas que usa el pipeline: cierta, o borde mensual si las
+            # bases lo autorizan. Leer solo el ISO completo descartaba en silencio
+            # los certificados con mes y año (dos profesionales bajo el mínimo).
+            ini, fin, _deducida = fechas_calculo(exp, regla_periodos)
             if not (ini and fin) or fin < ini:
                 if exp.get("fecha_inicial") or exp.get("fecha_final"):
                     fechas_invalidas.append(ne)

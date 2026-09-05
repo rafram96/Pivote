@@ -37,6 +37,7 @@ from resolucion import (ConsultaInfoObras, resolver_con_dedup, resolver_obras,
 from resolucion.cui import (es_expediente_exp, establecimiento,
                             estampar_tipo_evaluacion, fuente_camino, rubros_de,
                             tipo_evaluacion_del_espejo)
+from validacion.recalculo import fechas_calculo, regla_periodos_de
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
 from entregables import (completar_revisiones_privadas, desempaquetar_enriquecimiento,
                          generar_excel_final, inyectar_veredicto_backend,
@@ -1988,6 +1989,19 @@ def _minimo_exigido(requisitos) -> Optional[tuple[int, str]]:
     return None
 
 
+_RE_LETRA_FACTOR = re.compile(r"^\s*(?:factor\s+)?([A-Za-z])(?=\s*[—–\-:.)]|\s|$)", re.I)
+
+
+def _letra_factor(f: dict) -> str:
+    """Letra del factor ('A') venga sola ("A"), con rótulo ("Factor A") o con su
+    nombre ("A — Experiencia específica…", formato que emite el consolidador
+    desde #88). Un nombre sin letra inicial aislada ("Certificaciones del
+    personal clave") devuelve "". Antes se comparaba `== "A"` literal y el
+    Factor A de un espejo real nunca se recalculaba: puntaje mudo en Excel y Panel."""
+    m = _RE_LETRA_FACTOR.match(str((f or {}).get("factor") or ""))
+    return m.group(1).upper() if m else ""
+
+
 def _participantes_factor_a(espejo: dict) -> set[int]:
     """Cargos que participan según las bases; legado: recupera la lista que
     quedó escrita en el detalle del factor, sin confiar en sus resultados."""
@@ -1998,7 +2012,7 @@ def _participantes_factor_a(espejo: dict) -> set[int]:
     if estructurados:
         return estructurados
     factor = next((f for f in (espejo.get("resumen_evaluacion") or {}).get("factores", [])
-                   if str(f.get("factor") or "").strip().upper() == "A"), None)
+                   if _letra_factor(f) == "A"), None)
     texto = str((factor or {}).get("detalle") or "")
     # Formato histórico real: "Factor A (nº 2 ..., 3 ..., 4 ..., 6 ...)".
     # El paréntesis termina antes de las cifras de años/porcentaje del resultado.
@@ -2021,7 +2035,7 @@ def _recalcular_factor_a(espejo: dict, enriquecimiento: dict) -> None:
     """
     resumen = espejo.get("resumen_evaluacion") or {}
     factor = next((f for f in resumen.get("factores", [])
-                   if str(f.get("factor") or "").strip().upper() == "A"), None)
+                   if _letra_factor(f) == "A"), None)
     if not factor:
         return
     participantes = _participantes_factor_a(espejo)
@@ -2140,9 +2154,10 @@ class EtapaReglasReal:
             cobertura_baja: list[int] = []  # obra verificada pero casi sin solape
             fechas_invalidas: list[int] = []  # fecha sin leer (ej. "POR VERIFICAR")
             for e in p.get("experiencias", []):
-                calculo = e.get("_backend") if isinstance(e.get("_backend"), dict) else {}
-                ini = _fecha_iso(calculo.get("fecha_inicial_calculo") or e.get("fecha_inicial"))
-                fin = _fecha_iso(calculo.get("fecha_final_calculo") or e.get("fecha_final"))
+                # Fecha cierta, la deducida por el recálculo o el borde mensual
+                # que autorizan las bases (#93). Un solo criterio para pipeline,
+                # Excel y API: `validacion.recalculo.fechas_calculo`.
+                ini, fin, _deducida = fechas_calculo(e, regla_periodos_de(ctx.espejo))
                 if not (ini and fin) or fin < ini:
                     # no se puede contar; si tenía algún dato de fecha, marcarla
                     # (Claude no la leyó) para que el humano la confirme.
