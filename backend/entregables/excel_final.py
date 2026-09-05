@@ -33,6 +33,7 @@ from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+import entregables.cronologia as cronologia
 from entregables.certeza import (
     BUCKET_CONFIRMADO, BUCKET_INFERIDO, BUCKET_PRIVADA, BUCKET_SIN_IDENTIFICAR,
     COLOR_INFERIDO, COLOR_PRIVADA, COLOR_SIN_IDENTIFICAR, COLOR_VERIFICADO,
@@ -568,6 +569,275 @@ _CRON_LEYENDA = ("Colores: verde = la fecha declarada calza con el documento · 
 
 _CRON_SIN_FUENTE_B = "POR VERIFICAR — sin fuente pública localizada"
 
+# ── Sección 2 · línea de tiempo por profesional (concursos de EXPEDIENTES) ──
+#
+# En un concurso de expedientes la tabla comparativa (una fila por experiencia,
+# once columnas de texto) obligaba al Comité a reconstruir mentalmente el orden
+# de las experiencias y a buscar los traslapes a mano. Lo que decide es CUÁNTO
+# tiempo acredita el profesional y CUÁNTO de ese tiempo está pisado o sin
+# identificar: eso se ve de un golpe en una línea de tiempo y no en una tabla.
+# La tabla se conserva tal cual para los concursos de OBRAS, donde el contraste
+# fila a fila contra el contrato sigue siendo la lectura natural.
+COLOR_TRASLAPE = "F4B183"                                   # naranja: dos periodos pisados
+FILL_TRASLAPE = PatternFill("solid", fgColor=COLOR_TRASLAPE)
+
+_GANTT_TITULO = "2 · LÍNEA DE TIEMPO POR PROFESIONAL"
+
+_GANTT_LEYENDA = (
+    "Cómo se lee: una fila por experiencia, ordenadas por fecha de inicio; la "
+    "barra ocupa las columnas del eje que toca el periodo declarado. "
+    "Colores de la barra — verde: el CUI está citado en el certificado o "
+    "confirmado por un documento del MEF · violeta: el CUI se dedujo del nombre "
+    "del proyecto · amarillo: sin identificar (o certificado de varias obras sin "
+    "ubicar) · gris: obra privada, fuera del registro público. "
+    "Marcas — C: firma del contrato · R: resolución que aprobó el expediente · "
+    "≈: el certificado consigna mes y año, se asume el mes completo. "
+    "Naranja: traslape (dos experiencias corriendo a la vez; esos días se "
+    "cuentan una sola vez).")
+
+_GANTT_FRASE = (
+    "La línea de tiempo solo es concluyente cuando todas las experiencias del "
+    "profesional están identificadas; las barras amarillas cuentan solo por el "
+    "certificado.")
+
+_GANTT_ROTULO_EJE = "PERIODO ACREDITADO"
+_GANTT_SIN_PERIODOS = ("Sin periodos computables: el certificado no consigna "
+                       "fechas con las que se pueda dibujar una línea de tiempo.")
+
+#: Las marcas C/R/≈ van ENCIMA de la barra: fuente pequeña y negrita para que se
+#: lean sobre el relleno de certeza sin taparlo.
+F_MARCA = Font(bold=True, size=8, color="15212E")
+
+_GANTT_ESCALA = {cronologia.GRANO_MES: "Eje: meses",
+                 cronologia.GRANO_TRIMESTRE: "Eje: trimestres",
+                 cronologia.GRANO_ANIO: "Eje: años"}
+
+
+def _num(*valores) -> int:
+    """El primer valor numérico de la lista (0 si no hay ninguno)."""
+    for v in valores:
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return int(v)
+    return 0
+
+
+def _veredicto_gantt(prof: dict, datos: dict) -> str:
+    """CUMPLE / NO CUMPLE / POR VERIFICAR, leído de `cumple_backend`.
+
+    `cumple_backend` lo redacta `reconciliar_resultados_profesionales` y ya cita
+    los mismos días que imprime la cabecera del bloque; aquí solo se extrae la
+    palabra. Cuando el reconciliado NO dictó nada (no hay incidencias) se decide
+    con el mínimo exigido: sin mínimo declarado en las bases no hay contra qué
+    comparar y la respuesta honesta es POR VERIFICAR.
+    """
+    texto = str(prof.get("cumple_backend") or datos.get("cumple_backend") or "")
+    cabeza = _sin_jerga(texto).strip().upper()
+    for etiqueta in ("NO CUMPLE", "POR VERIFICAR", "CUMPLE"):
+        if cabeza.startswith(etiqueta):
+            return etiqueta
+    minimo = datos.get("minimo_dias")
+    if isinstance(minimo, int) and minimo > 0:
+        return ("CUMPLE" if _num(datos.get("dias_efectivos")) >= minimo
+                else "NO CUMPLE")
+    return "POR VERIFICAR"
+
+
+def _bloques_linea_de_tiempo(espejo: dict, fichas: dict,
+                             tipo_evaluacion: Optional[str]) -> list[dict]:
+    """Un bloque por profesional, ya resuelto: eje, filas, traslapes y totales.
+
+    Todo lo que decide QUÉ se dibuja se resuelve aquí, con las fuentes únicas
+    del backend, y el pintado de más abajo se limita a colocarlo:
+
+      · periodos → `validacion.recalculo.fechas_calculo` con la regla de las
+        bases (`regla_periodos_de`), la MISMA que usa la PARTE 5, para no
+        descartar en silencio los certificados con mes y año;
+      · días E/T → `reconciliar_resultados_profesionales` (o el
+        `total_backend` que ese mismo reconciliado ya dejó en el espejo);
+      · color → `certeza.clasificar_identificacion`;
+      · reglas A/B → `presentacion_cruces` (viajan como comentario de la celda).
+    """
+    from validacion.recalculo import fechas_calculo, regla_periodos_de
+
+    regla = regla_periodos_de(espejo)
+    reconciliado = reconciliar_resultados_profesionales(espejo, None)
+    bloques: list[dict] = []
+
+    profesionales = sorted((espejo or {}).get("profesionales", []) or [],
+                           key=lambda p: _num(p.get("n_prof")))
+    for prof in profesionales:
+        np_ = prof.get("n_prof")
+        datos = reconciliado.get(np_) or {}
+        total = prof.get("total_backend") if isinstance(
+            prof.get("total_backend"), dict) else {}
+        dias_ef = _num(total.get("dias_efectivos"), datos.get("dias_efectivos"))
+        dias_tr = _num(total.get("dias_traslape"), datos.get("dias_traslape"))
+        dias_dec = _num(total.get("dias_declarados"), datos.get("dias_brutos"))
+
+        crudas: list[dict] = []
+        periodos: list[tuple[date, date]] = []
+        hitos: list[Optional[date]] = []
+        for e in prof.get("experiencias", []) or []:
+            fx = fichas.get((np_, e.get("n"))) or {}
+            ini, fin, deducida = fechas_calculo(e, regla)
+            if not (ini and fin) or fin < ini:
+                ini = fin = None
+            else:
+                periodos.append((ini, fin))
+            firma = cronologia.hito_firma(fx)
+            resolucion = cronologia.hito_resolucion(fx)
+            hitos += [firma, resolucion]
+            p = presentacion_cruces(e, fx, tipo_evaluacion)
+            crudas.append({
+                "n": e.get("n"), "proyecto": p["proyecto"] or e.get("proyecto"),
+                "cui": p["cui"], "inicio": ini, "fin": fin,
+                "deducida": bool(deducida and (ini or fin)),
+                "firma": firma, "resolucion": resolucion,
+                "color": clasificar_identificacion(e, fx)["color"],
+                "comentario": _sin_jerga(
+                    "¿Empezó después de firmado el contrato? "
+                    f"{p['resp_a']}\n"
+                    "¿Terminó antes de aprobarse el expediente? "
+                    f"{p['resp_b']}\n{p['motivo'] or '—'}"),
+            })
+
+        rango = cronologia.rango_eje(periodos, hitos)
+        eje = cronologia.construir_eje(*rango) if rango else []
+        grano = cronologia.granularidad(*rango) if rango else cronologia.GRANO_MES
+
+        # Orden de lectura: por fecha de inicio; las que no tienen fechas
+        # computables van al final, para que la escalera de barras no se rompa.
+        crudas.sort(key=lambda f: (f["inicio"] is None, f["inicio"] or date.min,
+                                   _num(f["n"])))
+
+        filas: list[dict] = []
+        for f in crudas:
+            celdas = cronologia.indices_periodo(eje, f["inicio"], f["fin"])
+            marcas: dict[int, list[str]] = {}
+            notas: list[str] = []
+            if not celdas:
+                notas.append(cronologia.NOTA_SIN_FECHAS)
+            elif f["deducida"]:
+                marcas.setdefault(celdas[0], []).append(cronologia.MARCA_MES)
+                notas.append(cronologia.NOTA_MES_COMPLETO)
+            for marca, valor in ((cronologia.MARCA_FIRMA, f["firma"]),
+                                 (cronologia.MARCA_RESOLUCION, f["resolucion"])):
+                if not valor:
+                    continue
+                i = cronologia.indice_unidad(eje, valor)
+                if i is None:
+                    notas.append(cronologia.nota_hito_fuera(marca, valor))
+                else:
+                    marcas.setdefault(i, []).append(marca)
+            filas.append({
+                "rotulo": cronologia.rotulo_experiencia(f["n"], f["proyecto"],
+                                                        f["cui"], notas),
+                "celdas": celdas, "color": f["color"],
+                "marcas": cronologia.marcas_de_columna(marcas),
+                "comentario": f["comentario"],
+            })
+
+        traslapes = cronologia.unidades_con_traslape(eje, periodos)
+        bloques.append({
+            "n_prof": np_,
+            "cabecera": (f"PROFESIONAL {np_} · {prof.get('nombre') or '—'} · "
+                         f"{prof.get('cargo') or '—'} · {dias_ef} días efectivos "
+                         f"({dias_tr} de traslape) · "
+                         f"{_veredicto_gantt(prof, datos)}"),
+            "escala": _GANTT_ESCALA.get(grano, ""),
+            "eje": eje, "filas": filas, "traslapes": traslapes,
+            "rotulo_traslapes": ("Traslapes · Sin traslapes" if not dias_tr
+                                 else f"Traslapes · {dias_tr} días de traslape"),
+            "total": (f"Total: {dias_dec} días declarados · {dias_tr} traslape · "
+                      f"{dias_ef} efectivos"),
+        })
+    return bloques
+
+
+def _pintar_linea_de_tiempo(ws, bloques: list[dict], fila: int,
+                            ncols: int) -> tuple[int, int]:
+    """Vuelca los bloques ya resueltos en la hoja. Devuelve `(filas, fila)`."""
+    total_filas = 0
+    for b in bloques:
+        ws.merge_cells(start_row=fila, start_column=1, end_row=fila,
+                       end_column=ncols)
+        c = ws.cell(fila, 1, _sin_jerga(b["cabecera"]))
+        c.font, c.fill = F_CERT, FILL_CERT
+        c.alignment = Alignment(vertical="center", wrap_text=True)
+        ws.row_dimensions[fila].height = 18
+        fila += 1
+
+        eje = b["eje"]
+        if not eje:
+            ws.merge_cells(start_row=fila, start_column=1, end_row=fila,
+                           end_column=ncols)
+            c = ws.cell(fila, 1, _GANTT_SIN_PERIODOS)
+            c.font, c.fill, c.alignment = F_CELL, FILL_PEND, AL_WRAP
+            fila += 2
+            continue
+
+        # Cabecera 1: los años, combinados sobre sus unidades.
+        c = ws.cell(fila, 1, b["escala"])
+        c.font, c.alignment = F_BOLD, AL_HEAD
+        for i0, i1, anio in cronologia.tramos_de_anio(eje):
+            if i1 > i0:
+                ws.merge_cells(start_row=fila, start_column=2 + i0,
+                               end_row=fila, end_column=2 + i1)
+            ca = ws.cell(fila, 2 + i0, anio)
+            ca.font, ca.fill, ca.border, ca.alignment = (F_HEAD, FILL_HEAD,
+                                                         BORDER, AL_HEAD)
+            ca.number_format = "0"
+        ws.row_dimensions[fila].height = 14
+        fila += 1
+
+        # Cabecera 2: la unidad (letra del mes, «T1»… o vacío en años).
+        c = ws.cell(fila, 1, _GANTT_ROTULO_EJE)
+        c.font, c.alignment = F_BOLD, AL_HEAD
+        for i, u in enumerate(eje):
+            cu = ws.cell(fila, 2 + i, u.etiqueta or None)
+            cu.font, cu.fill, cu.border, cu.alignment = (F_HEAD, FILL_HEAD,
+                                                         BORDER, AL_HEAD)
+        ws.row_dimensions[fila].height = 14
+        fila += 1
+
+        for f in b["filas"]:
+            cr = ws.cell(fila, 1, _sin_jerga(f["rotulo"]))
+            cr.font, cr.border = F_CELL, BORDER
+            cr.alignment = Alignment(vertical="center")
+            if f["comentario"]:
+                # Las respuestas de las dos reglas y su motivo NO se pierden al
+                # retirar la tabla comparativa: viajan aquí, a un clic del
+                # rótulo de la experiencia.
+                cr.comment = Comment(f["comentario"], "Pivote")
+            relleno = _FILL_CERTEZA.get(f["color"]) or FILL_PEND
+            for i in f["celdas"]:
+                cb = ws.cell(fila, 2 + i)
+                cb.fill, cb.border = relleno, BORDER
+            for i, marca in f["marcas"].items():
+                cm = ws.cell(fila, 2 + i, marca)
+                cm.font, cm.border, cm.alignment = F_MARCA, BORDER, AL_HEAD
+            ws.row_dimensions[fila].height = 14
+            fila += 1
+            total_filas += 1
+
+        ct = ws.cell(fila, 1, b["rotulo_traslapes"])
+        ct.font, ct.border = F_BOLD, BORDER
+        ct.alignment = Alignment(vertical="center")
+        for i in sorted(b["traslapes"]):
+            cx = ws.cell(fila, 2 + i)
+            cx.fill, cx.border = FILL_TRASLAPE, BORDER
+        ws.row_dimensions[fila].height = 14
+        fila += 1
+
+        ws.merge_cells(start_row=fila, start_column=1, end_row=fila,
+                       end_column=ncols)
+        ctot = ws.cell(fila, 1, b["total"])
+        ctot.font, ctot.fill = F_BOLD, FILL_EFECTIVO
+        ctot.alignment = Alignment(vertical="center")
+        fila += 2
+
+    return total_filas, fila
+
 # Formato de fecha de los cruces: año de CUATRO dígitos. Aquí se comparan
 # periodos declarados contra documentos oficiales y un `29/05/18` obliga a
 # adivinar el siglo justo donde el año es el dato que importa.
@@ -738,19 +1008,44 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
     """Hoja «Cronología de expedientes». Devuelve el nº de filas comparadas.
 
     Dos partes: (1) una ficha por proyecto — contrato del proceso, resolución de
-    aprobación del expediente y modificaciones de plazo conocidas; (2) la tabla
-    comparativa, una fila por experiencia, con el periodo declarado frente a esos
-    hitos y el resultado de las dos reglas en lenguaje de evaluador.
+    aprobación del expediente y modificaciones de plazo conocidas; (2) según el
+    tipo de concurso:
+
+      · EXPEDIENTES → «2 · LÍNEA DE TIEMPO POR PROFESIONAL»: un bloque tipo Gantt
+        por profesional, con el color de certeza en cada barra, los hitos del MEF
+        (C/R) sobre la barra y la fila de traslapes. Las respuestas de las dos
+        reglas no se pierden: viajan como COMENTARIO de la celda del rótulo.
+      · OBRAS (o tipo no declarado) → la tabla comparativa de siempre, una fila
+        por experiencia.
     """
+    from resolucion.cui import TIPO_EXPEDIENTES
     fichas = fichas or {}
-    for i, w in enumerate(_CRON_WIDTHS, start=1):
-        ws.column_dimensions[get_column_letter(i)].width = w
+    tipo_evaluacion = _tipo_evaluacion_espejo(espejo)          # ADR-010
+    linea_de_tiempo = tipo_evaluacion == TIPO_EXPEDIENTES
+
+    bloques: list[dict] = []
+    if linea_de_tiempo:
+        # La rejilla de la línea de tiempo manda sobre los anchos de la hoja: A
+        # es el rótulo y de B en adelante van las unidades del eje, todas
+        # estrechas. La sección 1 sigue combinando A:C (etiqueta) y D:última
+        # (valor), así que se garantiza un mínimo de columnas para que ese valor
+        # conserve un ancho legible aunque el eje sea corto.
+        bloques = _bloques_linea_de_tiempo(espejo, fichas, tipo_evaluacion)
+        eje_max = max([len(b["eje"]) for b in bloques] or [0])
+        _NCOL = max(1 + eje_max, cronologia.MIN_COLUMNAS)
+        ws.column_dimensions["A"].width = cronologia.ANCHO_ROTULO
+        for i in range(2, _NCOL + 1):
+            ws.column_dimensions[get_column_letter(i)].width = cronologia.ANCHO_UNIDAD
+    else:
+        _NCOL = _NCOL_CRON
+        for i, w in enumerate(_CRON_WIDTHS, start=1):
+            ws.column_dimensions[get_column_letter(i)].width = w
 
     r = 1
 
     def banda(texto, font=F_PARTE, fill=FILL_PARTE, alto=20):
         nonlocal r
-        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=_NCOL_CRON)
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=_NCOL)
         # También los títulos: el nombre del proyecto viene del espejo y puede
         # arrastrar marcas del consolidador (#55).
         c = ws.cell(r, 1, _sin_jerga(texto))
@@ -764,7 +1059,7 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
         texto = _sin_jerga(texto)
         n = filas or max(1, -(-len(texto) // 190))
         ws.merge_cells(start_row=r, start_column=1, end_row=r + n - 1,
-                       end_column=_NCOL_CRON)
+                       end_column=_NCOL)
         c = ws.cell(r, 1, texto)
         c.font, c.alignment = F_CELL, AL_WRAP
         if fill:
@@ -779,7 +1074,7 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=3)
         cl = ws.cell(r, 1, etiqueta)
         cl.font, cl.border, cl.alignment = F_BOLD, BORDER, AL_WRAP
-        ws.merge_cells(start_row=r, start_column=4, end_row=r, end_column=_NCOL_CRON)
+        ws.merge_cells(start_row=r, start_column=4, end_row=r, end_column=_NCOL)
         cv = ws.cell(r, 4, _cron_dato(valor))
         cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
         if fill:
@@ -870,6 +1165,15 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
                   "InfoObras no registra modificaciones de plazo para este proyecto")
 
     r += 2
+    if linea_de_tiempo:
+        # La leyenda va UNA sola vez, antes del primer profesional: es la clave
+        # de lectura de todos los bloques, no de cada uno.
+        banda(_GANTT_TITULO)
+        parrafo(_GANTT_LEYENDA)
+        parrafo(_GANTT_FRASE, FILL_PEND)
+        r += 1
+        return _pintar_linea_de_tiempo(ws, bloques, r, _NCOL)[0]
+
     banda("2 · TABLA COMPARATIVA — periodo declarado frente a los hitos documentales")
     for i, h in enumerate(_CRON_HEAD, start=1):
         c = ws.cell(r, i, h)
@@ -879,8 +1183,6 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
     r += 1
 
     filas = 0
-    from resolucion.cui import tipo_evaluacion_del_espejo
-    tipo_evaluacion = tipo_evaluacion_del_espejo(espejo)   # ADR-010
     for prof in espejo.get("profesionales", []):
         for e in prof.get("experiencias", []):
             p = presentacion_cruces(e, fichas.get((prof.get("n_prof"), e.get("n"))),
