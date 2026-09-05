@@ -33,6 +33,12 @@ from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from entregables.certeza import (
+    BUCKET_CONFIRMADO, BUCKET_INFERIDO, BUCKET_PRIVADA, BUCKET_SIN_IDENTIFICAR,
+    COLOR_INFERIDO, COLOR_PRIVADA, COLOR_SIN_IDENTIFICAR, COLOR_VERIFICADO,
+    alertas_experiencia, bucket_certeza, clasificar_identificacion,
+    es_provisional, fuente_mef,
+)
 from reglas import (
     anios, dias_efectivos_profesional, dias_inclusivos, periodo_fechas,
     restar_paralizaciones,
@@ -85,6 +91,16 @@ F_CERT = Font(bold=True, size=10, color="15212E")
 FILL_DATOS = PatternFill("solid", fgColor="1F4E78")        # azul oscuro: header del recap
 F_DATOS = Font(bold=True, size=10, color="FFFFFF")
 FILL_RECAP = PatternFill("solid", fgColor="DDEBF7")        # azul claro: etiquetas del recap
+# Certeza de identificación (PARTE 5 de expedientes): `entregables.certeza`
+# devuelve el HEX y aquí se traduce al relleno YA existente, para que la leyenda
+# del entregable siga siendo verdad (verde=verificado, violeta=inferido,
+# amarillo suave=por verificar, gris=fuera del registro público).
+_FILL_CERTEZA = {
+    COLOR_VERIFICADO: FILL_OK,
+    COLOR_INFERIDO: FILL_SUPUESTO,
+    COLOR_SIN_IDENTIFICAR: FILL_PEND,
+    COLOR_PRIVADA: FILL_PARTE,
+}
 FMT_SOLES = '#,##0.00'
 # El avance físico de InfoObras ya viene en escala de porcentaje (38.36 = 38.36%).
 # El formato nativo '0.00%' de Excel multiplica ×100 (mostraría 3836.00%), así que
@@ -102,6 +118,26 @@ _ACCION_GENERICA = "revisar esta experiencia en el panel"
 # En el bloque sin obra el diagnóstico sí es de identidad (no hubo cruce), así que
 # ahí la acción por defecto puede ser concreta.
 _ACCION_SIN_OBRA = "confirmar la obra o pegar el CUI correcto en el panel"
+
+# El entregable lo lee un Comité que NO usa el panel: una acción redactada para
+# el operador del backend ("elegir candidato", "pegar el CUI") es una fuga de
+# interfaz que además le pide algo que no puede hacer. Se traduce al gesto
+# documental equivalente en el momento de pintarla.
+_ACCION_SIN_PANEL = {
+    "elegir candidato o pegar CUI":
+        "Confirmar con el certificado y, si existe, el contrato del expediente",
+    "elegir el RUC correcto en el panel": "confirmar el RUC del emisor",
+}
+
+
+def _accion_visible(accion) -> Optional[str]:
+    """Traduce la acción del item de revisión a lenguaje de evaluador."""
+    if accion is None:
+        return None
+    texto = str(accion)
+    for jerga, claro in _ACCION_SIN_PANEL.items():
+        texto = texto.replace(jerga, claro)
+    return texto
 
 
 def _rotulo_candado_seace(resultado) -> Optional[str]:
@@ -127,9 +163,10 @@ def _motivo_accion(v) -> tuple[str, Optional[str]]:
     reintentar el portal… Se acepta también un str suelto — el marcador
     "[PRIVADA]" y las llamadas que solo pasan el motivo."""
     if isinstance(v, dict):
-        return str(v.get("motivo") or ""), v.get("accion_sugerida")
+        return str(v.get("motivo") or ""), _accion_visible(v.get("accion_sugerida"))
     if isinstance(v, (tuple, list)):
-        return str(v[0] if v else ""), (v[1] if len(v) > 1 else None)
+        return (str(v[0] if v else ""),
+                _accion_visible(v[1] if len(v) > 1 else None))
     return str(v or ""), None
 
 
@@ -916,6 +953,65 @@ def _xl(v):
     return _sin_jerga(v)
 
 
+def _conclusion_expedientes(prof: dict, dias_ef: int, traslape: int,
+                            dias_inferidos: int, dias_sin_identificar: int,
+                            hay_provisional: bool) -> str:
+    """Conclusión del profesional en un concurso de EXPEDIENTES.
+
+    UNA sola fuente de verdad: los días efectivos que acaba de imprimir la
+    PARTE 5 — que son los de `reconciliar_resultados_profesionales`. Reglas:
+
+    · Si el backend ya dictó `cumple_backend` (NO CUMPLE o POR VERIFICAR), esa
+      línea manda tal cual: ya cita el mismo número.
+    · Si no lo dictó, se redacta aquí desde los días efectivos y el mínimo. Un
+      «CUMPLE» heredado del evaluador NUNCA sobrevive a unos días efectivos por
+      debajo del mínimo (caso real P9: la hoja decía «CUMPLE — 574 días» con un
+      mínimo de 24 meses, porque tabla y conclusión contaban cosas distintas).
+    · Siempre se dice cuántos de esos días dependen de un CUI inferido o de una
+      experiencia sin identificar: es la información que la tabla acaba de
+      desglosar y la que decide si el veredicto se puede firmar.
+    """
+    from orquestador.etapas_reales import _minimo_exigido
+
+    exigido = _minimo_exigido(prof.get("requisitos"))
+    minimo_dias, minimo_texto = exigido if exigido else (
+        None, prof.get("minimo_exigido_backend"))
+    anios_ef = round(anios(dias_ef), 2)
+    base = _sin_jerga(prof.get("cumple_backend") or "") or None
+    bajo_minimo = bool(minimo_dias) and dias_ef < minimo_dias
+
+    if base and (bajo_minimo or not base.strip().upper().startswith("CUMPLE")):
+        texto = base
+    elif minimo_dias is None:
+        texto = (f"POR VERIFICAR — {dias_ef} días efectivos ({anios_ef} años) "
+                 f"tras descontar {traslape} días de traslape; las bases no "
+                 f"consignan un mínimo con el que compararlos")
+    elif bajo_minimo:
+        texto = (f"NO CUMPLE — {dias_ef} días efectivos ({anios_ef} años) tras "
+                 f"descontar {traslape} días de traslape, contra un mínimo de "
+                 f"{minimo_texto} ({minimo_dias} días)")
+    else:
+        texto = (f"CUMPLE — {dias_ef} días efectivos ({anios_ef} años) tras "
+                 f"descontar {traslape} días de traslape, contra un mínimo de "
+                 f"{minimo_texto} ({minimo_dias} días)")
+
+    dependientes = []
+    if dias_inferidos:
+        dependientes.append(f"{dias_inferidos} dependen de un CUI inferido por "
+                            f"el nombre del proyecto")
+    if dias_sin_identificar:
+        dependientes.append(f"{dias_sin_identificar} provienen de experiencias "
+                            f"SIN identificar")
+    texto = texto.rstrip().rstrip(".")     # `cumple_backend` ya trae su punto final
+    if dependientes:
+        texto += (". De esos días efectivos, " + " y ".join(dependientes)
+                  + ": confirmar esa evidencia antes de firmar el veredicto")
+    elif not hay_provisional:
+        texto += (". Todos esos días están respaldados por un CUI citado en el "
+                  "certificado o confirmado por el MEF")
+    return texto + "."
+
+
 def construir_hoja_profesional(
     ws, prof: dict, paralizaciones: Paralizaciones,
     cuis: Optional[dict] = None,
@@ -924,6 +1020,7 @@ def construir_hoja_profesional(
     sunat: Optional[dict] = None,
     certificados: Optional[dict] = None,
     tipo_evaluacion: Optional[str] = None,   # ADR-010 · `_meta.tipo_evaluacion`
+    regla_periodos: str = "no_definida",     # #93 · `reglas_evaluacion.periodos_sin_dia`
 ) -> None:
     cuis = cuis or {}
     fichas = fichas or {}
@@ -1029,7 +1126,8 @@ def construir_hoja_profesional(
             _ini, _fin = _fecha_iso(fx.get("fecha_inicio")), _fecha_iso(fx.get("fecha_fin"))
             _rango = (f"{_ini.strftime('%d/%m/%Y')} a {_fin.strftime('%d/%m/%Y')}"
                       if _ini and _fin else "sin fechas publicadas")
-            kv("Ejecución posterior de la obra (contexto, no cuenta para el expediente)",
+            kv("Ejecución de la obra registrada en InfoObras (contexto: no cuenta "
+               "para el expediente)",
                f"{_sin_jerga(fx.get('estado') or 'estado no publicado')} · {_rango}")
         else:
             kv("Estado de obra", _sin_jerga(fx.get("estado") or "—"))
@@ -1435,7 +1533,7 @@ def construir_hoja_profesional(
                                            (-(-len(titulo) // 78)) * 14 + 6)
         rr += 1
         ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
-        c = ws.cell(rr, 6, f"Acción: {accion or _ACCION_GENERICA}.")
+        c = ws.cell(rr, 6, f"Acción: {_accion_visible(accion) or _ACCION_GENERICA}.")
         c.font, c.fill, c.border, c.alignment = F_CELL, FILL_AVISO, BORDER, AL_WRAP
         ws.row_dimensions[rr].height = max(ws.row_dimensions[rr].height or 15,
                                            (-(-len(str(c.value)) // 78)) * 13 + 2)
@@ -1886,7 +1984,7 @@ def construir_hoja_profesional(
         elif s and s.get("ambiguo"):                 # varias empresas con ese nombre
             kv("Emisor (cert)", s.get("nombre") or "—")
             txt = (f"⚠ Por verificar — {s.get('ambiguo')} empresas en SUNAT con ese nombre; "
-                   f"elegir el RUC correcto en el panel.")
+                   f"confirmar el RUC del emisor.")
             fill = FILL_ALERTA
         elif s and s.get("no_encontrado"):           # buscado por nombre, sin match
             kv("Emisor (cert)", s.get("nombre") or "—")
@@ -2397,7 +2495,21 @@ def construir_hoja_profesional(
     # Es la conclusión del profesional (días efectivos del Paso 5). Flush-left;
     # A=52 lleva el Cliente, Objeto (B:D) y Proyecto (F:I) combinados anchos para
     # que el texto no se corte. Reconcilia la suma por-experiencia con ALT11.
-    banda("PARTE 5 — EXPERIENCIA DEL PROFESIONAL (días declarados y efectivos verificados)",
+    from resolucion.cui import (
+        TIPO_EXPEDIENTES, es_expediente_exp, normalizar_tipo_evaluacion,
+    )
+    from validacion.recalculo import fechas_calculo
+    # ADR-010 · en un concurso de ELABORACIÓN DE EXPEDIENTES la fila «Fuente:
+    # InfoObras» de la PARTE 5 hablaba de la EJECUCIÓN de la obra — algo que no
+    # prueba nada sobre quién elaboró el expediente — y la tabla sumaba días de
+    # CUI citado y de CUI inferido como si valieran lo mismo. Para «obras» la
+    # PARTE 5 se conserva EXACTAMENTE como estaba.
+    _es_concurso_expedientes = (
+        normalizar_tipo_evaluacion(tipo_evaluacion) == TIPO_EXPEDIENTES)
+
+    banda("PARTE 5 — EXPERIENCIA DEL PROFESIONAL (días efectivos y certeza de "
+          "identificación del expediente)" if _es_concurso_expedientes else
+          "PARTE 5 — EXPERIENCIA DEL PROFESIONAL (días declarados y efectivos verificados)",
           F_PARTE, FILL_PARTE, 18)
 
     # 9 columnas: N°(A) · Proyecto(B:H) · Cliente(I:K) · Objeto(M) · Fuente(N)
@@ -2473,44 +2585,223 @@ def construir_hoja_profesional(
             ce.font, ce.fill, ce.border, ce.number_format = F_BOLD, fill_e, BORDER, FMT_INT
         r += 1
 
-    _p5_head()
-    _sd = _se = 0
-    _n_decl = 0        # periodos que sí aportan días declarados (desfase máximo)
-    for e in prof.get("experiencias", []):
-        ne = e.get("n")
-        ini_, fin_ = _fecha_iso(e.get("fecha_inicial")), _fecha_iso(e.get("fecha_final"))
-        decl, efec, _clamp = _dias_exp(ne, ini_, fin_)
-        fx_ = fichas.get((n_prof, ne)) or {}
-        _p5(ne, e.get("proyecto") or "—", e.get("entidad_emisora") or "—",
-            e.get("cargo_ocupado") or "—", ini_, fin_,
-            _fecha_iso(fx_.get("fecha_inicio")), _fecha_iso(fx_.get("fecha_fin")),
-            decl, efec,
-            set(prof.get("supuestos") or []) | set(e.get("supuestos") or []))
-        if isinstance(decl, (int, float)):
-            _sd += decl
-            _n_decl += 1
-        if isinstance(efec, (int, float)):
-            _se += efec
+    # ── PARTE 5 · variante EXPEDIENTES ───────────────────────────────────────
+    # Cada experiencia baja como un bloque apilado en N (rótulo) + O:P (dato):
+    # Certificado · MEF (contrato) · MEF (resolución) · Identificación · Alerta.
+    def _p5_head_exp():
+        nonlocal r
+        for ci, cf, val in [(1, 1, "N°"), (2, 8, "Proyecto / Expediente técnico"),
+                            (9, 11, "Cliente o Empleador"),
+                            (13, 13, "Objeto de contratación"),
+                            (14, 14, "Fuente / dato"),
+                            (15, 15, "Fecha de inicio · detalle"),
+                            (16, 16, "Fecha de fin"),
+                            (18, 18, "Declarado (días)"), (19, 19, "Efectivo (días)")]:
+            if cf > ci:
+                ws.merge_cells(start_row=r, start_column=ci, end_row=r, end_column=cf)
+            c = ws.cell(r, ci, val)
+            c.font, c.fill, c.border, c.alignment = F_HEAD, FILL_HEAD, BORDER, AL_WRAP
+        ws.row_dimensions[r].height = 30
+        r += 1
 
-    res5 = dias_efectivos_profesional(periodos_validos, paral_por_idx) if periodos_validos else None
-    _p5_tot("TOTAL, DÍAS (suma por experiencia)", _sd, _se)
-    if res5 and res5.dias_traslape:
-        _p5_tot("(−) Traslapes entre experiencias (ALT11)", None, res5.dias_traslape, FILL_BACKEND)
-    _dias_ef = res5.dias_efectivos if res5 else _se
-    _hay_revision = any(
-        _es_revision_efectiva(rev)
-        for e in prof.get("experiencias", [])
-        if (rev := revisiones.get((n_prof, e.get("n"))))
-    )
-    _p5_tot("DÍAS PROVISIONALES DEL PROFESIONAL — POR VERIFICAR" if _hay_revision
-            else "DÍAS EFECTIVOS DEL PROFESIONAL", None, _dias_ef,
-            FILL_PEND if _hay_revision else FILL_EFECTIVO)
+    def _p5_exp(n, proyecto, cliente, objeto, ini, fin, deducida, decl, efec,
+                certeza, alertas, mef, supuestos=None):
+        """Un bloque de experiencia de la PARTE 5 de expedientes. Devuelve nada;
+        avanza `r` tantas filas como rótulos tenga el bloque."""
+        nonlocal r
+        supuestos = set(supuestos or [])
+        # Los rótulos apilados: (etiqueta, valor, relleno). Solo se dibujan los
+        # que tienen algo que decir — una «Alerta» vacía sería ruido rojo.
+        detalle: list[tuple[str, str, Optional[PatternFill]]] = [
+            ("MEF · contrato", mef["contrato"], FILL_BACKEND),
+            ("MEF · resolución",
+             f"{mef['resolucion']} · {mef['consultor']}"
+             if not mef["sin_documentos"] else "—", FILL_BACKEND),
+            ("Identificación", certeza["etiqueta"],
+             _FILL_CERTEZA.get(certeza["color"])),
+        ]
+        if deducida:
+            detalle.append(("Fecha deducida",
+                            "Mes completo asumido según bases (el certificado "
+                            "consigna solo mes y año)", FILL_SUPUESTO))
+        if alertas:
+            detalle.append(("Alerta", "⚠ " + "; ".join(alertas), FILL_ALERTA))
+        filas = 1 + len(detalle)
+
+        for ci, cf, val, campo in [(1, 1, n, None), (2, 8, proyecto, "proyecto"),
+                                   (9, 11, cliente, "entidad_emisora"),
+                                   (13, 13, objeto, "cargo_ocupado")]:
+            ws.merge_cells(start_row=r, start_column=ci, end_row=r + filas - 1,
+                           end_column=cf)
+            c = ws.cell(r, ci, val); c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
+            if campo in supuestos and val not in (None, ""):
+                c.fill = FILL_SUPUESTO
+        # fila 1: el periodo con el que SE CUENTA (fechas_calculo), violeta
+        # cuando lo dedujo la regla de mes completo.
+        fill_fechas = FILL_SUPUESTO if deducida else FILL_CLAUDE
+        for ci, val in [(14, "Certificado"), (15, ini or "—"), (16, fin or "—")]:
+            c = ws.cell(r, ci, val)
+            c.font, c.fill, c.border, c.alignment = F_CELL, fill_fechas, BORDER, AL_WRAP
+            if ci == 14:
+                c.fill = FILL_CLAUDE
+            if isinstance(val, date):
+                c.number_format = FMT_FECHA
+        for k, (rotulo, valor, fill) in enumerate(detalle, start=1):
+            cr = ws.cell(r + k, 14, rotulo)
+            cr.font, cr.border, cr.alignment = F_BOLD, BORDER, AL_WRAP
+            ws.merge_cells(start_row=r + k, start_column=15, end_row=r + k, end_column=16)
+            cv = ws.cell(r + k, 15, valor)
+            cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
+            if fill is not None:
+                cr.fill = cv.fill = fill
+            ws.row_dimensions[r + k].height = max(
+                15, (-(-len(str(valor)) // 30)) * 12 + 3)
+
+        for ci, val, fill in [(18, decl, FILL_CLAUDE), (19, efec, None)]:
+            ws.merge_cells(start_row=r, start_column=ci, end_row=r + filas - 1,
+                           end_column=ci)
+            c = ws.cell(r, ci, val); c.font, c.border, c.alignment = F_CELL, BORDER, AL_HEAD
+            if isinstance(val, (int, float)):
+                c.number_format = FMT_INT
+            if ci == 19:
+                # (c) el color de los días efectivos ES la certeza: cyan solo si
+                # la identificación está documentada; violeta si se infirió;
+                # gris si es privada; SIN relleno (y rotulado PROVISIONAL) si no
+                # se sabe qué obra es.
+                fill = {COLOR_VERIFICADO: FILL_EFECTIVO,
+                        COLOR_INFERIDO: FILL_SUPUESTO,
+                        COLOR_PRIVADA: FILL_PARTE,
+                        COLOR_SIN_IDENTIFICAR: None}.get(certeza["color"])
+            if fill is not None and val not in (None, ""):
+                c.fill = fill
+        lns = max(-(-len(str(proyecto)) // 74), -(-len(str(cliente)) // 43),
+                  -(-len(str(objeto)) // 14), 1)
+        ws.row_dimensions[r].height = max(15, lns * 13 + 3)
+        r += filas
+
+    def _p5_tot_exp(label, efec_v, fill_e):
+        _p5_tot(label, None, efec_v, fill_e)
+
+    if not _es_concurso_expedientes:
+        # ── camino histórico (concursos de OBRA): intacto ───────────────────
+        _p5_head()
+        _sd = _se = 0
+        _n_decl = 0    # periodos que sí aportan días declarados (desfase máximo)
+        for e in prof.get("experiencias", []):
+            ne = e.get("n")
+            ini_, fin_ = _fecha_iso(e.get("fecha_inicial")), _fecha_iso(e.get("fecha_final"))
+            decl, efec, _clamp = _dias_exp(ne, ini_, fin_)
+            fx_ = fichas.get((n_prof, ne)) or {}
+            _p5(ne, e.get("proyecto") or "—", e.get("entidad_emisora") or "—",
+                e.get("cargo_ocupado") or "—", ini_, fin_,
+                _fecha_iso(fx_.get("fecha_inicio")), _fecha_iso(fx_.get("fecha_fin")),
+                decl, efec,
+                set(prof.get("supuestos") or []) | set(e.get("supuestos") or []))
+            if isinstance(decl, (int, float)):
+                _sd += decl
+                _n_decl += 1
+            if isinstance(efec, (int, float)):
+                _se += efec
+
+        res5 = (dias_efectivos_profesional(periodos_validos, paral_por_idx)
+                if periodos_validos else None)
+        _p5_tot("TOTAL, DÍAS (suma por experiencia)", _sd, _se)
+        if res5 and res5.dias_traslape:
+            _p5_tot("(−) Traslapes entre experiencias (ALT11)", None,
+                    res5.dias_traslape, FILL_BACKEND)
+        _dias_ef = res5.dias_efectivos if res5 else _se
+        _hay_revision = any(
+            _es_revision_efectiva(rev)
+            for e in prof.get("experiencias", [])
+            if (rev := revisiones.get((n_prof, e.get("n"))))
+        )
+        _p5_tot("DÍAS PROVISIONALES DEL PROFESIONAL — POR VERIFICAR" if _hay_revision
+                else "DÍAS EFECTIVOS DEL PROFESIONAL", None, _dias_ef,
+                FILL_PEND if _hay_revision else FILL_EFECTIVO)
+        _fill_anios = FILL_PEND if _hay_revision else FILL_EFECTIVO
+        _conclusion = None      # la arma el camino histórico, más abajo
+    else:
+        # ── camino EXPEDIENTES ──────────────────────────────────────────────
+        # UNA sola fuente de días: `fechas_calculo` + `dias_efectivos_profesional`,
+        # exactamente lo que hace `reconciliar_resultados_profesionales`. Antes la
+        # tabla leía el ISO literal (descartando en silencio los certificados con
+        # mes y año) y la conclusión leía el reconciliado: dos números distintos
+        # para lo mismo (P5 439 vs 759, P9 574 vs 838, P12 926 vs 1056).
+        _p5_head_exp()
+        _periodos_exp: list[tuple[date, date]] = []
+        _paral_exp: dict[int, list[tuple[date, date]]] = {}
+        _dias_por_nivel: dict[str, int] = {}
+        _hay_provisional = False
+        _filas_exp: list[tuple] = []
+        for e in prof.get("experiencias", []):
+            ne = e.get("n")
+            fx_ = fichas.get((n_prof, ne)) or {}
+            # `enr` de esta experiencia: la proyección que viaja en `fichas` más
+            # el bloque SUNAT, que llega por su propio canal.
+            enr_ = {**fx_, "sunat": sunat.get((n_prof, ne))}
+            ini_, fin_, deducida_ = fechas_calculo(e, regla_periodos)
+            certeza = clasificar_identificacion(e, enr_)
+            alertas = alertas_experiencia(e, enr_)
+            if not (ini_ and fin_) or fin_ < ini_:
+                decl_ = efec_ = None
+            else:
+                idx_ = len(_periodos_exp)
+                _periodos_exp.append((ini_, fin_))
+                privada_ = str(enr_.get("via") or "").upper() == "PRIVADA"
+                clamp_: list[tuple[date, date]] = []
+                if not (privada_ or es_expediente_exp(e, tipo_evaluacion)):
+                    for p in paralizaciones.get((n_prof, ne), []):
+                        p_i, p_f = periodo_fechas(p)
+                        c_i, c_f = max(p_i, ini_), min(p_f, fin_)
+                        if c_f >= c_i:
+                            clamp_.append((c_i, c_f))
+                if clamp_:
+                    _paral_exp[idx_] = clamp_
+                decl_ = dias_inclusivos(ini_, fin_)
+                efec_ = sum(dias_inclusivos(a, b)
+                            for a, b in restar_paralizaciones((ini_, fin_), clamp_))
+                cubeta = bucket_certeza(certeza)
+                _dias_por_nivel[cubeta] = _dias_por_nivel.get(cubeta, 0) + efec_
+            if es_provisional(certeza["nivel"]):
+                _hay_provisional = True
+            _filas_exp.append((e, ne, ini_, fin_, deducida_, decl_, efec_,
+                               certeza, alertas, fuente_mef(enr_)))
+
+        for (e, ne, ini_, fin_, deducida_, decl_, efec_, certeza, alertas,
+             mef) in _filas_exp:
+            mostrado = (f"{efec_} PROVISIONAL" if efec_ is not None
+                        and es_provisional(certeza["nivel"]) else efec_)
+            _p5_exp(ne, e.get("proyecto") or "—", e.get("entidad_emisora") or "—",
+                    e.get("cargo_ocupado") or "—", ini_, fin_, deducida_,
+                    decl_, mostrado, certeza, alertas, mef,
+                    set(prof.get("supuestos") or []) | set(e.get("supuestos") or []))
+
+        res5 = (dias_efectivos_profesional(_periodos_exp, _paral_exp)
+                if _periodos_exp else None)
+        _dias_ef = res5.dias_efectivos if res5 else 0
+        _traslape = res5.dias_traslape if res5 else 0
+        _d_conf = _dias_por_nivel.get(BUCKET_CONFIRMADO, 0)
+        _d_inf = _dias_por_nivel.get(BUCKET_INFERIDO, 0)
+        _d_sin = _dias_por_nivel.get(BUCKET_SIN_IDENTIFICAR, 0)
+        _d_priv = _dias_por_nivel.get(BUCKET_PRIVADA, 0)
+        _p5_tot_exp("DÍAS CON CUI CITADO O CONFIRMADO POR EL MEF", _d_conf, FILL_OK)
+        _p5_tot_exp("DÍAS CON CUI INFERIDO POR NOMBRE", _d_inf, FILL_SUPUESTO)
+        _p5_tot_exp("DÍAS SIN IDENTIFICAR (provisionales)", _d_sin, FILL_PEND)
+        if _d_priv:
+            _p5_tot_exp("DÍAS DE OBRA PRIVADA (sin registro público)", _d_priv,
+                        FILL_PARTE)
+        _p5_tot_exp("(−) Traslapes entre experiencias", _traslape, FILL_BACKEND)
+        _p5_tot_exp("DÍAS EFECTIVOS DEL PROFESIONAL", _dias_ef, FILL_EFECTIVO)
+        _fill_anios = FILL_EFECTIVO
+        _conclusion = _conclusion_expedientes(
+            prof, _dias_ef, _traslape, _d_inf, _d_sin, _hay_provisional)
+
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=18)
     ca = ws.cell(r, 1, "AÑOS EFECTIVOS (días efectivos / 365)")
     ca.font, ca.border, ca.alignment = F_BOLD, BORDER, AL_HEAD
     cy = ws.cell(r, 19, round(anios(_dias_ef), 2))
     cy.font, cy.fill, cy.border, cy.number_format = (
-        F_BOLD, FILL_PEND if _hay_revision else FILL_EFECTIVO, BORDER, FMT_DEC)
+        F_BOLD, _fill_anios, BORDER, FMT_DEC)
 
     r += 2
     veredicto = prof.get("cumple_backend") or prof.get("cumple") or "POR VERIFICAR — sin conclusión"
@@ -2518,14 +2809,20 @@ def construir_hoja_profesional(
     cvl = ws.cell(r, 1, "CONCLUSIÓN DEL TIEMPO EFECTIVO")
     cvl.font, cvl.fill, cvl.border, cvl.alignment = F_BOLD, FILL_RECAP, BORDER, AL_HEAD
     ws.merge_cells(start_row=r, start_column=7, end_row=r, end_column=19)
-    # La conclusión y la PARTE 5 de arriba tienen que decir el MISMO número: si el
-    # veredicto del evaluador cita el conteo sin bordes, se antepone el total
-    # declarado verificado (`_sd`, el que acaba de imprimirse) y se explica el
-    # otro. La línea del equipo evaluador (`cumple_backend`) no se toca: esa ya
-    # trae su propia cifra, la de los días efectivos.
-    _visible = _sin_jerga(veredicto)
-    if not prof.get("cumple_backend"):
-        _visible = conciliar_conclusion(_visible, _sd, _n_decl)
+    if _conclusion is not None:
+        # Expedientes: el texto lo arma `_conclusion_expedientes` desde los MISMOS
+        # días efectivos que acaba de imprimir la tabla. Nada de `conciliar_
+        # conclusion`, que reescribía la frase con el total DECLARADO.
+        veredicto = _visible = _conclusion
+    else:
+        # La conclusión y la PARTE 5 de arriba tienen que decir el MISMO número: si el
+        # veredicto del evaluador cita el conteo sin bordes, se antepone el total
+        # declarado verificado (`_sd`, el que acaba de imprimirse) y se explica el
+        # otro. La línea del equipo evaluador (`cumple_backend`) no se toca: esa ya
+        # trae su propia cifra, la de los días efectivos.
+        _visible = _sin_jerga(veredicto)
+        if not prof.get("cumple_backend"):
+            _visible = conciliar_conclusion(_visible, _sd, _n_decl)
     cver = ws.cell(r, 7, _visible)
     cver.font, cver.border, cver.alignment = F_BOLD, BORDER, AL_WRAP
     # El color sale del veredicto ORIGINAL: con el prefijo delante,
@@ -2662,6 +2959,8 @@ def generar_excel_final(
     fecha_inicio, fecha_fin, valorizaciones:[…]}} — la ficha de la obra y todas
     sus valorizaciones, para el bloque de la derecha en la hoja del profesional.
     """
+    from validacion.recalculo import regla_periodos_de
+
     paralizaciones = paralizaciones or {}
     cuis = cuis or {}
     fichas = fichas or {}
@@ -2710,7 +3009,8 @@ def generar_excel_final(
         certs_prof = {k: v for k, v in certificados.items() if k[0] == prof.get("n_prof")}
         construir_hoja_profesional(wb.create_sheet(nombre), prof, paralizaciones,
                                    cuis, fichas, revisiones, sunat, certs_prof,
-                                   tipo_evaluacion=_tipo_evaluacion_espejo(espejo))
+                                   tipo_evaluacion=_tipo_evaluacion_espejo(espejo),
+                                   regla_periodos=regla_periodos_de(espejo))
 
     # T-011 · hoja ADITIVA, al final: el formato congelado (CLAUDE + Base de
     # Datos + una por profesional) conserva su orden y su contenido exactos.
@@ -2784,6 +3084,7 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                 or enr.get("verificacion_expediente") or enr.get("seace")
                 or enr.get("inventario_documental") or enr.get("cruces_fechas")
                 or enr.get("resoluciones_candidatos")
+                or enr.get("sin_documentos_mef") or enr.get("contrato_emisor")
                 or str(enr.get("via") or "").upper() == "PRIVADA"):
             # `obra_ficha` NO trae el nombre (solo código/CUI/estado/monto/fechas);
             # el nombre viaja suelto en `obra_nombre` (o en `obra.nombre_obra`) y sin
@@ -2798,6 +3099,18 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                                  "representante_obra": enr.get("representante_obra"),
                                  "aprobacion_expediente": enr.get("aprobacion_expediente"),
                                  "verificacion_expediente": enr.get("verificacion_expediente"),
+                                 # La PARTE 5 de expedientes tiene que poder decir
+                                 # «el MEF no publica contrato ni resolución» en vez
+                                 # de dejar la fila muda: sin esta marca, un
+                                 # expediente sin documentos se veía igual que uno
+                                 # con la consulta fallida.
+                                 "sin_documentos_mef": enr.get("sin_documentos_mef"),
+                                 # Vía CONTRATO: el contrato que ATA al emisor con
+                                 # el expediente (manda sobre el elegido por
+                                 # heurística en `verificacion_expediente`).
+                                 "contrato_emisor": enr.get("contrato_emisor"),
+                                 # Multi-obra al que le faltan sub-obras por ubicar.
+                                 "identificacion_incompleta": enr.get("identificacion_incompleta"),
                                  # Resolución de aprobación LEÍDA (fecha, consultor) y
                                  # camino con que se enrutó (ADR-010): deciden el bloque
                                  # expediente/obra de la ficha y sus filas de contraste.
@@ -2822,6 +3135,8 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
         if enr.get("sub_obras"):
             fichas[(np_, ne)] = {**(fichas.get((np_, ne)) or {}),
                                  "sub_obras": enr["sub_obras"],
+                                 "via": enr.get("via"),
+                                 "identificacion_incompleta": enr.get("identificacion_incompleta"),
                                  "multi_rubro": enr.get("multi_rubro")}
     return paral, cuis, fichas, sunat
 

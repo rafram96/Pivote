@@ -807,7 +807,11 @@ def test_aviso_de_revision_se_pinta_aunque_haya_obra(tmp_path):
 
     assert "EXPERIENCIA EN REVISIÓN" in texto
     assert "contradicen el rubro" in texto
-    assert "Acción: elegir candidato o pegar CUI" in texto
+    # La acción se traduce a lenguaje de evaluador: el Comité no usa el panel,
+    # así que «elegir candidato o pegar CUI» no le dice qué hacer con el papel.
+    assert "elegir candidato" not in texto
+    assert ("Acción: Confirmar con el certificado y, si existe, el contrato del "
+            "expediente.") in texto
     aviso = next(c for f in ws.iter_rows() for c in f
                  if str(c.value or "").startswith("⚠ EXPERIENCIA EN REVISIÓN"))
     cabecera = next(c for f in ws.iter_rows() for c in f

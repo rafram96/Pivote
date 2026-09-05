@@ -128,15 +128,16 @@ def test_dias_citados_lee_los_conteos_del_veredicto():
 def test_conciliar_reemplaza_la_cifra_del_llm_por_la_autoridad_inclusiva():
     txt = conciliar_conclusion("CUMPLE — acredita 1267 días (3.47 años).",
                                1269, periodos=2)
-    assert txt.startswith("CUMPLE — total declarado recalculado: 1269 días inclusivos")
+    assert txt.startswith("CUMPLE según la evaluación inicial — 1269 días declarados")
     assert "1267" not in txt
 
 
 def test_conciliar_canoniza_aun_si_la_cifra_del_llm_coincide():
     txt = "CUMPLE — acredita 1269 días (3.48 años)."
     assert conciliar_conclusion(txt, 1269, periodos=2) == (
-        "CUMPLE — total declarado recalculado: 1269 días inclusivos "
-        "(3.48 años) en 2 periodos computables.")
+        "CUMPLE según la evaluación inicial — 1269 días declarados "
+        "(3.48 años) en 2 periodos computables; el tiempo efectivo verificado "
+        "va en la línea siguiente.")
 
 
 @pytest.mark.parametrize("texto, verificado, periodos", [
@@ -153,8 +154,8 @@ def test_conciliar_canoniza_aun_si_la_cifra_del_llm_coincide():
 def test_conciliar_no_publica_una_segunda_cifra(texto, verificado, periodos):
     resultado = conciliar_conclusion(texto, verificado, periodos)
     if periodos:
-        assert resultado.startswith("CUMPLE — total declarado recalculado:")
-        assert f"{verificado} días inclusivos" in resultado
+        assert resultado.startswith("CUMPLE según la evaluación inicial —")
+        assert f"{verificado} días declarados" in resultado
     else:
         assert resultado == texto
 
@@ -182,15 +183,15 @@ def test_conciliar_conserva_el_verde_del_veredicto(tmp_path):
     }
     ws = openpyxl.load_workbook(
         generar_excel_final(espejo, tmp_path / "dias.xlsx"))["CLAUDE"]
-    celda = _buscar(ws, "total declarado recalculado: 1269 días inclusivos")
+    celda = _buscar(ws, "según la evaluación inicial — 1269 días declarados")
     assert celda is not None
     assert _fill(celda) == str(FILL_CUMPLE.fgColor.rgb)
 
     # y la hoja del profesional dice el mismo número en sus dos superficies
     hoja_p = openpyxl.load_workbook(
         generar_excel_final(espejo, tmp_path / "dias.xlsx")).worksheets[2]
-    conclusion = _buscar(hoja_p, "días inclusivos")
-    assert conclusion is not None and conclusion.value.startswith("CUMPLE — total declarado")
+    conclusion = _buscar(hoja_p, "días declarados")
+    assert conclusion is not None and conclusion.value.startswith("CUMPLE según la evaluación inicial")
 
 
 # ── 3 · el entregable no habla en jerga ──────────────────────────────────────

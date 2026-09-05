@@ -76,7 +76,7 @@ def test_expediente_sin_fuente_mef_no_pinta_valorizaciones(tmp_path):
     assert "OBRA EN INFOOBRAS (origen del análisis)" not in texto
     assert "Nombre del proyecto" in texto
     assert "Inicio de obra" not in texto and "Fin de obra" not in texto
-    assert "Ejecución posterior de la obra (contexto" in texto
+    assert "Ejecución de la obra registrada en InfoObras (contexto" in texto
 
 
 def test_expediente_muestra_lo_que_dice_la_resolucion_leida(tmp_path):

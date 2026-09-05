@@ -243,10 +243,15 @@ def conciliar_conclusion(texto, dias_verificados, periodos: int = 0) -> str:
         estado = "CUMPLE"
     else:
         estado = "POR VERIFICAR"
-    return (f"{estado} — total declarado recalculado: {dias_verificados} días "
-            f"inclusivos ({round(dias_verificados / 365, 2)} años) en "
+    # Es el veredicto de la EVALUACIÓN INICIAL sobre los días declarados; el tiempo
+    # efectivo verificado (paralizaciones, traslapes, ventana) va en la línea
+    # siguiente. Antes decía «total declarado recalculado», que se leía como si
+    # fuera el efectivo (revisión del 5-sep-2026, 12 hojas).
+    return (f"{estado} según la evaluación inicial — {dias_verificados} días "
+            f"declarados ({round(dias_verificados / 365, 2)} años) en "
             f"{periodos} periodo{'s' if periodos != 1 else ''} computable"
-            f"{'s' if periodos != 1 else ''}.")
+            f"{'s' if periodos != 1 else ''}; el tiempo efectivo verificado va en la "
+            "línea siguiente.")
 
 
 # Un MONTO tiene forma de monto: miles agrupados ("16,670,989.88" / "16.670.989,88")
@@ -708,7 +713,14 @@ def construir_hoja_evaluacion(ws, espejo: dict,
         # como alerta y el motivo va debajo: antes el CUMPLE salía en verde y el número
         # que lo desmentía vivía 500 filas más abajo, en otra hoja (#51).
         vb = prof.get("cumple_backend")
-        contradice = bool(vb) and str(prof.get("cumple", "")).upper().startswith("CUMPLE")
+        _vb_up = str(vb or "").strip().upper()
+        _dice_cumple = str(prof.get("cumple", "")).upper().startswith("CUMPLE")
+        # Contradice SOLO si el backend concluye NO CUMPLE. Un «POR VERIFICAR» del
+        # backend no desmiente el CUMPLE: lo deja pendiente (amarillo), no en rojo.
+        # Antes cualquier texto del backend pintaba de rojo un CUMPLE (6 de 12
+        # veredictos en rojo en la corrida real del 5-sep-2026).
+        contradice = _dice_cumple and _vb_up.startswith("NO CUMPLE")
+        pendiente = _dice_cumple and _vb_up.startswith(("POR VERIFICAR", "POR CONFIRMAR"))
         if prof.get("cumple"):
             # El veredicto del evaluador cuenta los días por su cuenta; la fila
             # TOTAL DECLARADO de arriba los cuenta inclusivos. Si discrepan, la
@@ -716,7 +728,8 @@ def construir_hoja_evaluacion(ws, espejo: dict,
             _cumple = _sin_jerga(prof["cumple"])
             b.kv("¿EL PROFESIONAL CUMPLE?",
                  conciliar_conclusion(_cumple, t.get("dias"), len(exps) - sin_dias),
-                 verdict="neg" if contradice else "pos", valor_veredicto=_cumple)
+                 verdict="neg" if contradice else "pos",
+                 valor_veredicto="POR VERIFICAR" if pendiente else _cumple)
         if vb:
             # `pos` sobre el TEXTO del backend: su "NO CUMPLE" se pinta rojo y su
             # "POR VERIFICAR" amarillo. Con `neg` un NO CUMPLE saldría VERDE.
