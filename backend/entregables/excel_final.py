@@ -1070,16 +1070,31 @@ def construir_hoja_profesional(
         # EXPEDIENTE técnico: la experiencia es de ELABORACIÓN del expediente, no de
         # ejecución de obra. En su MISMO lugar (mismo formato, distinta info) va la
         # verificación: contrato/contratista/resolución del MEF + aprobación InfoObras.
-        # Si hay verificación MEF (la experiencia es expediente por nombre) se muestra
-        # AUNQUE la obra resuelta tenga valorizaciones (esas son de la CONSTRUCCIÓN, no
-        # del expediente que elaboró este cargo).
-        if verif or (aprob and not vals):
+        # La decisión la toma el CAMINO con que el backend enrutó la experiencia
+        # (ADR-010: parámetro del concurso), no la existencia de datos en el MEF:
+        # antes, un expediente cuyo CUI no tenía contrato publicado caía a pintar
+        # las valorizaciones de la CONSTRUCCIÓN como si fuera obra (caso real, 5-sep).
+        from resolucion.cui import TIPO_EXPEDIENTES, normalizar_tipo_evaluacion
+        es_exped = (fx.get("camino") == "expediente"
+                    or normalizar_tipo_evaluacion(tipo_evaluacion) == TIPO_EXPEDIENTES)
+        if verif or aprob or es_exped:
             ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
             c = ws.cell(rr, 6, "EXPEDIENTE TÉCNICO — verificación (no hay valorizaciones: "
                                "este cargo elaboró el expediente, no ejecutó la obra)")
             c.font, c.fill = F_PARTE, FILL_PARTE
             c.alignment = Alignment(vertical="center", wrap_text=True)
             rr += 1
+            if not verif and not aprob:
+                # Sin fuente pública: se dice, no se disimula con datos de otra fase.
+                ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+                c = ws.cell(rr, 6, "POR VERIFICAR — ni el MEF ni InfoObras publican contrato, "
+                                   "contratista o resolución de aprobación del expediente para "
+                                   "este CUI. La verificación queda en el propio certificado. "
+                                   "Las valorizaciones de la construcción no se muestran: "
+                                   "no respaldan ni descuentan la elaboración del expediente.")
+                c.font, c.fill, c.alignment = F_CELL, FILL_PEND, AL_WRAP
+                ws.row_dimensions[rr].height = 42
+                rr += 1
             if aprob:   # respaldo por la "Aprobación del proyecto" de InfoObras
                 f = aprob.get("fecha")
                 fm = f"{f[8:10]}/{f[5:7]}/{f[0:4]}" if f and len(f) == 10 else None

@@ -61,6 +61,20 @@ Reproducido sobre el job real: prof. 5 pasa de 439 a 759 días, prof. 9 de 534 a
 838, Factor A a 60 definitivo. Gate: **1065 passed, 25 skipped**; Panel `tsc`
 limpio. Para ver el efecto hay que reiniciar el backend y resubir el análisis.
 
+## Nota (2026-09-05, Claude) — un expediente ya no muestra ni baja valorizaciones
+
+Caso real (prof. 2, exp. 1): enrutado como `expediente/declarado`, pero la hoja P
+decidía el bloque por «¿hay verificación MEF?» y el MEF no publicaba contrato para
+ese CUI → pintó 62 valorizaciones de la construcción; la descarga bajó 208
+archivos de la obra sin mirar el camino. Ahora `render_obra` decide por el
+`camino` del enriquecimiento o el tipo declarado; sin fuente MEF ni aprobación
+escribe «POR VERIFICAR» y no pinta la fase de ejecución. La descarga aplica
+`secciones_descarga_por_camino`: obra citada solo por expedientes → únicamente
+«Aprobación del expediente» y «Verificación MEF», con aviso en el índice. La skill
+pregunta el tipo de concurso al inicio si el usuario no lo dijo con los PDF. Gate:
+**1068 passed, 25 skipped**. Cierra el pendiente de ADR-010 «filtro de secciones
+de descarga por camino».
+
 **Para la corrida de expedientes**: invocar la skill diciendo que el concurso es
 de expedientes y pasar `--tipo expedientes` al consolidar; revisar a mano las
 vías CODIGO y PROBABLE; en la verificación MEF mirar el veredicto del

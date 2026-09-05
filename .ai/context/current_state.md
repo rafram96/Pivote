@@ -31,6 +31,10 @@ corregidos con criterio único `fechas_calculo` y `_letra_factor`; `/resumen`
 expone el estado condicionado y el Panel lo pinta como «Por verificar» con
 rango. Gate: **1065 passed, 25 skipped**.
 
+Cuarta entrega: un expediente sin fuente MEF ya no cae a pintar valorizaciones
+en la hoja P ni a descargar la fase de ejecución; la skill pregunta el tipo de
+concurso al inicio. Gate: **1068 passed, 25 skipped**.
+
 ## Adopción RAF y arquitectura visual canónica (20-ago)
 
 Pivote ya está adoptado como proyecto RAF (`.ai/project.json`, perfil `repo`) y

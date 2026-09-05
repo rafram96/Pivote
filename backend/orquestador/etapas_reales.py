@@ -1023,6 +1023,21 @@ def _estado_seccion(secciones: dict, avisos: list[str], nombre: str,
     }
 
 
+SECCIONES_EXPEDIENTE = frozenset({"Aprobación del expediente", "Verificación MEF"})
+
+
+def secciones_descarga_por_camino(caminos) -> Optional[frozenset]:
+    """Qué secciones del corpus de una obra se descargan según el camino (ADR-010)
+    de las experiencias que la citan. Si TODAS son de expediente, solo las que
+    verifican un expediente (`SECCIONES_EXPEDIENTE`). Con alguna de obra, o sin
+    camino registrado (espejos anteriores al parámetro), None = todo, como antes.
+    Puro: lo prueban los tests sin red."""
+    conjunto = {str(c) for c in (caminos or ()) if c}
+    if conjunto and conjunto == {"expediente"}:
+        return SECCIONES_EXPEDIENTE
+    return None
+
+
 def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                               max_descargas=None, descargar=None, reportar=None,
                               descargar_seace=None, dir_cache_seace=None,
@@ -1089,6 +1104,9 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
             if not oid:
                 continue
             requisito = requisitos_obra.setdefault(str(oid), {})
+            # ADR-010 · qué caminos citan esta obra: decide qué secciones bajar.
+            requisito.setdefault("caminos", set()).add(
+                enr_requisito.get("camino") or "desconocido")
             if enr_requisito.get("aprobacion_expediente") and not requisito.get("aprobacion"):
                 requisito["aprobacion"] = enr_requisito["aprobacion_expediente"]
             verificacion = enr_requisito.get("verificacion_expediente")
@@ -1154,6 +1172,16 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
         `pendientes` se conserva solo por compatibilidad de firma; el flujo
         vigente nunca vuelve a invocar una entrada publicada.
         """
+        # Obra citada SOLO por experiencias de expediente: las valorizaciones, los
+        # informes de control y los datos de cierre son de la CONSTRUCCIÓN posterior.
+        # No respaldan ni descuentan un expediente y engordaban el ZIP con cientos de
+        # archivos ajenos (208 en un caso real). Solo se baja lo que sí verifica el
+        # expediente: aprobación y documentos del MEF.
+        filtro_camino = secciones_descarga_por_camino(
+            requisitos_obra.get(str(obra_id), {}).get("caminos"))
+        if filtro_camino is not None:
+            pendientes = filtro_camino if pendientes is None else (pendientes & filtro_camino)
+
         def _toca(seccion: str) -> bool:
             return pendientes is None or seccion in pendientes
 
@@ -1168,6 +1196,11 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
             }
 
         estado: dict = {"secciones": {}, "avisos": [], "informes_anios": []}
+        if filtro_camino is not None:
+            estado["avisos"].append(
+                "Experiencia de expediente técnico: no se descargan las valorizaciones "
+                "ni los documentos de ejecución de la obra (corresponden a la "
+                "construcción posterior, no a la elaboración del expediente).")
         if _toca("InfoObras"):
             # Que la sección principal reviente ya no tira TODO el corpus: se
             # publica lo demás y esta sección queda declarada como fallida.

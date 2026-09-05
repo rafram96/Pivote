@@ -110,6 +110,11 @@ edita. Lo que quedó en código:
   Panel `tsc --noEmit` limpio. Resolver de CUI intacto en su selección
   (la golden no aplica: el tipo solo gobierna la verificación, punto 4).
 
+Cuarta entrega (mismo día): el filtro de secciones de descarga por camino ya
+está (`secciones_descarga_por_camino`) y la hoja P decide el bloque expediente/obra
+por el camino enrutado, no por la existencia de datos MEF. La skill pregunta el
+tipo al inicio si el usuario no lo dijo.
+
 Segunda entrega (mismo día): cada experiencia registra en el enriquecimiento
 `camino` (`expediente` | `obra`) y `camino_fuente` (`declarado` | `forzado` |
 `texto`), y la hoja CLAUDE del Excel rotula «Tipo de concurso» en palabras del

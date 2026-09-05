@@ -47,6 +47,25 @@ profundidad por profesional):
 
 ## Flujo
 
+### Antes de empezar — tipo de concurso (OBLIGATORIO, una sola pregunta)
+
+El backend verifica **todas** las experiencias de la propuesta por el mismo
+camino: si el concurso es de **expedientes técnicos**, cada certificado se
+contrasta con el contrato y la resolución de aprobación del MEF; si es de
+**supervisión o ejecución de obra**, con las valorizaciones de InfoObras. Un
+expediente enrutado como obra recibe valorizaciones de una construcción que no
+le corresponde y su veredicto sale mal por una razón invisible.
+
+- Si el usuario ya lo dijo en su mensaje junto con los PDF («es de
+  expediente», «concurso de supervisión de obra»…), anótalo y pásalo al
+  consolidar con `--tipo expedientes` o `--tipo obras`. No preguntes de nuevo.
+- Si **no** lo dijo, pregúntaselo **ahora**, antes de lanzar ningún subagente:
+  «¿Este concurso es de elaboración de expedientes técnicos o de supervisión y
+  ejecución de obra?». Espera la respuesta. Es una pregunta y evita reprocesar
+  toda la propuesta.
+- `agent-bases` lo leerá igual del objeto de la convocatoria; si difiere de lo
+  que dijo el usuario, avísale y manda lo que dijo el usuario.
+
 ### Paso 0 — OCR de la propuesta escaneada (condicional)
 Si `propuesta.pdf` **no tiene capa de texto** (escaneo de imagen), necesitas leer
 las páginas como imagen antes de mapear. Hay dos caminos, en orden de preferencia:
