@@ -46,6 +46,7 @@
 const fs = require("fs");
 const path = require("path");
 const { matchCargoBases, _norm, _toks } = require("./match_cargo");
+const { auditarOrdenEscaneo } = require("./auditar_orden_experiencias");
 
 const rd = (p) => JSON.parse(fs.readFileSync(p, "utf-8"));
 const rdOpt = (p, def) => (fs.existsSync(p) ? rd(p) : def);
@@ -711,7 +712,8 @@ function reportar(outPath, espejo, avisos) {
     console.log(`⛔ INCOMPLETO · espejo escrito en ${outPath} · ${cuerpo}`);
     console.log("   NO lo subas al backend ni sigas al Paso 5: el espejo VALIDA igual contra el schema");
     console.log("   (validar_espejo.js dirá «OK» y eso no significa que la evaluación esté completa).");
-    console.log("   Vuelve a correr agent-evaluador cubriendo lo que falta y consolida de nuevo.");
+    console.log("   Si el crítico es de orden/numeración, corrige primero la extracción contra el PDF.");
+    console.log("   Vuelve a correr agent-evaluador con los hechos corregidos y consolida de nuevo.");
   } else {
     console.log(`OK · espejo escrito en ${outPath} · ${cuerpo}`);
   }
@@ -802,6 +804,7 @@ function consolidar(WS, opts = {}) {
   const hechos = [];   // insumo del candado 1:1 (quién existe, cuántas declaró)
   for (const i of nums) {
     const raw = rd(path.join(dirProf, `profesional_${String(i).padStart(2, "0")}.json`));
+    avisos.push(...auditarOrdenEscaneo(raw.experiencias, i));
     const pr = raw.profesional || {};
     const pe = PE[String(i)] || {};
     const ee = EE[String(i)] || [];

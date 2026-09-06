@@ -256,9 +256,18 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
     literales del documento.
 
 ## Orden y observaciones
-- `experiencias` ordenadas por `fecha_final` ascendente (la más antigua
-  primero), aunque varias estén en el mismo certificado (NOTA 7); `n`
-  contiguo 1..N.
+- `experiencias` en el **orden del escaneado**: página FÍSICA del certificado
+  principal (`paginas_pdf[0]`) ascendente; nunca por fecha inicial/final ni
+  por folio impreso. Los anexos no cambian la posición del certificado.
+  Si una misma página contiene varios periodos (NOTA 7), conserva su orden
+  de aparición en ella. Asigna `n` contiguo 1..N DESPUÉS de ordenar, antes
+  de redactar observaciones que hagan referencia a otras experiencias.
+- Ese `n` identifica la misma experiencia en evaluación, Excel, Panel,
+  certificados y ZIP. No copies una numeración de un cuadro resumen cuyo
+  orden difiera del escaneado. Transcribe siempre el nombre del proyecto.
+- Si no puedes ubicar una página física, vuelve al PDF; no uses el folio
+  impreso como sustituto. Si sigue sin poder determinarse, conserva el orden
+  de lectura y declara la incertidumbre en observaciones. No inventes páginas.
 - Observaciones: firma/cargo del firmante no visible (`extraccion_parcial`),
   posible duplicado (`duplicado_posible` + ambos `n`), escaneo deficiente
   (`calidad_documento` + `pagina_pdf`).

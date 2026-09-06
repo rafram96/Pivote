@@ -162,7 +162,22 @@ los `⚠ SIN MONTO` van al evaluador como dato faltante, igual que hoy.
 
 > Camino B (sin OCR): el script sale con aviso y no aplica — el mapa es la única vía.
 
-### Paso 3 — `agent-evaluador` (depende de 1, 2 y 2.5)
+### Paso 2.6 — Comprobar identidad de experiencias (antes de evaluar)
+
+Guarda los resultados en `_prof/profesional_NN.json` y ejecuta:
+
+```bash
+node scripts/auditar_orden_experiencias.js <carpeta_analisis>
+```
+
+Los números E1…EN siguen las páginas físicas del certificado principal, no
+las fechas del servicio. Si termina con exit 1, corrige la extracción del
+profesional indicado contra el PDF **antes de evaluar** (máximo 2 intentos;
+si persiste, detén la entrega y explica el problema). Los periodos de la misma
+página conservan su orden de aparición. Revisa también las advertencias de
+páginas ausentes: no equivalen a orden comprobado. El script no renumera datos.
+
+### Paso 3 — `agent-evaluador` (depende de 1, 2, 2.5 y 2.6)
 Cuando bases + mapa + **todos** los profesionales estén listos, lanza
 `agent-evaluador` (`prompts/agent-evaluador.md`) pasándole esas salidas (sin PDFs).
 Devuelve la evaluación: cumple/no-cumple por profesional, DÍAS/MESES/AÑOS por
@@ -201,13 +216,17 @@ propenso a errores en propuestas grandes):
 
   > ⛔ **GATE — si el consolidador termina en `⛔ INCOMPLETO` (exit code 1), PARA.**
   > No sigas al Paso 5, no subas por MCP y no le digas al usuario que el análisis
-  > está listo. Ese exit ≠ 0 significa que `agent-evaluador` no cubrió 1:1 a los
-  > profesionales/experiencias: el espejo se escribe igual (los hechos crudos no
+  > está listo. Ese exit ≠ 0 puede indicar orden/numeración incorrectos o que
+  > `agent-evaluador` no cubrió 1:1 a los profesionales/experiencias:
+  > el espejo se escribe igual (los hechos crudos no
   > se pierden) y **`validar_espejo.js` va a decir «OK»**, porque el schema no
   > sabe distinguir un veredicto ausente de un `null` legítimo. Pasó dos veces el
   > 26-jul: veredictos corridos +1 y una corrida sin evaluación, ambas subidas
   > como buenas.
   > **Qué hacer:** lee los críticos que lista (dicen qué profesional/qué `n`),
+  > si son `orden_escaneo_*` o `numeracion_experiencias_invalida`, corrige primero
+  > la extracción contra el PDF y repite después la evaluación afectada:
+  > no renumeres un espejo ya evaluado ni recortes existentes. Para los demás,
   > vuelve a correr `agent-evaluador` exigiéndole esas entradas (máx. 2 intentos)
   > y consolida otra vez. Si al segundo intento sigue en `⛔`, no lo subas:
   > repórtale al usuario qué quedó sin evaluar y para ahí.

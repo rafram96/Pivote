@@ -253,6 +253,10 @@ los campos de juicio dentro de cada `experiencia` y `profesional`, y
   por ese número, así que una entrada sin `n`, con un `n` inventado o renumerado
   `1..N` cuando el crudo traía otros números **no le llega a ninguna fila** —
   aunque el conteo cuadre, la fila sale en blanco.
+- Los números proceden del **orden del escaneado**, no de las fechas.
+  Puedes ordenar periodos temporalmente para calcular traslapes, pero cada
+  resultado y referencia debe conservar el `n` recibido. Si detectas un orden
+  documental incorrecto, avísalo; no repares tú la numeración.
 - `cumple` **no puede ir vacío**. Si no puedes evaluar a alguno, **igual
   devuélvelo** con `cumple` explicando por qué: un `cumple: null` produce
   exactamente el mismo Excel que omitirlo — mudo, no marcado como duda.

@@ -19,7 +19,9 @@ La skill produce la hoja **`CLAUDE`** (formato vigente). El bloque Parte 3+4
 
 > **Reglas de dominio portadas del flujo manual** (las "NOTAS" del evaluador):
 > límite inferior 90%; cross-check anti-omisión por profesional (NOTA 1, hasta 4×);
-> 1 fila por periodo; orden por fecha-fin asc; traslapes en rojo; COVID como rango;
+> 1 fila por periodo; numeración por orden del escaneado (certificado principal,
+> `paginas_pdf[0]`; misma página: orden de aparición), nunca por fechas;
+> identidad E# conservada en todas las vistas; traslapes en rojo; COVID como rango;
 > los ISO se mapean **por nombre** (14001 → Sostenibilidad Ambiental, 37001 →
 > Integridad, 9001 → Gestión de Calidad) a la **letra que use el formato**; en
 > **consorcio** el ISO puntúa solo si **todos** acreditan; PMP solo PMI/sello/2

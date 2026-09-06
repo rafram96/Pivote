@@ -480,6 +480,7 @@ function taller(evaluacion, postorMapa) {
       experiencias: Array.from({ length: h.n_experiencias }, (_, j) => ({
         n: j + 1, entidad_emisora: "GORE X", proyecto: `OBRA ${j + 1}`,
         fecha_inicial: "2019-01-01", fecha_final: "2020-01-01", folio: 100 + j,
+        paginas_pdf: [110 + j],
       })),
     });
   }
@@ -582,6 +583,27 @@ test("cli · corrida sana: exit code 0 y la primera línea es «OK»", () => {
   assert.match(out.split(/\r?\n/)[0], /^OK · espejo escrito/);
   assert.ok(!/CRÍTICO/.test(out));
   fs.rmSync(ws, { recursive: true, force: true });
+});
+
+test("cli · orden cronológico invertido respecto al PDF bloquea sin cruzar juicios", (t) => {
+  const ws = taller(SANA);
+  t.after(() => fs.rmSync(ws, { recursive: true, force: true }));
+  const archivo = path.join(ws, "_prof/profesional_01.json");
+  const raw = JSON.parse(fs.readFileSync(archivo, "utf8"));
+  raw.experiencias[0].paginas_pdf = [120];
+  raw.experiencias[1].paginas_pdf = [110];
+  fs.writeFileSync(archivo, JSON.stringify(raw));
+  const ev = JSON.parse(fs.readFileSync(path.join(ws, "evaluacion.json"), "utf8"));
+  ev.experiencias_eval[1] = [{ n: 2, dias: 222 }, { n: 1, dias: 111 }];
+  fs.writeFileSync(path.join(ws, "evaluacion.json"), JSON.stringify(ev));
+  const { status, out } = cli(ws);
+  assert.strictEqual(status, 1);
+  assert.match(out, /orden_escaneo_invertido/);
+  assert.match(out, /corrige primero la extracción/);
+  const esp = JSON.parse(fs.readFileSync(path.join(ws, "espejo.json"), "utf8"));
+  assert.deepStrictEqual(esp.profesionales[0].experiencias.map(e =>
+    [e.n, e.paginas_pdf[0], e.dias]), [[1, 120, 111], [2, 110, 222]]);
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(archivo, "utf8")), raw);
 });
 
 test("experiencias_eval anidado en profesionales_eval → fallback automático a warning (sin critical)", () => {
