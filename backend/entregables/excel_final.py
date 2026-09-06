@@ -600,6 +600,7 @@ _GANTT_SIN_PERIODOS = ("Sin periodos computables: el certificado no consigna "
 F_MARCA = Font(bold=True, size=8, color="15212E")
 
 _GANTT_ESCALA = {cronologia.GRANO_MES: "Eje: meses",
+                 cronologia.GRANO_BIMESTRE: "Eje: bimestres",
                  cronologia.GRANO_TRIMESTRE: "Eje: trimestres",
                  cronologia.GRANO_ANIO: "Eje: años"}
 
@@ -702,6 +703,7 @@ def _bloques_linea_de_tiempo(espejo: dict, fichas: dict,
                 "n": e.get("n"), "proyecto": p["proyecto"] or e.get("proyecto"),
                 "cui": p["cui"], "inicio": ini, "fin": fin,
                 "deducida": bool(deducida and (ini or fin)),
+                "supuestos": set(prof.get("supuestos") or []) | set(e.get("supuestos") or []),
                 "firma": firma, "resolucion": resolucion,
                 "cruces": p,
                 "color": clasificar_identificacion(e, fx)["color"],
@@ -713,8 +715,8 @@ def _bloques_linea_de_tiempo(espejo: dict, fichas: dict,
             })
 
         rango = cronologia.rango_eje(periodos, hitos)
-        eje = cronologia.construir_eje(*rango) if rango else []
-        grano = cronologia.granularidad(*rango) if rango else cronologia.GRANO_MES
+        grano = cronologia.GRANO_BIMESTRE
+        eje = cronologia.construir_eje(*rango, grano=grano) if rango else []
 
         # Orden de lectura: por fecha de inicio; las que no tienen fechas
         # computables van al final, para que la escalera de barras no se rompa.
@@ -727,7 +729,14 @@ def _bloques_linea_de_tiempo(espejo: dict, fichas: dict,
             marcas: dict[int, list[str]] = {}
             # A/B procede de `presentacion_cruces`; el motivo completo queda en
             # comentario, pero el estado nunca queda oculto tras un clic.
-            notas: list[str] = [_rotulo_cruces(f["cruces"])]
+            notas: list[str] = []
+            if f["inicio"] and f["fin"]:
+                notas.append(f"\nInicio: {f['inicio']:%d/%m/%Y} · Fin: {f['fin']:%d/%m/%Y}")
+                asumidos = [nombre for campo, nombre in (("fecha_inicial", "inicio"),
+                            ("fecha_final", "fin")) if campo in f["supuestos"]]
+                if asumidos:
+                    notas.append("Fecha asumida en la extracción: " + ", ".join(asumidos))
+            notas.append(_rotulo_cruces(f["cruces"]))
             if not celdas:
                 notas.append(cronologia.NOTA_SIN_FECHAS)
             elif f["deducida"]:
@@ -742,10 +751,10 @@ def _bloques_linea_de_tiempo(espejo: dict, fichas: dict,
                     notas.append(cronologia.nota_hito_fuera(marca, valor))
                 else:
                     marcas.setdefault(i, []).append(marca)
+                    notas.append(f"{marca}: {valor:%d/%m/%Y}")
             rotulo = cronologia.rotulo_experiencia(f["n"], f["proyecto"],
                                                    f["cui"], notas)
-            rotulo = rotulo.replace(" · \nInicio frente al contrato:",
-                                    "\nInicio frente al contrato:")
+            rotulo = rotulo.replace(" · \n", "\n")
             filas.append({
                 "rotulo": rotulo,
                 "celdas": celdas, "color": f["color"],
@@ -773,7 +782,7 @@ def _bloques_linea_de_tiempo(espejo: dict, fichas: dict,
 def _pintar_linea_de_tiempo(ws, bloques: list[dict], fila: int,
                             ncols: int) -> tuple[int, int]:
     """Vuelca los bloques ya resueltos en la hoja. Devuelve `(filas, fila)`."""
-    total_filas = 0
+    total_filas = sum(len(b["filas"]) for b in bloques)
     for b in bloques:
         # Separación visual antes de TODOS los profesionales, incluido el
         # primero; no agrega datos ni altera los totales.
@@ -802,7 +811,6 @@ def _pintar_linea_de_tiempo(ws, bloques: list[dict], fila: int,
                     cr.comment = Comment(f["comentario"], "Pivote")
                 ws.row_dimensions[fila].height = _alto_rotulo_gantt(cr.value)
                 fila += 1
-                total_filas += 1
             fila += 1
             continue
 
@@ -826,14 +834,15 @@ def _pintar_linea_de_tiempo(ws, bloques: list[dict], fila: int,
         ws.row_dimensions[fila_anios].height = 36 if fila_anios_alta else 14
         fila += 1
 
-        # Cabecera 2: la unidad (letra del mes, «T1»… o vacío en años).
+        # Los nombres completos se leen verticalmente, sin ensanchar la rejilla.
         c = ws.cell(fila, 1, _GANTT_ROTULO_EJE)
         c.font, c.alignment = F_BOLD, AL_HEAD
         for i, u in enumerate(eje):
             cu = ws.cell(fila, 2 + i, u.etiqueta or None)
-            cu.font, cu.fill, cu.border, cu.alignment = (F_HEAD, FILL_HEAD,
-                                                         BORDER, AL_HEAD)
-        ws.row_dimensions[fila].height = 14
+            cu.font, cu.fill, cu.border, cu.alignment = (
+                F_HEAD, FILL_HEAD, BORDER,
+                Alignment(horizontal="center", vertical="center", text_rotation=90))
+        ws.row_dimensions[fila].height = 65
         fila += 1
 
         for f in b["filas"]:
@@ -854,8 +863,6 @@ def _pintar_linea_de_tiempo(ws, bloques: list[dict], fila: int,
                 cm.font, cm.border, cm.alignment = F_MARCA, BORDER, AL_HEAD
             ws.row_dimensions[fila].height = _alto_rotulo_gantt(cr.value)
             fila += 1
-            total_filas += 1
-
         ct = ws.cell(fila, 1, b["rotulo_traslapes"])
         ct.font, ct.border = F_BOLD, BORDER
         ct.alignment = Alignment(vertical="center", wrap_text=True)

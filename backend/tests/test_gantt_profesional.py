@@ -218,3 +218,35 @@ def test_png_en_memoria_se_puede_guardar_y_reabrir_con_openpyxl(tmp_path):
     salida = tmp_path / "imagen.xlsx"
     wb.save(salida)
     assert len(openpyxl.load_workbook(salida).active._images) == 1
+
+
+def test_render_continuo_conserva_marcas_y_filas_sin_fechas_sin_mutar(monkeypatch):
+    from entregables.cronologia import GRANO_BIMESTRE
+    from PIL import ImageDraw
+    eje = construir_eje(date(2000, 1, 1), date(2024, 12, 31), GRANO_BIMESTRE)
+    bloque = _bloque(eje, [
+        {"rotulo": "Largo", "celdas": list(range(150)), "marcas": {35: "C", 36: "R"}},
+        {"rotulo": "Sin fechas", "celdas": [], "marcas": {}},
+    ])
+    bloque["traslapes"] = {35, 36}
+    antes = copy.deepcopy(bloque)
+    textos = []
+    original = ImageDraw.ImageDraw.text
+    def espiar(self, xy, text, *args, **kwargs):
+        textos.append(text)
+        return original(self, xy, text, *args, **kwargs)
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", espiar)
+    renderizar_gantt_profesional(bloque)
+    assert textos.count("LEYENDA — COLORES Y MARCAS") == 1
+    assert textos.count("Largo") == textos.count("Sin fechas") == 1
+    assert "C" in textos and "R" in textos
+    assert not any("Continúa" in t for t in textos)
+    assert bloque == antes
+
+
+def test_fechas_asumidas_no_se_presentan_como_exactas_documentadas():
+    espejo = _espejo()
+    espejo["profesionales"][0]["experiencias"][0]["supuestos"] = ["fecha_final"]
+    rotulo = _bloques_linea_de_tiempo(espejo, {}, "expedientes")[0]["filas"][0]["rotulo"]
+    assert "Inicio: 01/01/2024 · Fin: 31/12/2024" in rotulo
+    assert "Fecha asumida en la extracción: fin" in rotulo

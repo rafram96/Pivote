@@ -19,6 +19,25 @@ def _hoja(experiencias, fichas):
     return ws
 
 
+def test_gantt_ordena_por_fechas_sin_renumerar_la_identidad_del_escaneado():
+    from copy import deepcopy
+    experiencias = [
+        {"n": 1, "proyecto": "Proyecto reciente", "paginas_pdf": [20],
+         "fecha_inicial": "2024-01-01", "fecha_final": "2024-06-30"},
+        {"n": 2, "proyecto": "Proyecto antiguo", "paginas_pdf": [21],
+         "fecha_inicial": "2020-01-01", "fecha_final": "2020-06-30"},
+    ]
+    copia = deepcopy(experiencias)
+    ws = _hoja(experiencias, {(1, 1): {"via": "CUI_TEXTO", "cui": "9000001"},
+                             (1, 2): {"via": "CUI_TEXTO", "cui": "9000002"}})
+    rotulos = [c.value for c in ws["A"] if isinstance(c.value, str)
+               and c.value.startswith(("1 ·", "2 ·")) and "Inicio:" in c.value]
+    assert len(rotulos) == 2
+    assert rotulos[0].startswith("2 ·") and "Proyecto antiguo" in rotulos[0] and "9000002" in rotulos[0]
+    assert rotulos[1].startswith("1 ·") and "Proyecto reciente" in rotulos[1] and "9000001" in rotulos[1]
+    assert experiencias == copia
+
+
 def test_estados_no_y_pendiente_son_visibles_y_el_detalle_sigue_en_comentario():
     ws = _hoja(
         [{"n": 1, "proyecto": "Expediente ficticio con contradicción",
@@ -58,7 +77,7 @@ def test_periodo_declarado_y_ano_parcial_son_legibles_y_el_pdf_no_usa_relleno():
     textos = [c.value for fila in ws.iter_rows() for c in fila
               if isinstance(c.value, str)]
     assert "PERÍODO DECLARADO" in textos
-    fila_eje = next(c.row for c in ws["A"] if c.value == "Eje: meses")
+    fila_eje = next(c.row for c in ws["A"] if c.value == "Eje: bimestres")
     # Un rango corto usa meses; el año visible sigue siendo de cuatro dígitos.
     assert ws.cell(fila_eje, 2).value == 2022
     assert ws.column_dimensions["B"].width == 2.4
@@ -110,24 +129,23 @@ def test_privada_no_pendiente_conserva_no_aplica_completo():
             "localizada; revisar el sustento privado") in rotulo
 
 
-def test_anos_rotados_solo_para_tramo_de_un_slot_en_tres_escalas():
+def test_anos_rotados_solo_para_tramo_de_un_mes():
     casos = [
         ("2022-01-01", "2023-06-30", False),   # mensual: años parciales, varios slots
-        ("2008-01-01", "2025-06-30", False),   # trimestral: varios slots por año
-        ("2003-01-01", "2025-06-30", True),    # anual: un slot por año
+        ("2008-01-01", "2025-06-30", False),
+        ("2003-01-01", "2025-06-30", False),
     ]
     for inicio, fin, rotado in casos:
         ws = _hoja([{"n": 1, "proyecto": "Escala ficticia",
                      "fecha_inicial": inicio, "fecha_final": fin}], {})
-        fila = next(c.row for c in ws["A"] if c.value in
-                    ("Eje: meses", "Eje: trimestres", "Eje: años"))
+        fila = next(c.row for c in ws["A"] if c.value == "Eje: bimestres")
         assert (ws.cell(fila, 2).alignment.textRotation == 90) is rotado
         assert ws.row_dimensions[fila].height == (36 if rotado else 14)
         assert ws.column_dimensions["B"].width == 2.4
 
     ws = _hoja([{"n": 1, "proyecto": "Trimestre parcial",
-                 "fecha_inicial": "2020-10-01", "fecha_final": "2026-03-31"}], {})
-    fila = next(c.row for c in ws["A"] if c.value == "Eje: trimestres")
+                 "fecha_inicial": "2020-12-01", "fecha_final": "2026-03-31"}], {})
+    fila = next(c.row for c in ws["A"] if c.value == "Eje: bimestres")
     assert ws.cell(fila, 2).value == 2020
     assert ws.cell(fila, 2).alignment.textRotation == 90
     assert ws.row_dimensions[fila].height == 36

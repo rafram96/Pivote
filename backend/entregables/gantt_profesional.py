@@ -61,7 +61,7 @@ def _texto_envuelto(draw, xy, texto, fuente, ancho_px, color=_TEXTO,
 
 
 def renderizar_gantt_profesional(bloque: dict, ancho: int = 1800) -> tuple[io.BytesIO, int, int]:
-    """Devuelve ``(PNG en memoria, ancho, alto)`` para un bloque resuelto."""
+    """Un único eje continuo por profesional; devuelve PNG en memoria y tamaño."""
     ancho = max(1100, int(ancho))
     margen = 24
     ancho_rotulo = min(650, max(470, int(ancho * .34)))
@@ -86,7 +86,7 @@ def renderizar_gantt_profesional(bloque: dict, ancho: int = 1800) -> tuple[io.By
     altos_notas = [alto_texto(nota, ancho - 2 * margen - 28) + 8
                    for nota in NOTAS_GANTT]
     alto_leyenda = 42 + sum(altos_leyenda) + sum(altos_notas) + 10
-    alto_eje = 58 if eje else 0
+    alto_eje = 165 if eje else 0
     caracteres_rotulo = max(8, (ancho_rotulo - 18) // max(5, int(16 * .57)))
     altos_fila = [max(42, len(_lineas(f.get("rotulo", ""), caracteres_rotulo)) * 23 + 12)
                   for f in filas]
@@ -128,6 +128,7 @@ def renderizar_gantt_profesional(bloque: dict, ancho: int = 1800) -> tuple[io.By
     else:
         x0 = margen + ancho_rotulo
         unidad = (ancho - margen - x0) / len(eje)
+        fuente_etiqueta = _fuente(min(15, max(6, int(unidad - 3))), True)
         d.rectangle((margen, y, x0, y + alto_eje), fill=_AZUL, outline=_REJILLA)
         d.text((margen + 10, y + 17), bloque.get("escala") or "Eje temporal",
                font=fuente_c, fill="#FFFFFF")
@@ -136,8 +137,11 @@ def renderizar_gantt_profesional(bloque: dict, ancho: int = 1800) -> tuple[io.By
             d.rectangle((xa, y, xb, y + alto_eje), fill=_AZUL_CLARO, outline=_REJILLA)
             etiqueta = str(getattr(u, "etiqueta", "") or "")
             if etiqueta:
-                d.text((xa + max(2, (unidad - d.textlength(etiqueta, font=fuente_u)) / 2),
-                        y + 31), etiqueta, font=fuente_u, fill=_TEXTO)
+                capa = Image.new("RGBA", (110, max(9, int(fuente_etiqueta.size * 1.5))), (255, 255, 255, 0))
+                dc = ImageDraw.Draw(capa)
+                dc.text((1, 1), etiqueta, font=fuente_etiqueta, fill=_TEXTO)
+                giro = capa.rotate(90, expand=True)
+                imagen.paste(giro, (int(xa + (unidad - giro.width) / 2), int(y + 55)), giro)
         for i0, i1, anio in _tramos_anio(eje):
             xa, xb = x0 + i0 * unidad, x0 + (i1 + 1) * unidad
             texto = str(anio)

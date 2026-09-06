@@ -14,14 +14,11 @@ error de una celda (una barra corrida un mes, una «C» en el trimestre
 equivocado) es indetectable a ojo en un Excel de cincuenta columnas y es
 justamente lo que el Comité mira primero.
 
-Granularidad adaptativa
+Granularidad
 ───────────────────────
-El mismo dibujo tiene que servir para un profesional con dos experiencias de
-tres meses y para otro con veinte años de trayectoria:
-
-  · hasta  60 meses de rango → una columna por MES      (letra del mes)
-  · hasta 240 meses de rango → una columna por TRIMESTRE («T1»…«T4»)
-  · más                      → una columna por AÑO      (sin sub-rótulo)
+La presentación de expedientes solicita BIMESTRES de calendario explícitos,
+sin dividir la trayectoria. La selección adaptativa se conserva como utilidad
+compatible para consumidores que no indiquen granularidad.
 """
 from __future__ import annotations
 
@@ -31,6 +28,7 @@ from typing import NamedTuple, Optional, Sequence
 
 # ── Vocabulario de granularidad ─────────────────────────────────────────────
 GRANO_MES = "mes"
+GRANO_BIMESTRE = "bimestre"
 GRANO_TRIMESTRE = "trimestre"
 GRANO_ANIO = "anio"
 
@@ -40,6 +38,7 @@ MAX_MESES_GRANO_TRIMESTRE = 240
 
 #: Inicial del mes en español; la «S» de setiembre se escribe S, no SET.
 LETRA_MES = "EFMAMJJASOND"
+BIMESTRES = ("Ene–Feb", "Mar–Abr", "May–Jun", "Jul–Ago", "Sep–Oct", "Nov–Dic")
 
 #: Un hito documental (firma o resolución) que cae fuera del periodo declarado
 #: pero CERCA se muestra igual: es la información que explica el desfase. Más
@@ -167,6 +166,15 @@ def construir_eje(inicio: date, fin: date,
                               date(anio, mes, monthrange(anio, mes)[1]),
                               anio, LETRA_MES[mes - 1]))
             anio, mes = (anio + 1, 1) if mes == 12 else (anio, mes + 1)
+        return eje
+
+    if grano == GRANO_BIMESTRE:
+        anio, mes = inicio.year, ((inicio.month - 1) // 2) * 2 + 1
+        while (anio, mes) <= (fin.year, fin.month):
+            eje.append(Unidad(date(anio, mes, 1),
+                              date(anio, mes + 1, monthrange(anio, mes + 1)[1]),
+                              anio, BIMESTRES[(mes - 1) // 2]))
+            anio, mes = (anio + 1, 1) if mes == 11 else (anio, mes + 2)
         return eje
 
     if grano == GRANO_TRIMESTRE:

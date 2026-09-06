@@ -145,7 +145,7 @@ def test_la_seccion_2_es_la_linea_de_tiempo_con_su_leyenda(hoja_p1):
     # la leyenda, UNA sola vez y con todo lo que hay que saber leer
     assert textos.count("Naranja: traslape") == 1
     for pieza in ("verde", "violeta", "amarillo", "gris",
-                  "C: firma del contrato", "R: resolución", "≈"):
+                  "C: fecha de firma del contrato", "R: fecha de la resolución", "≈"):
         assert pieza.lower() in textos.lower(), pieza
     assert ("Las barras representan los períodos declarados. Su color indica "
             "la certeza de identificación del proyecto") in textos
@@ -172,21 +172,21 @@ def test_cabecera_del_bloque_cita_los_dias_de_reconciliar(hoja_p1):
     assert esperado["dias_efectivos"] == 440 and esperado["dias_traslape"] == 61
 
 
-def test_el_eje_es_mensual_y_lleva_las_dos_filas_de_cabecera(hoja_p1):
+def test_el_eje_es_bimestral_y_lleva_las_dos_filas_de_cabecera(hoja_p1):
     _espejo, ws, _filas = hoja_p1
     fila = _fila_que_empieza(ws, "PROFESIONAL 1 · ")
-    assert ws.cell(fila + 1, 1).value == "Eje: meses"
-    # 17 columnas: de enero de 2022 a mayo de 2023
-    unidades = [ws.cell(fila + 2, 2 + i).value for i in range(17)]
-    assert unidades == list("EFMAMJJASOND") + list("EFMAM")
-    assert ws.cell(fila + 2, 19).value is None          # el eje termina en 17
+    assert ws.cell(fila + 1, 1).value == "Eje: bimestres"
+    unidades = [ws.cell(fila + 2, 2 + i).value for i in range(9)]
+    assert unidades == list(cronologia.BIMESTRES) + list(cronologia.BIMESTRES[:3])
+    assert ws.cell(fila + 2, 2).alignment.textRotation == 90
+    assert ws.cell(fila + 2, 11).value is None
     assert ws.cell(fila + 2, 1).value == "PERÍODO DECLARADO"
-    # fila de años: 2022 combinado sobre sus doce meses, 2023 sobre cinco
+    # 2022 combinado sobre seis bimestres, 2023 sobre tres.
     assert ws.cell(fila + 1, 2).value == 2022
-    assert ws.cell(fila + 1, 14).value == 2023
+    assert ws.cell(fila + 1, 8).value == 2023
     combinados = {str(m) for m in ws.merged_cells.ranges}
-    assert f"B{fila + 1}:M{fila + 1}" in combinados      # 2022 → 12 meses
-    assert f"N{fila + 1}:R{fila + 1}" in combinados      # 2023 → 5 meses
+    assert f"B{fila + 1}:G{fila + 1}" in combinados
+    assert f"H{fila + 1}:J{fila + 1}" in combinados
 
 
 def test_cada_barra_ocupa_sus_meses_con_el_color_de_certeza(hoja_p1):
@@ -198,32 +198,34 @@ def test_cada_barra_ocupa_sus_meses_con_el_color_de_certeza(hoja_p1):
     assert f1 < f2 < f3                                  # orden por fecha de inicio
 
     # 15/01/2022 – 30/06/2022 → enero a junio · CUI inferido → violeta
-    assert _pintadas(ws, f1, COLOR_INFERIDO) == [0, 1, 2, 3, 4, 5]
+    assert _pintadas(ws, f1, COLOR_INFERIDO) == [0, 1, 2]
     # 01/05/2022 – 30/11/2022 → mayo a noviembre · CUI citado → verde
-    assert _pintadas(ws, f2, COLOR_VERIFICADO) == [4, 5, 6, 7, 8, 9, 10]
+    assert _pintadas(ws, f2, COLOR_VERIFICADO) == [2, 3, 4, 5]
     # 02/2023 – 05/2023 (mes completo) → febrero a mayo de 2023 · sin identificar
-    assert _pintadas(ws, f3, COLOR_SIN_IDENTIFICAR) == [13, 14, 15, 16]
+    assert _pintadas(ws, f3, COLOR_SIN_IDENTIFICAR) == [6, 7, 8]
     assert rot  # sanity: la columna A tiene rótulos
 
 
 def test_los_hitos_del_mef_caen_en_su_mes_y_no_borran_la_barra(hoja_p1):
     _espejo, ws, _filas = hoja_p1
     f2 = _fila_que_empieza(ws, "2 · Expediente técnico del centro")
-    # C = firma del contrato del emisor, 20/04/2022 → abril (índice 3), fuera de
+    # C = firma del contrato del emisor, 20/04/2022 → Mar–Abr (índice 1), fuera de
     # la barra (que empieza en mayo): la celda lleva la marca y ningún relleno.
-    assert ws.cell(f2, 2 + 3).value == "C"
-    assert ws.cell(f2, 2 + 3).font.bold
-    # R = resolución de aprobación, 05/12/2022 → diciembre (índice 11)
-    assert ws.cell(f2, 2 + 11).value == "R"
+    assert ws.cell(f2, 2 + 1).value == "C"
+    assert ws.cell(f2, 2 + 1).font.bold
+    # R cae en Nov–Dic, compartiendo columna con la barra que termina en noviembre.
+    assert ws.cell(f2, 2 + 5).value == "R"
+    assert "C: 20/04/2022" in ws.cell(f2, 1).value
+    assert "R: 05/12/2022" in ws.cell(f2, 1).value
     # y dentro de la barra la marca convive con el relleno de certeza
-    assert _color(ws.cell(f2, 2 + 10)) == COLOR_VERIFICADO
+    assert _color(ws.cell(f2, 2 + 5)) == COLOR_VERIFICADO
 
 
 def test_las_fechas_de_mes_se_marcan_con_la_tilde_y_lo_dicen_en_el_rotulo(hoja_p1):
     _espejo, ws, _filas = hoja_p1
     f3 = _fila_que_empieza(ws, "3 · Expediente técnico de la vía")
-    assert ws.cell(f3, 2 + 13).value == "≈"
-    assert _color(ws.cell(f3, 2 + 13)) == COLOR_SIN_IDENTIFICAR
+    assert ws.cell(f3, 2 + 6).value == "≈"
+    assert _color(ws.cell(f3, 2 + 6)) == COLOR_SIN_IDENTIFICAR
     assert "(fechas de mes; se asume mes completo)" in ws.cell(f3, 1).value
 
 
@@ -251,7 +253,7 @@ def test_la_fila_de_traslapes_pinta_naranja_solo_los_meses_pisados(hoja_p1):
     espejo, ws, _filas = hoja_p1
     fila = _fila_que_empieza(ws, "Traslapes · ")
     # 01/05/2022 – 30/06/2022 son los únicos días con dos experiencias vivas
-    assert _pintadas(ws, fila, COLOR_TRASLAPE) == [4, 5]
+    assert _pintadas(ws, fila, COLOR_TRASLAPE) == [2]
     esperado = reconciliar_resultados_profesionales(espejo, None)[1]
     assert ws.cell(fila, 1).value == (
         f"Traslapes · {esperado['dias_traslape']} días de traslape")
@@ -279,22 +281,21 @@ def test_los_bloques_van_en_orden_de_n_prof(hoja_p1):
 
 # ── (b) Rango largo · granularidad por años ────────────────────────────────
 
-def test_un_profesional_con_veinte_anios_de_rango_usa_un_eje_de_anios(hoja_p1):
-    """2003 y 2025: 265 meses de rango, por encima del umbral de 240 → AÑOS.
-    Las celdas de unidad quedan vacías (el año ya está en la fila de arriba)."""
+def test_un_profesional_con_veinte_anios_conserva_un_solo_eje_bimestral(hoja_p1):
+    """No se divide ni se degrada a trimestres/años por una trayectoria larga."""
     _espejo, ws, _filas = hoja_p1
     fila = _fila_que_empieza(ws, "PROFESIONAL 2 · ")
-    assert ws.cell(fila + 1, 1).value == "Eje: años"
-    assert ws.row_dimensions[fila + 1].height == 36
-    assert ws.cell(fila + 1, 2).alignment.textRotation == 90
+    assert ws.cell(fila + 1, 1).value == "Eje: bimestres"
     assert ws.column_dimensions["B"].width == cronologia.ANCHO_UNIDAD
-    anios = [ws.cell(fila + 1, 2 + i).value for i in range(23)]
-    assert anios == list(range(2003, 2026))
-    assert all(ws.cell(fila + 2, 2 + i).value is None for i in range(23))
+    assert ws.cell(fila + 2, 2).value == "Mar–Abr"
+    assert ws.cell(fila + 2, 135).value == "May–Jun"
+    assert ws.cell(fila + 2, 136).value is None
+    assert sum(str(c.value).startswith("PROFESIONAL 2 · ") for c in ws["A"]) == 1
     f1 = _fila_que_empieza(ws, "1 · Expediente técnico del colegio")
     f2 = _fila_que_empieza(ws, "2 · Expediente técnico del mercado")
-    assert _pintadas(ws, f1, COLOR_SIN_IDENTIFICAR) == [0]      # 2003
-    assert _pintadas(ws, f2, COLOR_SIN_IDENTIFICAR) == [22]     # 2025
+    assert _pintadas(ws, f1, COLOR_SIN_IDENTIFICAR)
+    assert _pintadas(ws, f2, COLOR_SIN_IDENTIFICAR)
+    assert "Inicio:" in ws.cell(f1, 1).value and "Fin:" in ws.cell(f2, 1).value
     assert ws.cell(_fila_que_empieza(ws, "Traslapes · Sin traslapes"), 1).value
 
 
@@ -304,6 +305,19 @@ def test_dos_mil_ocho_a_dos_mil_veinticinco_cae_en_trimestres():
     para pasar a un eje de años."""
     assert cronologia.granularidad(date(2008, 3, 1),
                                    date(2025, 6, 30)) == cronologia.GRANO_TRIMESTRE
+
+
+def test_una_experiencia_en_varios_tramos_se_cuenta_una_sola_vez():
+    espejo = _espejo_expedientes()
+    espejo["profesionales"] = espejo["profesionales"][:1]
+    espejo["profesionales"][0]["experiencias"] = [
+        {"n": 1, "proyecto": "Expediente ficticio prolongado",
+         "fecha_inicial": "2010-01-17", "fecha_final": "2025-06-23"}]
+    ws, filas = _hoja(espejo, {})
+    assert filas == 1
+    rotulos = [c.value for c in ws["A"] if str(c.value).startswith("1 · Expediente")]
+    assert len(rotulos) == 1
+    assert all("Inicio: 17/01/2010 · Fin: 23/06/2025" in r for r in rotulos)
 
 
 def test_un_profesional_sin_periodos_computables_lo_dice_y_no_dibuja_eje():
@@ -382,6 +396,21 @@ def test_umbrales_de_granularidad():
         cronologia.GRANO_TRIMESTRE                 # 240 meses justos
     assert cronologia.granularidad(date(2005, 1, 1), date(2025, 1, 1)) == \
         cronologia.GRANO_ANIO                      # 241 meses
+
+
+def test_bimestres_de_calendario_respetan_bisiesto_y_cambio_de_anio():
+    eje = cronologia.construir_eje(date(2023, 12, 17), date(2024, 3, 2),
+                                  cronologia.GRANO_BIMESTRE)
+    assert [u.etiqueta for u in eje] == ["Nov–Dic", "Ene–Feb", "Mar–Abr"]
+    assert eje[1].inicio == date(2024, 1, 1)
+    assert eje[1].fin == date(2024, 2, 29)
+    assert cronologia.indice_unidad(eje, date(2024, 1, 8)) == 1
+    assert cronologia.indice_unidad(eje, date(2024, 2, 29)) == 1
+    assert cronologia.indice_unidad(eje, date(2024, 3, 1)) == 2
+    # Compartir bimestre no equivale a tener días traslapados.
+    assert cronologia.unidades_con_traslape(eje, [
+        (date(2024, 1, 1), date(2024, 1, 31)),
+        (date(2024, 2, 1), date(2024, 2, 29))]) == set()
 
 
 def test_el_eje_estira_para_un_hito_cercano_y_no_para_uno_lejano():
