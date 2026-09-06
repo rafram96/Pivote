@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 2,
+  "templateVersion": "0.3.0",
+  "id": "pivote",
+  "name": "Pivote",
+  "profile": "repo",
+  "createdAt": "2026-08-20",
+  "agents": [
+    "claude",
+    "codex",
+    "agy"
+  ]
+}

@@ -1,0 +1,1716 @@
+{
+  "schemaVersion": 1,
+  "projectId": "pivote",
+  "revision": 5,
+  "updatedAt": "2026-08-21T02:51:52.886Z",
+  "architecture": {
+    "components": [
+      {
+        "id": "skill-osce",
+        "title": "Skill de análisis OSCE",
+        "icon": "BrainCircuit",
+        "color": "#CBA6F7",
+        "borderColor": "#8957C6",
+        "technologies": {
+          "OCR": "Tesseract o visión",
+          "contrato": "Skill analizar-licitacion-osce",
+          "ejecución": "Claude Code / Cowork",
+          "runtime auxiliar": "Node 18+"
+        },
+        "connections": [
+          "agentes-documentales"
+        ],
+        "position": {
+          "x": -62.60958683560786,
+          "y": -232.40080128700905
+        },
+        "dataFlow": {
+          "sends": [
+            "Plan de extracción",
+            "Contexto por concurso",
+            "Órdenes por profesional"
+          ],
+          "receives": [
+            "Bases y propuesta",
+            "Resultados de subagentes",
+            "Estado de la entrega"
+          ]
+        },
+        "purpose": "Motor no determinístico que entiende bases y propuestas, coordina la extracción y conserva la separación entre lo declarado y lo que debe verificar el servidor.",
+        "techDetails": {
+          "type": "ai",
+          "items": [
+            {
+              "label": "Paso 0",
+              "description": "Detecta capa de texto y aplica OCR local o visión solo cuando hace falta."
+            },
+            {
+              "label": "Orquestación",
+              "description": "Ejecuta bases y mapa en paralelo y luego un extractor por profesional."
+            },
+            {
+              "label": "Evaluación",
+              "description": "Cruza requisitos, experiencias, factores y evidencias con razones literales."
+            },
+            {
+              "label": "Regla de frontera",
+              "description": "Deja en null lo que exige una fuente oficial; nunca lo inventa."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "agentes-documentales",
+        "title": "Fábrica de subagentes documentales",
+        "icon": "UsersRound",
+        "color": "#CBA6F7",
+        "borderColor": "#8957C6",
+        "technologies": {
+          "agentes": "bases + mapa + profesional ×N + evaluador",
+          "control": "Cross-check de cobertura",
+          "paralelismo": "Por documento y profesional",
+          "unidad": "Bundle de folios"
+        },
+        "connections": [
+          "contrato-espejo"
+        ],
+        "position": {
+          "x": 312.27558576310037,
+          "y": 76.40918619210333
+        },
+        "dataFlow": {
+          "sends": [
+            "Requisitos estructurados",
+            "Mapa de folios",
+            "Experiencias atómicas",
+            "Veredictos razonados"
+          ],
+          "receives": [
+            "Bases integradas",
+            "Propuesta técnica",
+            "Índice OCR",
+            "Bundles por profesional"
+          ]
+        },
+        "purpose": "Divide propuestas extensas en responsabilidades acotadas para mantener cobertura por profesional, folio y requisito sin mezclar evidencias.",
+        "techDetails": {
+          "type": "ai",
+          "items": [
+            {
+              "label": "agent-bases",
+              "description": "Extrae requisitos, factores, personal clave, cuantías y reglas eliminadas por tachado."
+            },
+            {
+              "label": "agent-propuesta-mapa",
+              "description": "Construye el inventario global y delimita el bundle de cada profesional."
+            },
+            {
+              "label": "agent-propuesta-profesional ×N",
+              "description": "Lee solo el rango asignado y emite una fila por experiencia y periodo."
+            },
+            {
+              "label": "agent-evaluador",
+              "description": "Evalúa cumplimiento sin releer PDFs y explica cada conclusión."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "contrato-espejo",
+        "title": "Contrato espejo y consolidación",
+        "icon": "Braces",
+        "color": "#89B4FA",
+        "borderColor": "#4F7FC8",
+        "technologies": {
+          "artefactos": "JSON + XLSX + ZIP",
+          "cliente": "Zod",
+          "servidor": "Pydantic v2",
+          "versión": "Espejo v1.4"
+        },
+        "connections": [
+          "mcp-local"
+        ],
+        "position": {
+          "x": 647.6618064749454,
+          "y": -232.40080128700905
+        },
+        "dataFlow": {
+          "sends": [
+            "JSON espejo validable",
+            "Excel base",
+            "certificados.zip"
+          ],
+          "receives": [
+            "Extracciones segmentadas",
+            "Evaluación por profesional",
+            "Metadatos del concurso"
+          ]
+        },
+        "purpose": "Frontera de datos versionada que consolida la evaluación de Claude y reserva explícitamente los campos que el backend debe verificar o recalcular.",
+        "techDetails": {
+          "type": "module",
+          "items": [
+            {
+              "label": "Consolidación determinística",
+              "description": "Fusiona salidas segmentadas y comprueba cobertura antes de empacar."
+            },
+            {
+              "label": "Compatibilidad aditiva",
+              "description": "Cliente y backend aceptan jobs históricos sin reescribir el origen."
+            },
+            {
+              "label": "Procedencia",
+              "description": "Distingue dato literal, inferencia de Claude y cálculo del backend."
+            },
+            {
+              "label": "Paquete de análisis",
+              "description": "Entrega espejo, Excel y certificados con nombres y formatos conocidos."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "mcp-local",
+        "title": "MCP local seguro",
+        "icon": "Cable",
+        "color": "#89B4FA",
+        "borderColor": "#4F7FC8",
+        "technologies": {
+          "protocolo": "MCP stdio",
+          "sdk": "@modelcontextprotocol/sdk",
+          "seguridad": "ANALISIS_DIR + límites",
+          "transporte LAN": "fetch + multipart"
+        },
+        "connections": [
+          "api-backend"
+        ],
+        "position": {
+          "x": 934.4009007366592,
+          "y": -539.9434946443781
+        },
+        "dataFlow": {
+          "sends": [
+            "Análisis multipart",
+            "Consultas de jobs",
+            "Búsquedas CUI",
+            "Órdenes de descarga"
+          ],
+          "receives": [
+            "Paquete local autorizado",
+            "Job y progreso",
+            "Candidatos MEF",
+            "Enlaces de entregables"
+          ]
+        },
+        "purpose": "Puente en la PC del evaluador que limita la lectura a ANALISIS_DIR y convierte herramientas MCP en operaciones contra la LAN sin enviar documentos por el chat.",
+        "techDetails": {
+          "type": "module",
+          "items": [
+            {
+              "label": "subir_analisis",
+              "description": "Carga espejo, único Excel y certificados opcionales desde una carpeta autorizada."
+            },
+            {
+              "label": "consultar_estado",
+              "description": "Devuelve progreso, pendientes humanos y enlaces finales."
+            },
+            {
+              "label": "buscar_cui",
+              "description": "Consulta por código, nombre, ubicación y entidad sobre la base local."
+            },
+            {
+              "label": "descargar_documentos_cui",
+              "description": "Inicia y sigue una descarga pesada sin transportar archivos en la conversación."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "panel-web",
+        "title": "Panel del evaluador",
+        "icon": "MonitorCheck",
+        "color": "#A6E3A1",
+        "borderColor": "#5A9E55",
+        "technologies": {
+          "despliegue": "Docker on-prem",
+          "framework": "Next.js",
+          "lenguaje": "TypeScript",
+          "repositorio": "Panel-InfoObras"
+        },
+        "connections": [
+          "api-backend"
+        ],
+        "position": {
+          "x": 90,
+          "y": 285
+        },
+        "dataFlow": {
+          "sends": [
+            "Archivos y consultas",
+            "Correcciones CUI/RUC",
+            "Decisiones humanas",
+            "Solicitudes de descarga"
+          ],
+          "receives": [
+            "Progreso por etapas",
+            "Alertas explicadas",
+            "Resultados reconciliados",
+            "Excel y ZIP"
+          ]
+        },
+        "purpose": "Superficie de trabajo del Comité: organiza concursos, explica resultados en lenguaje no técnico, permite correcciones trazables y publica los entregables.",
+        "techDetails": {
+          "type": "frontend",
+          "items": [
+            {
+              "label": "Concursos",
+              "description": "Agrupa jobs por proceso y conserva el histórico."
+            },
+            {
+              "label": "Profesionales",
+              "description": "Muestra experiencia, evidencia oficial y conclusión efectiva."
+            },
+            {
+              "label": "Mesa de revisión",
+              "description": "Separa contexto, motivo, candidatos y decisión del evaluador."
+            },
+            {
+              "label": "Descargas",
+              "description": "Distingue documentos encontrados, estado operativo y artefactos listos."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "api-backend",
+        "title": "API de control on-prem",
+        "icon": "ServerCog",
+        "color": "#94E2D5",
+        "borderColor": "#4A9E91",
+        "technologies": {
+          "framework": "FastAPI 0.115+",
+          "runtime": "Python 3.12",
+          "servidor": "Uvicorn",
+          "validación": "Pydantic + multipart"
+        },
+        "connections": [
+          "motor-jobs",
+          "repositorio-archivos",
+          "base-mef-local",
+          "paquete-documental",
+          "operacion-onprem"
+        ],
+        "position": {
+          "x": 1260.9812269722888,
+          "y": -334.73899481206377
+        },
+        "dataFlow": {
+          "sends": [
+            "Jobs y correcciones",
+            "Órdenes de pipeline",
+            "Consultas de datos",
+            "Solicitudes de materialización"
+          ],
+          "receives": [
+            "Espejo, Excel y certificados",
+            "Checkpoints",
+            "Resultados reconciliados",
+            "Artefactos persistidos"
+          ]
+        },
+        "purpose": "Frontera HTTP sin IA cloud que valida límites de ingesta, administra el ciclo de vida y expone consultas, correcciones, salud y descargas.",
+        "techDetails": {
+          "type": "backend",
+          "items": [
+            {
+              "label": "Ingesta defensiva",
+              "description": "Lee y valida todos los insumos antes de crear un job; rechaza ZIP/PDF inválidos."
+            },
+            {
+              "label": "API de dominio",
+              "description": "Concursos, jobs, profesionales, progreso, espejo, resumen y alertas."
+            },
+            {
+              "label": "Human-in-the-loop",
+              "description": "Aplica CUI o RUC y reanuda únicamente etapas aguas abajo."
+            },
+            {
+              "label": "Operaciones directas",
+              "description": "Busca MEF, descarga por CUI y publica el estado de salud."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "motor-jobs",
+        "title": "Orquestador de nueve etapas",
+        "icon": "Workflow",
+        "color": "#F9E2AF",
+        "borderColor": "#B48A35",
+        "technologies": {
+          "etapas": "9 con checkpoint",
+          "fan-out": "Por experiencia",
+          "patrón": "Máquina de estados",
+          "recuperación": "Reanudación selectiva"
+        },
+        "connections": [
+          "escudo-integridad",
+          "resolver-cui",
+          "cruces-oficiales",
+          "motor-reglas",
+          "repositorio-archivos",
+          "generador-excel",
+          "operacion-onprem"
+        ],
+        "position": {
+          "x": 1647.3489158200125,
+          "y": 50.894803101698486
+        },
+        "dataFlow": {
+          "sends": [
+            "Contextos por etapa",
+            "Experiencias por verificar",
+            "Checkpoints",
+            "Espejo enriquecido"
+          ],
+          "receives": [
+            "Job validado",
+            "Resultados de fuentes",
+            "Correcciones humanas",
+            "Métricas por etapa"
+          ]
+        },
+        "purpose": "Máquina de estados reanudable que procesa cada experiencia, ejecuta fuentes independientes en paralelo y conserva resultados útiles ante fallos parciales.",
+        "techDetails": {
+          "type": "pipeline",
+          "items": [
+            {
+              "label": "Ingesta → validación → CUI",
+              "description": "Cadena secuencial que fija el contexto y la identidad antes de consultar hechos."
+            },
+            {
+              "label": "InfoObras ∥ SUNAT ∥ RENIPRESS",
+              "description": "Ramas independientes con errores parciales por ítem."
+            },
+            {
+              "label": "Reglas → Excel → persistencia",
+              "description": "Cierra el resultado sin perder el origen ni los pendientes."
+            },
+            {
+              "label": "Reanudación acotada",
+              "description": "Salta checkpoints OK y repite solo lo afectado por una decisión humana."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "escudo-integridad",
+        "title": "Escudo de integridad",
+        "icon": "ShieldCheck",
+        "color": "#FAB387",
+        "borderColor": "#C56A3A",
+        "technologies": {
+          "alcance": "15+ controles",
+          "lenguaje": "Python puro",
+          "política": "Falla cerrado",
+          "salida": "Hallazgos estructurados"
+        },
+        "connections": [
+          "repositorio-archivos"
+        ],
+        "position": {
+          "x": 2655.302650687155,
+          "y": -367.0563190831336
+        },
+        "dataFlow": {
+          "sends": [
+            "Confiabilidad global",
+            "Hallazgos críticos",
+            "Observaciones por profesional"
+          ],
+          "receives": [
+            "JSON espejo original",
+            "Cobertura de evaluación",
+            "Requisitos y experiencias"
+          ]
+        },
+        "purpose": "Control de calidad fail-closed que detecta omisiones, corrimientos y veredictos sin sustento sin volver a evaluar la propuesta ni sustituir al Comité.",
+        "techDetails": {
+          "type": "engine",
+          "items": [
+            {
+              "label": "Cobertura",
+              "description": "Detecta profesionales, experiencias, montos u oferta sin evaluar."
+            },
+            {
+              "label": "Correspondencia",
+              "description": "Señala veredictos que hablan de otra especialidad o fila."
+            },
+            {
+              "label": "Sustento",
+              "description": "Bloquea decisiones que solo repiten CUMPLE/NO CUMPLE sin razones."
+            },
+            {
+              "label": "No circularidad",
+              "description": "No cuenta campos rellenados por el propio backend como evidencia del evaluador."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "resolver-cui",
+        "title": "Resolver de identidad CUI",
+        "icon": "ScanSearch",
+        "color": "#FAB387",
+        "borderColor": "#C56A3A",
+        "technologies": {
+          "corroboración": "InfoObras + ficha MEF",
+          "matching": "rapidfuzz + reglas",
+          "seguridad": "Candados ADR-005",
+          "índice": "MEF en memoria"
+        },
+        "connections": [
+          "base-mef-local",
+          "infoobras",
+          "repositorio-archivos",
+          "operacion-onprem"
+        ],
+        "position": {
+          "x": 2175.929007332951,
+          "y": 355.02086925398476
+        },
+        "dataFlow": {
+          "sends": [
+            "Consultas por CUI/SNIP",
+            "Búsquedas por identidad",
+            "Decisiones y candidatos",
+            "Trazas de vetos"
+          ],
+          "receives": [
+            "Experiencia declarada",
+            "Candidatos MEF",
+            "Obras InfoObras",
+            "Señales de emisor y ubigeo"
+          ]
+        },
+        "purpose": "Motor público-primero que identifica la inversión correcta por código, nombre, entidad, ubicación y emisor, con vetos y abstención ante ambigüedad.",
+        "techDetails": {
+          "type": "engine",
+          "items": [
+            {
+              "label": "Paso código citado",
+              "description": "Confirma equivalencias exactas y descarta códigos incompatibles sin buscar un reemplazo silencioso."
+            },
+            {
+              "label": "Fusión de candidatos",
+              "description": "Combina top MEF con búsqueda InfoObras y trae por código candidatos solo-MEF."
+            },
+            {
+              "label": "Ranking de identidad",
+              "description": "Pondera nombre, entidad, ubigeo y RUC; las fechas no eligen identidad."
+            },
+            {
+              "label": "Abstención",
+              "description": "Empates, señales débiles y contradicciones terminan en revisión con candidatos visibles."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "cruces-oficiales",
+        "title": "Verificación multifuente",
+        "icon": "Network",
+        "color": "#F9E2AF",
+        "borderColor": "#B48A35",
+        "technologies": {
+          "cliente": "requests",
+          "concurrencia": "Por fuente independiente",
+          "resiliencia": "con_reintentos",
+          "semántica": "Caído ≠ vacío"
+        },
+        "connections": [
+          "infoobras",
+          "mef-seace",
+          "sunat",
+          "renipress",
+          "repositorio-archivos",
+          "operacion-onprem"
+        ],
+        "position": {
+          "x": 2032.6209667141245,
+          "y": 643.7972850782772
+        },
+        "dataFlow": {
+          "sends": [
+            "CUI, RUC y nombres",
+            "Ventanas de fechas",
+            "Solicitudes documentales"
+          ],
+          "receives": [
+            "Obras y valorizaciones",
+            "Contratos y aprobaciones",
+            "Identidad tributaria",
+            "Existencia sanitaria"
+          ]
+        },
+        "purpose": "Capa de enriquecimiento que consulta sistemas estatales con contratos explícitos de caída, vacío y evidencia auxiliar, sin convertir ausencia de datos en confirmación.",
+        "techDetails": {
+          "type": "pipeline",
+          "items": [
+            {
+              "label": "InfoObras",
+              "description": "Obtiene ficha, valorizaciones, paralizaciones, representantes y documentos."
+            },
+            {
+              "label": "MEF / SEACE",
+              "description": "Contrasta expediente, contrato, adjudicatario, objeto, fechas y monto."
+            },
+            {
+              "label": "SUNAT",
+              "description": "Verifica RUC, HABIDO histórico, representantes y reinscripciones."
+            },
+            {
+              "label": "RENIPRESS",
+              "description": "Aporta evidencia auxiliar para salud sin emitir un veredicto automático."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "motor-reglas",
+        "title": "Motor determinístico de reglas",
+        "icon": "Scale",
+        "color": "#FAB387",
+        "borderColor": "#C56A3A",
+        "technologies": {
+          "aritmética": "Día exacto e inclusivo",
+          "lenguaje": "Python puro",
+          "principio": "Señalar, no juzgar",
+          "salida": "Observaciones + veredicto efectivo"
+        },
+        "connections": [
+          "repositorio-archivos",
+          "generador-excel",
+          "operacion-onprem"
+        ],
+        "position": {
+          "x": 2179.5404509105465,
+          "y": 1236.7021191858878
+        },
+        "dataFlow": {
+          "sends": [
+            "Cálculos reconciliados",
+            "Alertas explicables",
+            "Estado efectivo",
+            "Totales verificados"
+          ],
+          "receives": [
+            "Espejo declarado",
+            "Enriquecimiento oficial",
+            "Requisitos de bases",
+            "Correcciones humanas"
+          ]
+        },
+        "purpose": "Recalcula lo que el backend puede demostrar: días efectivos, mínimos, cargos, fechas, puntajes y estado efectivo, manteniendo abstención cuando falta fuente.",
+        "techDetails": {
+          "type": "engine",
+          "items": [
+            {
+              "label": "Tiempo efectivo",
+              "description": "Aplica paralizaciones, traslapes, clamps y mínimos con una autoridad única."
+            },
+            {
+              "label": "Cargo y formación",
+              "description": "Comprueba núcleo completo, funciones y vía documental sin relajar equivalencias."
+            },
+            {
+              "label": "Cruces de fechas",
+              "description": "Compara contrato y aprobación con gates anti-circularidad y tolerancias en días."
+            },
+            {
+              "label": "Puntajes y conclusión",
+              "description": "Reconcilia factores, ISO, montos y conclusión para API y Excel."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "infoobras",
+        "title": "Contraloría · InfoObras",
+        "icon": "Building2",
+        "color": "#89DCEB",
+        "borderColor": "#3E91A3",
+        "technologies": {
+          "acceso": "Requests sin login",
+          "caché": "Por obra y job",
+          "resiliencia": "Backoff + PortalNoResponde",
+          "uso": "Producción"
+        },
+        "connections": [],
+        "position": {
+          "x": 3541.8787909111365,
+          "y": -189.3110355922491
+        },
+        "dataFlow": {
+          "sends": [
+            "Ficha de obra",
+            "Valorizaciones",
+            "Paralizaciones",
+            "Documentos e informes"
+          ],
+          "receives": [
+            "CUI y nombre",
+            "Periodo de experiencia",
+            "Obra seleccionada"
+          ]
+        },
+        "purpose": "Portal oficial de obras públicas usado para corroborar inversiones, ejecución física, paralizaciones y sustento descargable.",
+        "techDetails": {
+          "type": "external",
+          "items": [
+            {
+              "label": "Búsqueda",
+              "description": "Busca obras y recupera la ficha exacta por CUI."
+            },
+            {
+              "label": "Ejecución",
+              "description": "Expone avances, periodos y paralizaciones para el clamp."
+            },
+            {
+              "label": "Documentos",
+              "description": "Publica valorizaciones, control, cierre y aprobaciones disponibles."
+            },
+            {
+              "label": "Flakiness explícita",
+              "description": "Una caída genera incertidumbre y reintento; nunca se interpreta como cero resultados."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "mef-seace",
+        "title": "MEF · Invierte.pe · SEACE",
+        "icon": "Landmark",
+        "color": "#89DCEB",
+        "borderColor": "#3E91A3",
+        "technologies": {
+          "acceso": "CSV + JSON + descargas",
+          "contratación": "SEACE/OCDS",
+          "datos": "MEF Datos Abiertos",
+          "ficha": "Invierte.pe 08-A"
+        },
+        "connections": [],
+        "position": {
+          "x": 3533.0423090077516,
+          "y": -396.70334913298154
+        },
+        "dataFlow": {
+          "sends": [
+            "Datasets de inversiones",
+            "Ficha enriquecida",
+            "Contratos y adjudicatarios",
+            "Bases y resoluciones"
+          ],
+          "receives": [
+            "CUI/SNIP",
+            "Tipo de proceso",
+            "Identidad del certificado",
+            "Solicitud ETL"
+          ]
+        },
+        "purpose": "Conjunto de fuentes estatales para identidad de inversiones, ficha 08-A, contratos y documentos de contratación pública.",
+        "techDetails": {
+          "type": "external",
+          "items": [
+            {
+              "label": "Datos Abiertos",
+              "description": "Tres datasets alimentan el catálogo local de inversiones y entidades."
+            },
+            {
+              "label": "Ficha 08-A",
+              "description": "Aporta aprobación, función, ubicación y situación de la inversión."
+            },
+            {
+              "label": "SEACE abierto",
+              "description": "Selecciona procesos por CUI y tipo y descarga bases o contrato cuando están publicados."
+            },
+            {
+              "label": "Candado de proceso",
+              "description": "Entidad, adjudicatario, objeto, fechas y monto sostienen o degradan la evidencia."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "sunat",
+        "title": "SUNAT · Identidad empresarial",
+        "icon": "BadgeCheck",
+        "color": "#89DCEB",
+        "borderColor": "#3E91A3",
+        "technologies": {
+          "acceso": "consPorRuc + getRepLeg + getinfHis",
+          "frecuencia": "Una consulta por RUC/job",
+          "matching": "Razón social normalizada",
+          "reintentos": "Contrato unificado"
+        },
+        "connections": [],
+        "position": {
+          "x": 3540.083384007188,
+          "y": 10.302743695905804
+        },
+        "dataFlow": {
+          "sends": [
+            "Ficha RUC",
+            "Representantes",
+            "Historia HABIDO",
+            "Coincidencias por nombre"
+          ],
+          "receives": [
+            "RUC declarado",
+            "Razón social del emisor",
+            "Periodo de experiencia"
+          ]
+        },
+        "purpose": "Fuente tributaria que verifica al emisor del certificado y aporta historia suficiente para distinguir actividad real, reinscripción y ambigüedad.",
+        "techDetails": {
+          "type": "external",
+          "items": [
+            {
+              "label": "Identidad del emisor",
+              "description": "Resuelve el RUC exacto o devuelve candidatos sin escoger en zona gris."
+            },
+            {
+              "label": "ALT-04",
+              "description": "Contrasta antigüedad y actividad de la empresa durante el periodo."
+            },
+            {
+              "label": "Historia tributaria",
+              "description": "Reconcilia reinscripciones y estados históricos para evitar falsos positivos."
+            },
+            {
+              "label": "Representantes",
+              "description": "Se muestra como dato informativo; no se convierte en regla automática de firma."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "renipress",
+        "title": "SUSALUD · RENIPRESS",
+        "icon": "Hospital",
+        "color": "#89DCEB",
+        "borderColor": "#3E91A3",
+        "technologies": {
+          "alcance": "Solo proyectos de salud",
+          "cliente": "WS DataTables",
+          "contrato": "encontrado / vacío / caído",
+          "efecto": "Informativo"
+        },
+        "connections": [],
+        "position": {
+          "x": 4056.2469798297407,
+          "y": 555.7121593105775
+        },
+        "dataFlow": {
+          "sends": [
+            "Establecimientos candidatos",
+            "Estado de respuesta",
+            "Datos de existencia"
+          ],
+          "receives": [
+            "Nombre del establecimiento",
+            "Ubicación declarada"
+          ]
+        },
+        "purpose": "Evidencia auxiliar de existencia para experiencias de salud públicas o privadas, con estado explícito y sin afectar automáticamente el veredicto.",
+        "techDetails": {
+          "type": "external",
+          "items": [
+            {
+              "label": "Consulta selectiva",
+              "description": "Solo se ejecuta cuando la experiencia pertenece al rubro salud."
+            },
+            {
+              "label": "Tres estados",
+              "description": "Distingue encontrado, sin resultados y portal no disponible."
+            },
+            {
+              "label": "Evidencia auxiliar",
+              "description": "Enriquece el análisis, pero no crea CUI ni decide cumplimiento."
+            },
+            {
+              "label": "Fallo parcial",
+              "description": "Una caída no detiene InfoObras, SUNAT ni el resto del job."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "base-mef-local",
+        "title": "Plataforma local MEF",
+        "icon": "DatabaseZap",
+        "color": "#B4BEFE",
+        "borderColor": "#6976C5",
+        "technologies": {
+          "ETL": "actualizar_base_mef.py",
+          "frescura": "Bitácora + umbral 10 días",
+          "persistencia": "PostgreSQL 16 schema mef",
+          "índice": "CSV.GZ + índice invertido"
+        },
+        "connections": [
+          "mef-seace",
+          "operacion-onprem"
+        ],
+        "position": {
+          "x": 2583.1315042027295,
+          "y": 756.0438347342432
+        },
+        "dataFlow": {
+          "sends": [
+            "Candidatos por nombre",
+            "Ficha exacta CUI/SNIP",
+            "Carga activa",
+            "Aviso de frescura"
+          ],
+          "receives": [
+            "Datasets MEF",
+            "Consultas del resolver",
+            "Refresco programado"
+          ]
+        },
+        "purpose": "Subsistema serving-first que mantiene una carga oficial versionada, un índice de nombres en memoria y fichas exactas en PostgreSQL con degradación segura.",
+        "techDetails": {
+          "type": "database",
+          "items": [
+            {
+              "label": "ETL versionado",
+              "description": "Valida volumen, carga staging y publica una carga activa sin perder la anterior."
+            },
+            {
+              "label": "Índice RAM",
+              "description": "Sirve ranking difuso rápido sobre nombres, entidades y ubicaciones."
+            },
+            {
+              "label": "Ficha PostgreSQL",
+              "description": "Responde lookup enriquecido por load_id y CUI/SNIP."
+            },
+            {
+              "label": "Degradación",
+              "description": "Si PG o la carga fallan conserva el último dato útil y publica el estado anormal."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "repositorio-archivos",
+        "title": "Repositorio y trazabilidad del job",
+        "icon": "FolderLock",
+        "color": "#B4BEFE",
+        "borderColor": "#6976C5",
+        "technologies": {
+          "escritura": "tmp + os.replace",
+          "primario": "Carpeta por job",
+          "respaldo": "PostgreSQL best-effort",
+          "volumen": "datos_pivote"
+        },
+        "connections": [],
+        "position": {
+          "x": 4066.9222635594583,
+          "y": 350.3306397674936
+        },
+        "dataFlow": {
+          "sends": [
+            "Job y checkpoints",
+            "Espejo enriquecido",
+            "Ledger de descargas",
+            "Artefactos y trazas"
+          ],
+          "receives": [
+            "Ingesta validada",
+            "Resultados oficiales",
+            "Decisiones humanas",
+            "Excel, ZIP y PDFs"
+          ]
+        },
+        "purpose": "Fuente de verdad por job que conserva entradas, enriquecimiento, decisiones, checkpoints, descargas y entregables mediante escrituras atómicas.",
+        "techDetails": {
+          "type": "database",
+          "items": [
+            {
+              "label": "RepositorioArchivos",
+              "description": "Autoridad operativa compatible con reanudación y jobs históricos."
+            },
+            {
+              "label": "RepositorioConRespaldo",
+              "description": "Replica metadatos a PostgreSQL sin reemplazar la fuente de verdad."
+            },
+            {
+              "label": "Ledger documental",
+              "description": "Marca cada fuente lógica antes de tocar red para impedir redescargas."
+            },
+            {
+              "label": "Atomicidad",
+              "description": "Conserva la versión anterior si Windows bloquea temporalmente el reemplazo."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "generador-excel",
+        "title": "Fábrica del Excel auditable",
+        "icon": "Sheet",
+        "color": "#89B4FA",
+        "borderColor": "#4F7FC8",
+        "technologies": {
+          "entrada": "Espejo + enriquecimiento",
+          "imágenes": "PyMuPDF + Pillow",
+          "motor": "openpyxl",
+          "salida": "XLSX multih hoja"
+        },
+        "connections": [
+          "repositorio-archivos"
+        ],
+        "position": {
+          "x": 2786.0124843488907,
+          "y": 937.7035449829148
+        },
+        "dataFlow": {
+          "sends": [
+            "Excel final",
+            "Hojas por profesional",
+            "Cronología",
+            "Evidencias embebidas"
+          ],
+          "receives": [
+            "Resultado efectivo",
+            "Cruces oficiales",
+            "Certificados",
+            "Reglas y alertas"
+          ]
+        },
+        "purpose": "Reconstruye el formato de evaluación desde datos reconciliados, con evidencias, cronología, colores semánticos y una conclusión consistente en todas las hojas.",
+        "techDetails": {
+          "type": "module",
+          "items": [
+            {
+              "label": "Base de Datos",
+              "description": "Expone procedencia, CUI, estado de fuente y cifras reconciliadas."
+            },
+            {
+              "label": "Hojas profesionales",
+              "description": "Integra requisitos, periodos, evidencias y conclusión por cargo."
+            },
+            {
+              "label": "Cronología",
+              "description": "Presenta contratos, certificados, aprobaciones y reglas de fechas."
+            },
+            {
+              "label": "Semántica visual",
+              "description": "Verde, amarillo, pendiente y violeta tienen significados controlados por pruebas."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "paquete-documental",
+        "title": "Fábrica de sustento documental",
+        "icon": "ArchiveRestore",
+        "color": "#89B4FA",
+        "borderColor": "#4F7FC8",
+        "technologies": {
+          "SEACE": "CacheDescargasSeace",
+          "caché": "cache_obras + hardlinks",
+          "ejecución": "Diferida y asíncrona",
+          "empaquetado": "zipfile"
+        },
+        "connections": [
+          "infoobras",
+          "mef-seace",
+          "repositorio-archivos",
+          "operacion-onprem"
+        ],
+        "position": {
+          "x": 1359.3737363629543,
+          "y": 363.9979037737264
+        },
+        "dataFlow": {
+          "sends": [
+            "ZIP de sustento",
+            "Índice de documentos",
+            "Estado de secciones",
+            "Progreso de descarga"
+          ],
+          "receives": [
+            "CUI y periodos",
+            "Documentos oficiales",
+            "Ledger previo",
+            "Solicitud del usuario"
+          ]
+        },
+        "purpose": "Descarga una sola vez por fuente lógica, reutiliza corpus por obra y construye un ZIP auditable por profesional, experiencia y sección.",
+        "techDetails": {
+          "type": "module",
+          "items": [
+            {
+              "label": "Caché por obra",
+              "description": "Descarga el corpus una vez y materializa copias por experiencia."
+            },
+            {
+              "label": "Secciones independientes",
+              "description": "InfoObras, control, cierre, MEF y SEACE fallan o reintentan por separado."
+            },
+            {
+              "label": "Integridad",
+              "description": "Valida firmas, temporales y testzip antes de publicar el paquete."
+            },
+            {
+              "label": "Materialización diferida",
+              "description": "El veredicto no espera gigabytes; el ZIP se completa al solicitarlo."
+            }
+          ]
+        },
+        "annotations": []
+      },
+      {
+        "id": "operacion-onprem",
+        "title": "Operación, salud y observabilidad",
+        "icon": "Activity",
+        "color": "#BAC2DE",
+        "borderColor": "#737B95",
+        "technologies": {
+          "despliegue": "Docker Compose",
+          "host": "Windows on-prem",
+          "salud": "API + healthchecks",
+          "traza": "JSONL por job"
+        },
+        "connections": [
+          "repositorio-archivos"
+        ],
+        "position": {
+          "x": 3553.7969836561265,
+          "y": 916.360272838926
+        },
+        "dataFlow": {
+          "sends": [
+            "Trazas y métricas",
+            "Estado de portales",
+            "Avisos de frescura",
+            "Señales de operación"
+          ],
+          "receives": [
+            "Spans del pipeline",
+            "Errores clasificados",
+            "Estado MEF/PG",
+            "Progreso de descargas"
+          ]
+        },
+        "purpose": "Plano operativo que ejecuta backend, panel y PostgreSQL on-prem, publica salud de dependencias y conserva trazas sin introducir servicios cloud.",
+        "techDetails": {
+          "type": "infra",
+          "items": [
+            {
+              "label": "Compose de tres servicios",
+              "description": "Backend, Panel y PostgreSQL comparten red y volúmenes controlados."
+            },
+            {
+              "label": "Tracing estructurado",
+              "description": "Registra spans y decisiones por job; nunca rompe el pipeline."
+            },
+            {
+              "label": "Salud operativa",
+              "description": "Distingue backend, base MEF y portales con mensajes accionables."
+            },
+            {
+              "label": "Restricción on-prem",
+              "description": "El servidor tiene salida a fuentes estatales, pero jamás llama IA cloud."
+            }
+          ]
+        },
+        "annotations": []
+      }
+    ],
+    "connectionLabels": {
+      "agentes-documentales-contrato-espejo": "Extracciones y evaluación segmentada",
+      "api-backend-base-mef-local": "Búsquedas CUI y fichas",
+      "api-backend-motor-jobs": "Jobs y reanudaciones",
+      "api-backend-operacion-onprem": "Estado de salud",
+      "api-backend-paquete-documental": "Solicitudes de descarga",
+      "api-backend-repositorio-archivos": "Concursos, estados y artefactos",
+      "base-mef-local-mef-seace": "Datasets y fichas oficiales",
+      "base-mef-local-operacion-onprem": "Frescura y estado de carga",
+      "contrato-espejo-mcp-local": "Paquete de análisis validado",
+      "cruces-oficiales-infoobras": "Ejecución y documentos de obra",
+      "cruces-oficiales-mef-seace": "Ficha, contrato y aprobación",
+      "cruces-oficiales-operacion-onprem": "Estado y latencia de fuentes",
+      "cruces-oficiales-renipress": "Existencia sanitaria auxiliar",
+      "cruces-oficiales-repositorio-archivos": "Evidencia oficial por experiencia",
+      "cruces-oficiales-sunat": "Identidad e historia tributaria",
+      "escudo-integridad-repositorio-archivos": "Confiabilidad y hallazgos",
+      "generador-excel-repositorio-archivos": "Libro final y respaldos",
+      "mcp-local-api-backend": "Análisis, consultas y órdenes",
+      "motor-jobs-cruces-oficiales": "Identidades por verificar",
+      "motor-jobs-escudo-integridad": "Espejo a auditar",
+      "motor-jobs-generador-excel": "Resultado efectivo",
+      "motor-jobs-motor-reglas": "Hechos para reconciliar",
+      "motor-jobs-operacion-onprem": "Métricas y fallos por etapa",
+      "motor-jobs-repositorio-archivos": "Checkpoints y enriquecimiento",
+      "motor-jobs-resolver-cui": "Experiencias por identificar",
+      "motor-reglas-generador-excel": "Resultado reconciliado",
+      "motor-reglas-operacion-onprem": "Métricas de cálculo",
+      "motor-reglas-repositorio-archivos": "Cálculos, alertas y estado efectivo",
+      "operacion-onprem-repositorio-archivos": "Trazas y bitácoras",
+      "panel-web-api-backend": "Archivos, decisiones y resultados",
+      "paquete-documental-infoobras": "Corpus de obra y control",
+      "paquete-documental-mef-seace": "Bases, contratos y aprobaciones",
+      "paquete-documental-operacion-onprem": "Progreso y secciones fallidas",
+      "paquete-documental-repositorio-archivos": "ZIP, índice y ledger",
+      "resolver-cui-base-mef-local": "Candidatos y fichas locales",
+      "resolver-cui-infoobras": "Obras para corroboración",
+      "resolver-cui-operacion-onprem": "Trazas de ranking y vetos",
+      "resolver-cui-repositorio-archivos": "Decisiones y candidatos",
+      "skill-osce-agentes-documentales": "Documentos, contexto y tareas"
+    },
+    "scenarios": [
+      {
+        "id": "analisis-integral",
+        "name": "Análisis integral de una propuesta",
+        "description": "Recorrido ejecutivo desde miles de folios hasta un entregable auditable.",
+        "steps": [
+          {
+            "title": "Se divide el expediente",
+            "narration": "La skill identifica el tipo de documento y distribuye bases, mapa y profesionales sin mezclar folios.",
+            "edges": [
+              {
+                "from": "skill-osce",
+                "to": "agentes-documentales"
+              }
+            ],
+            "duration": 3600
+          },
+          {
+            "title": "Se consolida una sola verdad declarada",
+            "narration": "Las salidas segmentadas se fusionan en el contrato espejo, separando lo literal de lo pendiente de verificación.",
+            "edges": [
+              {
+                "from": "agentes-documentales",
+                "to": "contrato-espejo"
+              }
+            ],
+            "duration": 3600
+          },
+          {
+            "title": "El paquete cruza la LAN",
+            "narration": "El MCP local entrega el paquete autorizado a la API on-prem.",
+            "edges": [
+              {
+                "from": "contrato-espejo",
+                "to": "mcp-local"
+              },
+              {
+                "from": "mcp-local",
+                "to": "api-backend"
+              }
+            ],
+            "duration": 3600
+          },
+          {
+            "title": "El job entra al pipeline",
+            "narration": "La API crea el job solo después de validar tamaños y firmas, y dispara el motor reanudable.",
+            "edges": [
+              {
+                "from": "api-backend",
+                "to": "motor-jobs"
+              }
+            ],
+            "duration": 3600
+          },
+          {
+            "title": "Se audita la integridad",
+            "narration": "El escudo detecta omisiones, corrimientos o conclusiones sin sustento antes de confiar en la evaluación.",
+            "edges": [
+              {
+                "from": "motor-jobs",
+                "to": "escudo-integridad"
+              },
+              {
+                "from": "escudo-integridad",
+                "to": "repositorio-archivos"
+              }
+            ],
+            "duration": 3800
+          },
+          {
+            "title": "Se identifica cada inversión",
+            "narration": "El resolver fusiona la base MEF local con InfoObras y se abstiene si no hay identidad suficiente.",
+            "edges": [
+              {
+                "from": "motor-jobs",
+                "to": "resolver-cui"
+              },
+              {
+                "from": "resolver-cui",
+                "to": "base-mef-local"
+              },
+              {
+                "from": "resolver-cui",
+                "to": "infoobras"
+              }
+            ],
+            "duration": 4200
+          },
+          {
+            "title": "Se cruzan las fuentes oficiales",
+            "narration": "InfoObras, MEF/SEACE, SUNAT y RENIPRESS aportan hechos independientes y estados explícitos.",
+            "edges": [
+              {
+                "from": "motor-jobs",
+                "to": "cruces-oficiales"
+              },
+              {
+                "from": "cruces-oficiales",
+                "to": "infoobras"
+              },
+              {
+                "from": "cruces-oficiales",
+                "to": "mef-seace"
+              },
+              {
+                "from": "cruces-oficiales",
+                "to": "sunat"
+              },
+              {
+                "from": "cruces-oficiales",
+                "to": "renipress"
+              }
+            ],
+            "duration": 4800
+          },
+          {
+            "title": "Se reconcilia y entrega",
+            "narration": "Las reglas producen el estado efectivo y la fábrica Excel publica un libro consistente y trazable.",
+            "edges": [
+              {
+                "from": "motor-jobs",
+                "to": "motor-reglas"
+              },
+              {
+                "from": "motor-reglas",
+                "to": "generador-excel"
+              },
+              {
+                "from": "generador-excel",
+                "to": "repositorio-archivos"
+              }
+            ],
+            "duration": 4200
+          }
+        ]
+      },
+      {
+        "id": "identidad-y-abstencion",
+        "name": "Identidad CUI con abstención segura",
+        "description": "Cómo el sistema evita que una coincidencia atractiva se convierta en un falso CUMPLE.",
+        "steps": [
+          {
+            "title": "Se recibe una experiencia",
+            "narration": "El motor entrega proyecto, entidad, ubicación, emisor y código citado al resolver.",
+            "edges": [
+              {
+                "from": "motor-jobs",
+                "to": "resolver-cui"
+              }
+            ],
+            "duration": 3200
+          },
+          {
+            "title": "Se consulta la referencia local",
+            "narration": "CUI/SNIP exactos y candidatos por nombre se obtienen de la carga MEF activa.",
+            "edges": [
+              {
+                "from": "resolver-cui",
+                "to": "base-mef-local"
+              }
+            ],
+            "duration": 3400
+          },
+          {
+            "title": "Se corrobora en obra pública",
+            "narration": "Los candidatos relevantes se contrastan con InfoObras sin usar las fechas declaradas para escoger identidad.",
+            "edges": [
+              {
+                "from": "resolver-cui",
+                "to": "infoobras"
+              }
+            ],
+            "duration": 3400
+          },
+          {
+            "title": "Se aplican vetos y candados",
+            "narration": "Rubro, provincia, entidad municipal, empates y señales débiles pueden degradar el resultado a revisión.",
+            "focus": [
+              "resolver-cui"
+            ],
+            "duration": 3900
+          },
+          {
+            "title": "La decisión queda trazable",
+            "narration": "Ganador, candidatos, vetos o abstención se persisten y se registran en la traza.",
+            "edges": [
+              {
+                "from": "resolver-cui",
+                "to": "repositorio-archivos"
+              },
+              {
+                "from": "resolver-cui",
+                "to": "operacion-onprem"
+              }
+            ],
+            "duration": 3600
+          }
+        ]
+      },
+      {
+        "id": "camino-expediente",
+        "name": "Camino A · Expediente técnico",
+        "description": "Verificación de un servicio de expediente sin confundirlo con la ejecución posterior de la obra.",
+        "steps": [
+          {
+            "title": "Se confirma la inversión",
+            "narration": "El resolver identifica el CUI con las compuertas habituales.",
+            "edges": [
+              {
+                "from": "motor-jobs",
+                "to": "resolver-cui"
+              }
+            ],
+            "duration": 3200
+          },
+          {
+            "title": "Se busca el proceso correcto",
+            "narration": "La capa multifuente obtiene ficha 08-A y proceso SEACE del tipo esperado.",
+            "edges": [
+              {
+                "from": "motor-jobs",
+                "to": "cruces-oficiales"
+              },
+              {
+                "from": "cruces-oficiales",
+                "to": "mef-seace"
+              }
+            ],
+            "duration": 3800
+          },
+          {
+            "title": "Se valida la identidad documental",
+            "narration": "Entidad, adjudicatario, objeto, fechas y monto sostienen o degradan el proceso elegido.",
+            "focus": [
+              "cruces-oficiales"
+            ],
+            "duration": 3800
+          },
+          {
+            "title": "Se cruzan contrato y aprobación",
+            "narration": "Las reglas comparan inicio, firma, término y resolución con gates anti-circularidad.",
+            "edges": [
+              {
+                "from": "motor-jobs",
+                "to": "motor-reglas"
+              }
+            ],
+            "duration": 3800
+          },
+          {
+            "title": "Se materializa la evidencia",
+            "narration": "Bases, contrato y aprobación quedan en el ZIP y en la cronología del Excel.",
+            "edges": [
+              {
+                "from": "motor-reglas",
+                "to": "generador-excel"
+              },
+              {
+                "from": "api-backend",
+                "to": "paquete-documental"
+              },
+              {
+                "from": "paquete-documental",
+                "to": "mef-seace"
+              }
+            ],
+            "duration": 4200
+          }
+        ]
+      },
+      {
+        "id": "camino-obra",
+        "name": "Camino B · Supervisión o ejecución",
+        "description": "Verificación de tiempo efectivo usando la ejecución física publicada por Contraloría.",
+        "steps": [
+          {
+            "title": "Se identifica la obra",
+            "narration": "El resolver fija un CUI o se abstiene antes de usar cualquier valorización.",
+            "edges": [
+              {
+                "from": "motor-jobs",
+                "to": "resolver-cui"
+              },
+              {
+                "from": "resolver-cui",
+                "to": "infoobras"
+              }
+            ],
+            "duration": 3600
+          },
+          {
+            "title": "Se recupera la ejecución",
+            "narration": "InfoObras aporta valorizaciones, paralizaciones, cierre e informes de control.",
+            "edges": [
+              {
+                "from": "motor-jobs",
+                "to": "cruces-oficiales"
+              },
+              {
+                "from": "cruces-oficiales",
+                "to": "infoobras"
+              }
+            ],
+            "duration": 4000
+          },
+          {
+            "title": "Se verifica al emisor",
+            "narration": "SUNAT contrasta identidad e historia tributaria durante el periodo declarado.",
+            "edges": [
+              {
+                "from": "cruces-oficiales",
+                "to": "sunat"
+              }
+            ],
+            "duration": 3600
+          },
+          {
+            "title": "Se calcula el tiempo efectivo",
+            "narration": "El motor de reglas aplica días inclusivos, paralizaciones, traslapes y mínimo exigido.",
+            "edges": [
+              {
+                "from": "motor-jobs",
+                "to": "motor-reglas"
+              }
+            ],
+            "duration": 3900
+          },
+          {
+            "title": "Se arma el sustento",
+            "narration": "El corpus se reutiliza por obra y se organiza por profesional e experiencia.",
+            "edges": [
+              {
+                "from": "api-backend",
+                "to": "paquete-documental"
+              },
+              {
+                "from": "paquete-documental",
+                "to": "infoobras"
+              },
+              {
+                "from": "paquete-documental",
+                "to": "repositorio-archivos"
+              }
+            ],
+            "duration": 4200
+          }
+        ]
+      },
+      {
+        "id": "revision-humana",
+        "name": "Revisión humana y reanálisis acotado",
+        "description": "Una incertidumbre se resuelve sin repetir fuentes ni perder la trazabilidad previa.",
+        "steps": [
+          {
+            "title": "El panel explica el pendiente",
+            "narration": "El evaluador ve proyecto, motivo, candidatos y fuentes en lenguaje de decisión.",
+            "focus": [
+              "panel-web"
+            ],
+            "duration": 3200
+          },
+          {
+            "title": "Se confirma o corrige",
+            "narration": "La decisión CUI/RUC llega a la API con el dato anterior y el valor corregido.",
+            "edges": [
+              {
+                "from": "panel-web",
+                "to": "api-backend"
+              }
+            ],
+            "duration": 3200
+          },
+          {
+            "title": "El motor reanuda selectivamente",
+            "narration": "Solo se invalidan y repiten las etapas aguas abajo de esa experiencia.",
+            "edges": [
+              {
+                "from": "api-backend",
+                "to": "motor-jobs"
+              }
+            ],
+            "duration": 3600
+          },
+          {
+            "title": "Se recalcula la conclusión",
+            "narration": "Las reglas actualizan estado efectivo, días y alertas sin rehacer trabajo independiente.",
+            "edges": [
+              {
+                "from": "motor-jobs",
+                "to": "motor-reglas"
+              },
+              {
+                "from": "motor-reglas",
+                "to": "repositorio-archivos"
+              }
+            ],
+            "duration": 3800
+          },
+          {
+            "title": "Se regenera el entregable",
+            "narration": "El Excel incorpora la corrección; el ZIP solo cambia si apareció una fuente lógica nueva.",
+            "edges": [
+              {
+                "from": "motor-reglas",
+                "to": "generador-excel"
+              },
+              {
+                "from": "generador-excel",
+                "to": "repositorio-archivos"
+              }
+            ],
+            "duration": 3800
+          }
+        ]
+      },
+      {
+        "id": "refresco-mef",
+        "name": "Refresco seguro de la base MEF",
+        "description": "Actualización versionada que nunca sustituye una carga sana por datos incompletos.",
+        "steps": [
+          {
+            "title": "Se solicitan los datasets oficiales",
+            "narration": "El ETL obtiene activas, cerradas y desactivadas desde MEF Datos Abiertos.",
+            "edges": [
+              {
+                "from": "base-mef-local",
+                "to": "mef-seace"
+              }
+            ],
+            "duration": 3500
+          },
+          {
+            "title": "Se valida antes de publicar",
+            "narration": "Volumen, identidades y archivos se comprueban antes de activar la nueva carga.",
+            "focus": [
+              "base-mef-local"
+            ],
+            "duration": 3800
+          },
+          {
+            "title": "Se sirven dos representaciones",
+            "narration": "El índice RAM responde nombres y PostgreSQL conserva la ficha enriquecida exacta.",
+            "focus": [
+              "base-mef-local"
+            ],
+            "duration": 3600
+          },
+          {
+            "title": "La frescura queda visible",
+            "narration": "Éxito o fallo se registra y aparece en salud, búsquedas y observaciones del análisis.",
+            "edges": [
+              {
+                "from": "base-mef-local",
+                "to": "operacion-onprem"
+              },
+              {
+                "from": "operacion-onprem",
+                "to": "repositorio-archivos"
+              }
+            ],
+            "duration": 3600
+          }
+        ]
+      },
+      {
+        "id": "descarga-diferida",
+        "name": "Descarga diferida de sustento",
+        "description": "Los gigabytes documentales se procesan fuera del camino crítico del veredicto.",
+        "steps": [
+          {
+            "title": "El usuario pide el paquete",
+            "narration": "Panel o MCP solicitan una descarga existente o por CUI.",
+            "edges": [
+              {
+                "from": "panel-web",
+                "to": "api-backend"
+              }
+            ],
+            "duration": 3000
+          },
+          {
+            "title": "La API crea seguimiento",
+            "narration": "Se responde inmediatamente con estado y la fábrica continúa en segundo plano.",
+            "edges": [
+              {
+                "from": "api-backend",
+                "to": "paquete-documental"
+              }
+            ],
+            "duration": 3200
+          },
+          {
+            "title": "Se reutiliza evidencia",
+            "narration": "La fábrica usa caché por obra, ledger por fuente y descarga solo secciones pendientes.",
+            "edges": [
+              {
+                "from": "paquete-documental",
+                "to": "infoobras"
+              },
+              {
+                "from": "paquete-documental",
+                "to": "mef-seace"
+              }
+            ],
+            "duration": 4200
+          },
+          {
+            "title": "Se publica un ZIP auditable",
+            "narration": "Índice, faltantes y archivos válidos se guardan; el progreso queda observable.",
+            "edges": [
+              {
+                "from": "paquete-documental",
+                "to": "repositorio-archivos"
+              },
+              {
+                "from": "paquete-documental",
+                "to": "operacion-onprem"
+              }
+            ],
+            "duration": 3800
+          }
+        ]
+      }
+    ]
+  }
+}
