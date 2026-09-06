@@ -2,7 +2,68 @@
 
 > Última actualización: **2026-09-05** · rama de trabajo: `demo`
 
+Cierre solicitado: cambios locales separados en commits de hoja ET, Gantt,
+numeración por escaneo, ZIP, privacidad y documentación. Ver primera sección
+del [handoff del día](../handoffs/2026-09-05_codex.md). Backend focal: 133 passed,
+1 skipped; skill Node: 54 passed. Sin push ni despliegue; la sonda OCR sigue
+separada y el especialista documental no está implementado. La validación de
+conocimiento local conserva errores históricos de frontmatter, fuera de este cierre.
+
+Mapeo posterior del orden actual concluido, solo documentación:
+[mapa procedural de expedientes y obras](../../../.ai/architecture/mapa-procedural-actual.md).
+Incluye skill, MCP, nueve etapas, variantes por ruta, conciliación, Excel/ZIP,
+Panel y revisiones. No es una nueva corrida ni implementación del plan documental.
+
+Plan posterior, no implementación: el backend debe entregar todo el texto del
+corpus acordado, sin preselección semántica, y la skill incorpora un especialista
+solo para expedientes. Fuente canónica (desde este documento):
+`../../../.ai/architecture/plan-expedientes-backend-skill.md`, ADR-S010 propuesto.
+Incluye puente MCP, pausa/reanudación durable y pruebas; no cambia producto/jobs.
+Esta dirección sustituye la propuesta de promover preselección del sondeo.
+
+Sondeo posterior autorizado, fuera de esta carpeta: worktree hermano del sistema
+`InfoObras-ocr-local`, rama `sonda/ocr-expedientes`, base `328d780`. Descarga nueva,
+OCR Tesseract, caché y candidatos documentales probados; sin integración/producto
+ni modificación de jobs. Registro canónico de resultados y límites:
+`../../../.ai/experiments/2026-09-05_ocr-expedientes.md` (desde este documento).
+No confundir documentos localizados con experiencias acreditadas; el sondeo
+no sustituye la interpretación del agente y conserva un fallo adversarial abierto.
+
+Material privado del chat: `docs/indicaciones_chat/errores_encontrados/` y
+`docs/indicaciones_chat/busqueda/`. Esta última contiene el nuevo requerimiento
+de descarga de documentos MEF. Alcance confirmado solo B; investigación del
+caso inicial ampliada a21 CUI, sin implementar aún reglas generales en el
+sistema. Informe y evidencia privada en
+`busqueda/estudio_b_18_cuis_2026-09-05/INFORME_PATRON_APROBACION.md`.
+Incluye adjuntos directos e indirectos de controversias enlazadas desdeB,
+clasificación de actos, alcance, fechas y limitaciones de la muestra.
+Carpeta completa excluida de Git.
+
+Flujo económico propuesto, no implementado: `docs/indicaciones_chat/busqueda/PROPUESTA_FLUJO_EXPEDIENTES.md`.
+Mantiene skill extractora y backend verificador, con evidencia documental compartida
+y lectura local reutilizable; no introduce un segundo ciclo de IA obligatorio.
+
 ## Auditoría de las dos presentaciones (5-sep, Codex)
+
+Numeración adaptada al escaneado para nuevas extracciones: regla en el prompt,
+auditoría determinística previa al evaluador y gate repetido al consolidar.
+Las vistas conservan `n`; ZIP añade proyecto abreviado a la carpeta E# sin
+cambiar claves ni fuentes. No se renumeraron jobs guardados. Detalles y pruebas
+en [handoff actual](../handoffs/current.md). Sustituye el registro pendiente
+de imágenes: la causa era la antigua regla de orden por fecha final.
+
+Actualización vigente: Gantt continuo bimestral en expedientes, sin tramos,
+con días de Inicio/Fin y de hitos, supuestos visibles y leyenda compartida. Excel más
+reciente actualizado con respaldo. Investigación de cobertura concluida, sin
+modificar resolver ni estados: [informe privado](../../docs/comercial/auditorias/2026-09-05-rutas/investigacion-identificacion-expedientes.md).
+Último gate: 70 focales aprobadas; no se repitió suite completa en este cambio.
+Sin Orca ni despliegue. Detalles de entrega en el handoff actual; abajo, historia.
+
+Simplificación posterior autorizada: retiradas tarjetas independientes de
+cruces en expedientes; incidencias conservadas junto al certificado. Parte 5,
+conclusión y Gantt preservados; 159 pruebas focales y comparación real de
+ambas rutas. Excel más reciente actualizado con respaldo. Detalle en
+[`handoffs/current.md`](../handoffs/current.md).
 
 Último ajuste de presentación: leyenda explícita del Gantt compartida entre
 hojas profesionales y cronología general (muestras de color, marcas y escala).

@@ -1,9 +1,120 @@
 ---
-timestamp: "2026-09-05T16:55:32-05:00"
+timestamp: "2026-09-05T23:21:35-05:00"
 agent: Codex
 ---
 
 # Handoff — punto de continuación
+
+Última petición: commitear los pendientes de Pivote atómicamente. Separados por
+tema: hoja ET, Gantt, orden de escaneo, ZIP, privacidad, scaffolding documental y
+cierre de contexto. No se implementa el especialista ni se integra la sonda OCR.
+Pruebas focales: backend 133 passed / 1 skipped; Node 54 passed. Ocho pruebas
+adicionales sobre índice exportado verifican independencia del primer commit.
+Validación documental local sigue con deuda de frontmatter histórica; no se
+omitieron hooks ni se reformaron ADRs. Sin push/deploy. Detalle en handoff fechado.
+Las entradas siguientes son históricas.
+
+Última petición: orden procedural de ambas rutas mapeado por lectura de código.
+Fuente canónica: [mapa actual](../../../.ai/architecture/mapa-procedural-actual.md).
+No implementar sin distinguirlo del plan backend/skill. El mapa incluye autoridad
+de conciliación, tres usos del juicio documental y secuencia Excel/descargas.
+Sin cambios funcionales ni corridas. Véase primera entrada del handoff del día.
+Validación local de conocimiento pendiente por frontmatter de tareas/ADR históricos;
+detalle en handoff fechado. El mapa y la validación de sistema están correctos.
+
+Plan posterior listo, no implementación: `../../../.ai/architecture/plan-expedientes-backend-skill.md`.
+ADR-S010 propuesto. Backend sin preselección documental, entrega de texto íntegro
+ordenado por MCP, especialista de skill solo en expedientes, retorno trazable y
+reanudación. No promover el clasificador del sondeo. Véase primera entrada del
+handoff de hoy; las entradas siguientes son históricas.
+
+Última petición: sondeo de flujo Tesseract en worktree concluido, no integrado.
+Registro canónico: `../../../.ai/experiments/2026-09-05_ocr-expedientes.md`.
+Código y datos privados en worktree hermano del sistema `InfoObras-ocr-local`,
+rama `sonda/ocr-expedientes` desde `328d780`. No fusionar como verificador:
+la prueba respalda preprocesamiento, no asociación ni acreditación autónoma.
+Véase primera sección del handoff de hoy. Lo que sigue es histórico.
+
+Última consulta: recomendación de flujo económico, no implementación.
+Fuente canónica: `docs/indicaciones_chat/busqueda/PROPUESTA_FLUJO_EXPEDIENTES.md`.
+El usuario pregunta dónde consumir la evidencia; no ha autorizado esta nueva
+implementación. Mantener lectura/verificación en backend y reutilizar resultados
+para entregables; no remitir todos los PDF a la skill.
+
+Investigación MEF ampliada a21 CUI. Informe canónico privado:
+`docs/indicaciones_chat/busqueda/estudio_b_18_cuis_2026-09-05/INFORME_PATRON_APROBACION.md`.
+Descarga completa de adjuntos disponibles directosB y de fichas de controversias
+enlazadas desdeB; lectura por página, hashes y clasificación documental.
+Continuación: convertir evidencia en plan de implementación, no adoptar un
+selector por título ni por «SE RESUELVE» solamente. No se tocaron producto,
+jobs o entregables ni se midió acierto automático. Sin Orca. Véase también
+[handoff de investigación](2026-09-05_codex.md). Lo siguiente es histórico.
+
+Nuevo requerimiento MEF: alcance confirmado solo B. Descargados todos los
+adjuntos del caso2355382 y analizado patrón de aprobación; evidencia y límites
+en `docs/indicaciones_chat/busqueda/cui2355382_seccion_b/ANALISIS_APROBACION.md`.
+5 PDF/8 enlaces, lectura por página con OCR local y comprobación visual sin
+Orca. No implementación general, no cambios de producto, jobs ni veredictos.
+
+Organización posterior: notas e imágenes del usuario ahora viven en
+`docs/indicaciones_chat/errores_encontrados/`; carpeta hermana `busqueda/`
+creada vacía. Movimiento verificado por SHA-256 de los cuatro archivos.
+Todo `docs/indicaciones_chat/` excluido de Git; sin cambios del sistema.
+
+## Identidad de experiencias por escaneado implementada (Codex)
+
+La numeración antigua por fecha final explicaba la discrepancia del reporte.
+Nuevas extracciones asignan n contiguo según página física principal, y orden
+de aparición entre periodos de una misma página. `auditar_orden_experiencias.js`
+comprueba sin mutar: antes de evaluar (Paso 2.6) y dentro del consolidador.
+Inversión comprobada o numeración inválida = crítico/exit 1. Página ausente =
+advertencia explícita (no usa folio como sustituto, no certifica el orden).
+No reordenar juicios ya emitidos: corregir extracción y repetir evaluación.
+
+ZIP: carpetas `E{n} {proyecto abreviado}` (36 caracteres de nombre, saneados);
+claves `n_prof:n_exp`, descargas `P#_E#` y recortes no cambian. Panel ya consume
+n/proyecto del espejo; Gantt ordena visualmente por inicio conservando n/CUI.
+No cambios de schema, resolver, jobs guardados, recortes reales ni Excel/ZIP
+existentes. El junction local de la skill apunta al repo y recibe el ajuste;
+no se reconstruyó paquete de distribución ni se desplegó nada.
+
+Pruebas: 69 Node aprobadas (incluye gate CLI, unión por n y recortes PDF reales
+sintéticos con anexos). Backend completo: 1296 passed / 25 skipped y un fallo
+en el filtro del test NUEVO del Gantt (incluía también encabezados). Filtro
+corregido, sin cambio de producto: repetición `--lf` 1 passed; gate de Excel,
+Gantt y ZIP 125 passed / 1 skipped. No se repitió toda la suite después de
+corregir ese test. Auditoría de solo lectura sobre el caso reportado detecta
+las inversiones; no se guardó renumeración.
+Decisión transversal registrada en ADR-S009 del nivel sistema. Sin Orca,
+subagentes ni commit. Lo siguiente es historia de las presentaciones.
+
+Presentación vigente: **Gantt continuo bimestral**, sin dividir trayectorias.
+Conserva ambas ubicaciones (profesional/general), fechas Inicio/Fin, C/R,
+supuestos, leyenda y cálculo. Retirada segmentación de tres años. 70 focales
+aprobadas; Excel más reciente regenerado con respaldo, valores anteriores al
+Gantt y JSON intactos. Muestra real inspeccionada en memoria, sin Orca/scratch.
+No nueva corrida, cambios de resolver ni commit. Lo siguiente es histórico.
+
+Última intervención (Codex): Gantt de expedientes con meses completos, años,
+Inicio/Fin y C/R fechados, leyenda explícita y tramos de hasta 36 meses.
+Preserva avisos de fechas deducidas, valores anteriores al Gantt y cálculos.
+Suite completa 1293 passed / 25 skipped; último ajuste del contador cubierto
+por gate de 69 focales. Excel más reciente regenerado con respaldo, JSON intactos.
+Investigación privada de cobertura: referencias contractuales desaprovechadas,
+rutas privadas, recuperación/geografía de candidatos, identidad de emisor y
+cola multiobra. NO se implementó nada del resolver ni se promovieron decisiones.
+Véase [informe privado y plan](../../docs/comercial/auditorias/2026-09-05-rutas/investigacion-identificacion-expedientes.md).
+Sin Orca/deploy/commit nuevo. Las entradas siguientes son históricas.
+
+Último ajuste: checkpoint `328d780` antes de retirar las tarjetas de cruces
+independientes SOLO en expedientes. Las incidencias/motivos y fechas inferidas
+quedan junto al certificado; Parte 5 y conclusión conservan contenido/formato,
+y los Gantt conservan imágenes idénticas en la muestra real. Obras sin cambios
+en el control antes/después. **159 pruebas focales aprobadas**; ocho regresiones
+nuevas en `test_expedientes_sin_tarjetas_cruces.py`. Excel más reciente
+regenerado con respaldo, fuentes originales intactas; scratch propio a Papelera.
+Sin Orca, push/deploy ni suite completa nueva. Cambios posteriores al checkpoint
+sin commit. Las entradas siguientes son históricas.
 
 Actualización posterior: leyenda explícita del Gantt con cinco muestras de
 color, C/R/≈, meses/trimestres y lectura de cruces, compartida entre imagen y

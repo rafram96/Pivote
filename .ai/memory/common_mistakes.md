@@ -1,5 +1,19 @@
 # Errores ya cometidos (no repetir)
 
+- **Confundir rótulo del adjunto con tipo/alcance del acto**: un enlace de
+  aprobación puede entregar una memoria, un acta de terreno o un archivo
+  vacío con HTTP200. La aprobación real también puede ser un formato firmado
+  dentro de un informe largo, sin «SE RESUELVE». Clasificar el contenido y su
+  objeto antes de extraer fechas o atribuirlo a una experiencia; preservar
+  las discrepancias. Consultar la investigación privada enlazada en el
+  handoff del5-sep antes de diseñar la descarga ampliada de expedientes.
+
+- **Numerar por fechas cuando el evaluador usa el escaneado**: produce un
+  aparente intercambio de experiencias aunque los documentos correspondan.
+  Asignar n por página física principal antes de evaluar, y conservarlo en
+  todas las vistas. No reparar renumerando solo Excel/ZIP ni el espejo ya
+  evaluado: juicios, recortes y enriquecimiento están unidos por ese número.
+
 - **Clasificar por un solo campo**: el tipo expediente/obra se leía solo de
   `proyecto`; el certificado dice "Elaboración del ET: «X»" y la skill guardaba
   solo «X» → 51/68 expedientes tratados como obra. Clasificar por TODA la
