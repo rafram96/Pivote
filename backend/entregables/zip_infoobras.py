@@ -764,6 +764,17 @@ def _corto(txt: str, maxlen: int) -> str:
     return t[:maxlen].strip() or "(sin nombre)"
 
 
+def _carpeta_experiencia(n: int, proyecto: str) -> str:
+    """Etiqueta humana; n sigue siendo la única clave de asociación.
+
+    Acota el nombre para no consumir el presupuesto de rutas Windows. El
+    proyecto completo sigue disponible en el espejo/Excel/índice Markdown.
+    """
+    nombre = re.sub(r"[\x00-\x1f]", " ", str(proyecto or ""))
+    nombre = _corto(nombre, 36).rstrip(" .") or "(sin nombre)"
+    return f"E{n} {nombre}"
+
+
 def _sha256_archivo(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as fh:
@@ -1033,7 +1044,7 @@ def construir_zip_infoobras(
             nivel2 = _corto(f"P{n_prof:02d} {_cargo_corto(prof.get('cargo', ''))}", 22)
             for e in prof.get("experiencias", []):
                 n_exp = e.get("n")
-                nivel3 = f"E{n_exp}"
+                nivel3 = _carpeta_experiencia(n_exp, e.get("proyecto"))
                 base = f"{nivel2}/{nivel3}"
                 proyecto = str(e.get("proyecto") or "sin proyecto")
 

@@ -13,6 +13,7 @@ import openpyxl
 import pytest
 
 from entregables import construir_zip_infoobras, generar_excel_final, inventariar
+from entregables.zip_infoobras import _carpeta_experiencia
 from scripts.generar_excel import generar_excel
 from schemas.cargo import etiqueta_hoja
 from reglas import dias_efectivos_profesional
@@ -188,6 +189,33 @@ def test_excel_final_fixture_libertador(tmp_path):
 
 # ── ZIP InfoObras ─────────────────────────────────────────────────────────────
 
+def test_zip_nombre_corto_seguro_sin_cambiar_claves_ni_evidencia(tmp_path):
+    import copy
+    espejo = copy.deepcopy(ESPEJO)
+    exps = espejo["profesionales"][0]["experiencias"]
+    exps[0]["proyecto"] = 'Proyecto "sintético" / prueba: ' + "nombre largo " * 30
+    exps[1]["proyecto"] = exps[0]["proyecto"]
+    # E1 sigue primero en el escaneado, aunque E2 sea más antigua.
+    exps[0]["fecha_inicial"], exps[1]["fecha_inicial"] = "2024-01-01", "2020-01-01"
+    copia = copy.deepcopy(espejo)
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    (a / "prueba.pdf").write_bytes(b"evidencia E1")
+    (b / "prueba.pdf").write_bytes(b"evidencia E2")
+    salida = construir_zip_infoobras(espejo, {(1, 1): a, (1, 2): b}, tmp_path / "nombre.zip")
+    with zipfile.ZipFile(salida) as zf:
+        for n in (1, 2):
+            carpeta = _carpeta_experiencia(n, exps[n - 1]["proyecto"])
+            assert carpeta.startswith(f"E{n} Proyecto ")
+            assert len(carpeta) <= 40
+            assert not any(c in carpeta for c in '<>:"/\\|?*')
+            assert zf.read(f"P01 SUPERVISIÓN/{carpeta}/prueba.pdf") == f"evidencia E{n}".encode()
+    assert espejo == copia
+    assert _carpeta_experiencia(3, None) == "E3 (sin nombre)"
+    assert not _carpeta_experiencia(4, "... \n").endswith((".", " "))
+
+
 def test_zip_arbol_de_4_niveles_con_y_sin_documentos(tmp_path):
     # docs reales descargados por el prototipo (gitignored) si están; si no, sintéticos
     origen = RAIZ / "tools" / "_descargas_72056"
@@ -201,9 +229,9 @@ def test_zip_arbol_de_4_niveles_con_y_sin_documentos(tmp_path):
 
     with zipfile.ZipFile(salida) as zf:
         nombres = zf.namelist()
-        # carpeta corta "P{nn} {cargo}" / "E{n}" (nombres cortos para el límite 260
+        # carpeta corta "P{nn} {cargo}" / "E{n} {proyecto}" (límite 260
         # de Windows; el nivel del concurso se omite, va en el indice.txt)
-        pref = "P01 SUPERVISIÓN/E1/"
+        pref = "P01 SUPERVISIÓN/E1 Obra A/"
         assert any(n.startswith(pref) for n in nombres)
         # la experiencia CON descargas trae archivos reales
         con_docs = [n for n in nombres if n.startswith(pref) and not n.endswith("/")]
@@ -242,7 +270,7 @@ def test_zip_carpeta_vacia_deja_nota_y_fallos_en_indice(tmp_path):
 
     with zipfile.ZipFile(salida) as zf:
         nombres = zf.namelist()
-        assert any(n.startswith("P01 SUPERVISIÓN/E1/")
+        assert any(n.startswith("P01 SUPERVISIÓN/E1 Obra A/")
                    and n.endswith("SIN_DOCUMENTOS.txt") for n in nombres)
         indice = zf.read("indice.txt").decode("utf-8")
         assert "SECCIÓN InfoObras: consulta fallida (0/3 descargados)" in indice
@@ -270,8 +298,8 @@ def test_zip_arbol_completo_por_experiencia_con_manifiestos(tmp_path):
         nombres = zf.namelist()
         # cero almacén central: los PDF viven dentro de cada experiencia
         assert not any(n.startswith("DOCUMENTOS_COMPARTIDOS/") for n in nombres)
-        assert "P01 SUPERVISIÓN/E1/original-a.pdf" in nombres
-        assert "P01 SUPERVISIÓN/E2/otro-nombre.pdf" in nombres
+        assert "P01 SUPERVISIÓN/E1 Obra A/original-a.pdf" in nombres
+        assert "P01 SUPERVISIÓN/E2 Obra B/otro-nombre.pdf" in nombres
         manifests = [n for n in nombres if n.endswith("MANIFIESTO_DOCUMENTOS.txt")]
         assert len(manifests) == 2
         huellas = [zf.read(m).decode("utf-8") for m in manifests]
@@ -309,8 +337,8 @@ def test_zip_sin_manifiestos_cuando_la_variable_esta_en_cero(tmp_path, monkeypat
         nombres = zf.namelist()
         assert not any(n.endswith("MANIFIESTO_DOCUMENTOS.txt") for n in nombres)
         # los documentos del evaluador siguen ahí, en su árbol por experiencia
-        assert "P01 SUPERVISIÓN/E1/original-a.pdf" in nombres
-        assert "P01 SUPERVISIÓN/E2/otro-nombre.pdf" in nombres
+        assert "P01 SUPERVISIÓN/E1 Obra A/original-a.pdf" in nombres
+        assert "P01 SUPERVISIÓN/E2 Obra B/otro-nombre.pdf" in nombres
         indice = zf.read("indice.txt").decode("utf-8")
         assert "MANIFIESTO_DOCUMENTOS.txt" not in indice
         assert "huella SHA-256" not in indice
@@ -450,7 +478,8 @@ def test_indice_desactivado_no_deja_ningun_indice(tmp_path, monkeypatch):
     with zipfile.ZipFile(salida) as zf:
         nombres = zf.namelist()
         assert not any(n.startswith("indice.") for n in nombres)
-        assert "P01 SUPERVISIÓN/E1/original-a.pdf" in nombres   # el árbol no cambia
+        carpeta = _carpeta_experiencia(1, PROYECTO_LARGO)
+        assert f"P01 SUPERVISIÓN/{carpeta}/original-a.pdf" in nombres
 
 
 def test_indice_formato_desconocido_cae_al_txt(tmp_path, monkeypatch):
