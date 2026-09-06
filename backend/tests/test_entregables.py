@@ -274,7 +274,7 @@ def test_zip_carpeta_vacia_deja_nota_y_fallos_en_indice(tmp_path):
                    and n.endswith("SIN_DOCUMENTOS.txt") for n in nombres)
         indice = zf.read("indice.txt").decode("utf-8")
         assert "SECCIÓN InfoObras: consulta fallida (0/3 descargados)" in indice
-        assert "SECCIÓN Datos de cierre: sin documentos publicados (0 disponibles)" in indice
+        assert "SECCIÓN Datos de cierre: sin documentos recuperados en la consulta (0 disponibles)" in indice
         assert "ADVERTENCIA: InfoObras" in indice
 
 

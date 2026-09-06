@@ -1,9 +1,18 @@
 ---
-timestamp: "2026-09-05T23:21:35-05:00"
+timestamp: "2026-09-06"
 agent: Codex
 ---
 
 # Handoff — punto de continuación
+
+## 2026-09-06 — Mensajes y procedencia de expedientes
+
+Implementada la primera corrección autorizada. Detalle, pruebas y limitaciones
+en [handoff fechado](2026-09-06_codex.md). Sin cambiar resolver, cálculo ni
+numeración; sin corridas nuevas ni regeneraciones. Cierre en commit solicitado
+por el usuario; matriz consolidada en la arquitectura de nivel sistema. Próximo bloque:
+guardas de origen/páginas, según el diagnóstico de nivel sistema.
+Las entradas siguientes son históricas.
 
 Última petición: commitear los pendientes de Pivote atómicamente. Separados por
 tema: hoja ET, Gantt, orden de escaneo, ZIP, privacidad, scaffolding documental y

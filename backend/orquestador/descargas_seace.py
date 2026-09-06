@@ -50,8 +50,8 @@ _ETIQUETAS_SEACE: dict[str, str] = {
 # Las lee un evaluador dentro de la carpeta de la experiencia: frases completas,
 # sin jerga y sin sugerir nuevas descargas: cada fuente se intenta una vez.
 NOTA_SEACE_DESCARGA_FALLIDA = (
-    "No se pudo obtener este documento en la única consulta realizada. "
-    "El proceso sí lo publica, pero el archivo no quedó disponible."
+    "Se encontró un enlace para este documento, pero no se pudo obtener "
+    "un archivo utilizable en esta corrida."
 )
 
 _NOTAS_SEACE_AUSENCIA: dict[str, str] = {
@@ -59,25 +59,24 @@ _NOTAS_SEACE_AUSENCIA: dict[str, str] = {
         "La consulta a los datos abiertos del SEACE no respondió en esta corrida, "
         "así que no fue posible obtener este documento."
     ),
-    # definitivos: la fuente respondió y el documento no está
+    # La ausencia se limita al resultado de la consulta, no a todo el portal.
     "sin_tipo": (
-        "El SEACE solo publica procesos de otro tipo para esta obra (por ejemplo "
-        "ejecución o equipamiento); el proceso que certifica esta experiencia no "
-        "figura en los datos abiertos."
+        "Entre los procesos recuperados en esta consulta al SEACE, ninguno "
+        "correspondió al tipo de experiencia buscado. No se obtuvo este documento."
     ),
     "sin_procesos": (
-        "Los datos abiertos del SEACE cubren contrataciones desde 2018; esta "
-        "contratación es anterior, por eso sus documentos no están publicados ahí."
+        "La consulta al SEACE no recuperó procesos asociados a esta experiencia. "
+        "Este resultado no determina la causa ni demuestra que el documento no exista."
     ),
     "seleccionado": (
-        "El proceso de contratación sí fue identificado en el SEACE, pero no "
-        "publica este documento entre sus archivos."
+        "Se seleccionó un proceso del SEACE, pero no se identificó un enlace "
+        "para este documento entre los archivos recuperados en la consulta."
     ),
 }
 
 _NOTA_SEACE_AUSENCIA_GENERICA = (
-    "Este documento no figura publicado en los datos abiertos del SEACE para "
-    "esta experiencia."
+    "No se obtuvo este documento del SEACE en esta corrida. "
+    "No se conserva un motivo específico de la consulta."
 )
 
 

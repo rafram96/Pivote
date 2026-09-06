@@ -1,6 +1,12 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-09-05** · rama de trabajo: `demo`
+> Última actualización: **2026-09-06** · rama de trabajo: `demo`
+
+Primer tramo de claridad de expedientes implementado: CUI declarado/utilizado
+coherente en Excel/API/ZIP, notas de ausencia sin causas inventadas y corrección
+de etiquetas en Panel. Sin cambiar cálculo, resolver ni numeración. Sin nuevas
+corridas ni regeneraciones. Commit de cierre solicitado por el usuario. Detalle y verificación en
+[handoff del día](../handoffs/2026-09-06_codex.md). Las entradas siguientes son históricas.
 
 Cierre solicitado: cambios locales separados en commits de hoja ET, Gantt,
 numeración por escaneo, ZIP, privacidad y documentación. Ver primera sección

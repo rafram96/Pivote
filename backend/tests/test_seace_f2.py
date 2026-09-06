@@ -171,13 +171,11 @@ def test_descarga_seace_escribe_notas_honestas(tmp_path):
 def test_notas_seace_hablan_en_frases_de_evaluador(tmp_path):
     """Las notas dicen qué pasó sin convertir el fallo en tarea de descarga."""
     casos = {
-        "sin_tipo": ("El SEACE solo publica procesos de otro tipo para esta obra "
-                     "(por ejemplo ejecución o equipamiento); el proceso que "
-                     "certifica esta experiencia no figura en los datos abiertos.",
+        "sin_tipo": ("Entre los procesos recuperados en esta consulta al SEACE, ninguno "
+                     "correspondió al tipo de experiencia buscado. No se obtuvo este documento.",
                      "NO_DISPONIBLE"),
-        "sin_procesos": ("Los datos abiertos del SEACE cubren contrataciones desde "
-                         "2018; esta contratación es anterior, por eso sus "
-                         "documentos no están publicados ahí.", "NO_DISPONIBLE"),
+        "sin_procesos": ("La consulta al SEACE no recuperó procesos asociados a esta experiencia. "
+                         "Este resultado no determina la causa ni demuestra que el documento no exista.", "NO_DISPONIBLE"),
         "fuente_no_disponible": ("La consulta a los datos abiertos del SEACE no "
                                  "respondió en esta corrida, así que no fue posible "
                                  "obtener este documento.",
@@ -199,8 +197,8 @@ def test_nota_seace_de_descarga_fallida_es_terminal(tmp_path):
                              descargar_seace=lambda _url, _destino: False)
     destino = carpeta_job(tmp_path, "job-falla") / "descargas" / "P1_E1"
     assert (destino / "BASES_INTEGRADAS_ERROR.txt").read_text(encoding="utf-8") == (
-        "No se pudo obtener este documento en la única consulta realizada. "
-        "El proceso sí lo publica, pero el archivo no quedó disponible.\n")
+        "Se encontró un enlace para este documento, pero no se pudo obtener "
+        "un archivo utilizable en esta corrida.\n")
 
 
 def test_notas_seace_llegan_al_zip_con_el_nombre_completo(tmp_path):
@@ -227,7 +225,8 @@ def test_notas_seace_llegan_al_zip_con_el_nombre_completo(tmp_path):
         indice = zf.read("indice.txt").decode("utf-8")
         assert "SIN DOCUMENTOS" in indice
         # el aviso rotula el documento en lenguaje de evaluador, no el archivo
-        assert "Bases Integradas (SEACE): no publicado por la fuente." in indice
+        assert "Bases Integradas (SEACE): no obtenido en esta corrida" in indice
+        assert "no publicado por la fuente" not in indice
         assert "BASES_INTEGRADAS_NO_DISPONIBLE" not in indice
 
 

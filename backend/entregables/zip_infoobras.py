@@ -36,6 +36,9 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 import requests
 
+from entregables.certeza import identificacion_panel, normalizar_motivo_fuente
+from entregables.procedencia import procedencia_cui, rotulo_cui
+
 logger = logging.getLogger(__name__)
 
 # El portal corta la conexión en archivos grandes (IncompleteRead): obras
@@ -729,9 +732,7 @@ def _wlong(p) -> str:
 
 
 def _motivo_sin_docs(via: Optional[str], cui: Optional[str]) -> str:
-    """Razón legible para SIN_DOCUMENTOS.txt según la vía de resolución del backend.
-    NOMBRE/CUI_TEXTO/RUC/PROBABLE/MANUAL = resuelto · NA = no aplica ·
-    NO_EXISTE = no está en InfoObras · None = pendiente."""
+    """Ausencia de archivos, sin equiparar CUI utilizado con confirmado."""
     v = (via or "").upper()
     if v == "PRIVADA":
         return ("Cliente/obra privada: InfoObras solo registra obra pública — "
@@ -741,9 +742,10 @@ def _motivo_sin_docs(via: Optional[str], cui: Optional[str]) -> str:
     if v == "NO_EXISTE":
         return "Obra no encontrada en InfoObras (marcada por el evaluador)."
     if cui:
-        return (f"CUI {cui} resuelto (vía {via or '—'}); sus documentos no se "
-                f"incluyeron en esta descarga.")
-    return "Pendiente de resolución de CUI (sin candidato confirmado)."
+        return (f"CUI {cui} utilizado (vía {via or 'no informada'}); no hay "
+                "documentos incorporados a esta entrega. Esto no prueba su inexistencia.")
+    return ("No hay CUI utilizado registrado ni documentos incorporados a esta entrega. "
+            "La identificación y la obtención de documentos son estados distintos.")
 
 
 def _cargo_corto(cargo: str) -> str:
@@ -856,7 +858,7 @@ def _cabecera_indice(manifiestos: bool) -> list[str]:
 _CAMPOS_INDICE_JSON = (
     "n_prof", "cargo", "n_exp", "proyecto", "documentos", "compartidos",
     "propios", "notas", "sin_documentos", "motivo", "secciones_incompletas",
-    "advertencias", "seace",
+    "advertencias", "seace", "procedencia", "identificacion",
 )
 
 
@@ -874,8 +876,7 @@ def _linea_candado_seace(info: dict) -> Optional[str]:
 
 
 def _indice_txt(meta: dict, registros: list[dict], cabecera: list[str]) -> str:
-    """Índice plano histórico: una línea por experiencia. Formato CONGELADO —
-    es el que ya conocen el cliente y los tests."""
+    """Conserva la línea histórica y añade procedencia sin cambiar los conteos."""
     lineas = [f"ZIP InfoObras · {meta['concurso']}",
               f"Postor: {meta['postor']}", ""]
     if cabecera:
@@ -895,6 +896,9 @@ def _indice_txt(meta: dict, registros: list[dict], cabecera: list[str]) -> str:
                 detalle = f"{r['documentos']} documento(s)"
             nota_txt = f" + {r['notas']} nota(s)" if r["notas"] else ""
             lineas.append(f"{prefijo}{detalle}{nota_txt}")
+        lineas.append(f"  {rotulo_cui(r['procedencia'])}")
+        if r.get("identificacion"):
+            lineas.append(f"  Identificación: {r['identificacion']['etiqueta']}")
         if r.get("seace"):
             lineas.append(f"  {r['seace']}")
         for s in r["secciones_incompletas"]:
@@ -940,6 +944,9 @@ def _indice_md(meta: dict, registros: list[dict], cabecera: list[str]) -> str:
                            f"de esta obra, {r['propios']} propios del periodo{nota}")
             else:
                 out.append(f"- **Documentos:** {r['documentos']}{nota}")
+        out.append(f"- {rotulo_cui(r['procedencia'])}")
+        if r.get("identificacion"):
+            out.append(f"- Identificación: {r['identificacion']['etiqueta']}")
         if r.get("seace"):
             out.append(f"- {r['seace']}")
         for s in r["secciones_incompletas"]:
@@ -979,7 +986,7 @@ def _estado_seccion_legible(estado: dict, nombre: str = "documentos") -> str:
                        if publicados != 1 else "1 publicado, de otro año")
             return (f"los {nombre.lower()} publicados no corresponden al periodo "
                     f"de este certificado ({detalle})")
-        return "sin documentos publicados (0 disponibles)"
+        return "sin documentos recuperados en la consulta (0 disponibles)"
     if e == "completa":
         return f"completa ({bajados}/{esperados})"
     if e == "parcial":
@@ -1001,10 +1008,10 @@ def construir_zip_infoobras(
     """Arma el ZIP del análisis: Proyecto → Profesional → Experiencia → archivos.
 
     `descargas`: {(n_prof, n_exp): directorio con los documentos descargados}.
-    Las experiencias sin entrada llevan SIN_DOCUMENTOS.txt con el motivo REAL
-    (del enriquecimiento: CUI resuelto sin descarga, no aplica, no existe, o
-    pendiente). `enriquecimiento`: {"n_prof:n_exp": {cui, via, ...}} — la verdad
-    del backend (sin ella, cae al `cui` del espejo, que puede estar incompleto).
+    Las experiencias sin entrada llevan SIN_DOCUMENTOS.txt. IDENTIFICACION.txt
+    conserva la procedencia aun sin índice o PDFs; no cuenta como descarga.
+    `enriquecimiento`: {"n_prof:n_exp": {cui, via, ...}}. Sin enriquecimiento
+    no se presenta el CUI declarado como utilizado por el backend.
 
     Dos variables de entorno ajustan el entregable sin tocar el árbol:
     `PIVOTE_MANIFIESTOS_ZIP` (manifiesto SHA-256 por experiencia, default sí) y
@@ -1012,6 +1019,12 @@ def construir_zip_infoobras(
     `json`). Ninguna cambia qué documentos entran al ZIP.
     """
     enr = enriquecimiento or {}
+    # Import diferido: el paquete orquestador importa a su vez entregables.
+    from orquestador.descargas_seace import (
+        es_archivo_seace, nota_seace_ausencia, NOTA_SEACE_DESCARGA_FALLIDA,
+    )
+    from resolucion.cui import TIPO_EXPEDIENTES, tipo_evaluacion_del_espejo
+    es_expediente = tipo_evaluacion_del_espejo(espejo) == TIPO_EXPEDIENTES
     manifiestos = _manifiestos_activos()   # PIVOTE_MANIFIESTOS_ZIP (default: 1)
     formatos = _formatos_indice()          # PIVOTE_INDICE_ZIP     (default: txt)
     raiz = _ruta_segura(espejo.get("_meta", {}).get("concurso") or "concurso")
@@ -1050,6 +1063,19 @@ def construir_zip_infoobras(
 
                 origen = descargas.get((n_prof, n_exp))
                 info = enr.get(f"{n_prof}:{n_exp}") or {}
+                procedencia = procedencia_cui(e, info)
+                identificacion = identificacion_panel(e, info) if es_expediente else None
+                detalle_cui = rotulo_cui(procedencia)
+                lineas_identidad = [detalle_cui,
+                                    f"Vía: {procedencia['via'] or 'no informada'}"]
+                if identificacion:
+                    lineas_identidad.append(f"Identificación: {identificacion['etiqueta']}")
+                for pos, sub in enumerate(procedencia['sub_obras'], 1):
+                    lineas_identidad.append(
+                        f"Sub-obra {pos}: {sub['nombre'] or 'sin nombre registrado'} · "
+                        f"CUI: {sub['cui'] or 'no registrado'} · "
+                        f"Estado: {sub['estado'] or 'no informado'}")
+                zf.writestr(f"{base}/IDENTIFICACION.txt", "\n".join(lineas_identidad) + "\n")
                 manifiesto = (info.get("descargas_reales")
                               if isinstance(info.get("descargas_reales"), dict) else {})
                 reg: dict[str, Any] = {
@@ -1059,6 +1085,7 @@ def construir_zip_infoobras(
                     "sin_documentos": True, "motivo": None,
                     "secciones_incompletas": [], "advertencias": [],
                     "seace": _linea_candado_seace(info),
+                    "procedencia": procedencia, "identificacion": identificacion,
                     "_grupo_obra": None,
                 }
                 registros.append(reg)
@@ -1066,7 +1093,8 @@ def construir_zip_infoobras(
                     # Un temporal nunca es un entregable. Las notas de error sí se
                     # incluyen, pero no cuentan como documentos descargados.
                     archivos = [p for p in sorted(Path(origen).rglob("*"))
-                                if p.is_file() and p.suffix.lower() != ".part"]
+                                if p.is_file() and p.suffix.lower() != ".part"
+                                and p.name.upper() != "IDENTIFICACION.TXT"]
                     reales = [p for p in archivos
                               if not p.name.upper().endswith(
                                   ("_ERROR.TXT", "_NO_DISPONIBLE.TXT", "SIN_DOCUMENTOS.TXT"))]
@@ -1076,7 +1104,27 @@ def construir_zip_infoobras(
                     for p in archivos:
                         rel = p.relative_to(origen)
                         partes = "/".join(_ruta_segura(x, 38) for x in rel.parts)
-                        zf.write(p, f"{base}/{partes}")
+                        # Las notas generadas no son evidencia original. Al armar
+                        # el entregable se actualiza su explicación, sin tocar la
+                        # carpeta histórica ni los documentos descargados.
+                        if p.name.upper() == "SIN_DOCUMENTOS.TXT":
+                            zf.writestr(f"{base}/{partes}",
+                                        f"{detalle_cui}\nDocumentos incorporados: {len(reales)}.\n"
+                                        "La ausencia de archivos no demuestra que no estén publicados.\n")
+                        elif es_archivo_seace(p.name) and p.name.upper().endswith("_NO_DISPONIBLE.TXT"):
+                            seace = info.get("seace") or {}
+                            zf.writestr(f"{base}/{partes}", nota_seace_ausencia(seace.get("estado")) + "\n")
+                        elif es_archivo_seace(p.name) and p.name.upper().endswith("_ERROR.TXT"):
+                            # Se conservan detalles técnicos, neutralizando la
+                            # explicación antigua de publicación, si la hubiera.
+                            texto = p.read_text(encoding="utf-8", errors="replace")
+                            texto = texto.replace(
+                                "No se pudo obtener este documento en la única consulta realizada. "
+                                "El proceso sí lo publica, pero el archivo no quedó disponible.",
+                                NOTA_SEACE_DESCARGA_FALLIDA)
+                            zf.writestr(f"{base}/{partes}", texto)
+                        else:
+                            zf.write(p, f"{base}/{partes}")
                     manifiesto_docs: list[str] = [
                         "Documento técnico de verificación — el equipo de "
                         "evaluación puede ignorarlo.",
@@ -1103,14 +1151,13 @@ def construir_zip_infoobras(
                         zf.writestr(f"{base}/MANIFIESTO_DOCUMENTOS.txt",
                                     "\n".join(manifiesto_docs) + "\n")
                     if not reales:
-                        cui = info.get("cui") or e.get("cui")
                         motivo = ("la carpeta existe, pero ninguna descarga produjo "
                                   "un documento utilizable")
                         if not any(p.name.upper() == "SIN_DOCUMENTOS.TXT" for p in archivos):
                             zf.writestr(
                                 f"{base}/SIN_DOCUMENTOS.txt",
                                 f"Sin documentos descargados para esta experiencia.\n"
-                                f"CUI: {cui or '(no resuelto)'}\nMotivo: {motivo}\n",
+                                f"{detalle_cui}\nMotivo: {motivo}\n",
                             )
                         reg["motivo"] = motivo
                     else:
@@ -1125,14 +1172,14 @@ def construir_zip_infoobras(
                             reg["secciones_incompletas"].append(
                                 {"seccion": nombre,
                                  "estado": _estado_seccion_legible(estado, nombre)})
-                    reg["advertencias"] = list(manifiesto.get("avisos") or [])
+                    reg["advertencias"] = [normalizar_motivo_fuente(aviso)
+                                           for aviso in manifiesto.get("avisos") or []]
                 else:
-                    cui = info.get("cui") or e.get("cui")
-                    motivo = _motivo_sin_docs(info.get("via"), cui)
+                    motivo = _motivo_sin_docs(info.get("via"), procedencia['cui_utilizado'])
                     zf.writestr(
                         f"{base}/SIN_DOCUMENTOS.txt",
                         f"Sin documentos descargados para esta experiencia.\n"
-                        f"CUI: {cui or '(no resuelto)'}\nMotivo: {motivo}\n",
+                        f"{detalle_cui}\nMotivo: {motivo}\n",
                     )
                     reg["motivo"] = motivo
 

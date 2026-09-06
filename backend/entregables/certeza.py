@@ -98,6 +98,8 @@ def normalizar_motivo_fuente(texto) -> str:
     """Neutraliza solo afirmaciones históricas que la evidencia no prueba."""
     salida = str(texto or "")
     reemplazos = (
+        ("no publicado por la fuente.",
+         "no obtenido en esta corrida; la ausencia no prueba que no esté publicado."),
         ("El MEF no publica la resolución de aprobación de este expediente",
          "Este análisis no dispone de una resolución de aprobación utilizable"),
         ("el MEF no publica contratos ni Formato 08-A para este",
@@ -543,12 +545,15 @@ def detalle_identificacion(exp: Optional[dict], enr: Optional[dict]) -> str:
         return (f"Certificado de {total} obras y ninguna ubicada en el registro "
                 "público; los días se cuentan como provisionales")
     if via == "REVISION":
-        return ("El backend no pudo ubicar la obra en el registro público y la "
-                "dejó para revisión manual; los días se cuentan como provisionales")
+        return ("La identificación quedó pendiente de revisión manual; "
+                "los días se cuentan como provisionales")
     if via in _VIA_CITADA:
         return ("El certificado cita un código pero no se leyó un CUI válido; "
                 "los días se cuentan como provisionales")
-    return ("Sin CUI y sin coincidencia en el registro público; los días se "
+    if cui:
+        return (f"CUI {cui} registrado sin un método de identificación verificable; "
+                "los días se cuentan como provisionales")
+    return ("Sin identificación verificable registrada; los días se "
             "cuentan como provisionales")
 
 

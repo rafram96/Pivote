@@ -161,6 +161,41 @@ def _valor_total(ws, etiqueta: str):
     raise AssertionError(f"no se encontró la fila de totales {etiqueta!r}")
 
 
+@pytest.mark.parametrize("enr_exp,utilizado", [
+    ({}, None),
+    ({"cui": "2222222", "via": "PROBABLE"}, "2222222"),
+    ({"cui": "2222222", "obra": {"cui": "3333333"}, "via": "NOMBRE"}, "3333333"),
+    ({"obra": {"cui": "3333333"}}, "3333333"),
+    ({"obra_ficha": {"cui": "5555555"}}, "5555555"),
+    ({"verificacion_expediente": {"cui_confirmado": "4444444"}}, "4444444"),
+])
+def test_excel_y_api_distinguen_cui_declarado_y_utilizado(tmp_path, job, cliente, enr_exp, utilizado):
+    api, job_id = job
+    _, modulo = cliente
+    modulo.repo.guardar_enriquecimiento(job_id, {"1:1": enr_exp})
+    _, exps = _experiencias(api, job_id)
+    assert exps[1].get("cui_resuelto") == utilizado
+
+    espejo = _espejo()
+    exp = espejo["profesionales"][0]["experiencias"][0]
+    paral, cuis, fichas, sunat = desempaquetar_enriquecimiento({"1:1": enr_exp})
+    salida = generar_excel_final(espejo, tmp_path / "procedencia.xlsx", paral, cuis, fichas, {}, sunat)
+    wb = openpyxl.load_workbook(salida)
+    ws = wb[etiqueta_hoja(1, CARGO)]
+    titulo = next(str(c.value) for fila in ws for c in fila
+                  if str(c.value).startswith("EXPERIENCIA 1:"))
+    assert f"CUI declarado: {exp['cui']}" in titulo
+    assert f"CUI utilizado: {utilizado or 'no registrado'}" in titulo
+    assert "confirmado" not in titulo
+    textos = [str(c.value) for fila in ws for c in fila if c.value]
+    assert not any("Citado en el certificado y verificado" in t for t in textos)
+    assert f"CUI declarado: {exp['cui']} · CUI utilizado: {utilizado or 'no registrado'}" in textos
+    celda_cui = wb["Base de Datos"].cell(2, 8)
+    assert celda_cui.value == (utilizado or exp["cui"])
+    assert f"CUI utilizado: {utilizado or 'no registrado'}" in celda_cui.comment.text
+    wb.close()
+
+
 def test_la_aritmetica_api_es_la_misma_que_el_resumen_compacto(tmp_path):
     espejo, enr = _espejo(), _enriquecimiento()
     inyectar_veredicto_backend(espejo, enr)

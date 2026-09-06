@@ -41,6 +41,7 @@ from entregables.certeza import (
     alertas_experiencia, fuente_mef_panel, identificacion_panel,
     normalizar_motivo_fuente, resumen_certeza_profesional,
 )
+from entregables.procedencia import procedencia_cui
 from orquestador import Motor, RepositorioArchivos, etapas_esqueleto, etapas_reales
 from orquestador.progreso import REGISTRO
 from resolucion.cui import TIPO_EXPEDIENTES, tipo_evaluacion_del_espejo
@@ -1023,7 +1024,8 @@ def extraccion(job_id: str):
             ev = enr.get(f"{np_}:{e.get('n')}")
             if isinstance(ev, dict):
                 obra = ev.get("obra") or {}
-                d["cui_resuelto"] = obra.get("cui") or ev.get("cui")
+                d["cui_resuelto"] = (procedencia_cui(e, ev)["cui_utilizado"]
+                                     if certeza_aplica else obra.get("cui") or ev.get("cui"))
                 d["obra_nombre"] = ev.get("obra_nombre") or obra.get("nombre_obra")
                 d["via_resolucion"] = ev.get("via")
                 d["representante_obra"] = ev.get("representante_obra")

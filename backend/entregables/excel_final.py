@@ -35,6 +35,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 import entregables.cronologia as cronologia
+from entregables.procedencia import procedencia_cui, rotulo_cui
 from entregables.leyenda_gantt import COLORES_GANTT, MARCAS_GANTT, NOTAS_GANTT
 from entregables.certeza import (
     BUCKET_CONFIRMADO, BUCKET_INFERIDO, BUCKET_PRIVADA, BUCKET_SIN_IDENTIFICAR,
@@ -459,7 +460,8 @@ _BD_VERDICTS = {20: "pos", 21: "neg", 23: "neg", 24: "pos"}
 
 
 def construir_hoja_base_datos(ws, espejo: dict, cuis: Optional[dict] = None,
-                              revisiones: Optional[dict] = None) -> int:
+                              revisiones: Optional[dict] = None,
+                              fichas: Optional[dict] = None) -> int:
     """Construye la hoja "Base de Datos". Devuelve el nº de filas de datos."""
     for i, w in enumerate(_BD_WIDTHS, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
@@ -471,10 +473,17 @@ def construir_hoja_base_datos(ws, espejo: dict, cuis: Optional[dict] = None,
 
     cuis = cuis or {}
     revisiones = revisiones or {}
+    fichas = fichas or {}
+    es_expediente = _tipo_evaluacion_espejo(espejo) == "expedientes"
     r = 2
     for idx, prof in enumerate(espejo.get("profesionales", [])):
         fill = PatternFill("solid", fgColor=_PALETA_PROF[idx % len(_PALETA_PROF)])
         for e in prof.get("experiencias", []):
+            clave = (prof.get("n_prof"), e.get("n"))
+            fx = fichas.get(clave) or {}
+            procedencia = {**(fx.get("_procedencia_cui") or procedencia_cui(e, {
+                **fx, "cui": cuis.get(clave) or fx.get("cui")})),
+                "cui_declarado": str(e.get("cui") or "").strip() or None}
             sup = set(prof.get("supuestos") or []) | set(e.get("supuestos") or [])
             privada = _es_ruta_privada(
                 revisiones.get((prof.get("n_prof"), e.get("n"))))
@@ -501,6 +510,8 @@ def construir_hoja_base_datos(ws, espejo: dict, cuis: Optional[dict] = None,
                 e.get("incluye_covid"), e.get("traslape"), e.get("tipo_obra_valido"),
                 observaciones,
             ]
+            if es_expediente:
+                valores[7] = procedencia["cui_utilizado"] or procedencia["cui_declarado"]
             # #55: las celdas las lee el evaluador — la jerga interna (⟦crudo⟧,
             # agent-*, campos del schema) se reescribe igual que en la hoja CLAUDE
             valores = [_sin_jerga(v) for v in valores]
@@ -529,7 +540,10 @@ def construir_hoja_base_datos(ws, espejo: dict, cuis: Optional[dict] = None,
                 }
                 if campos_bd.get(i) in sup and v not in (None, ""):
                     c.fill = FILL_SUPUESTO
-                if i == 8 and (prof.get("n_prof"), e.get("n")) in cuis:
+                if i == 8 and es_expediente:
+                    c.comment = Comment(rotulo_cui(procedencia) + "\n"
+                        "Utilizado no significa confirmado; ver identificación en la hoja del profesional.", "Pivote")
+                elif i == 8 and (prof.get("n_prof"), e.get("n")) in cuis:
                     c.comment = Comment(
                         "CUI identificado por el sistema durante el cruce con InfoObras; "
                         "no necesariamente estaba escrito en el certificado.",
@@ -2669,7 +2683,7 @@ def construir_hoja_profesional(
             return dias_inclusivos(ini, fin), f"{efectivo} PROVISIONAL", clamp
         return dias_inclusivos(ini, fin), efectivo, clamp
 
-    def cert_marco(n_exp, e, ini, fin, cui, fx=None):
+    def cert_marco(n_exp, e, ini, fin, cui, fx=None, procedencia=None):
         """Encabezado 'CERT. N°X' (amarillo) + recap 'DATOS DE LA EXPERIENCIA'
         (azul) en columnas A:D, antes de las bandas técnicas (formato ingeniero).
         Muestra el periodo del certificado y el de InfoObras juntos, para comparar."""
@@ -2709,6 +2723,8 @@ def construir_hoja_profesional(
             cui_text = f"No consignado en el certificado — el sistema identificó el CUI {cui}"
         else:
             cui_text = "No consignado en el certificado"
+        if es_exp_prof:
+            cui_text = rotulo_cui(procedencia)
 
         sup = set(e.get("supuestos") or [])
         filas_recap = [
@@ -2753,11 +2769,14 @@ def construir_hoja_profesional(
         fx = fichas.get((n_prof, n_exp))
         # CUI resuelto por el backend (etapa InfoObras); si no, el del espejo
         cui = cuis.get((n_prof, n_exp)) or (fx or {}).get("cui") or e.get("cui")
-        cert_marco(n_exp, e, ini, fin, cui, fx)   # encabezado CERT N°X + recap (cert vs InfoObras)
+        procedencia = ((fx or {}).get("_procedencia_cui") or procedencia_cui(e, {
+            **(fx or {}), "cui": cuis.get((n_prof, n_exp)) or (fx or {}).get("cui")}))
+        procedencia = {**procedencia, "cui_declarado": str(e.get("cui") or "").strip() or None}
+        cert_marco(n_exp, e, ini, fin, cui, fx, procedencia)
         r_top = r  # fila del título: el bloque de obra (F:J) arranca alineado aquí
         titulo = f"EXPERIENCIA {n_exp}: {str(e.get('proyecto') or '')}"  # nombre VERBATIM, sin truncar
         extra = " · ".join(x for x in [
-            f"CUI {cui}" if cui else "",
+            rotulo_cui(procedencia) if es_exp_prof else (f"CUI {cui}" if cui else ""),
             f"folio {e['folio']}" if e.get("folio") else ""] if x)
         banda(titulo + (f"  ({extra})" if extra else ""), F_HEAD, FILL_HEAD, 16)
 
@@ -3459,7 +3478,7 @@ def generar_excel_final(
     construir_hoja_evaluacion(ws, espejo, confiabilidad=confiabilidad)
 
     construir_hoja_base_datos(wb.create_sheet("Base de Datos"), espejo, cuis,
-                              revisiones)
+                              revisiones, fichas)
 
     tipo_excel = _tipo_evaluacion_espejo(espejo)
     fichas_crono = dict(fichas)
@@ -3549,13 +3568,14 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                 or enr.get("inventario_documental") or enr.get("cruces_fechas")
                 or enr.get("resoluciones_candidatos")
                 or enr.get("sin_documentos_mef") or enr.get("contrato_emisor")
-                or enr.get("via") or enr.get("cui") or enr.get("sub_obras")):
+                or enr.get("via") or enr.get("cui") or enr.get("sub_obras") or enr.get("obra")):
             # `obra_ficha` NO trae el nombre (solo código/CUI/estado/monto/fechas);
             # el nombre viaja suelto en `obra_nombre` (o en `obra.nombre_obra`) y sin
             # esta línea nunca llegaba al Excel — el evaluador no podía ver con qué
             # obra se emparejó el certificado.
             _obra = enr.get("obra") if isinstance(enr.get("obra"), dict) else {}
             fichas[(np_, ne)] = {**(enr.get("obra_ficha") or {}),
+                                 "_procedencia_cui": procedencia_cui(None, enr),
                                  "cui": (enr.get("cui")
                                          or (enr.get("obra_ficha") or {}).get("cui")),
                                  "obra_nombre": (enr.get("obra_nombre")
