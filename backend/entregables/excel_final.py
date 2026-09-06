@@ -2871,6 +2871,32 @@ def construir_hoja_profesional(
             r_rep = render_representante(r_top, (fx or {}).get("representante_obra"))
             r = max(r, r_rep + 1)
 
+        # En expedientes no se repiten tarjetas al pie: las incidencias quedan
+        # junto a su certificado; las respuestas completas siguen en el Gantt.
+        if es_exp_prof:
+            cruce = presentacion_cruces(e, fx, tipo_evaluacion)
+            incidencias = [f"{rotulo}: {cruce[clave]}" for rotulo, clave in (
+                ("Inicio frente al contrato", "resp_a"),
+                ("Término frente a aprobación", "resp_b"))
+                if cruce[clave] != "SÍ"]
+            if cruce["inferida"]:
+                incidencias.append("Fecha de aprobación inferida: "
+                                   + _ddmmaa_larga(cruce["aprobacion"]))
+            if incidencias:
+                texto = "Observación de fechas — " + " · ".join(incidencias)
+                if cruce["motivo"]:
+                    texto += "\n" + cruce["motivo"]
+                ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=26)
+                c = ws.cell(r, 1, _sin_jerga(texto))
+                c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
+                c.fill = (_fill_veredicto("NO", "pos")
+                          if "NO" in (cruce["resp_a"], cruce["resp_b"]) else
+                          FILL_SUPUESTO if cruce["resp_a"] == cruce["resp_b"] == "SÍ"
+                          else FILL_PEND)
+                lineas = sum(max(1, -(-len(linea) // 220)) for linea in texto.splitlines())
+                ws.row_dimensions[r].height = max(30, lineas * 14 + 6)
+                r += 1
+
         # imagen del certificado presentado (Fase 2): la skill recortó sus folios a
         # un PDF chico (principal primero); aquí se renderiza y embebe.
         # #47 · si la skill NO pudo confirmar que la página citada muestre al
@@ -3247,7 +3273,7 @@ def construir_hoja_profesional(
     #
     # OJO con `r`: la PARTE 5 termina escribiendo EN la fila `r` sin avanzarla
     # (mismo detalle que documenta el bloque del factor, más abajo).
-    if prof.get("experiencias"):
+    if prof.get("experiencias") and not _es_concurso_expedientes:
         r += 2
         banda("CRUCE DE FECHAS CONTRA EL CONTRATO Y LA APROBACIÓN DEL EXPEDIENTE",
               F_PARTE, FILL_PARTE, 18)
