@@ -35,6 +35,7 @@ descargador y extractor inyectables para los tests.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import unicodedata
@@ -371,6 +372,39 @@ def interpretar_resolucion(texto: str, emisor: str, cui: Optional[str] = None,
             "fecha_motivo": motivo, "resumen": " ".join(partes)}
 
 
+def _ruta_texto(ruta_pdf: Path) -> Path:
+    return ruta_pdf.with_name(ruta_pdf.name + ".texto.json")
+
+
+def _leer_texto_guardado(ruta_pdf: Path, max_pag: int) -> Optional[tuple[str, str, int]]:
+    """Texto ya extraído de este PDF, si el sidecar corresponde al mismo archivo
+    (tamaño) y al mismo tope de páginas. Un «sin_texto» (host sin Tesseract) no se
+    reutiliza: instalar el OCR debe bastar para que la siguiente lectura lo use."""
+    try:
+        p = _ruta_texto(ruta_pdf)
+        if not p.exists():
+            return None
+        d = json.loads(p.read_text(encoding="utf-8"))
+        if (d.get("version") != 1 or d.get("max_pag") != max_pag
+                or d.get("bytes") != ruta_pdf.stat().st_size
+                or d.get("fuente") == "sin_texto"):
+            return None
+        return str(d.get("texto") or ""), str(d.get("fuente") or ""), int(d.get("paginas") or 0)
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _guardar_texto(ruta_pdf: Path, max_pag: int, texto: str, fuente: str, paginas: int) -> None:
+    """Best-effort: no poder guardar el sidecar jamás afecta la lectura."""
+    try:
+        _ruta_texto(ruta_pdf).write_text(json.dumps({
+            "version": 1, "max_pag": max_pag, "bytes": ruta_pdf.stat().st_size,
+            "fuente": fuente, "paginas": paginas, "texto": texto,
+        }, ensure_ascii=False), encoding="utf-8")
+    except (OSError, TypeError, ValueError) as ex:
+        logger.debug("sidecar de texto %s: %s", ruta_pdf.name, ex)
+
+
 def leer_resolucion(url: str, destino_dir, *, emisor: str, cui: Optional[str],
                     numero: Optional[str] = None, numero_citado: Optional[str] = None,
                     fecha_contrato: Any = None,
@@ -403,11 +437,20 @@ def leer_resolucion(url: str, destino_dir, *, emisor: str, cui: Optional[str],
         if extraer_texto is None:
             from scraping.ocr_local import texto_pdf
             extraer_texto = lambda r: texto_pdf(r, max_pag=max_pag)  # noqa: E731
-        texto, fuente, paginas = extraer_texto(ruta)
+        # El texto (capa u OCR) se guarda junto al PDF: la misma resolución la leen
+        # todas las experiencias que comparten CUI (Muraria 6-sep: 34 lecturas
+        # sobre 11 archivos, 19 pasadas de OCR sobre 7) y el OCR es lo caro.
+        previo = _leer_texto_guardado(ruta, max_pag)
+        if previo is not None:
+            texto, fuente, paginas = previo
+        else:
+            texto, fuente, paginas = extraer_texto(ruta)
+            _guardar_texto(ruta, max_pag, texto, fuente, paginas)
         out = interpretar_resolucion(texto, emisor, cui, numero_citado, fecha_contrato,
                                      numero=numero or numero_citado)
         out.update({"numero": numero, "url": url, "archivo": ruta.name,
-                    "paginas": paginas, "texto_fuente": fuente})
+                    "paginas": paginas, "texto_fuente": fuente,
+                    "texto_reutilizado": previo is not None})
         return out
     except Exception as ex:  # noqa: BLE001 — leer un PDF jamás tumba el análisis
         logger.debug("resolución de aprobación %s: %s", url, ex)

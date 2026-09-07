@@ -42,13 +42,34 @@ from reglas import anios, dias_efectivos_profesional, periodo_fechas
 from entregables import (completar_revisiones_privadas, desempaquetar_enriquecimiento,
                          generar_excel_final, inyectar_veredicto_backend,
                          mapear_certificados)
+from .cronometro import Cronometro
 from .etapas import Contexto, EtapaIngesta, EtapaStub
 from .repositorio import carpeta_job
 
 logger = logging.getLogger(__name__)
 
+
+def _acepta_parametro(fn, nombre: str) -> bool:
+    """¿La función admite el parámetro con nombre `nombre`? (para pasar la caché
+    MEF solo a verificadores que la entienden; los fakes de tests no la reciben)."""
+    if fn is None:
+        return False
+    try:
+        import inspect
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return nombre in params or any(p.kind is inspect.Parameter.VAR_KEYWORD
+                                   for p in params.values())
+
 E = pipeline.Etapa
 EE = pipeline.EstadoEtapa
+
+
+def _orden_clave(k: str) -> tuple:
+    """Orden natural de claves `"prof:exp"` (2:7 antes que 10:1)."""
+    a, _, b = str(k).partition(":")
+    return (int(a), int(b)) if a.isdigit() and b.isdigit() else (10**9, 0, str(k))
 
 
 def _met(total=0, ok=0, rev=0, err=0, reintentos=0, descargas=0, bytes_=0) -> pipeline.MetricaEtapa:
@@ -542,6 +563,13 @@ class EtapaInfoObrasReal:
         # Verificación de expedientes contra el MEF (módulo T-003). Inyectable en
         # tests; en producción usa scraping.mef.verificar_cui (best-effort, red).
         self._verificar_mef = verificador_mef
+        self._verificar_mef_con_cache = _acepta_parametro(verificador_mef, "cache")
+        # Caché MEF (ficha 08-A + contratos por CUI) de UNA corrida: la crea
+        # `correr` por job. Medido en la corrida Muraria del 6-sep: 71
+        # verificaciones sobre ~30 CUI distintos → la mitad de las peticiones sobra.
+        self._cache_mef = None
+        # Tiempos por experiencia/fuente/fase de la corrida (ver cronometro.py).
+        self._cron = Cronometro()
         # T-004: procesos y documentos SEACE por CUI. Inyectable para que la
         # suite sea offline; en producción se usa el cliente OCDS best-effort.
         self._consulta_ocds = consulta_ocds
@@ -560,13 +588,14 @@ class EtapaInfoObrasReal:
             .strip() in ("1", "true", "si", "sí")
 
     def _fetch(self, cui: str, cert_ini=None, cert_fin=None, obra_id=None):
-        if self._fetcher:
-            try:
-                return self._fetcher(cui, cert_ini, cert_fin, obra_id)
-            except TypeError:
-                return self._fetcher(cui)
-        from scraping.infoobras import fetch_by_cui
-        return fetch_by_cui(cui, cert_ini, cert_fin, obra_id)
+        with self._cron.medir("infoobras"):
+            if self._fetcher:
+                try:
+                    return self._fetcher(cui, cert_ini, cert_fin, obra_id)
+                except TypeError:
+                    return self._fetcher(cui)
+            from scraping.infoobras import fetch_by_cui
+            return fetch_by_cui(cui, cert_ini, cert_fin, obra_id)
 
     def _leer_resolucion_aprobacion(self, ctx, exp: dict, cui, vmef: dict) -> Optional[dict]:
         """Descarga y lee la resolución de aprobación del 08-A (si el MEF la publica).
@@ -590,9 +619,10 @@ class EtapaInfoObrasReal:
             # la firma del contrato del expediente acota la plausibilidad de la fecha
             # leída: una resolución no puede aprobar un expediente antes de contratarlo
             _fc = (vmef.get("contrato") or {}).get("fecha") if isinstance(vmef.get("contrato"), dict) else None
-            lectura = lector(url, destino, emisor=emisor, cui=cui, numero=res.get("numero"),
-                             numero_citado=exp.get("resolucion_aprobacion_numero"),
-                             fecha_contrato=_fc)
+            with self._cron.medir("resolucion"):
+                lectura = lector(url, destino, emisor=emisor, cui=cui, numero=res.get("numero"),
+                                 numero_citado=exp.get("resolucion_aprobacion_numero"),
+                                 fecha_contrato=_fc)
             if isinstance(lectura, dict):
                 lectura["numero_citado"] = exp.get("resolucion_aprobacion_numero")
             return lectura
@@ -610,22 +640,33 @@ class EtapaInfoObrasReal:
         if self._verificar_mef is None:
             return None
         try:
-            return self._verificar_mef(exp, cui, codsnip)
+            with self._cron.medir("mef"):
+                if self._verificar_mef_con_cache and self._cache_mef is not None:
+                    return self._verificar_mef(exp, cui, codsnip, cache=self._cache_mef)
+                return self._verificar_mef(exp, cui, codsnip)
         except Exception as e:  # noqa: BLE001
             from scraping.errores_red import corto
-            logger.debug("verificación MEF CUI %s: %s", cui, corto(e))
+            logger.info("verificación MEF CUI %s no respondió: %s", cui, corto(e))
             return None
 
     def _procesos_seace(self, cui: str):
-        if self._consulta_ocds is not None:
-            return self._consulta_ocds(cui)
-        from scraping.seace_abierto import procesos_por_cui
-        return procesos_por_cui(cui)
+        with self._cron.medir("seace"):
+            if self._consulta_ocds is not None:
+                return self._consulta_ocds(cui)
+            from scraping.seace_abierto import procesos_por_cui
+            return procesos_por_cui(cui)
 
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
         obs: list[pipeline.Observacion] = []
         cache: dict[tuple, object] = {}
         cont = {"ok": 0, "rev": 0, "err": 0}
+        cron = self._cron = Cronometro()
+        # Caché MEF de ESTA corrida (ficha + contratos por CUI, sesión compartida).
+        # Solo en modo real: con verificador inyectado (tests) no hace falta.
+        self._cache_mef = None
+        if self._verificar_mef is not None and self._verificar_mef_con_cache:
+            from scraping.mef import CacheMef
+            self._cache_mef = CacheMef()
 
         def _fetch_obra(cui, cert_ini, cert_fin, obra_id=None):
             # Cachea SOLO éxitos: si la obra cae por flakiness no se memoriza el
@@ -948,13 +989,16 @@ class EtapaInfoObrasReal:
         # la obra por FUENTE OFICIAL del MEF (contrato de expediente a nombre del
         # emisor, o resolución de aprobación que lo nombra). Lo que se promueve
         # entra al bucle de abajo como una experiencia resuelta más.
-        obs.extend(self._promover_expedientes_por_fuente_oficial(ctx))
+        with cron.fase("candidatos"):
+            obs.extend(self._promover_expedientes_por_fuente_oficial(ctx))
 
-        for _e, (np_, ne) in ctx.items_experiencia():
-            enr = ctx.enriquecimiento.get(_clave(np_, ne)) or {}
-            if enr.get("via") == "MULTI_OBRA" and enr.get("sub_obras"):
-                enr["sub_obras"] = [_enriquecer_subobra(s) for s in enr["sub_obras"]]
-                ctx.enriquecimiento[_clave(np_, ne)] = enr
+        with cron.fase("sub_obras"):
+            for _e, (np_, ne) in ctx.items_experiencia():
+                enr = ctx.enriquecimiento.get(_clave(np_, ne)) or {}
+                if enr.get("via") == "MULTI_OBRA" and enr.get("sub_obras"):
+                    with cron.experiencia(_clave(np_, ne)):
+                        enr["sub_obras"] = [_enriquecer_subobra(s) for s in enr["sub_obras"]]
+                    ctx.enriquecimiento[_clave(np_, ne)] = enr
 
         # 1ª pasada: procesar lo que responda; lo que cae por flakiness se aparta
         # (todavía NO se marca error) para reintentarlo al final.
@@ -962,28 +1006,30 @@ class EtapaInfoObrasReal:
                       if (ctx.enriquecimiento.get(_clave(np_, ne)) or {}).get("cui"))
         i_fetch = 0
         fallidos: list[tuple] = []
-        for _e, (np_, ne) in ctx.items_experiencia():
-            enr = ctx.enriquecimiento.get(_clave(np_, ne)) or {}
-            cui = enr.get("cui")
-            if not cui:
-                continue  # sin obra identificada: nada que consultar
-            i_fetch += 1
-            _proy = _recorte(_e.get("proyecto"))
-            ctx.reportar(self.nombre, i_fetch, n_fetch,
-                         f"Verificando la obra {i_fetch} de {n_fetch}"
-                         + (f" — {_proy}" if _proy else ""))
-            cert_ini, cert_fin = _fecha_iso(_e.get("fecha_inicial")), _fecha_iso(_e.get("fecha_final"))
-            obra_id = enr.get("obra", {}).get("obra_id") if isinstance(enr.get("obra"), dict) else None
-            obra = _fetch_obra(cui, cert_ini, cert_fin, obra_id)
-            if obra is None:
-                # identificado por el Banco de Inversiones: que InfoObras no lo tenga
-                # es lo esperado → verificación directa contra el MEF, sin 2ª pasada
-                if str(enr.get("via") or "").upper() in _VIAS_SOLO_MEF \
-                        and _procesar_sin_obra(_e, np_, ne, cui):
-                    continue
-                fallidos.append((_e, np_, ne, cui, cert_ini, cert_fin, obra_id))
-            else:
-                _procesar(_e, np_, ne, cui, cert_ini, cert_fin, obra)
+        with cron.fase("bucle"):
+            for _e, (np_, ne) in ctx.items_experiencia():
+                enr = ctx.enriquecimiento.get(_clave(np_, ne)) or {}
+                cui = enr.get("cui")
+                if not cui:
+                    continue  # sin obra identificada: nada que consultar
+                i_fetch += 1
+                _proy = _recorte(_e.get("proyecto"))
+                ctx.reportar(self.nombre, i_fetch, n_fetch,
+                             f"Verificando la obra {i_fetch} de {n_fetch}"
+                             + (f" — {_proy}" if _proy else ""))
+                cert_ini, cert_fin = _fecha_iso(_e.get("fecha_inicial")), _fecha_iso(_e.get("fecha_final"))
+                obra_id = enr.get("obra", {}).get("obra_id") if isinstance(enr.get("obra"), dict) else None
+                with cron.experiencia(_clave(np_, ne)):
+                    obra = _fetch_obra(cui, cert_ini, cert_fin, obra_id)
+                    if obra is None:
+                        # identificado por el Banco de Inversiones: que InfoObras no lo tenga
+                        # es lo esperado → verificación directa contra el MEF, sin 2ª pasada
+                        if str(enr.get("via") or "").upper() in _VIAS_SOLO_MEF \
+                                and _procesar_sin_obra(_e, np_, ne, cui):
+                            continue
+                        fallidos.append((_e, np_, ne, cui, cert_ini, cert_fin, obra_id))
+                    else:
+                        _procesar(_e, np_, ne, cui, cert_ini, cert_fin, obra)
 
         # 2ª pasada: reintentar las caídas. Ya pasaron minutos procesando el
         # resto → el bache transitorio del portal suele haberse disipado. Solo
@@ -991,30 +1037,32 @@ class EtapaInfoObrasReal:
         if fallidos:
             logger.info("InfoObras: 2da pasada para %d obra(s) caídas por flakiness", len(fallidos))
             n_fall = len(fallidos)
-            for j, (_e, np_, ne, cui, cert_ini, cert_fin, obra_id) in enumerate(fallidos, 1):
-                ctx.reportar(self.nombre, j, n_fall,
-                             f"Reintentando la obra {j} de {n_fall} (el portal estaba inestable)")
-                obra = _fetch_obra(cui, cert_ini, cert_fin, obra_id)
-                if obra is None and _procesar_sin_obra(_e, np_, ne, cui):
-                    continue   # expediente: verificado solo contra el MEF
-                if obra is None:
-                    cont["err"] += 1
-                    # ventana DESCONOCIDA: no se clampa (sería NO CUMPLE falso).
-                    # Se marca provisional Y se limpian las paralizaciones de una
-                    # corrida exitosa previa (re-disparo): reglas no debe descontar
-                    # tramos de una obra que ya no se pudo verificar.
-                    k = _clave(np_, ne)
-                    enr = ctx.enriquecimiento.get(k) or {}
-                    enr["sin_verificar"] = True
-                    enr.pop("paralizaciones", None)
-                    ctx.enriquecimiento[k] = enr
-                    obs.append(pipeline.Observacion(
-                        codigo="INFOOBRAS", severidad=pipeline.Severidad.ADVERTENCIA,
-                        mensaje=f"la obra CUI {cui} no respondió en InfoObras (tras 2 pasadas) "
-                                f"— experiencia sin verificar, veredicto provisional",
-                        origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
-                else:
-                    _procesar(_e, np_, ne, cui, cert_ini, cert_fin, obra)
+            with cron.fase("segunda_pasada"):
+                for j, (_e, np_, ne, cui, cert_ini, cert_fin, obra_id) in enumerate(fallidos, 1):
+                    ctx.reportar(self.nombre, j, n_fall,
+                                 f"Reintentando la obra {j} de {n_fall} (el portal estaba inestable)")
+                    with cron.experiencia(_clave(np_, ne)):
+                        obra = _fetch_obra(cui, cert_ini, cert_fin, obra_id)
+                        if obra is None and _procesar_sin_obra(_e, np_, ne, cui):
+                            continue   # expediente: verificado solo contra el MEF
+                        if obra is None:
+                            cont["err"] += 1
+                            # ventana DESCONOCIDA: no se clampa (sería NO CUMPLE falso).
+                            # Se marca provisional Y se limpian las paralizaciones de una
+                            # corrida exitosa previa (re-disparo): reglas no debe descontar
+                            # tramos de una obra que ya no se pudo verificar.
+                            k = _clave(np_, ne)
+                            enr = ctx.enriquecimiento.get(k) or {}
+                            enr["sin_verificar"] = True
+                            enr.pop("paralizaciones", None)
+                            ctx.enriquecimiento[k] = enr
+                            obs.append(pipeline.Observacion(
+                                codigo="INFOOBRAS", severidad=pipeline.Severidad.ADVERTENCIA,
+                                mensaje=f"la obra CUI {cui} no respondió en InfoObras (tras 2 pasadas) "
+                                        f"— experiencia sin verificar, veredicto provisional",
+                                origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+                        else:
+                            _procesar(_e, np_, ne, cui, cert_ini, cert_fin, obra)
 
         # 2ª pasada para las sub-obras MULTI-OBRA cuya ficha cayó por flakiness en el
         # pre-loop: mismo criterio que el loop de cui único (ya pasaron minutos → el
@@ -1025,8 +1073,9 @@ class EtapaInfoObrasReal:
                 continue
             if not any(s.get("sin_verificar") for s in enr["sub_obras"]):
                 continue
-            enr["sub_obras"] = [_enriquecer_subobra(s) if s.get("sin_verificar") else s
-                                for s in enr["sub_obras"]]
+            with cron.experiencia(_clave(np_, ne)):
+                enr["sub_obras"] = [_enriquecer_subobra(s) if s.get("sin_verificar") else s
+                                    for s in enr["sub_obras"]]
             ctx.enriquecimiento[_clave(np_, ne)] = enr
 
         # T-004 F2: localizar las Bases Integradas y el contrato del proceso que
@@ -1038,131 +1087,151 @@ class EtapaInfoObrasReal:
         )
         from validacion.candado_seace import (
             CONTRADICE, evaluar_candado, resumen_proceso)
-        cache_seace: dict[str, object] = {}
-        for _e, (np_, ne) in ctx.items_experiencia():
-            k = _clave(np_, ne)
-            enr = ctx.enriquecimiento.get(k) or {}
-            cui = str(enr.get("cui") or "").strip()
-            if not cui or str(enr.get("via") or "").upper() == "PRIVADA":
-                continue
-            if cui not in cache_seace:
-                try:
-                    cache_seace[cui] = self._procesos_seace(cui)
-                except Exception as ex:  # noqa: BLE001 — fuente estatal best-effort
-                    logger.warning("SEACE abierto CUI %s: %r", cui, ex)
-                    cache_seace[cui] = None
-            procesos = cache_seace[cui]
-            if procesos is None:
-                enr["seace"] = {
-                    "estado": "fuente_no_disponible", "cui": cui,
-                    "motivo": "la fuente de datos abiertos no respondió; reintentar",
-                }
-                obs.append(pipeline.Observacion(
-                    codigo="SEACE", severidad=pipeline.Severidad.ADVERTENCIA,
-                    mensaje=f"datos abiertos del proceso CUI {cui} no disponibles "
-                            f"temporalmente — el análisis continúa",
-                    origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
-                ctx.enriquecimiento[k] = enr
-                continue
-            if not procesos:
-                enr["seace"] = {
-                    "estado": "sin_procesos", "cui": cui,
-                    "motivo": "el CUI no figura en los datos abiertos disponibles (cobertura 2018+)",
-                }
-                ctx.enriquecimiento[k] = enr
-                continue
+        with cron.fase("seace"):
+            cache_seace: dict[str, object] = {}
+            for _e, (np_, ne) in ctx.items_experiencia():
+                k = _clave(np_, ne)
+                enr = ctx.enriquecimiento.get(k) or {}
+                cui = str(enr.get("cui") or "").strip()
+                if not cui or str(enr.get("via") or "").upper() == "PRIVADA":
+                    continue
+                if cui not in cache_seace:
+                    with cron.experiencia(k):
+                        try:
+                            cache_seace[cui] = self._procesos_seace(cui)
+                        except Exception as ex:  # noqa: BLE001 — fuente estatal best-effort
+                            logger.warning("SEACE abierto CUI %s: %r", cui, ex)
+                            cache_seace[cui] = None
+                procesos = cache_seace[cui]
+                if procesos is None:
+                    enr["seace"] = {
+                        "estado": "fuente_no_disponible", "cui": cui,
+                        "motivo": "la fuente de datos abiertos no respondió; reintentar",
+                    }
+                    obs.append(pipeline.Observacion(
+                        codigo="SEACE", severidad=pipeline.Severidad.ADVERTENCIA,
+                        mensaje=f"datos abiertos del proceso CUI {cui} no disponibles "
+                                f"temporalmente — el análisis continúa",
+                        origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+                    ctx.enriquecimiento[k] = enr
+                    continue
+                if not procesos:
+                    enr["seace"] = {
+                        "estado": "sin_procesos", "cui": cui,
+                        "motivo": "el CUI no figura en los datos abiertos disponibles (cobertura 2018+)",
+                    }
+                    ctx.enriquecimiento[k] = enr
+                    continue
 
-            texto = " ".join(str(_e.get(c) or "") for c in
-                             ("proyecto", "objeto", "cargo_ocupado", "descripcion"))
-            es_exped = es_expediente_exp(_e, tipo_evaluacion_del_espejo(ctx.espejo),
-                                         self.forzar_expedientes)   # ADR-010
-            tipo = tipo_esperado(es_exped, texto)
-            ini, fin = _fecha_iso(_e.get("fecha_inicial")), _fecha_iso(_e.get("fecha_final"))
-            seleccion = seleccionar_proceso(
-                procesos, tipo, periodo=(ini, fin) if ini and fin else None)
-            elegido = seleccion.get("elegido")
-            if elegido is None:
-                enr["seace"] = {
-                    "estado": "sin_tipo", "cui": cui, "proceso_objeto": tipo,
-                    "seleccion": None, "motivo": seleccion.get("motivo"),
-                    "candidatos": seleccion.get("candidatos") or [],
-                }
-                ctx.enriquecimiento[k] = enr
-                continue
+                texto = " ".join(str(_e.get(c) or "") for c in
+                                 ("proyecto", "objeto", "cargo_ocupado", "descripcion"))
+                es_exped = es_expediente_exp(_e, tipo_evaluacion_del_espejo(ctx.espejo),
+                                             self.forzar_expedientes)   # ADR-010
+                tipo = tipo_esperado(es_exped, texto)
+                ini, fin = _fecha_iso(_e.get("fecha_inicial")), _fecha_iso(_e.get("fecha_final"))
+                seleccion = seleccionar_proceso(
+                    procesos, tipo, periodo=(ini, fin) if ini and fin else None)
+                elegido = seleccion.get("elegido")
+                if elegido is None:
+                    enr["seace"] = {
+                        "estado": "sin_tipo", "cui": cui, "proceso_objeto": tipo,
+                        "seleccion": None, "motivo": seleccion.get("motivo"),
+                        "candidatos": seleccion.get("candidatos") or [],
+                    }
+                    ctx.enriquecimiento[k] = enr
+                    continue
 
-            # F5: la identidad del proceso sale de `resumen_proceso`, que abarca
-            # TODOS sus contratos. `contracts[0]` es arbitrario y puede ser una
-            # adenda de dos días (caso real CUI 2343407) — de ahí salían la
-            # «fecha de firma» y la vigencia que se muestran en el Excel.
-            resumen = resumen_proceso(elegido)
-            resumen["tipo"] = clasificar_proceso(elegido)[0]
-            bases, firmado = doc_bases_integradas(elegido), doc_contrato_firmado(elegido)
-            seace = {
-                "estado": "seleccionado",
-                "cui": cui,
-                "codigoconvocatoria": codigo_convocatoria(elegido),
-                "ocid": elegido.get("ocid"),
-                "proceso_objeto": tipo,
-                "seleccion": seleccion.get("seleccion"),
-                "ambiguo": bool(seleccion.get("ambiguo")),
-                "motivo": seleccion.get("motivo"),
-                "fecha_suscripcion": resumen.get("fecha_firma"),
-                "vigencia": [resumen.get("vigencia_inicio"),
-                             resumen.get("vigencia_fin")],
-                "docs": {
-                    "bases": {
-                        "estado": "disponible" if bases else "no_disponible",
-                        "url": (bases or {}).get("url"),
-                        "titulo": (bases or {}).get("title"),
-                        "formato": (bases or {}).get("format"),
+                # F5: la identidad del proceso sale de `resumen_proceso`, que abarca
+                # TODOS sus contratos. `contracts[0]` es arbitrario y puede ser una
+                # adenda de dos días (caso real CUI 2343407) — de ahí salían la
+                # «fecha de firma» y la vigencia que se muestran en el Excel.
+                resumen = resumen_proceso(elegido)
+                resumen["tipo"] = clasificar_proceso(elegido)[0]
+                bases, firmado = doc_bases_integradas(elegido), doc_contrato_firmado(elegido)
+                seace = {
+                    "estado": "seleccionado",
+                    "cui": cui,
+                    "codigoconvocatoria": codigo_convocatoria(elegido),
+                    "ocid": elegido.get("ocid"),
+                    "proceso_objeto": tipo,
+                    "seleccion": seleccion.get("seleccion"),
+                    "ambiguo": bool(seleccion.get("ambiguo")),
+                    "motivo": seleccion.get("motivo"),
+                    "fecha_suscripcion": resumen.get("fecha_firma"),
+                    "vigencia": [resumen.get("vigencia_inicio"),
+                                 resumen.get("vigencia_fin")],
+                    "docs": {
+                        "bases": {
+                            "estado": "disponible" if bases else "no_disponible",
+                            "url": (bases or {}).get("url"),
+                            "titulo": (bases or {}).get("title"),
+                            "formato": (bases or {}).get("format"),
+                        },
+                        "contrato": {
+                            "estado": "disponible" if firmado else "no_disponible",
+                            "url": (firmado or {}).get("url"),
+                            "titulo": (firmado or {}).get("title"),
+                            "formato": (firmado or {}).get("format"),
+                        },
                     },
-                    "contrato": {
-                        "estado": "disponible" if firmado else "no_disponible",
-                        "url": (firmado or {}).get("url"),
-                        "titulo": (firmado or {}).get("title"),
-                        "formato": (firmado or {}).get("format"),
-                    },
-                },
-            }
-            # T-004 F5 — candado de identidad: elegir el proceso por CUI+tipo NO
-            # prueba que sea el del certificado. El resumen del proceso se
-            # PERSISTE (identidad estructurada, sin PDFs) para poder re-evaluar
-            # el candado sin volver a la fuente.
-            seace["proceso"] = resumen
-            candado = evaluar_candado(resumen, {
-                "entidad_contratante": _e.get("entidad_contratante"),
-                "entidad_emisora": _e.get("entidad_emisora"),
-                "ruc_emisor": _e.get("ruc_emisor"),
-                "tipo_experiencia": tipo,
-                "fecha_inicial": _e.get("fecha_inicial"),
-                "fecha_final": _e.get("fecha_final"),
-                "monto_contrato_soles": _e.get("monto_contrato_soles"),
-            })
-            seace["candado"] = candado.como_dict()
-            enr["seace"] = seace
-            if candado.resultado == CONTRADICE:
-                # Una contradicción se SEÑALA, no se esconde ni bloquea: los PDF
-                # siguen yendo al ZIP como sustento, con el rótulo que
-                # corresponde.
-                obs.append(pipeline.Observacion(
-                    codigo="SEACE", severidad=pipeline.Severidad.ADVERTENCIA,
-                    mensaje=f"los documentos del proceso encontrado para el CUI {cui} "
-                            f"no coinciden con el certificado: {candado.motivo}",
-                    origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
-            if seace["ambiguo"]:
-                obs.append(pipeline.Observacion(
-                    codigo="SEACE", severidad=pipeline.Severidad.ADVERTENCIA,
-                    mensaje=f"hay varios procesos de {tipo} para el CUI {cui}; "
-                            f"se eligió el más reciente y debe confirmarse en el ZIP",
-                    origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
-            ctx.enriquecimiento[k] = enr
+                }
+                # T-004 F5 — candado de identidad: elegir el proceso por CUI+tipo NO
+                # prueba que sea el del certificado. El resumen del proceso se
+                # PERSISTE (identidad estructurada, sin PDFs) para poder re-evaluar
+                # el candado sin volver a la fuente.
+                seace["proceso"] = resumen
+                candado = evaluar_candado(resumen, {
+                    "entidad_contratante": _e.get("entidad_contratante"),
+                    "entidad_emisora": _e.get("entidad_emisora"),
+                    "ruc_emisor": _e.get("ruc_emisor"),
+                    "tipo_experiencia": tipo,
+                    "fecha_inicial": _e.get("fecha_inicial"),
+                    "fecha_final": _e.get("fecha_final"),
+                    "monto_contrato_soles": _e.get("monto_contrato_soles"),
+                })
+                seace["candado"] = candado.como_dict()
+                enr["seace"] = seace
+                if candado.resultado == CONTRADICE:
+                    # Una contradicción se SEÑALA, no se esconde ni bloquea: los PDF
+                    # siguen yendo al ZIP como sustento, con el rótulo que
+                    # corresponde.
+                    obs.append(pipeline.Observacion(
+                        codigo="SEACE", severidad=pipeline.Severidad.ADVERTENCIA,
+                        mensaje=f"los documentos del proceso encontrado para el CUI {cui} "
+                                f"no coinciden con el certificado: {candado.motivo}",
+                        origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+                if seace["ambiguo"]:
+                    obs.append(pipeline.Observacion(
+                        codigo="SEACE", severidad=pipeline.Severidad.ADVERTENCIA,
+                        mensaje=f"hay varios procesos de {tipo} para el CUI {cui}; "
+                                f"se eligió el más reciente y debe confirmarse en el ZIP",
+                        origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+                ctx.enriquecimiento[k] = enr
 
         # Experiencias de EXPEDIENTE que quedaron en revisión: la resolución de
         # aprobación de cada candidato es evidencia oficial de quién elaboró ESE
         # expediente. No resuelve (regla de oro: sin golden no se promueve), pero
         # convierte un «por confirmar» mudo en «la resolución del candidato X nombra
         # a Y», en el ítem de revisión (Panel) y en la hoja P.
-        self._leer_resoluciones_de_candidatos(ctx)
+        with cron.fase("lectura_candidatos"):
+            self._leer_resoluciones_de_candidatos(ctx)
+
+        # TIEMPOS: por experiencia en el enriquecimiento (`tiempos_s`, segundos de
+        # pared por fuente) y un resumen de fases/fuentes/más lentas en el job. Es
+        # la instrumentación que faltó en la corrida Muraria del 6-sep (51,8 min
+        # sin poder decir dónde). El log deja una línea por experiencia.
+        for k_t in sorted(cron.por_experiencia, key=_orden_clave):
+            enr_t = ctx.enriquecimiento.get(k_t)
+            if isinstance(enr_t, dict):
+                enr_t["tiempos_s"] = cron.tiempos_de(k_t)
+            logger.info("infoobras tiempos %s", cron.linea_experiencia(k_t))
+        resumen_t = cron.resumen()
+        if self._cache_mef is not None:
+            resumen_t += f"; caché MEF: {self._cache_mef.resumen()}"
+        logger.info("infoobras tiempos — %s", resumen_t)
+        obs.append(pipeline.Observacion(
+            codigo="TIEMPOS", severidad=pipeline.Severidad.INFO,
+            mensaje=f"tiempos de la etapa — {resumen_t}", origen=self.nombre))
 
         total = sum(1 for _ in ctx.items_experiencia())
         # Las métricas de descarga (archivos/bytes/reintentos) las RELLENA la
@@ -1179,7 +1248,8 @@ class EtapaInfoObrasReal:
         if self._verificar_mef is None:
             return []
         from scraping import mef
-        return mef.normalizar_contratos(mef.fetch_contratos(cui))
+        with self._cron.medir("mef"):
+            return mef.normalizar_contratos(mef.fetch_contratos(cui, cache=self._cache_mef))
 
     def _promover_expedientes_por_fuente_oficial(self, ctx, max_candidatos: int = 3
                                                  ) -> list[pipeline.Observacion]:
@@ -1217,33 +1287,34 @@ class EtapaInfoObrasReal:
                     vistos.add(cc)
                     candidatos.append(c)
             # (cui, via, detalle, contrato_que_coincidió | None)
-            positivos: list[tuple[str, str, str, Optional[dict]]] = []
-            for c in candidatos[:max_candidatos]:
-                cui = str(c["cui"])
-                # (a) CUALQUIER contrato de expediente del CUI a nombre del emisor: un
-                # CUI puede tener varios (original, actualización, componente) y el
-                # más barato —el que elige la ficha— no tiene por qué ser el suyo.
-                try:
-                    ces = contratos_de_expediente(self._contratos_mef(cui))
-                except Exception as ex:  # noqa: BLE001
-                    logger.debug("contratos MEF %s: %s", cui, ex)
-                    ces = []
-                ce = next((x for x in ces
-                           if _nombres_coinciden(emisor, x.get("contratista") or "")), None)
-                if ce:
-                    positivos.append((cui, "CONTRATO",
-                                      f"el contrato de expediente {ce.get('numero')} del MEF "
-                                      f"está a nombre de {ce.get('contratista')}", ce))
-                    continue
-                # (b) alguna de las resoluciones de aprobación del 08-A nombra al emisor
-                for info in self._resoluciones_08a(cui):
-                    lect = self._leer_resolucion_aprobacion(ctx, e, cui, {"resolucion": info})
-                    if lect and lect.get("coincide_emisor") == "confirma":
-                        positivos.append((cui, "RESOLUCION",
-                                          f"la resolución de aprobación {info.get('numero') or ''} "
-                                          "nombra al emisor del certificado como consultor".replace("  ", " "),
-                                          {"lectura": lect, "info": info}))
-                        break
+            with self._cron.experiencia(k):
+                positivos: list[tuple[str, str, str, Optional[dict]]] = []
+                for c in candidatos[:max_candidatos]:
+                    cui = str(c["cui"])
+                    # (a) CUALQUIER contrato de expediente del CUI a nombre del emisor: un
+                    # CUI puede tener varios (original, actualización, componente) y el
+                    # más barato —el que elige la ficha— no tiene por qué ser el suyo.
+                    try:
+                        ces = contratos_de_expediente(self._contratos_mef(cui))
+                    except Exception as ex:  # noqa: BLE001
+                        logger.debug("contratos MEF %s: %s", cui, ex)
+                        ces = []
+                    ce = next((x for x in ces
+                               if _nombres_coinciden(emisor, x.get("contratista") or "")), None)
+                    if ce:
+                        positivos.append((cui, "CONTRATO",
+                                          f"el contrato de expediente {ce.get('numero')} del MEF "
+                                          f"está a nombre de {ce.get('contratista')}", ce))
+                        continue
+                    # (b) alguna de las resoluciones de aprobación del 08-A nombra al emisor
+                    for info in self._resoluciones_08a(cui):
+                        lect = self._leer_resolucion_aprobacion(ctx, e, cui, {"resolucion": info})
+                        if lect and lect.get("coincide_emisor") == "confirma":
+                            positivos.append((cui, "RESOLUCION",
+                                              f"la resolución de aprobación {info.get('numero') or ''} "
+                                              "nombra al emisor del certificado como consultor".replace("  ", " "),
+                                              {"lectura": lect, "info": info}))
+                            break
             cuis = {p[0] for p in positivos}
             if len(cuis) != 1:
                 if len(cuis) > 1:
@@ -1303,7 +1374,8 @@ class EtapaInfoObrasReal:
             return []
         else:
             from scraping import mef
-            html = mef.fetch_ficha_08a(cui)
+            with self._cron.medir("mef"):
+                html = mef.fetch_ficha_08a(cui, cache=self._cache_mef)
             ficha = mef.parsear_ficha_08a(html) if html else {}
             r = [ficha.get("resolucion")] + [
                 {"url": d.get("url"), "numero": None, "documento": d.get("label")}
@@ -1336,29 +1408,30 @@ class EtapaInfoObrasReal:
                 continue
             if not es_expediente_exp(e, tipo_decl, self.forzar_expedientes):
                 continue
-            lecturas = []
-            vistos_cui: set[str] = set()
-            candidatos = []
-            for c in (enr.get("candidatos") or []):
-                cc = str(c.get("cui") or "")
-                if cc and cc not in vistos_cui:       # el mismo CUI puede venir repetido
-                    vistos_cui.add(cc)
-                    candidatos.append(c)
-            for c in candidatos[:max_candidatos]:
-                try:
-                    info = self._resolucion_08a(str(c["cui"]))
-                except Exception as ex:  # noqa: BLE001
-                    logger.debug("08-A candidato %s: %s", c.get("cui"), ex)
-                    continue
-                if not info or not info.get("url"):
-                    continue
-                lect = self._leer_resolucion_aprobacion(ctx, e, str(c["cui"]), {"resolucion": info})
-                if not lect:
-                    continue
-                lecturas.append({"cui": str(c["cui"]), "nombre_obra": c.get("nombre_obra"),
-                                 **{kk: lect.get(kk) for kk in
-                                    ("numero", "fecha", "legible", "coincide_emisor",
-                                     "detalle_emisor", "consultores", "resumen")}})
+            with self._cron.experiencia(k):
+                lecturas = []
+                vistos_cui: set[str] = set()
+                candidatos = []
+                for c in (enr.get("candidatos") or []):
+                    cc = str(c.get("cui") or "")
+                    if cc and cc not in vistos_cui:       # el mismo CUI puede venir repetido
+                        vistos_cui.add(cc)
+                        candidatos.append(c)
+                for c in candidatos[:max_candidatos]:
+                    try:
+                        info = self._resolucion_08a(str(c["cui"]))
+                    except Exception as ex:  # noqa: BLE001
+                        logger.debug("08-A candidato %s: %s", c.get("cui"), ex)
+                        continue
+                    if not info or not info.get("url"):
+                        continue
+                    lect = self._leer_resolucion_aprobacion(ctx, e, str(c["cui"]), {"resolucion": info})
+                    if not lect:
+                        continue
+                    lecturas.append({"cui": str(c["cui"]), "nombre_obra": c.get("nombre_obra"),
+                                     **{kk: lect.get(kk) for kk in
+                                        ("numero", "fecha", "legible", "coincide_emisor",
+                                         "detalle_emisor", "consultores", "resumen")}})
             if not lecturas:
                 continue
             enr["resoluciones_candidatos"] = lecturas

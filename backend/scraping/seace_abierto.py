@@ -328,7 +328,33 @@ def extension_documento(doc: Optional[dict]) -> str:
         return ".rar"
     if "zip" in formato or url.endswith(".zip"):
         return ".zip"
+    # Word: las Bases Integradas de la Universidad Nacional de Música (Muraria,
+    # 6-sep-2026) se publican como DOCX de 9,6 MB; con extensión `.pdf` la
+    # validación por magia las rechazaba y quedaba `*_ERROR.txt`.
+    if "wordprocessingml" in formato or "docx" in formato or url.endswith(".docx"):
+        return ".docx"
+    if "msword" in formato or formato == "doc" or url.endswith(".doc"):
+        return ".doc"
     return ".pdf"
+
+
+# Firmas (magia) de los archivos que publica SEACE, por extensión. DOCX es un
+# ZIP (PK); DOC es el contenedor OLE2 de Office.
+MAGIAS_ARCHIVO: dict[str, tuple[bytes, ...]] = {
+    ".pdf": (b"%PDF",),
+    ".zip": (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"),
+    ".rar": (b"Rar!\x1a\x07",),
+    ".docx": (b"PK\x03\x04",),
+    ".doc": (b"\xd0\xcf\x11\xe0",),
+}
+
+
+def cabecera_valida(extension: str, primeros: bytes) -> bool:
+    """¿Los primeros bytes corresponden a la extensión? Falso para extensiones
+    desconocidas y para respuestas vacías (HTTP 200 sin cuerpo, visto en el
+    contrato de Música)."""
+    magias = MAGIAS_ARCHIVO.get((extension or "").lower())
+    return bool(magias) and bool(primeros) and any(primeros.startswith(m) for m in magias)
 
 
 def descargar_archivo(url: str, destino, session: Optional[requests.Session] = None,
@@ -364,13 +390,7 @@ def descargar_archivo(url: str, destino, session: Optional[requests.Session] = N
                         if not primeros:
                             primeros = chunk[:8]
                         f.write(chunk)
-            ext = destino.suffix.lower()
-            valido = (
-                (ext == ".pdf" and primeros.startswith(b"%PDF"))
-                or (ext == ".zip" and primeros.startswith(b"PK\x03\x04"))
-                or (ext == ".rar" and primeros.startswith(b"Rar!\x1a\x07"))
-            )
-            if not valido:
+            if not cabecera_valida(destino.suffix, primeros):
                 tmp.unlink(missing_ok=True)
                 return False      # respondió algo que no es el archivo → no reintentar
             os.replace(tmp, destino)

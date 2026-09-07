@@ -298,3 +298,43 @@ def test_leer_resolucion_usa_la_fecha_del_contrato_del_expediente(tmp_path):
     # 22/03/2011 cae por el año del número y 14/08/2025 por ser previa al contrato
     assert out and out["fecha"] is None
     assert out["fecha_descartada"] == "2011-03-22"
+
+
+def test_leer_resolucion_reutiliza_el_texto_guardado_junto_al_pdf(tmp_path):
+    """El OCR es lo caro: la segunda lectura del mismo PDF (otra experiencia con el
+    mismo CUI) no vuelve a extraer texto. Un «sin_texto» no se reutiliza."""
+    extracciones = []
+
+    def descargar(url, ruta: Path) -> bool:
+        ruta.write_bytes(b"%PDF-1.4 fake")
+        return True
+
+    def extraer(ruta: Path):
+        extracciones.append(ruta.name)
+        return (CABECERA + "y el consultor CONSORCIO ESPERANZA; …", "ocr", 2)
+
+    args = dict(emisor="Consorcio Esperanza", cui="2234021", numero="274-2019-GRH/GR",
+                descargar=descargar, extraer_texto=extraer)
+    out = leer_resolucion("https://mef/x.pdf", tmp_path / "res", **args)
+    assert out["fecha"] == "2019-06-18" and out["texto_reutilizado"] is False
+    sidecar = tmp_path / "res" / (out["archivo"] + ".texto.json")
+    assert sidecar.exists()
+
+    out2 = leer_resolucion("https://mef/x.pdf", tmp_path / "res", **args)
+    assert out2["fecha"] == "2019-06-18" and out2["coincide_emisor"] == "confirma"
+    assert out2["texto_reutilizado"] is True and out2["paginas"] == 2
+    assert extracciones == [out["archivo"]]          # una sola extracción
+
+    # otro tope de páginas → el texto guardado no vale
+    leer_resolucion("https://mef/x.pdf", tmp_path / "res", max_pag=8, **args)
+    assert len(extracciones) == 2
+
+    # sin Tesseract la lectura queda «sin_texto» y NO se recuerda
+    def sin_texto(ruta: Path):
+        extracciones.append("sin")
+        return ("", "sin_texto", 2)
+
+    args2 = {**args, "extraer_texto": sin_texto}
+    leer_resolucion("https://mef/y.pdf", tmp_path / "res2", **args2)
+    leer_resolucion("https://mef/y.pdf", tmp_path / "res2", **args2)
+    assert extracciones[-2:] == ["sin", "sin"]

@@ -398,28 +398,110 @@ def _get(session: requests.Session, url: str, **kw) -> Optional[requests.Respons
     res = con_reintentos(_pedir, politica=_POLITICA,
                          etiqueta=f"MEF {metodo} {url[-40:]}",
                          excepciones=(requests.RequestException, RespuestaTransitoria),
-                         log=logger)
+                         log=logger, nivel=logging.INFO)
+    if not res.respondio:
+        logger.info("MEF %s %s: no respondió tras %d intentos (%s)",
+                    metodo, url[-40:], res.intentos, corto(res.error))
     return res.valor_o(None)
 
 
-def fetch_ficha_08a(cui, session: Optional[requests.Session] = None) -> Optional[str]:
+class CacheMef:
+    """Ficha 08-A y contratos por CUI durante UNA corrida (se crea por job).
+
+    Corrida Muraria del 6-sep-2026: 71 verificaciones sobre unos 30 CUI distintos,
+    cada una con ficha + contratos → la mitad de las peticiones repetía la
+    anterior (sonda de Codex: 16 → 8 peticiones sobre 8 experiencias, mismos
+    resultados). Comparte además la sesión HTTP (keep-alive).
+
+    Memoria de fallos: si el portal no respondió para un CUI, los hermanos que
+    llegan dentro de `ttl_fallo` segundos no vuelven a esperar los 3 reintentos;
+    pasado ese plazo se vuelve a intentar (el MEF cae por baches, no por horas).
+    """
+
+    def __init__(self, session: Optional[requests.Session] = None,
+                 ttl_fallo: float = 120.0, reloj=time.monotonic) -> None:
+        self.session = crear_session(session)
+        self.ttl_fallo = ttl_fallo
+        self._reloj = reloj
+        self._fichas: dict[str, str] = {}
+        self._contratos: dict[tuple[str, str], list] = {}
+        self._fallos: dict[str, float] = {}
+        self.peticiones = 0
+        self.aciertos = 0
+        self.evitadas_por_fallo = 0
+
+    def _fallo_reciente(self, cui: str) -> bool:
+        t = self._fallos.get(cui)
+        return t is not None and (self._reloj() - t) < self.ttl_fallo
+
+    def ficha_08a(self, cui) -> Optional[str]:
+        cui = str(cui).strip()
+        if cui in self._fichas:
+            self.aciertos += 1
+            return self._fichas[cui]
+        if self._fallo_reciente(cui):
+            self.evitadas_por_fallo += 1
+            return None
+        self.peticiones += 1
+        html = fetch_ficha_08a(cui, self.session)
+        if html is None:
+            self._fallos[cui] = self._reloj()
+        else:
+            self._fichas[cui] = html
+        return html
+
+    def contratos(self, cui, codsnip="") -> list[dict]:
+        cui = str(cui).strip()
+        k = (cui, str(codsnip or "0"))
+        if k in self._contratos:
+            self.aciertos += 1
+            return self._contratos[k]
+        if self._fallo_reciente(cui):
+            self.evitadas_por_fallo += 1
+            return []
+        self.peticiones += 1
+        crudo = _fetch_contratos_crudo(cui, codsnip, self.session)
+        if crudo is None:
+            self._fallos[cui] = self._reloj()
+            return []
+        self._contratos[k] = crudo
+        return crudo
+
+    def resumen(self) -> str:
+        return (f"{self.peticiones} peticiones, {self.aciertos} reutilizadas, "
+                f"{self.evitadas_por_fallo} evitadas por portal caído")
+
+
+def fetch_ficha_08a(cui, session: Optional[requests.Session] = None,
+                    cache: Optional[CacheMef] = None) -> Optional[str]:
     """HTML del Formato 08-A del CUI, o None si el portal no respondió."""
+    if cache is not None:
+        return cache.ficha_08a(cui)
     r = _get(crear_session(session), f"{FICHA_08A}{cui}")
     return r.text if r is not None else None
 
 
-def fetch_contratos(cui, codsnip="", session: Optional[requests.Session] = None) -> list[dict]:
-    """Contratos SEACE del CUI (crudos del DWH). [] si no hay o el portal falló."""
+def _fetch_contratos_crudo(cui, codsnip="", session: Optional[requests.Session] = None
+                           ) -> Optional[list]:
+    """Contratos crudos del DWH; None si el portal NO respondió (distinto de [])."""
     r = _get(crear_session(session), CONTRATOS_DWH, metodo="POST",
              data={"id": str(cui), "codsnip": str(codsnip or "0"), "vers": "v2"},
              headers={"X-Requested-With": "XMLHttpRequest"})
     if r is None:
-        return []
+        return None
     try:
         d = r.json()
         return d if isinstance(d, list) else []
     except ValueError:
         return []
+
+
+def fetch_contratos(cui, codsnip="", session: Optional[requests.Session] = None,
+                    cache: Optional[CacheMef] = None) -> list[dict]:
+    """Contratos SEACE del CUI (crudos del DWH). [] si no hay o el portal falló."""
+    if cache is not None:
+        return cache.contratos(cui, codsnip)
+    return _fetch_contratos_crudo(cui, codsnip, session) or []
 
 
 def descargar_pdf(session: requests.Session, url: str, destino, *, timeout: float = 60.0) -> bool:
@@ -499,14 +581,16 @@ def descargar_documentos_expediente(cui, destino, codsnip="",
     return hecho
 
 
-def verificar_cui(exp: dict, cui, codsnip="", session: Optional[requests.Session] = None) -> dict:
+def verificar_cui(exp: dict, cui, codsnip="", session: Optional[requests.Session] = None,
+                  cache: Optional[CacheMef] = None) -> dict:
     """Orquesta el fetch (RED) + parseo + contraste para un CUI. Devuelve el
     bloque `verificacion_expediente`. Best-effort: si el portal falla, degrada a
-    'no verificable' sin lanzar."""
-    s = crear_session(session)
-    html = fetch_ficha_08a(cui, s)
+    'no verificable' sin lanzar. Con `cache` (una por corrida) no repite ficha ni
+    contratos de un CUI ya consultado."""
+    s = cache.session if cache is not None else crear_session(session)
+    html = fetch_ficha_08a(cui, s, cache=cache)
     ficha = parsear_ficha_08a(html) if html else {}
-    contratos = normalizar_contratos(fetch_contratos(cui, codsnip, s))
+    contratos = normalizar_contratos(fetch_contratos(cui, codsnip, s, cache=cache))
     b = verificar_expediente(exp, ficha, contratos)
     # el CUI CONSULTADO (7 díg., codUniqInv) manda sobre el del espejo: el skill a
     # veces escribe el SNIP (6 díg.) y el backend lo corrige al resolver.

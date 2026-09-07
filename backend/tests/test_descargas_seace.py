@@ -61,3 +61,14 @@ def test_cache_valida_magia_y_publica_copias_atomicas(tmp_path):
         tmp_path / "segundo.zip"
     ).read_bytes()
     assert not list(tmp_path.rglob("*.part"))
+
+
+def test_archivo_seace_valido_reconoce_word(tmp_path):
+    docx = tmp_path / "bases.docx"
+    docx.write_bytes(b"PK\x03\x04" + b"x" * 20)
+    doc = tmp_path / "bases.doc"
+    doc.write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"x" * 20)
+    malo = tmp_path / "bases2.docx"
+    malo.write_bytes(b"%PDF-1.4")
+    assert archivo_seace_valido(docx) and archivo_seace_valido(doc)
+    assert not archivo_seace_valido(malo)

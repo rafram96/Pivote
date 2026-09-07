@@ -15,7 +15,8 @@ from scraping.seace_abierto import (
     TIPO_EJECUCION, TIPO_EXPEDIENTE, TIPO_PREINVERSION, TIPO_SUPERVISION,
     CacheConosce, clasificar_proceso, codigo_convocatoria,
     crear_session, descargar_archivo, doc_bases_integradas, doc_contrato_firmado,
-    extension_documento, procesos_por_cui, seleccionar_proceso, tipo_esperado,
+    cabecera_valida, extension_documento, procesos_por_cui, seleccionar_proceso,
+    tipo_esperado,
 )
 
 
@@ -337,3 +338,44 @@ def test_dos_procesos_del_tipo_sin_solape_elige_el_mas_reciente_y_lo_marca():
     # y con uno solo del tipo, nada de ambigüedad
     r1 = seleccionar_proceso([nuevo], TIPO_SUPERVISION)
     assert r1.get("ambiguo") in (None, False)
+
+
+# ── DOC/DOCX (Bases de la Universidad Nacional de Música, Muraria 6-sep-2026) ─
+
+@pytest.mark.parametrize(("doc", "esperada"), [
+    ({"format": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "url": "https://x/doc?fileCode=1"}, ".docx"),
+    ({"formato": "docx", "url": "https://x/d"}, ".docx"),
+    ({"format": "", "url": "https://x/BASES.docx"}, ".docx"),
+    ({"format": "application/msword", "url": "https://x/d"}, ".doc"),
+    ({"formato": "doc", "url": "https://x/d"}, ".doc"),
+    ({"format": "application/zip", "url": "https://x/d"}, ".zip"),
+    ({"format": "application/pdf", "url": "https://x/d"}, ".pdf"),
+])
+def test_extension_documento_reconoce_word(doc, esperada):
+    assert extension_documento(doc) == esperada
+
+
+@pytest.mark.parametrize(("nombre", "magia"), [
+    ("bases.docx", b"PK\x03\x04word"),
+    ("bases.doc", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"),
+])
+def test_descarga_archivo_acepta_word(tmp_path, nombre, magia):
+    destino = tmp_path / nombre
+    assert descargar_archivo("https://estado/doc", destino,
+                             session=_SessionArchivo(magia)) is True
+    assert destino.read_bytes() == magia
+
+
+def test_cabecera_valida_rechaza_vacio_y_extension_desconocida():
+    assert cabecera_valida(".docx", b"PK\x03\x04")
+    assert not cabecera_valida(".pdf", b"")            # HTTP 200 sin cuerpo
+    assert not cabecera_valida(".xlsx", b"PK\x03\x04")
+    assert not cabecera_valida(".docx", b"%PDF-1.4")
+
+
+def test_descarga_vacia_no_deja_archivo(tmp_path):
+    destino = tmp_path / "contrato.pdf"
+    assert descargar_archivo("https://estado/doc", destino,
+                             session=_SessionArchivo(b"")) is False
+    assert not destino.exists()

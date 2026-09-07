@@ -13,12 +13,7 @@ from typing import Callable
 from urllib.parse import parse_qsl, urlsplit
 
 from infraestructura.archivos_atomicos import reemplazar_atomico
-
-_MAGIAS = {
-    ".pdf": (b"%PDF",),
-    ".zip": (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"),
-    ".rar": (b"Rar!\x1a\x07",),
-}
+from scraping.seace_abierto import MAGIAS_ARCHIVO as _MAGIAS
 _GUARDIA_LOCKS = threading.Lock()
 _LOCKS: dict[str, threading.Lock] = {}
 
@@ -126,7 +121,7 @@ def clave_archivo_seace(url: str) -> str:
 
 
 def archivo_seace_valido(ruta: Path) -> bool:
-    """Reconoce únicamente PDF, ZIP o RAR cuya magia coincide con la extensión."""
+    """Reconoce PDF, ZIP, RAR, DOCX o DOC cuya magia coincide con la extensión."""
     ruta = Path(ruta)
     magias = _MAGIAS.get(ruta.suffix.lower())
     if not magias or not ruta.is_file():

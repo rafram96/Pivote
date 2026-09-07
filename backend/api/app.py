@@ -54,6 +54,10 @@ from validacion.recalculo import regla_periodos_de
 # Carpeta de datos: definible en el .env de la raíz (PIVOTE_DATA_DIR). Rutas
 # relativas quedan ancladas a backend/ — no al CWD (ver backend/config.py).
 DATA_DIR = config.data_dir()
+# Log a archivo (<DATA_DIR>/logs/backend.log) además de consola: sin esto los
+# INFO de las etapas (tiempos, reintentos, portales caídos) se perdían.
+from infraestructura.registro import configurar_registro  # noqa: E402
+configurar_registro(DATA_DIR)
 
 app = FastAPI(title="InfoObras Pivote API", version="0.2.0")
 # Persistencia: los ARCHIVOS son siempre la fuente de verdad (una carpeta por

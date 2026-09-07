@@ -215,3 +215,68 @@ def test_verificar_expediente_con_un_solo_contrato_dice_unico():
     assert b["contrato"]["elegido_por"] == "unico"
     assert b["contrato"]["otros_contratos_expediente"] == []
     assert b["contrato"]["veredicto"] == "no_verificable"
+
+
+# ── CacheMef: ficha y contratos por CUI durante una corrida ──────────────────
+
+class _SesionMuda:
+    headers: dict = {}
+
+
+def _parchear_get(monkeypatch, respuestas):
+    """`respuestas[url_final]` → objeto con .text/.json() o None (portal caído)."""
+    from scraping import mef as m
+    llamadas = []
+
+    class _R:
+        def __init__(self, cuerpo):
+            self.text = cuerpo if isinstance(cuerpo, str) else ""
+            self._cuerpo = cuerpo
+
+        def json(self):
+            return self._cuerpo
+
+    def _get(session, url, **kw):
+        clave = "contratos:" + kw.get("data", {}).get("id", "") if kw.get("metodo") == "POST" else url[-7:]
+        llamadas.append(clave)
+        r = respuestas.get(clave)
+        return None if r is None else _R(r)
+
+    monkeypatch.setattr(m, "_get", _get)
+    return llamadas
+
+
+def test_cache_mef_no_repite_ficha_ni_contratos(monkeypatch):
+    from scraping.mef import CacheMef, fetch_contratos, fetch_ficha_08a
+    llamadas = _parchear_get(monkeypatch, {"2331865": "<html>ficha</html>",
+                                           "contratos:2331865": [{"n": 1}]})
+    c = CacheMef(session=_SesionMuda())
+    assert fetch_ficha_08a("2331865", cache=c) == "<html>ficha</html>"
+    assert fetch_ficha_08a("2331865", cache=c) == "<html>ficha</html>"
+    assert fetch_contratos("2331865", "", cache=c) == [{"n": 1}]
+    assert fetch_contratos("2331865", "0", cache=c) == [{"n": 1}]     # codsnip "" ≡ "0"
+    assert llamadas == ["2331865", "contratos:2331865"]
+    assert c.peticiones == 2 and c.aciertos == 2
+    assert "2 peticiones, 2 reutilizadas" in c.resumen()
+
+
+def test_cache_mef_recuerda_el_portal_caido_solo_un_rato(monkeypatch):
+    from scraping.mef import CacheMef, fetch_ficha_08a
+    llamadas = _parchear_get(monkeypatch, {})          # todo None: portal caído
+    reloj = {"t": 0.0}
+    c = CacheMef(session=_SesionMuda(), ttl_fallo=120.0, reloj=lambda: reloj["t"])
+    assert fetch_ficha_08a("2280509", cache=c) is None
+    assert fetch_ficha_08a("2280509", cache=c) is None   # dentro del TTL: sin red
+    assert c.contratos("2280509") == []                  # mismo CUI: tampoco
+    assert llamadas == ["2280509"] and c.evitadas_por_fallo == 2
+    reloj["t"] = 121.0
+    assert fetch_ficha_08a("2280509", cache=c) is None   # pasado el TTL: reintenta
+    assert llamadas == ["2280509", "2280509"]
+
+
+def test_sin_cache_las_funciones_siguen_igual(monkeypatch):
+    from scraping.mef import fetch_contratos, fetch_ficha_08a
+    _parchear_get(monkeypatch, {"contratos:2331865": [{"n": 1}]})
+    assert fetch_ficha_08a("2331865", _SesionMuda()) is None
+    assert fetch_contratos("2331865", "", _SesionMuda()) == [{"n": 1}]
+    assert fetch_contratos("9999999", "", _SesionMuda()) == []
