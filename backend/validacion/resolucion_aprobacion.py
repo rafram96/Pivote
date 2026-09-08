@@ -35,6 +35,7 @@ descargador y extractor inyectables para los tests.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -372,22 +373,39 @@ def interpretar_resolucion(texto: str, emisor: str, cui: Optional[str] = None,
             "fecha_motivo": motivo, "resumen": " ".join(partes)}
 
 
+# Versión del extractor/formato del sidecar: subirla invalida todo texto guardado
+# (cambio de DPI, PSM, idioma o de la forma de leer la capa de texto).
+VERSION_TEXTO = 2
+
+
 def _ruta_texto(ruta_pdf: Path) -> Path:
     return ruta_pdf.with_name(ruta_pdf.name + ".texto.json")
 
 
+def _huella_pdf(ruta_pdf: Path) -> str:
+    """SHA-256 del contenido: dos PDF distintos del mismo tamaño no se confunden
+    (revisión de Codex, 7-sep: sustituir el PDF por otro de igual tamaño
+    reutilizaba la fecha del anterior)."""
+    h = hashlib.sha256()
+    with ruta_pdf.open("rb") as f:
+        for bloque in iter(lambda: f.read(1 << 20), b""):
+            h.update(bloque)
+    return h.hexdigest()
+
+
 def _leer_texto_guardado(ruta_pdf: Path, max_pag: int) -> Optional[tuple[str, str, int]]:
-    """Texto ya extraído de este PDF, si el sidecar corresponde al mismo archivo
-    (tamaño) y al mismo tope de páginas. Un «sin_texto» (host sin Tesseract) no se
-    reutiliza: instalar el OCR debe bastar para que la siguiente lectura lo use."""
+    """Texto ya extraído de este PDF, si el sidecar corresponde al mismo contenido
+    (huella), a la misma versión del extractor y al mismo tope de páginas. Un
+    «sin_texto» (host sin Tesseract) no se reutiliza: instalar el OCR debe bastar
+    para que la siguiente lectura lo use."""
     try:
         p = _ruta_texto(ruta_pdf)
         if not p.exists():
             return None
         d = json.loads(p.read_text(encoding="utf-8"))
-        if (d.get("version") != 1 or d.get("max_pag") != max_pag
-                or d.get("bytes") != ruta_pdf.stat().st_size
-                or d.get("fuente") == "sin_texto"):
+        if (d.get("version") != VERSION_TEXTO or d.get("max_pag") != max_pag
+                or d.get("fuente") == "sin_texto"
+                or d.get("huella") != _huella_pdf(ruta_pdf)):
             return None
         return str(d.get("texto") or ""), str(d.get("fuente") or ""), int(d.get("paginas") or 0)
     except (OSError, ValueError, TypeError):
@@ -398,7 +416,8 @@ def _guardar_texto(ruta_pdf: Path, max_pag: int, texto: str, fuente: str, pagina
     """Best-effort: no poder guardar el sidecar jamás afecta la lectura."""
     try:
         _ruta_texto(ruta_pdf).write_text(json.dumps({
-            "version": 1, "max_pag": max_pag, "bytes": ruta_pdf.stat().st_size,
+            "version": VERSION_TEXTO, "max_pag": max_pag,
+            "huella": _huella_pdf(ruta_pdf), "bytes": ruta_pdf.stat().st_size,
             "fuente": fuente, "paginas": paginas, "texto": texto,
         }, ensure_ascii=False), encoding="utf-8")
     except (OSError, TypeError, ValueError) as ex:

@@ -13,7 +13,7 @@ from typing import Callable
 from urllib.parse import parse_qsl, urlsplit
 
 from infraestructura.archivos_atomicos import reemplazar_atomico
-from scraping.seace_abierto import MAGIAS_ARCHIVO as _MAGIAS
+from scraping.seace_abierto import archivo_valido as _archivo_valido
 _GUARDIA_LOCKS = threading.Lock()
 _LOCKS: dict[str, threading.Lock] = {}
 
@@ -121,17 +121,9 @@ def clave_archivo_seace(url: str) -> str:
 
 
 def archivo_seace_valido(ruta: Path) -> bool:
-    """Reconoce PDF, ZIP, RAR, DOCX o DOC cuya magia coincide con la extensión."""
-    ruta = Path(ruta)
-    magias = _MAGIAS.get(ruta.suffix.lower())
-    if not magias or not ruta.is_file():
-        return False
-    try:
-        with ruta.open("rb") as archivo:
-            cabecera = archivo.read(8)
-        return any(cabecera.startswith(magia) for magia in magias)
-    except OSError:
-        return False
+    """Reconoce PDF, ZIP, RAR, DOCX o DOC íntegros (firma + contenedor), con el
+    mismo criterio que la descarga (`scraping.seace_abierto.archivo_valido`)."""
+    return _archivo_valido(Path(ruta))
 
 
 def lock_para_descarga(ruta: Path) -> threading.Lock:

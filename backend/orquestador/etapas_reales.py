@@ -17,6 +17,7 @@ y por profesional: "prof:n" → {dias_brutos, dias_paralizados, dias_traslape,
 from __future__ import annotations
 
 import logging
+import threading
 import os
 import re
 from datetime import date, timedelta
@@ -564,12 +565,14 @@ class EtapaInfoObrasReal:
         # tests; en producción usa scraping.mef.verificar_cui (best-effort, red).
         self._verificar_mef = verificador_mef
         self._verificar_mef_con_cache = _acepta_parametro(verificador_mef, "cache")
-        # Caché MEF (ficha 08-A + contratos por CUI) de UNA corrida: la crea
-        # `correr` por job. Medido en la corrida Muraria del 6-sep: 71
-        # verificaciones sobre ~30 CUI distintos → la mitad de las peticiones sobra.
-        self._cache_mef = None
-        # Tiempos por experiencia/fuente/fase de la corrida (ver cronometro.py).
-        self._cron = Cronometro()
+        # Estado de UNA corrida: caché MEF (ficha 08-A + contratos por CUI) y
+        # cronómetro (tiempos por experiencia/fuente/fase). Van en almacenamiento
+        # POR HILO: la API comparte esta instancia entre jobs concurrentes
+        # (PIVOTE_MAX_ANALISIS_CONCURRENTES=2) y cada job corre `correr` en su
+        # propio hilo; un atributo plano mezclaba cachés y tiempos entre jobs
+        # (revisión de Codex, 7-sep). Fuera de `correr` (tests que llaman a un
+        # método suelto) se crea un cronómetro efímero y no hay caché.
+        self._corrida = threading.local()
         # T-004: procesos y documentos SEACE por CUI. Inyectable para que la
         # suite sea offline; en producción se usa el cliente OCDS best-effort.
         self._consulta_ocds = consulta_ocds
@@ -586,6 +589,17 @@ class EtapaInfoObrasReal:
         # (es_expediente_exp) sigue siendo el default cuando el modo no está.
         self.forzar_expedientes = (os.getenv("PIVOTE_FORZAR_EXPEDIENTES") or "") \
             .strip() in ("1", "true", "si", "sí")
+
+    @property
+    def _cron(self) -> Cronometro:
+        c = getattr(self._corrida, "cron", None)
+        if c is None:
+            c = self._corrida.cron = Cronometro()
+        return c
+
+    @property
+    def _cache_mef(self):
+        return getattr(self._corrida, "cache_mef", None)
 
     def _fetch(self, cui: str, cert_ini=None, cert_fin=None, obra_id=None):
         with self._cron.medir("infoobras"):
@@ -660,13 +674,22 @@ class EtapaInfoObrasReal:
         obs: list[pipeline.Observacion] = []
         cache: dict[tuple, object] = {}
         cont = {"ok": 0, "rev": 0, "err": 0}
-        cron = self._cron = Cronometro()
-        # Caché MEF de ESTA corrida (ficha + contratos por CUI, sesión compartida).
-        # Solo en modo real: con verificador inyectado (tests) no hace falta.
-        self._cache_mef = None
+        cron = self._corrida.cron = Cronometro()
+        # Caché MEF de ESTA corrida (ficha + contratos por CUI, sesión compartida),
+        # solo si el verificador la entiende (el real sí; los fakes de tests no).
+        self._corrida.cache_mef = None
         if self._verificar_mef is not None and self._verificar_mef_con_cache:
             from scraping.mef import CacheMef
-            self._cache_mef = CacheMef()
+            self._corrida.cache_mef = CacheMef()
+        try:
+            return self._correr(ctx, obs, cache, cont, cron)
+        finally:
+            # el hilo del pool se reutiliza para otro job: no dejarle estado
+            self._corrida.cron = None
+            self._corrida.cache_mef = None
+
+    def _correr(self, ctx: Contexto, obs: list, cache: dict, cont: dict,
+                cron: Cronometro) -> pipeline.ResultadoEtapa:
 
         def _fetch_obra(cui, cert_ini, cert_fin, obra_id=None):
             # Cachea SOLO éxitos: si la obra cae por flakiness no se memoriza el
@@ -1220,15 +1243,16 @@ class EtapaInfoObrasReal:
         # pared por fuente) y un resumen de fases/fuentes/más lentas en el job. Es
         # la instrumentación que faltó en la corrida Muraria del 6-sep (51,8 min
         # sin poder decir dónde). El log deja una línea por experiencia.
+        _job = getattr(ctx.job, "job_id", "?")
         for k_t in sorted(cron.por_experiencia, key=_orden_clave):
             enr_t = ctx.enriquecimiento.get(k_t)
             if isinstance(enr_t, dict):
                 enr_t["tiempos_s"] = cron.tiempos_de(k_t)
-            logger.info("infoobras tiempos %s", cron.linea_experiencia(k_t))
+            logger.info("infoobras job %s tiempos %s", _job, cron.linea_experiencia(k_t))
         resumen_t = cron.resumen()
         if self._cache_mef is not None:
             resumen_t += f"; caché MEF: {self._cache_mef.resumen()}"
-        logger.info("infoobras tiempos — %s", resumen_t)
+        logger.info("infoobras job %s tiempos — %s", _job, resumen_t)
         obs.append(pipeline.Observacion(
             codigo="TIEMPOS", severidad=pipeline.Severidad.INFO,
             mensaje=f"tiempos de la etapa — {resumen_t}", origen=self.nombre))

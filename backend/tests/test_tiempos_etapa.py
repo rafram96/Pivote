@@ -87,3 +87,34 @@ def test_sin_verificador_no_hay_cache_ni_error():
     res = etapa.correr(ctx)
     assert etapa._cache_mef is None
     assert any(o.codigo == "TIEMPOS" for o in res.observaciones)
+
+
+def test_dos_jobs_concurrentes_no_comparten_cache_ni_tiempos():
+    """La API reutiliza la misma instancia de etapa para jobs concurrentes
+    (revisión de Codex, 7-sep): cada hilo debe tener su caché y su cronómetro."""
+    import threading
+
+    barrera = threading.Barrier(2)
+    vistos: dict[str, list] = {"A": [], "B": []}
+
+    def verificador(exp, cui, codsnip="", cache=None):
+        vistos[threading.current_thread().name].append(cache)
+        barrera.wait(timeout=10)                 # ambos hilos dentro de correr a la vez
+        return {"verificado_en_mef": True, "cui_confirmado": cui}
+
+    etapa = EtapaInfoObrasReal(fetcher=lambda *a: None, verificador_mef=verificador,
+                               consulta_ocds=lambda cui: [])
+    ctxs = {"A": _ctx(_enr_nombre("2425571")), "B": _ctx(_enr_nombre("2610575"))}
+    hilos = [threading.Thread(target=etapa.correr, args=(ctxs[n],), name=n) for n in ("A", "B")]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join(timeout=30)
+    assert not any(h.is_alive() for h in hilos)
+    ca, cb = vistos["A"], vistos["B"]
+    assert len(ca) == 2 and len(cb) == 2
+    assert ca[0] is ca[1] and cb[0] is cb[1] and ca[0] is not cb[0]   # una caché por job
+    for n in ("A", "B"):
+        t = ctxs[n].enriquecimiento["1:1"]["tiempos_s"]
+        assert set(t) >= {"total", "infoobras", "mef", "seace"}
+    assert etapa._cache_mef is None              # el hilo principal no hereda nada

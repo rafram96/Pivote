@@ -352,9 +352,48 @@ MAGIAS_ARCHIVO: dict[str, tuple[bytes, ...]] = {
 def cabecera_valida(extension: str, primeros: bytes) -> bool:
     """¿Los primeros bytes corresponden a la extensión? Falso para extensiones
     desconocidas y para respuestas vacías (HTTP 200 sin cuerpo, visto en el
-    contrato de Música)."""
+    contrato de Música). Es solo la firma: la integridad la comprueba
+    `archivo_valido` sobre el archivo completo."""
     magias = MAGIAS_ARCHIVO.get((extension or "").lower())
     return bool(magias) and bool(primeros) and any(primeros.startswith(m) for m in magias)
+
+
+# Solo el DOC tiene tamaño mínimo (un sector OLE); PDF/RAR se validan por firma
+# como siempre, y ZIP/DOCX por contenedor.
+_TAMANO_MIN = {".doc": 512}
+
+
+def archivo_valido(ruta, extension: Optional[str] = None) -> bool:
+    """¿El archivo descargado es íntegramente lo que dice su extensión?
+
+    Firma + contenedor: un ZIP/DOCX debe abrirse como ZIP (cuatro bytes «PK» no
+    bastan) y un DOCX debe traer `word/document.xml` (cualquier ZIP no es Word);
+    un DOC ocupa al menos un sector OLE. Revisión de Codex del 7-sep: la firma
+    sola aceptaba un ZIP con `aviso.txt` y un archivo truncado como Word válido.
+    `extension` permite validar un temporal (`*.part`) con la extensión final.
+    """
+    import zipfile
+    ruta = Path(ruta)
+    ext = (extension or ruta.suffix).lower()
+    if ext not in MAGIAS_ARCHIVO or not ruta.is_file():
+        return False
+    try:
+        if ruta.stat().st_size < _TAMANO_MIN.get(ext, 1):
+            return False
+        with ruta.open("rb") as f:
+            primeros = f.read(8)
+        if not cabecera_valida(ext, primeros):
+            return False
+        if ext in (".zip", ".docx"):
+            if not zipfile.is_zipfile(ruta):
+                return False
+            if ext == ".docx":
+                with zipfile.ZipFile(ruta) as z:
+                    nombres = set(z.namelist())
+                    return "word/document.xml" in nombres and "[Content_Types].xml" in nombres
+        return True
+    except (OSError, zipfile.BadZipFile):
+        return False
 
 
 def descargar_archivo(url: str, destino, session: Optional[requests.Session] = None,
@@ -390,7 +429,7 @@ def descargar_archivo(url: str, destino, session: Optional[requests.Session] = N
                         if not primeros:
                             primeros = chunk[:8]
                         f.write(chunk)
-            if not cabecera_valida(destino.suffix, primeros):
+            if not archivo_valido(tmp, extension=destino.suffix):
                 tmp.unlink(missing_ok=True)
                 return False      # respondió algo que no es el archivo → no reintentar
             os.replace(tmp, destino)

@@ -338,3 +338,29 @@ def test_leer_resolucion_reutiliza_el_texto_guardado_junto_al_pdf(tmp_path):
     leer_resolucion("https://mef/y.pdf", tmp_path / "res2", **args2)
     leer_resolucion("https://mef/y.pdf", tmp_path / "res2", **args2)
     assert extracciones[-2:] == ["sin", "sin"]
+
+
+def test_texto_guardado_se_invalida_si_cambia_el_pdf_aunque_pese_igual(tmp_path):
+    """Revisión de Codex (7-sep): sustituir el PDF por otro del mismo tamaño
+    reutilizaba la fecha del anterior."""
+    extracciones = []
+
+    def descargar_a(url, ruta: Path) -> bool:
+        ruta.write_bytes(b"%PDF-1.4 version A")
+        return True
+
+    def extraer(ruta: Path):
+        cuerpo = ruta.read_bytes()
+        extracciones.append(cuerpo)
+        cabecera = CABECERA if b"version A" in cuerpo else CABECERA.replace("18 de junio", "19 de junio")
+        return (cabecera + "y el consultor CONSORCIO ESPERANZA; …", "ocr", 1)
+
+    args = dict(emisor="Consorcio Esperanza", cui="2234021", numero="274-2019-GRH/GR",
+                extraer_texto=extraer)
+    out = leer_resolucion("https://mef/x.pdf", tmp_path / "res", descargar=descargar_a, **args)
+    assert out["fecha"] == "2019-06-18"
+    # se reemplaza el PDF por otro del MISMO tamaño y distinto contenido
+    (tmp_path / "res" / out["archivo"]).write_bytes(b"%PDF-1.4 version B")
+    out2 = leer_resolucion("https://mef/x.pdf", tmp_path / "res", descargar=lambda u, r: False, **args)
+    assert out2["fecha"] == "2019-06-19" and out2["texto_reutilizado"] is False
+    assert len(extracciones) == 2

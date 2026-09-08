@@ -413,9 +413,11 @@ class CacheMef:
     anterior (sonda de Codex: 16 → 8 peticiones sobre 8 experiencias, mismos
     resultados). Comparte además la sesión HTTP (keep-alive).
 
-    Memoria de fallos: si el portal no respondió para un CUI, los hermanos que
-    llegan dentro de `ttl_fallo` segundos no vuelven a esperar los 3 reintentos;
-    pasado ese plazo se vuelve a intentar (el MEF cae por baches, no por horas).
+    Memoria de fallos POR RECURSO: si la ficha de un CUI no respondió, los hermanos
+    que llegan dentro de `ttl_fallo` segundos no vuelven a esperar los 3 reintentos
+    de ESE recurso; pasado el plazo se reintenta (el MEF cae por baches, no por
+    horas). Un fallo de ficha no presume caída del endpoint de contratos, y una
+    respuesta inválida (no JSON, no lista) es fallo, nunca «sin contratos».
     """
 
     def __init__(self, session: Optional[requests.Session] = None,
@@ -425,13 +427,13 @@ class CacheMef:
         self._reloj = reloj
         self._fichas: dict[str, str] = {}
         self._contratos: dict[tuple[str, str], list] = {}
-        self._fallos: dict[str, float] = {}
+        self._fallos: dict[tuple, float] = {}          # (recurso, clave) → instante
         self.peticiones = 0
         self.aciertos = 0
         self.evitadas_por_fallo = 0
 
-    def _fallo_reciente(self, cui: str) -> bool:
-        t = self._fallos.get(cui)
+    def _fallo_reciente(self, clave: tuple) -> bool:
+        t = self._fallos.get(clave)
         return t is not None and (self._reloj() - t) < self.ttl_fallo
 
     def ficha_08a(self, cui) -> Optional[str]:
@@ -439,13 +441,14 @@ class CacheMef:
         if cui in self._fichas:
             self.aciertos += 1
             return self._fichas[cui]
-        if self._fallo_reciente(cui):
+        k = ("ficha", cui)
+        if self._fallo_reciente(k):
             self.evitadas_por_fallo += 1
             return None
         self.peticiones += 1
         html = fetch_ficha_08a(cui, self.session)
         if html is None:
-            self._fallos[cui] = self._reloj()
+            self._fallos[k] = self._reloj()
         else:
             self._fichas[cui] = html
         return html
@@ -456,15 +459,16 @@ class CacheMef:
         if k in self._contratos:
             self.aciertos += 1
             return self._contratos[k]
-        if self._fallo_reciente(cui):
+        kf = ("contratos",) + k
+        if self._fallo_reciente(kf):
             self.evitadas_por_fallo += 1
             return []
         self.peticiones += 1
         crudo = _fetch_contratos_crudo(cui, codsnip, self.session)
-        if crudo is None:
-            self._fallos[cui] = self._reloj()
+        if crudo is None:                              # sin respuesta o respuesta inválida
+            self._fallos[kf] = self._reloj()
             return []
-        self._contratos[k] = crudo
+        self._contratos[k] = crudo                     # lista (vacía o no) = dato
         return crudo
 
     def resumen(self) -> str:
@@ -483,7 +487,9 @@ def fetch_ficha_08a(cui, session: Optional[requests.Session] = None,
 
 def _fetch_contratos_crudo(cui, codsnip="", session: Optional[requests.Session] = None
                            ) -> Optional[list]:
-    """Contratos crudos del DWH; None si el portal NO respondió (distinto de [])."""
+    """Contratos crudos del DWH; None si el portal NO respondió o respondió algo
+    que no es la lista esperada (HTML de error, JSON de otra forma). Solo una
+    lista es dato; `[]` de la fuente significa «sin contratos»."""
     r = _get(crear_session(session), CONTRATOS_DWH, metodo="POST",
              data={"id": str(cui), "codsnip": str(codsnip or "0"), "vers": "v2"},
              headers={"X-Requested-With": "XMLHttpRequest"})
@@ -491,9 +497,9 @@ def _fetch_contratos_crudo(cui, codsnip="", session: Optional[requests.Session] 
         return None
     try:
         d = r.json()
-        return d if isinstance(d, list) else []
     except ValueError:
-        return []
+        return None
+    return d if isinstance(d, list) else None
 
 
 def fetch_contratos(cui, codsnip="", session: Optional[requests.Session] = None,

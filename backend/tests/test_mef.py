@@ -260,18 +260,39 @@ def test_cache_mef_no_repite_ficha_ni_contratos(monkeypatch):
     assert "2 peticiones, 2 reutilizadas" in c.resumen()
 
 
-def test_cache_mef_recuerda_el_portal_caido_solo_un_rato(monkeypatch):
-    from scraping.mef import CacheMef, fetch_ficha_08a
-    llamadas = _parchear_get(monkeypatch, {})          # todo None: portal caído
+def test_cache_mef_recuerda_el_portal_caido_solo_un_rato_y_por_recurso(monkeypatch):
+    """Un fallo de ficha no presume caída de contratos (revisión de Codex, 7-sep)."""
+    from scraping.mef import CacheMef, fetch_contratos, fetch_ficha_08a
+    llamadas = _parchear_get(monkeypatch, {"contratos:2280509": [{"n": 1}]})   # ficha: None
     reloj = {"t": 0.0}
     c = CacheMef(session=_SesionMuda(), ttl_fallo=120.0, reloj=lambda: reloj["t"])
     assert fetch_ficha_08a("2280509", cache=c) is None
     assert fetch_ficha_08a("2280509", cache=c) is None   # dentro del TTL: sin red
-    assert c.contratos("2280509") == []                  # mismo CUI: tampoco
-    assert llamadas == ["2280509"] and c.evitadas_por_fallo == 2
+    assert fetch_contratos("2280509", cache=c) == [{"n": 1}]   # contratos SÍ se consultan
+    assert llamadas == ["2280509", "contratos:2280509"] and c.evitadas_por_fallo == 1
     reloj["t"] = 121.0
     assert fetch_ficha_08a("2280509", cache=c) is None   # pasado el TTL: reintenta
-    assert llamadas == ["2280509", "2280509"]
+    assert llamadas == ["2280509", "contratos:2280509", "2280509"]
+
+
+def test_cache_mef_no_convierte_respuesta_invalida_en_sin_contratos(monkeypatch):
+    """HTML de error o JSON de otra forma = fallo con TTL, nunca «[]» permanente."""
+    from scraping import mef as m
+    from scraping.mef import CacheMef, fetch_contratos
+    respuestas = {"contratos:2331865": "<html>mantenimiento</html>"}   # r.json() → str
+    llamadas = _parchear_get(monkeypatch, respuestas)
+    reloj = {"t": 0.0}
+    c = CacheMef(session=_SesionMuda(), ttl_fallo=120.0, reloj=lambda: reloj["t"])
+    assert fetch_contratos("2331865", cache=c) == []
+    assert fetch_contratos("2331865", cache=c) == []        # fallo recordado, sin red
+    assert llamadas == ["contratos:2331865"] and c.evitadas_por_fallo == 1
+    respuestas["contratos:2331865"] = [{"n": 7}]             # el servicio se recupera
+    reloj["t"] = 121.0
+    assert fetch_contratos("2331865", cache=c) == [{"n": 7}]
+    assert fetch_contratos("2331865", cache=c) == [{"n": 7}]   # ahora sí es dato cacheado
+    assert llamadas == ["contratos:2331865", "contratos:2331865"]
+    # sin caché, el llamador sigue recibiendo la lista
+    assert m.fetch_contratos("2331865", "", _SesionMuda()) == [{"n": 7}]
 
 
 def test_sin_cache_las_funciones_siguen_igual(monkeypatch):

@@ -15,7 +15,8 @@ from scraping.seace_abierto import (
     TIPO_EJECUCION, TIPO_EXPEDIENTE, TIPO_PREINVERSION, TIPO_SUPERVISION,
     CacheConosce, clasificar_proceso, codigo_convocatoria,
     crear_session, descargar_archivo, doc_bases_integradas, doc_contrato_firmado,
-    cabecera_valida, extension_documento, procesos_por_cui, seleccionar_proceso,
+    archivo_valido, cabecera_valida, extension_documento, procesos_por_cui,
+    seleccionar_proceso,
     tipo_esperado,
 )
 
@@ -209,9 +210,23 @@ def test_descarga_invalida_elimina_archivo_parcial(tmp_path):
     assert not destino.with_name("bases.pdf.part").exists()
 
 
+def _zip_bytes(**archivos) -> bytes:
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for nombre, cuerpo in archivos.items():
+            z.writestr(nombre, cuerpo)
+    return buf.getvalue()
+
+
+def _docx_bytes() -> bytes:
+    return _zip_bytes(**{"[Content_Types].xml": "<Types/>", "word/document.xml": "<w:document/>"})
+
+
 @pytest.mark.parametrize(("nombre", "magia"), [
     ("bases.pdf", b"%PDF-1.4"),
-    ("bases.zip", b"PK\x03\x04demo"),
+    ("bases.zip", _zip_bytes(**{"bases.pdf": "x"})),
     ("bases.rar", b"Rar!\x1a\x07\x01demo"),
 ])
 def test_descarga_archivo_valida_pdf_zip_y_rar(tmp_path, nombre, magia):
@@ -357,8 +372,8 @@ def test_extension_documento_reconoce_word(doc, esperada):
 
 
 @pytest.mark.parametrize(("nombre", "magia"), [
-    ("bases.docx", b"PK\x03\x04word"),
-    ("bases.doc", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"),
+    ("bases.docx", _docx_bytes()),
+    ("bases.doc", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 600),
 ])
 def test_descarga_archivo_acepta_word(tmp_path, nombre, magia):
     destino = tmp_path / nombre
@@ -372,6 +387,28 @@ def test_cabecera_valida_rechaza_vacio_y_extension_desconocida():
     assert not cabecera_valida(".pdf", b"")            # HTTP 200 sin cuerpo
     assert not cabecera_valida(".xlsx", b"PK\x03\x04")
     assert not cabecera_valida(".docx", b"%PDF-1.4")
+
+
+@pytest.mark.parametrize(("nombre", "cuerpo"), [
+    ("bases.docx", b"PK\x03\x04"),                             # cuatro bytes truncados
+    ("bases.docx", _zip_bytes(**{"aviso.txt": "no es Word"})),   # ZIP cualquiera
+    ("bases.zip", b"PK\x03\x04demo"),                          # firma sin contenedor
+    ("bases.doc", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"),          # sin sector OLE
+])
+def test_descarga_rechaza_contenedores_incompletos(tmp_path, nombre, cuerpo):
+    """Revisión de Codex (7-sep): la firma sola aceptaba cualquier ZIP o un
+    archivo truncado como Word válido."""
+    destino = tmp_path / nombre
+    assert descargar_archivo("https://estado/doc", destino,
+                             session=_SessionArchivo(cuerpo)) is False
+    assert not destino.exists() and not destino.with_name(nombre + ".part").exists()
+
+
+def test_archivo_valido_admite_extension_final_sobre_temporal(tmp_path):
+    tmp = tmp_path / "bases.docx.part"
+    tmp.write_bytes(_docx_bytes())
+    assert archivo_valido(tmp, extension=".docx")
+    assert not archivo_valido(tmp)                      # «.part» no es una extensión conocida
 
 
 def test_descarga_vacia_no_deja_archivo(tmp_path):
