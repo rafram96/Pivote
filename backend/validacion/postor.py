@@ -122,10 +122,21 @@ def recalcular_experiencia_postor(espejo: dict) -> dict:
         requerido = _decimal(total.get(campo))
         if requerido is not None:
             break
-    if requerido is not None:
+    estado_requisito = total.get("requisito_estado")
+    fuente = total.get("requisito_fuente") or {}
+    if (estado_requisito == "no_aplica" and requerido is None
+            and fuente.get("pagina_pdf") and fuente.get("texto")):
+        postor["postor_cumple"] = "NO APLICA — mínimo de experiencia no exigido según la fuente registrada en las bases."
+    elif (requerido is None or not requerido.is_finite() or requerido < 0
+          or estado_requisito not in (None, "encontrado")
+          or total.get("requisito_moneda") not in (None, "PEN")):
+        postor["postor_cumple"] = (
+            "POR VERIFICAR — falta un mínimo de experiencia del postor utilizable de las bases "
+            "(monto, moneda o condición aplicable); la suma acreditada no lo sustituye.")
+    else:
         if confirmados >= requerido:
             postor["postor_cumple"] = (
-                f"CUMPLE — monto confirmado S/ {_texto(confirmados)} supera el mínimo S/ {_texto(requerido)}.")
+                f"CUMPLE — monto confirmado S/ {_texto(confirmados)} alcanza el mínimo S/ {_texto(requerido)}.")
         elif maximo < requerido:
             postor["postor_cumple"] = (
                 f"NO CUMPLE — incluso el máximo posible S/ {_texto(maximo)} no alcanza S/ {_texto(requerido)}.")

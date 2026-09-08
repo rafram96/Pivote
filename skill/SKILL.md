@@ -162,12 +162,13 @@ los `⚠ SIN MONTO` van al evaluador como dato faltante, igual que hoy.
 
 > Camino B (sin OCR): el script sale con aviso y no aplica — el mapa es la única vía.
 
-### Paso 2.6 — Comprobar identidad de experiencias (antes de evaluar)
+### Paso 2.6 — Comprobar identidad y entradas críticas (antes de evaluar)
 
 Guarda los resultados en `_prof/profesional_NN.json` y ejecuta:
 
 ```bash
 node scripts/auditar_orden_experiencias.js <carpeta_analisis>
+node scripts/auditar_entradas_criticas.js <carpeta_analisis>
 ```
 
 Los números E1…EN siguen las páginas físicas del certificado principal, no
@@ -176,6 +177,16 @@ profesional indicado contra el PDF **antes de evaluar** (máximo 2 intentos;
 si persiste, detén la entrega y explica el problema). Los periodos de la misma
 página conservan su orden de aparición. Revisa también las advertencias de
 páginas ausentes: no equivalen a orden comprobado. El script no renumera datos.
+
+El segundo control exige mínimo del postor con fuente, baremo A calculable y
+cotejo de los inicios/fines exactos. Es compartido con el consolidador: no se
+puede saltar pasando directamente al Paso 4. `entrada_minimo_postor` o
+`entrada_factor_a` → corregir solo `agent-bases`; `entrada_fecha_*` → el
+profesional indicado. Máximo 2 intentos focales contra la fuente; nunca repetir
+los 90 casos ni mandar al evaluador a arreglar lo que no extrajo. Si persiste,
+detén la entrega con el motivo. Una fecha parcial explícita no es un error.
+El control comprueba estructura y coherencia del cotejo registrado, no realiza
+la lectura visual ni certifica que el extractor leyó bien el documento.
 
 ### Paso 3 — `agent-evaluador` (depende de 1, 2, 2.5 y 2.6)
 Cuando bases + mapa + **todos** los profesionales estén listos, lanza
@@ -226,7 +237,9 @@ propenso a errores en propuestas grandes):
   > **Qué hacer:** lee los críticos que lista (dicen qué profesional/qué `n`),
   > si son `orden_escaneo_*` o `numeracion_experiencias_invalida`, corrige primero
   > la extracción contra el PDF y repite después la evaluación afectada:
-  > no renumeres un espejo ya evaluado ni recortes existentes. Para los demás,
+  > no renumeres un espejo ya evaluado ni recortes existentes. Los críticos
+  > `entrada_*` vuelven al extractor indicado en el Paso 2.6, no al evaluador.
+  > Reevalúa después solo los juicios afectados por un cambio de hechos. Para los demás,
   > vuelve a correr `agent-evaluador` exigiéndole esas entradas (máx. 2 intentos)
   > y consolida otra vez. Si al segundo intento sigue en `⛔`, no lo subas:
   > repórtale al usuario qué quedó sin evaluar y para ahí.

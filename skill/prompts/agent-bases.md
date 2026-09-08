@@ -90,13 +90,49 @@ los requisitos críticos si hay tacha.**
     `antiguedad_maxima_anios`, la regla literal para periodos que solo traen
     mes/año (`periodos_sin_dia`: `"mes_completo"` solo si las bases lo permiten;
     de lo contrario `"no_definida"`) y `factor_a` con
-    `dias_adicionales_requeridos` + todos sus `tramos` (límites inclusivos o
+    umbral adicional y unidad explícitos + todos sus `tramos` (límites inclusivos o
     exclusivos y puntaje). No completes un baremo por intuición.
+    Usa nombres y tipos exactos. Para un umbral en meses/años devuelve
+    `umbral_adicional_requerido` (número) y `unidad_umbral_adicional`
+    (`dias`, `meses` o `años`). El consolidador convierte con la
+    convención de cómputo del sistema (mes=30 días, año=365). Si las bases dan
+    equivalencia explícita, usa esa equivalencia: «1 año (12 meses)» → 12 meses.
+    No calcules tú los días ni inventes una equivalencia no declarada; el campo
+    del espejo `dias_adicionales_requeridos` lo deriva el consolidador.
+    Cada tramo debe tener `desde_porcentaje`, `hasta_porcentaje`,
+    `desde_inclusivo`, `hasta_inclusivo` y `puntaje`. Usa 0/100 para los
+    extremos del dominio. Una condición escrita solo en prosa no es un baremo
+    calculable. Separa el caso cero si tiene puntaje propio; los tramos deben
+    cubrir 0..100 exactamente una vez, también en sus bordes.
+    Ejemplo ficticio (los números reales salen exclusivamente de estas bases):
+    ```json
+    {"umbral_adicional_requerido": 6, "unidad_umbral_adicional": "meses", "folio": 31,
+     "tramos": [
+       {"desde_porcentaje":50,"desde_inclusivo":true,"hasta_porcentaje":100,"hasta_inclusivo":true,"puntaje":40},
+       {"desde_porcentaje":0,"desde_inclusivo":false,"hasta_porcentaje":50,"hasta_inclusivo":false,"puntaje":20},
+       {"desde_porcentaje":0,"desde_inclusivo":true,"hasta_porcentaje":0,"hasta_inclusivo":true,"puntaje":0}
+     ]}
+    ```
 13. **Acreditación de formación.** Por cada cargo, extrae
     `acreditacion_formacion`: modalidad literal (`anexo_15_registro_publico`,
     `diploma_adjunto`, etc.) y booleanos de documentos expresamente requeridos.
     Si las bases ordenan declarar título/universidad y que el Comité lo contraste
     con un registro, eso NO equivale a exigir diploma o constancia adjuntos.
+14. **Mínimo de experiencia del POSTOR, separado de la oferta y del personal.**
+    Busca el requisito de facturación/monto acumulado en la especialidad dentro
+    de los requisitos de calificación. Devuelve `experiencia_postor_requisito`:
+    ```json
+    {"estado":"encontrado","monto":1250000,"moneda":"PEN",
+     "fuente":{"pagina_pdf":27,"texto":"Experiencia mínima acumulada de S/ 1 250 000,00."}}
+    ```
+    Ejemplo ficticio: no reutilices ese monto. `monto` es número, sin símbolo ni
+    separadores; conserva el literal monetario y la página FÍSICA en `fuente`.
+    No confundir mínimo con cuantía, límite inferior de oferta, valor contractual
+    ni suma del postor. Si hay condiciones alternativas (MYPE, lotes, moneda,
+    porcentajes o reglas incompatibles), no selecciones una sin el dato que la
+    determina: `estado: "por_verificar"`, `monto: null`, literal y observación.
+    Si no lo encuentras, `estado: "no_encontrado"` + páginas revisadas/motivo;
+    `no_aplica` solo con sustento explícito en las bases, nunca por ausencia.
 
 No consultes ni propongas consultar MINEDU, SUNEDU, INACAL u otra fuente pública.
 Tu única fuente es el archivo de bases recibido; toda comprobación registral es
@@ -113,7 +149,7 @@ aplica).
 ## Salida
 JSON: `_meta` (con `subagente: "agent-bases"`), `metadata_concurso` (incluye
 **`pagina_factores`**, **`paginas_personal_clave`** y **`tipo_evaluacion`**), `factores_evaluacion`, `personal_clave[]`,
-`reglas_evaluacion`, `observaciones_claude[]`.
+`reglas_evaluacion`, `experiencia_postor_requisito`, `observaciones_claude[]`.
 
 **`tipo_evaluacion`** (en `metadata_concurso`, OBLIGATORIO): de qué es el
 concurso, leído del **objeto de la convocatoria** (carátula, numeral «Objeto» o
@@ -148,6 +184,10 @@ la procedencia sobreviva a la consolidación. Lo consume el recorte TDR.
       no el Cuadro Resumen ni otros factores (o `null` + observación).
 - [ ] `cuantia` + `limite_inferior` (90% si la oferta es limitada) calculados.
 - [ ] fecha/corte, periodos parciales y baremo del Factor A están estructurados.
+- [ ] mínimo del postor con monto, moneda, página física y literal (o estado
+      explícito sustentado); no es la cuantía ni la oferta.
+- [ ] Factor A con unidad explícita y tramos numéricos, sin huecos ni solapes;
+      si el texto no permite determinarlos, abstención y observación, no prosa sustituta.
 - [ ] la vía de formación distingue declaración registral de diploma adjunto.
 - [ ] cada factor con `aplica` true/false según el Cuadro Resumen (PMP puede ser NO APLICA).
 - [ ] bases `.docx` → se leyó el PDF LIMPIO del script; bases `.pdf` → se excluyó lo tachado (+ obs. `tachado_pdf` si tocaba plazo/experiencia/especialidad).

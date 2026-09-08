@@ -1514,7 +1514,7 @@ def test_alt04_reinscripcion_se_reconcilia_con_historico_habido():
     assert not [o for o in res.observaciones if o.codigo == "ALT04"]
 
 
-def test_factor_a_descarta_cargos_sin_exceso_efectivo_y_retira_puntaje():
+def test_factor_a_sin_baremo_no_inventa_umbral_y_retira_puntaje():
     from orquestador.etapas_reales import _recalcular_factor_a
 
     espejo = {
@@ -1535,8 +1535,11 @@ def test_factor_a_descarta_cargos_sin_exceso_efectivo_y_retira_puntaje():
 
     factor = espejo["resumen_evaluacion"]["factores"][0]
     assert factor["puntaje"] is None
-    assert "1 de 2" in factor["detalle"] and "profesionales 1" in factor["detalle"]
-    assert espejo["resumen_evaluacion"]["puntaje_total"] == 20
+    # Antes asumía 365 días sin que las bases aportaran umbral, y publicaba
+    # «1 de 2» con un subtotal heredado. Sin regla no puede decidir ninguno.
+    assert "POR VERIFICAR" in factor["detalle"]
+    assert "cuántos cargos califican" in factor["detalle"]
+    assert espejo["resumen_evaluacion"]["puntaje_total"] is None
 
 
 def test_sunat_desempate_por_nombre_exacto():

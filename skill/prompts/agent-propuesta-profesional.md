@@ -76,6 +76,24 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
    `observaciones`. Si el valor es literal, no lo marques. Si no puedes sostenerlo,
    usa `null`/`POR VERIFICAR`: un dato ausente no es un supuesto. Nunca conviertas
    una fecha parcial en un día completo inventado.
+4b. **Coteja las fechas que determinan días acreditables.** Un día erróneo pero
+   plausible (13/18, 01/07, etc.) no activa una alerta de formato y llega al
+   cálculo sin corregirse. Para cada inicio/fin completo, coteja la fila o frase
+   de **periodo de desempeño** en la página original, aunque el OCR parezca claro.
+   En escaneos, abre la imagen; en PDF de texto nativo, contrasta el texto y su
+   contexto. Reutiliza la misma lectura para los periodos de una página: no
+   renderices de nuevo ni releas todo el bundle por cada experiencia.
+   Registra en el crudo `fechas_fuente.fecha_inicial` y `.fecha_final`:
+   `valor` ISO, `pagina_pdf` física incluida en `paginas_pdf`, `texto` breve
+   literal con su rótulo, `evento` = `inicio_servicio` / `fin_servicio`, y
+   `metodo` = `visual` / `texto_pdf_cotejado`. No marques un cotejo que no hiciste.
+   Este registro es de auditoría de extracción, no un nuevo campo del espejo.
+   Fecha de orden de servicio, firma, emisión o aprobación **no equivale** a
+   inicio/fin de trabajo. Si es la única fecha, conserva el dato en observaciones
+   y el periodo en `POR VERIFICAR — motivo`; no sumes el plazo de la orden para
+   fabricar un fin. Tampoco rellenes un día ambiguo por coincidir con un total.
+   Las fechas parciales permanecen parciales; no requieren inventar un cotejo
+   de día exacto. Una discrepancia se corrige desde el original, no desde OCR.
 5. **Identificadores para el cruce oficial (backend)** — campos dedicados:
    - **`proyecto`: ACCIÓN + OBJETO + UBICACIÓN, con las palabras del certificado.**
      El backend busca esa obra en el registro público **con ese texto**, así que el
@@ -273,8 +291,9 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
   (`calidad_documento` + `pagina_pdf`).
 
 ## Salida
-Nombres de campo EXACTOS del schema espejo (`schemas/espejo.js` — el orquestador
-inserta tu salida tal cual en `profesionales[]` del JSON espejo):
+Campos factuales con los nombres del schema espejo (`schemas/espejo.js`);
+el consolidador los transporta. `fechas_fuente` es adicional del crudo para
+auditoría: no se inserta en `profesionales[]` del espejo.
 Rellena este **esqueleto** con los valores reales (mismas claves, mismos tipos):
 ```json
 {
@@ -296,6 +315,10 @@ Rellena este **esqueleto** con los valores reales (mismas claves, mismos tipos):
       "cui": "2354781",
       "tipo_documento": "Constancia", "nombre_emisor": "ING. ...", "cargo_emisor": "Gerente de Obras",
       "fecha_inicial": "2019-03-01", "fecha_final": "2020-06-30", "fecha_emision": "2020-07-10",
+      "fechas_fuente": {
+        "fecha_inicial": {"valor":"2019-03-01","pagina_pdf":1160,"texto":"Periodo de trabajo: del 01/03/2019","evento":"inicio_servicio","metodo":"visual"},
+        "fecha_final": {"valor":"2020-06-30","pagina_pdf":1160,"texto":"al 30/06/2020","evento":"fin_servicio","metodo":"visual"}
+      },
       "folio": 1160, "paginas_pdf": [1160, 1161], "folio_verificado": true,
       "cargo_ocupado": "Supervisor de Instalaciones Sanitarias",
       "funciones_similares": null,

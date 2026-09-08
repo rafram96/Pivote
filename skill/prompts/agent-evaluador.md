@@ -195,6 +195,17 @@ Para cada experiencia, cruzándola con los requisitos del cargo en `bases`:
 - Emite `observaciones_claude` (severidad + referencia) ante cualquier duda de
   criterio — mejor marcar que afirmar de más.
 
+## Datos críticos ya extraídos: no reinterpretarlos ni rellenarlos
+
+El mínimo monetario de experiencia del postor viene de
+`bases.experiencia_postor_requisito`, con su literal y página, y el consolidador
+lo transporta directamente al backend. No lo copies desde la cuantía/oferta ni
+lo sustituyas en `postor_eval`. Mantén `postor_cumple: null` hasta el cálculo.
+El umbral y los tramos del Factor A también son hechos de las bases: si falta
+estructura, debe corregirla `agent-bases` antes de esta evaluación.
+No corrijas fechas del profesional sin la fuente original; el cotejo pertenece
+al extractor. Cambiar el modelo evaluador no sustituye esa revisión de entrada.
+
 ## Salida
 La **evaluación** que el orquestador fusiona con los hechos crudos para formar el
 JSON espejo final (ver `references/salida.md`): bloques `resumen_evaluacion`,

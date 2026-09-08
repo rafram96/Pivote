@@ -39,6 +39,7 @@ from resolucion.cui import (es_expediente_exp, establecimiento,
                             estampar_tipo_evaluacion, fuente_camino, rubros_de,
                             tipo_evaluacion_del_espejo)
 from validacion.recalculo import fechas_calculo, regla_periodos_de
+from validacion.baremo import baremo_factor_a_valido
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
 from entregables import (completar_revisiones_privadas, desempaquetar_enriquecimiento,
                          generar_excel_final, inyectar_veredicto_backend,
@@ -2600,10 +2601,18 @@ def _recalcular_factor_a(espejo: dict, enriquecimiento: dict) -> None:
     if not participantes:
         return
     regla = (espejo.get("reglas_evaluacion") or {}).get("factor_a") or {}
-    tramos = regla.get("tramos") or []
+    if not baremo_factor_a_valido(regla):
+        factor.update(puntaje=None, puntaje_confirmado=None, puntaje_maximo_posible=None,
+                      estado_puntaje="condicionado", detalle=(
+                          "POR VERIFICAR — umbral o baremo del Factor A ausente, incompleto o incompatible. "
+                          "No se puede determinar cuántos cargos califican ni asignar puntaje; revisar las bases."))
+        for p in espejo.get("profesionales", []):
+            if p.get("n_prof") in participantes:
+                p["anios_adicionales"] = "POR VERIFICAR — falta umbral o baremo válido del Factor A"
+        reconciliar_puntajes(espejo)
+        return
+    tramos = regla["tramos"]
     adicional_requerido = regla.get("dias_adicionales_requeridos")
-    if not isinstance(adicional_requerido, int):
-        adicional_requerido = 365
     califican: list[int] = []
     pendientes: list[int] = []
     for p in espejo.get("profesionales", []):
@@ -2623,7 +2632,6 @@ def _recalcular_factor_a(espejo: dict, enriquecimiento: dict) -> None:
         p["anios_adicionales"] = f"{round(exceso / 365, 2)} años efectivos adicionales"
         if exceso >= adicional_requerido:
             califican.append(np_)
-    puntaje_anterior = factor.get("puntaje")
     porcentaje_confirmado = (len(califican) * 100 / len(participantes))
     porcentaje_maximo = ((len(califican) + len(pendientes)) * 100 / len(participantes))
 
@@ -2662,16 +2670,6 @@ def _recalcular_factor_a(espejo: dict, enriquecimiento: dict) -> None:
            f"Resultado condicionado entre {puntaje_min if puntaje_min is not None else 'sin dato'} "
            f"y {puntaje_max if puntaje_max is not None else 'sin dato'} puntos.")
     )
-    if not tramos:
-        factor["puntaje"] = None
-        factor["estado_puntaje"] = "condicionado"
-        factor["puntaje_confirmado"] = None
-        factor["puntaje_maximo_posible"] = None
-        factor["detalle"] += " Baremo no estructurado: requiere revisión manual."
-        if (isinstance(puntaje_anterior, (int, float))
-                and isinstance(resumen.get("puntaje_total"), (int, float))):
-            resumen["puntaje_total"] = max(0, resumen["puntaje_total"] - puntaje_anterior)
-
     minimos, maximos, condicionado = [], [], False
     for f in resumen.get("factores", []):
         if f.get("aplica") is False or isinstance(f.get("puntaje"), str):

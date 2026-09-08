@@ -601,6 +601,15 @@ def construir_hoja_evaluacion(ws, espejo: dict,
                  e.get("tipo_solicitado"), e.get("observaciones")]],
               fmts=m2, verdicts=V2, backend_cols=BE2)
     tot = p.get("experiencia_postor_total", {})
+    if "requisito_estado" in tot or "monto_requerido" in tot:
+        fuente_minimo = tot.get("requisito_fuente") or {}
+        monto_minimo = tot.get("monto_requerido")
+        texto_minimo = (f"{tot.get('requisito_moneda') or 'PEN'} {monto_minimo}"
+                        if monto_minimo is not None else
+                        "NO APLICA" if tot.get("requisito_estado") == "no_aplica" else "POR VERIFICAR")
+        if fuente_minimo.get("pagina_pdf"):
+            texto_minimo += f" — bases, página {fuente_minimo['pagina_pdf']}"
+        b.kv("MÍNIMO DE EXPERIENCIA DEL POSTOR", texto_minimo)
     if tot:
         b.row(["", "TOTAL", "", "", "", "", "",
                _sin_jerga(tot.get("monto_confirmado") or tot.get("le_corresponde")),

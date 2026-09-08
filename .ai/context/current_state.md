@@ -1,6 +1,14 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-09-06** · rama de trabajo: `demo`
+> Última actualización: **2026-09-08** · rama de trabajo: `demo`
+
+Primer lote versionado sobre 6c28aab: mínimo del postor con fuente a espejo/Excel,
+control semántico previo al evaluador, Factor A sin puntaje desde reglas nulas
+y cotejo de fechas/eventos en extracción. Backend 1364 passed / 25 skipped;
+Node 85; contrato 21 espejos sin divergencia. Sin push/despliegue. Validación
+IA focal pendiente de modelo; [handoff](../handoffs/2026-09-08_codex.md).
+Medición del backend congelado anterior a este lote en el nivel sistema; no
+confundir esa corrida con una prueba de la skill modificada. Lo siguiente es histórico.
 
 Primer tramo de claridad de expedientes implementado: CUI declarado/utilizado
 coherente en Excel/API/ZIP, notas de ausencia sin causas inventadas y corrección

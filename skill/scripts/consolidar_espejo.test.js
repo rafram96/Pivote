@@ -462,6 +462,12 @@ function taller(evaluacion, postorMapa) {
     // `tipo_evaluacion` declarado (ADR-010): sin él el consolidador grita, y
     // estos talleres prueban OTRAS cosas. El caso sin tipo tiene su propio test.
     metadata_concurso: { nomenclatura: "CP-02-2025", entidad: "GORE X", tipo_evaluacion: "obras" },
+    experiencia_postor_requisito: { estado: "encontrado", monto: 1000, moneda: "PEN",
+      fuente: { pagina_pdf: 20, texto: "Experiencia acumulada mínima S/ 1000." } },
+    reglas_evaluacion: { factor_a: { dias_adicionales_requeridos: 365, folio: 30, tramos: [
+      { desde_porcentaje: 0, desde_inclusivo: true, hasta_porcentaje: 50, hasta_inclusivo: false, puntaje: 0 },
+      { desde_porcentaje: 50, desde_inclusivo: true, hasta_porcentaje: 100, hasta_inclusivo: true, puntaje: 40 },
+    ] } },
     personal_clave: HECHOS.map((h) => ({
       numero: h.n_prof, cargo: h.cargo, cargos_similares_validos: ["A", "B"],
       tiempo_minimo_experiencia: "5 años", profesiones_aceptadas: ["Ingeniero Civil"],
@@ -481,6 +487,10 @@ function taller(evaluacion, postorMapa) {
         n: j + 1, entidad_emisora: "GORE X", proyecto: `OBRA ${j + 1}`,
         fecha_inicial: "2019-01-01", fecha_final: "2020-01-01", folio: 100 + j,
         paginas_pdf: [110 + j],
+        fechas_fuente: {
+          fecha_inicial: { valor: "2019-01-01", pagina_pdf: 110 + j, evento: "inicio_servicio", texto: "Del 01/01/2019", metodo: "visual" },
+          fecha_final: { valor: "2020-01-01", pagina_pdf: 110 + j, evento: "fin_servicio", texto: "al 01/01/2020", metodo: "visual" },
+        },
       })),
     });
   }
@@ -513,6 +523,53 @@ test("e2e · evaluación sana: ningún aviso crítico en el espejo", () => {
   assert.strictEqual(espejo.profesionales[1].requisitos.factor_a_aplica, true);
   assert.strictEqual(espejo.profesionales[0].requisitos.factor_a_aplica, false);
   fs.rmSync(ws, { recursive: true, force: true });
+});
+
+test("entrada crítica · mínimo de bases llega al espejo aunque el evaluador lo omita", () => {
+  const ws = taller(SANA);
+  try {
+    const espejo = main(ws);
+    assert.strictEqual(espejo.postor.experiencia_postor_total.monto_requerido, "1000.00");
+    assert.strictEqual(espejo.postor.experiencia_postor_total.requisito_fuente.pagina_pdf, 20);
+    assert.strictEqual(espejo.postor.postor_cumple, null);
+  } finally { fs.rmSync(ws, { recursive: true, force: true }); }
+});
+
+test("entrada crítica · mismo defecto bloquea antes de evaluar y al consolidar", () => {
+  const ws = taller(SANA);
+  try {
+    const archivo = path.join(ws, "bases.json");
+    const bases = JSON.parse(fs.readFileSync(archivo, "utf8"));
+    bases.reglas_evaluacion.factor_a.tramos = [{ condicion: "la mitad o más", puntaje: 40 }];
+    fs.writeFileSync(archivo, JSON.stringify(bases));
+    const gate = spawnSync(process.execPath, [path.join(__dirname, "auditar_entradas_criticas.js"), ws], { encoding: "utf8" });
+    assert.strictEqual(gate.status, 1);
+    assert.match(gate.stdout, /entrada_factor_a/);
+    const consolidado = spawnSync(process.execPath, [path.join(__dirname, "consolidar_espejo.js"), ws], { encoding: "utf8" });
+    assert.strictEqual(consolidado.status, 1);
+    assert.match(consolidado.stdout, /entrada_factor_a/);
+    const espejo = JSON.parse(fs.readFileSync(path.join(ws, "espejo.json"), "utf8"));
+    assert.strictEqual(espejo.reglas_evaluacion.factor_a, null);
+  } finally { fs.rmSync(ws, { recursive: true, force: true }); }
+});
+
+test("entrada crítica · gate sano y Excel inicial incluyen mínimo con fuente", async () => {
+  const ws = taller(SANA);
+  try {
+    const gate = spawnSync(process.execPath, [path.join(__dirname, "auditar_entradas_criticas.js"), ws], { encoding: "utf8" });
+    assert.strictEqual(gate.status, 0, gate.stdout + gate.stderr);
+    const espejo = main(ws);
+    const { generarExcel } = require("./generar_excel");
+    const ExcelJS = require("exceljs");
+    const destino = path.join(ws, "salida.xlsx");
+    await generarExcel(espejo, destino);
+    const libro = new ExcelJS.Workbook();
+    await libro.xlsx.readFile(destino);
+    const textos = [];
+    libro.eachSheet(hoja => hoja.eachRow(fila => textos.push(fila.values.join(" "))));
+    assert.match(textos.join("\n"), /MÍNIMO DE EXPERIENCIA DEL POSTOR/);
+    assert.match(textos.join("\n"), /PEN 1000.00 — bases, página 20/);
+  } finally { fs.rmSync(ws, { recursive: true, force: true }); }
 });
 
 test("e2e · oferta: merge POR CAMPO — el evaluador con nulls no pisa al mapa (fuga urgente1)", () => {

@@ -1,9 +1,19 @@
 ---
-timestamp: "2026-09-06"
+timestamp: "2026-09-08"
 agent: Codex
 ---
 
 # Handoff — punto de continuación
+
+## 2026-09-08 — Entrada fiable y guardas de cálculo
+
+Primer lote implementado y versionado a pedido del usuario, sin push/despliegue: mínimo desde bases,
+auditoría preevaluación y al consolidar, baremo A sin defaults cuando faltan
+reglas, fechas con evento y fuente en crudo. **1364 backend / 85 Node** pasan,
+contrato 21 espejos. [Detalle y límites](2026-09-08_codex.md).
+Prueba de extracción IA pendiente de elegir modelo. La corrida instrumentada
+de sistema usa 6c28aab congelado y no estos cambios. Resolver intacto; golden
+histórica ausente, sin inventar su resultado. Las entradas siguientes son históricas.
 
 ## 2026-09-06 — Mensajes y procedencia de expedientes
 

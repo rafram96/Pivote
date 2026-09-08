@@ -203,6 +203,12 @@ async function generarExcel(espejo, salida) {
     e.dentro_periodo_admitido || e.ultimos_20_anios, e.tipo_solicitado, e.observaciones],
     { fmts: m2, verdicts: V2, backendCols: BE2 }));
   const tot = p.experiencia_postor_total || {};
+  if ("requisito_estado" in tot || "monto_requerido" in tot) {
+    const fuente = tot.requisito_fuente || {};
+    const minimo = tot.monto_requerido != null ? `${tot.requisito_moneda || "PEN"} ${tot.monto_requerido}`
+      : tot.requisito_estado === "no_aplica" ? "NO APLICA" : "POR VERIFICAR";
+    b.bc("MÍNIMO DE EXPERIENCIA DEL POSTOR:", minimo + (fuente.pagina_pdf ? ` — bases, página ${fuente.pagina_pdf}` : ""));
+  }
   if (Object.keys(tot).length) {
     const tv = tot.monto_confirmado ?? (tot.le_corresponde !== undefined ? tot.le_corresponde : tot.acredita);
     b.row(["", "", "", "", "", "", "", "TOTAL (le corresponde):", tv, "", "", "", ""], { bold: true, fmts: { 9: FMT_MONEY } });

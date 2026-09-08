@@ -47,6 +47,7 @@ const fs = require("fs");
 const path = require("path");
 const { matchCargoBases, _norm, _toks } = require("./match_cargo");
 const { auditarOrdenEscaneo } = require("./auditar_orden_experiencias");
+const { normalizarBasesCriticas, factorADe, totalPostorDesdeBases, auditarFechas } = require("./entradas_criticas");
 
 const rd = (p) => JSON.parse(fs.readFileSync(p, "utf-8"));
 const rdOpt = (p, def) => (fs.existsSync(p) ? rd(p) : def);
@@ -622,32 +623,7 @@ function requisitosDe(bases, cargoNum) {
 function reglasEvaluacionDe(bases) {
   const mc = bases.metadata_concurso || {};
   const reglas = bases.reglas_evaluacion || {};
-  const factores = bases.factores_evaluacion || {};
-  const listaFactores = Array.isArray(factores) ? factores : [];
-  const factorCrudo = pick(
-    reglas.factor_a,
-    bases.factor_a,
-    (!Array.isArray(factores) && factores.factor_a),
-    listaFactores.find((f) => /^\s*(?:FACTOR\s*)?A\b/i.test(String(f.factor || f.codigo || f.nombre || ""))),
-  );
-  let factorA = null;
-  if (factorCrudo && typeof factorCrudo === "object") {
-    const tramos = (Array.isArray(factorCrudo.tramos) ? factorCrudo.tramos : []).map((t) => ({
-      desde_porcentaje: numify(pick(t.desde_porcentaje, t.minimo_porcentaje, t.desde)),
-      desde_inclusivo: t.desde_inclusivo !== false,
-      hasta_porcentaje: numify(pick(t.hasta_porcentaje, t.maximo_porcentaje, t.hasta)),
-      hasta_inclusivo: t.hasta_inclusivo === true,
-      puntaje: numify(pick(t.puntaje, t.puntos)),
-    })).filter((t) => t.puntaje != null);
-    factorA = {
-      dias_adicionales_requeridos: numify(pick(
-        factorCrudo.dias_adicionales_requeridos,
-        factorCrudo.minimo_adicional_dias,
-      )),
-      tramos,
-      folio: pick(factorCrudo.folio, factorCrudo.pagina, mc.pagina_factores),
-    };
-  }
+  const factorA = factorADe(bases).factor;
   const fecha = fechaOk(pick(reglas.fecha_presentacion_oferta, mc.fecha_presentacion_oferta));
   return {
     fecha_presentacion_oferta: fecha,
@@ -713,7 +689,8 @@ function reportar(outPath, espejo, avisos) {
     console.log("   NO lo subas al backend ni sigas al Paso 5: el espejo VALIDA igual contra el schema");
     console.log("   (validar_espejo.js dirá «OK» y eso no significa que la evaluación esté completa).");
     console.log("   Si el crítico es de orden/numeración, corrige primero la extracción contra el PDF.");
-    console.log("   Vuelve a correr agent-evaluador con los hechos corregidos y consolida de nuevo.");
+    console.log("   Los críticos entrada_* vuelven a agent-bases o al profesional indicado; no al evaluador.");
+    console.log("   Con hechos corregidos, repite solo la evaluación afectada y consolida de nuevo.");
   } else {
     console.log(`OK · espejo escrito en ${outPath} · ${cuerpo}`);
   }
@@ -780,6 +757,8 @@ function consolidar(WS, opts = {}) {
   const roster = rd(path.join(WS, "roster_bundles.json"));
   const ev = rd(path.join(WS, "evaluacion.json"));
   const avisos = []; // observaciones_claude que generamos si falta data
+  const entradas = normalizarBasesCriticas(bases);
+  avisos.push(...entradas.avisos);
   const tipoEval = tipoEvaluacion(bases, opts.tipo);
   if (!tipoEval.valor) avisos.push({
     severidad: "critical", tipo: "tipo_evaluacion_indeterminado",
@@ -805,6 +784,7 @@ function consolidar(WS, opts = {}) {
   for (const i of nums) {
     const raw = rd(path.join(dirProf, `profesional_${String(i).padStart(2, "0")}.json`));
     avisos.push(...auditarOrdenEscaneo(raw.experiencias, i));
+    avisos.push(...auditarFechas(raw.experiencias, i));
     const pr = raw.profesional || {};
     const pe = PE[String(i)] || {};
     const ee = EE[String(i)] || [];
@@ -1093,8 +1073,11 @@ function consolidar(WS, opts = {}) {
       formularios,
       oferta_economica: oe,   // ya mergeada por campo arriba (dueño por dato)
       experiencia_postor,
-      experiencia_postor_total: pick((ev.postor_eval || {}).experiencia_postor_total, P.experiencia_postor_total, {}),
-      postor_cumple: pick((ev.postor_eval || {}).postor_cumple),
+      experiencia_postor_total: totalPostorDesdeBases(entradas.requisito,
+        pick((ev.postor_eval || {}).experiencia_postor_total, P.experiencia_postor_total, {})),
+      // La suficiencia monetaria se calcula contra el mínimo de las bases en el
+      // backend. No conservar el CUMPLE del evaluador antes de esa comparación.
+      postor_cumple: null,
       consorciados: Array.isArray(P.consorciados) ? P.consorciados : [],
       isos_certificaciones: Array.isArray(P.isos_certificaciones)
         ? P.isos_certificaciones.map((iso) => ({
