@@ -253,6 +253,46 @@ def test_es_experiencia_privada_no_confunde_al_emisor():
     assert not _es_experiencia_privada({"proyecto": "I.E. N° 105 San Antonio, Huarochirí"})
 
 
+def test_instituto_privado_admite_calificadores_educativos():
+    nombres = [
+        "Instituto de Educación Superior Tecnológico Privado Los Cedros",
+        "INSTITUTO DE EDUCACION SUPERIOR TECNOLOGICO PRIVADO LOS CEDROS",
+        "Instituto Superior Tecnológico Particular Los Cedros",
+        "Instituto de Educación Superior Pedagógico Privado Los Cedros",
+        "Instituto de educación superior privado Los Cedros",
+        "Instituto tecnológico privado Los Cedros",
+    ]
+    for campo in ("proyecto", "entidad_contratante", "objeto"):
+        for nombre in nombres:
+            assert _es_experiencia_privada({campo: nombre}), (campo, nombre)
+
+
+def test_instituto_publico_no_se_vuelve_privado_por_contexto():
+    for proyecto in (
+        "Instituto de Educación Superior Tecnológico Público Los Cedros",
+        "Instituto de Educación Superior Tecnológico, inversión privada",
+        "Instituto superior tecnológico bajo asociación público privada",
+        "Instituto de educación superior en predios de propiedad privada",
+        "Instituto superior tecnológico con contratista privado",
+    ):
+        assert not _es_experiencia_privada({"proyecto": proyecto}), proyecto
+    assert not _es_experiencia_privada({
+        "proyecto": "Mejoramiento del hospital público",
+        "entidad_emisora": "Instituto de Educación Superior Tecnológico Privado Los Cedros",
+    })
+
+
+def test_resolver_instituto_privado_sin_candidato_publico():
+    resultado = resolver({
+        "proyecto": "Mejoramiento del Instituto de Educación Superior Tecnológico "
+                    "Privado Los Cedros",
+    }, _FakeConsulta([]))
+    assert resultado["via"] == "PRIVADA"
+    assert resultado["estado"] == "na"
+    assert resultado["cui"] is None
+    assert resultado["obra"] is None
+
+
 def test_privada_señal_precisa_sin_falsos_positivos():
     """La palabra 'privada/particular' SUELTA disparaba falsos positivos en obra
     pública (auditoría 14-jul). Debe atarse a un sustantivo de colegio; y I.E.P.

@@ -1115,6 +1115,10 @@ def _num(v) -> int:
 _RE_PRIVADA = re.compile(
     r"\b(?:educativ[ao]|colegio|escuela|jard[ií]n|nido|instituto|gesti[oó]n)\s+"
     r"(?:particular(?:es)?|privad[ao]s?)\b"
+    # Calificadores educativos cerrados: no aceptar palabras arbitrarias entre
+    # instituto y privado (podrían referirse a inversión o propiedad privada).
+    r"|\binstituto(?:\s+de\s+educaci[oó]n)?(?:\s+superior)?"
+    r"(?:\s+(?:tecnol[oó]gico|pedag[oó]gico))?\s+(?:particular|privado)\b"
     r"|\b[ic]\.?\s?e\.?\s?p\b(?!\.?\s*n?[°º]?\s*\d)", re.I)
 
 
