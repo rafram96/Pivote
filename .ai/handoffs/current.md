@@ -5,6 +5,41 @@ agent: Codex
 
 # Handoff — punto de continuación
 
+Código del 10-sep versionado: **8c6c43c** privadas, **c665c0d** multiobra.
+1371 pruebas pasan / 25 omitidas. Sin push/reinicio ni nueva corrida;
+[preparación y límites](2026-09-10_codex.md#commits-solicitados-y-preparación-de-pucallpa).
+
+## 2026-09-10 — Multiobra llega a descarga y ZIP
+
+Corregida omisión del descargador: destinos por sub-obra identificada, caché
+compartida, estados separados y notas propias en ZIP. No hereda fechas del
+padre ni le asigna un CUI. Replay Pucallpa aislado con fuentes simuladas y
+regresiones; [evidencia y límites](2026-09-10_codex.md#descarga-multiobra-implementada-tras-diagnóstico-de-pucallpa).
+Sin relanzar jobs, reiniciar backend ni regenerar entregables del usuario.
+
+## 2026-09-10 — Detector de institutos privados corregido
+
+Calificadores educativos cerrados reconocidos sin relajar identificación de
+CUI ni confundir emisor privado con cliente privado. Comparación sobre 925
+entradas y regresiones dirigidas; [detalle y límites](2026-09-10_codex.md).
+Sin regeneración de entregables ni reinicio de servicios.
+
+## 2026-09-09 — Corrida real Puerto Firmeza (Ucayali) + 2 defectos en producción
+
+Primera corrida completa de la skill sobre el concurso CP CON-SM-27-2026-GRU-GR-C-1 (GORE Ucayali,
+supervisión de obra educativa). 7 profesionales / 15 experiencias, espejo válido, gate en verde,
+backend `confiable` sin críticos. Job final **3f94d1bf3636**. [Detalle](2026-09-09_claude.md).
+
+Salieron **dos defectos de código, no corregidos**: (1) `montos_postor.js` barre con margen e invade
+el rango del contrato vecino, eligiendo montos ajenos y reportándolos como éxito — afecta al
+requisito 3.4, que es de admisión; (2) `consolidar_espejo.js` no hace fallback de
+`cuantia`/`limite_inferior` desde `bases.json`, y el backend rechaza con `OFERTA_INCOMPLETA`
+(obligó a resubir). Ambos se sortearon a mano en la corrida, con trazabilidad en el espejo.
+
+`base_mef` del servidor **stale a 33 días** (umbral 10). Quedan 3 ítems en revisión en el panel,
+todos CUI de obra privada donde la respuesta correcta es "ninguno"; **el ZIP no se libera** hasta
+resolverlos.
+
 ## 2026-09-08 — Entrada fiable y guardas de cálculo
 
 Primer lote implementado y versionado a pedido del usuario, sin push/despliegue: mínimo desde bases,

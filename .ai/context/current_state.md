@@ -1,6 +1,18 @@
 # Estado actual del proyecto
 
-> Última actualización: **2026-09-08** · rama de trabajo: `demo`
+> Última actualización: **2026-09-10** · rama de trabajo: `demo`
+
+Correcciones versionadas: **8c6c43c** privadas y **c665c0d** multiobra;
+1371 passed / 25 skipped. No se reinició backend ni relanzó Pucallpa.
+
+Descarga multiobra implementada localmente con subcarpetas/estado por obra,
+cachés compartidas y notas conservadas en ZIP. Ver [handoff](../handoffs/2026-09-10_codex.md#descarga-multiobra-implementada-tras-diagnóstico-de-pucallpa).
+Replay con fuentes simuladas no demuestra disponibilidad real en portales.
+
+Detector privado de institutos corregido en código local: calificadores de
+educación superior tecnológica/pedagógica sin texto intermedio arbitrario.
+[Validación y límites](../handoffs/2026-09-10_codex.md). No regenerados jobs
+ni entregables existentes; no equivale a aceptación documental de experiencia.
 
 Primer lote versionado sobre 6c28aab: mínimo del postor con fuente a espejo/Excel,
 control semántico previo al evaluador, Factor A sin puntaje desde reglas nulas
