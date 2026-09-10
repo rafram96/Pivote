@@ -1104,15 +1104,27 @@ def construir_zip_infoobras(
                     for p in archivos:
                         rel = p.relative_to(origen)
                         partes = "/".join(_ruta_segura(x, 38) for x in rel.parts)
+                        info_archivo = info
+                        sub_match = re.fullmatch(r"Subobra (\d+)", rel.parts[0])
+                        if len(rel.parts) > 1 and sub_match:
+                            sub_pos = int(sub_match.group(1)) - 1
+                            sub_obras = info.get("sub_obras") or []
+                            if 0 <= sub_pos < len(sub_obras):
+                                info_archivo = sub_obras[sub_pos]
                         # Las notas generadas no son evidencia original. Al armar
                         # el entregable se actualiza su explicación, sin tocar la
                         # carpeta histórica ni los documentos descargados.
                         if p.name.upper() == "SIN_DOCUMENTOS.TXT":
-                            zf.writestr(f"{base}/{partes}",
-                                        f"{detalle_cui}\nDocumentos incorporados: {len(reales)}.\n"
-                                        "La ausencia de archivos no demuestra que no estén publicados.\n")
+                            if info_archivo is not info:
+                                # La nota de la sub-obra conserva su identidad y
+                                # motivo; no reemplazarla por el total del padre.
+                                zf.write(p, f"{base}/{partes}")
+                            else:
+                                zf.writestr(f"{base}/{partes}",
+                                            f"{detalle_cui}\nDocumentos incorporados: {len(reales)}.\n"
+                                            "La ausencia de archivos no demuestra que no estén publicados.\n")
                         elif es_archivo_seace(p.name) and p.name.upper().endswith("_NO_DISPONIBLE.TXT"):
-                            seace = info.get("seace") or {}
+                            seace = info_archivo.get("seace") or {}
                             zf.writestr(f"{base}/{partes}", nota_seace_ausencia(seace.get("estado")) + "\n")
                         elif es_archivo_seace(p.name) and p.name.upper().endswith("_ERROR.TXT"):
                             # Se conservan detalles técnicos, neutralizando la

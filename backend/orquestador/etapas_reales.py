@@ -1564,6 +1564,26 @@ def secciones_descarga_por_camino(caminos) -> Optional[frozenset]:
     return None
 
 
+def _experiencias_documentales(profesional, enriquecimiento, tipo_evaluacion):
+    """Conserva P/E y expande multiobra sin inventar CUI ni fechas del padre."""
+    np_ = profesional.get("n_prof")
+    for experiencia in profesional.get("experiencias", []) or []:
+        info = enriquecimiento.get(_clave(np_, experiencia.get("n"))) or {}
+        if info.get("via") != "MULTI_OBRA" or not info.get("sub_obras"):
+            yield experiencia, info, None
+            continue
+        for pos, sub in enumerate(info["sub_obras"], 1):
+            # No trasladar periodos globales del certificado a cada sub-obra.
+            datos = {**experiencia, "proyecto": sub.get("proyecto"),
+                     "fecha_inicial": sub.get("fecha_inicial"),
+                     "fecha_final": sub.get("fecha_final")}
+            if not sub.get("camino"):
+                sub["camino"] = info.get("camino") or (
+                    "expediente" if es_expediente_exp(experiencia, tipo_evaluacion)
+                    else "obra")
+            yield datos, sub, pos
+
+
 def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                               max_descargas=None, descargar=None, reportar=None,
                               descargar_seace=None, dir_cache_seace=None,
@@ -1619,11 +1639,12 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
         return True
 
     requisitos_obra: dict[str, dict] = {}
+    tipo_evaluacion = tipo_evaluacion_del_espejo(espejo)
     for profesional in espejo.get("profesionales", []):
-        np_requisito = profesional.get("n_prof")
-        for experiencia in profesional.get("experiencias", []) or []:
-            enr_requisito = enriquecimiento.get(
-                _clave(np_requisito, experiencia.get("n"))) or {}
+        for experiencia, enr_requisito, sub_pos in _experiencias_documentales(
+                profesional, enriquecimiento, tipo_evaluacion):
+            if sub_pos is not None and enr_requisito.get("estado") != "resuelto":
+                continue
             obra_requisito = (enr_requisito.get("obra")
                               if isinstance(enr_requisito.get("obra"), dict) else {})
             oid = obra_requisito.get("obra_id")
@@ -1640,14 +1661,12 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                     and not requisito.get("verificacion")):
                 requisito["verificacion"] = verificacion
 
-    def _obra_id(np_, ne):
-        enr = enriquecimiento.get(_clave(np_, ne)) or {}
-        o = enr.get("obra") if isinstance(enr.get("obra"), dict) else None
-        return (o or {}).get("obra_id")
-
-    def _seace(np_, ne):
-        enr = enriquecimiento.get(_clave(np_, ne)) or {}
-        return enr.get("seace") if isinstance(enr.get("seace"), dict) else None
+    def _fuentes(enr, sub_pos):
+        if sub_pos is not None and enr.get("estado") != "resuelto":
+            return None, None
+        obra = enr.get("obra") if isinstance(enr.get("obra"), dict) else {}
+        seace = enr.get("seace") if isinstance(enr.get("seace"), dict) else None
+        return obra.get("obra_id"), seace
 
     def _nota_atomica(ruta: Path, texto: str) -> None:
         ruta.parent.mkdir(parents=True, exist_ok=True)
@@ -1816,19 +1835,36 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
 
     # total descargable = unión de InfoObras y SEACE (una cuenta por experiencia)
     total_desc = sum(1 for prof in espejo.get("profesionales", [])
-                     for e in (prof.get("experiencias", []) or [])
-                     if (_obra_id(prof.get("n_prof"), e.get("n"))
-                         or _seace(prof.get("n_prof"), e.get("n"))))
+                     for e, info, pos in _experiencias_documentales(
+                         prof, enriquecimiento, tipo_evaluacion)
+                     if any(_fuentes(info, pos)))
     procesadas = 0
     for prof in espejo.get("profesionales", []):
         np_ = prof.get("n_prof")
-        for e in prof.get("experiencias", []) or []:
+        for e, enr, sub_pos in _experiencias_documentales(
+                prof, enriquecimiento, tipo_evaluacion):
             ne = e.get("n")
-            enr = enriquecimiento.get(_clave(np_, ne)) or {}
             obra = enr.get("obra") if isinstance(enr.get("obra"), dict) else None
-            obra_id = (obra or {}).get("obra_id")
-            seace = _seace(np_, ne)
+            obra_id, seace = _fuentes(enr, sub_pos)
+            destino = base / f"P{np_}_E{ne}"
+            marca = f"P{np_}_E{ne}"
+            if sub_pos is not None:
+                destino = destino / f"Subobra {sub_pos:02d}"
+                marca += f"_S{sub_pos}"
             if not obra_id and not seace:
+                if sub_pos is not None:
+                    motivo = ("Obra privada: no aplica la descarga de obra pública."
+                              if enr.get("estado") in {"privada", "na"}
+                              or enr.get("via") == "PRIVADA" else
+                              "Identificación pendiente; no se inicia descarga de candidatos."
+                              if enr.get("estado") != "resuelto" else
+                              "Sub-obra identificada, sin fuente documental descargable incorporada.")
+                    _nota_atomica(destino / "SIN_DOCUMENTOS.txt",
+                                  f"Sub-obra {sub_pos}: {e.get('proyecto') or 'sin nombre'}\n"
+                                  f"CUI: {enr.get('cui') or 'no registrado'}\n{motivo}\n")
+                    enr["descargas_reales"] = {
+                        "completada": False, "archivos": 0, "por_hito": {},
+                        "secciones": {}, "avisos": [motivo]}
                 saltados += 1
                 continue
             if max_descargas is not None and bajadas >= max_descargas:
@@ -1838,9 +1874,8 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                 nombre_obra = (enr.get("obra_nombre") or (obra or {}).get("nombre")
                                or e.get("proyecto") or f"obra {obra_id}")
                 reportar(procesadas, total_desc, _recorte(nombre_obra))
-            destino = base / f"P{np_}_E{ne}"
-            ok = base / f"P{np_}_E{ne}.ok"
-            ok_seace = base / f"P{np_}_E{ne}.seace.ok"
+            ok = base / f"{marca}.ok"
+            ok_seace = base / f"{marca}.seace.ok"
             hizo_trabajo = False
             previo = (enr.get("descargas_reales")
                       if isinstance(enr.get("descargas_reales"), dict) else {})
@@ -1950,7 +1985,33 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                 "secciones": secciones,
                 "avisos": avisos,
             }
-            enriquecimiento[_clave(np_, ne)] = enr
+            if sub_pos is None:
+                enriquecimiento[_clave(np_, ne)] = enr
+            elif not archivos_reales:
+                _nota_atomica(destino / "SIN_DOCUMENTOS.txt",
+                              f"Sub-obra {sub_pos}: {e.get('proyecto') or 'sin nombre'}\n"
+                              f"CUI: {enr.get('cui') or 'no registrado'}\n"
+                              "Sub-obra identificada; no se incorporaron documentos.\n"
+                              + "\n".join(avisos))
+            else:
+                (destino / "SIN_DOCUMENTOS.txt").unlink(missing_ok=True)
+    for prof in espejo.get("profesionales", []):
+        for e in prof.get("experiencias", []) or []:
+            info = enriquecimiento.get(_clave(prof.get("n_prof"), e.get("n"))) or {}
+            if info.get("via") != "MULTI_OBRA" or not info.get("sub_obras"):
+                continue
+            estados = [s.get("descargas_reales") or {} for s in info["sub_obras"]]
+            info["descargas_reales"] = {
+                "completada": all(s.get("completada") for s in estados),
+                "archivos": sum(s.get("archivos", 0) for s in estados),
+                "por_hito": {},
+                "secciones": {f"Subobra {i:02d}": {
+                    "estado": "completa" if s.get("completada") else "parcial"}
+                    for i, s in enumerate(estados, 1)},
+                "avisos": [f"Subobra {i:02d}: {aviso}"
+                           for i, s in enumerate(estados, 1)
+                           for aviso in s.get("avisos", [])],
+            }
     if saltados:
         logger.info("descargas job %s: %d experiencia(s) sin fuentes descargables",
                     job_id, saltados)
