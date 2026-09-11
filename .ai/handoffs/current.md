@@ -5,6 +5,66 @@ agent: Codex
 
 # Handoff — punto de continuación
 
+## Checkpoint documental
+
+Por pedido del usuario se commitea primero `.ai/`; código e instrucciones de la
+skill quedan pendientes. [Alcance](2026-09-10_codex.md#checkpoint-documental-solicitado).
+
+
+## Actualización: piloto documental en datos aislados
+
+Tres adjuntos reales y constancia leídos con texto/visión; tipo de documento no
+equivale a correspondencia con el encargo. Resultado trazable privado en
+`backend/datos_pivote/piloto-documental-20260910/INFORME.md`. No integración productiva
+nueva. Ver handoff fechado «Piloto de documentos reales sin aplicación».
+
+## Actualización: MEF y SUNAT recontrastados en código
+
+El tramo posterior ya reconsulta ambas fuentes, con caché y sin heredar cruces.
+Contrato MEF solo si es el exacto; aprobación 08-A permanece por identificar por
+contenido/encargo. Sin aplicación histórica ni prueba viva. [Detalle](2026-09-10_codex.md#recontraste-mef-y-sunat).
+
+## Actualización: recontraste y publicación de entregables
+
+Cerrado en código el bloqueo permanente del tramo anterior: relectura de ficha
+exacta, contrato explícito, recálculos auxiliares y publicación conjunta Excel/ZIP.
+Si falla publicación siguen bloqueados; MEF/SUNAT no recontrastados son faltantes
+explícitos, no datos heredados. Solo validación aislada, sin tocar jobs del cliente.
+[Detalle, pruebas y límites](2026-09-10_codex.md#recontraste-posterior-y-publicación-conjunta-validación-aislada).
+
+## Actualización: asociaciones conectadas con descargas
+
+Aplicación explícita POST/MCP implementada y probada en carpetas temporales: fuente
+exacta, huella vigente, respaldo fuera del ZIP y diario anti-entregas obsoletas.
+Ningún job real modificado. Falta recontraste derivado; por seguridad el Excel se
+bloquea después de aplicar (no reutiliza cálculos previos). Ver
+[detalle y pruebas](2026-09-10_codex.md#aplicación-de-identidad-y-descargas-validación-aislada).
+
+## Actualización: filtros y finalizador corregidos
+
+Implementación local: RUC y contrato seleccionado impiden omisión por ficha única;
+finalizador adjunta IDs y valida borradores. Fuentes oficiales obligatorias para
+identificadores externos. Replay real sin red confirma que el control omitido ya
+entra a investigación. No se corrige automáticamente el resolver, ni jobs ni
+descargas. Ver handoff fechado «Corrección posterior al ensayo».
+
+## Actualización: investigador ensayado con fuentes reales
+
+Ocho ejecuciones Luna medium con/sin prompt; contexto/planificador local, no MCP
+desplegado. Investigación útil, sin superioridad consistente del prompt; 2/4
+salidas especializadas válidas. Filtro omite caso con ficha correcta y contrato de
+otro rol. Job intacto por SHA256 de 3196 archivos. Sin cambios productivos aquí.
+Ver informe sistema `.ai/experiments/2026-09-10_evaluacion-investigador-integrado.md`
+y workspace privado `backend/datos_pivote/eval-identidad-20260910/`.
+Supersede «sin nueva corrida IA» solo para investigador, no integración desplegada.
+
+## Actualización: investigación integrada en código
+
+El lote previo quedó en `382ee7b` (raíz `ad04b12`). Después se implementó el punto 2,
+sin commit nuevo: contexto de lectura API/MCP, paso 6 de la skill, investigador por
+caso y JSON separado validado. No aplicado al job ni a sus descargas; sin reinicio
+del servidor, sin nueva corrida IA. Ver el handoff fechado, sección siguiente.
+
 [Lote posterior de identidad y lectura](2026-09-10_codex.md#ficha-explícita-estable-y-lectura-investigativa):
 ID explícito sin sustitución por fechas, SEACE sin certeza temporal, observaciones
 visibles y consultas nuevas API/MCP de solo lectura. Pruebas offline; sin reinicio

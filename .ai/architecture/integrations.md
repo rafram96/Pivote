@@ -1,5 +1,22 @@
 # Integraciones externas (todas estatales, Perú)
 
+La investigación de identidad dispone de `preparar_investigacion_identidad` por
+MCP (GET del contexto del job), junto con lectura de candidatos y fichas. No
+descarga ni promueve selecciones. El cliente ejecuta la investigación, si tiene
+modelo/presupuesto y herramientas disponibles; Chrome es opcional. Protocolo:
+`skill/references/investigacion-identidad.md`. No requiere modificar el espejo.
+
+Aplicación posterior explícita: `aplicar_investigacion_identidad` llama POST
+`/jobs/{job_id}/investigacion-identidad/aplicar`. Backend relee ficha/proceso exactos,
+no ranking; respalda corpus anterior y activa descargador existente. Huella obsoleta
+o fuente no comprobada rechazan el lote. Luego relee la ficha exacta, recalcula
+contraste/cálculos y publica Excel/ZIP; ambos bloqueados hasta terminar. Reconsulta
+SUNAT por emisor y MEF en expedientes; contrato MEF solo por número/proceso exactos.
+Documentos 08-A candidatos, no aprobación acreditada por etiqueta. No se activa el
+descargador MEF genérico, que volvería a elegir contrato; contrato exacto vía SEACE.
+No hereda cruces anteriores. Fallo de
+publicación mantiene diario y bloqueo. No se han aplicado cambios a jobs históricos.
+
 | Fuente | Uso | Acceso | Estado |
 |---|---|---|---|
 | **MEF Datos Abiertos** | base local de CUIs (452,793) + catálogo de entidades | 3 CSV en `fs.datosabiertos.mef.gob.pe/datastorefiles/` (DETALLE_INVERSIONES solo ACTIVAS; unir con CIERRE y DESACTIVADAS), refresco semanal del MEF | ✔ producción (ETL propio) |

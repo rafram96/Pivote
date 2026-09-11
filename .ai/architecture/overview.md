@@ -1,5 +1,10 @@
 # Visión general del sistema
 
+Investigación de identidad (2026-09-10): tras el primer resultado, la skill puede
+obtener contexto por MCP y producir propuestas por caso con evidencia en un JSON
+separado. No hay promoción al job ni llamadas IA desde backend. Implementado local;
+pendiente validación real. Ver `skill/references/investigacion-identidad.md`.
+
 > **Coexistencia deliberada**: si este checkout incluye la raíz del sistema
 > (`../../.ai/`), la fuente oficial de la arquitectura global es
 > `../../.ai/topology.md` — este documento es el resumen AUTOSUFICIENTE para

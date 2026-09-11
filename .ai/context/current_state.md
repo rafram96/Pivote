@@ -1,5 +1,61 @@
 # Estado actual del proyecto
 
+## 2026-09-10 — Piloto de correspondencia documental
+
+Prueba aislada con PDF reales: tipo/alcance y asociación se devuelven por separado.
+No cambia API/MCP ni aplica a entregables. Falta integración documental productiva.
+[Detalle](../handoffs/2026-09-10_codex.md#piloto-de-documentos-reales-sin-aplicación).
+
+## 2026-09-10 — Recontraste MEF/SUNAT tras identidad
+
+Implementado con caché por lote y cruces por certificado. No cambia selección de
+contrato ni declara aprobación por etiqueta. Detalle y límites en
+[handoff](../handoffs/2026-09-10_codex.md#recontraste-mef-y-sunat). Pruebas aisladas;
+supersede el pendiente de reconsulta de ambas fuentes, no la identificación documental.
+
+## 2026-09-10 — Contraste tras corrección y publicación segura
+
+Se actualizan ficha exacta, contrato y cálculos auxiliares antes de habilitar
+Excel/ZIP. Fuentes faltantes explícitas; MEF/SUNAT anteriores no se reutilizan.
+Pruebas aisladas, no validación desplegada. Supersede el bloqueo permanente descrito
+en el lote anterior. [Detalle](../handoffs/2026-09-10_codex.md#recontraste-posterior-y-publicación-conjunta-validación-aislada).
+
+## 2026-09-10 — Aplicación explícita de identidad y descargas
+
+POST/MCP aplica lote con huella vigente y fuentes exactas, conserva respaldo e
+invalida corpus/entregables anteriores. Descargador existente usa selección nueva;
+ambigüedad explícita retira fuentes y mantiene pendiente. Pruebas en temporales,
+sin alterar jobs reales. Excel se bloquea hasta recontraste derivado (no implementado
+en este lote); recuperación de publicación interrumpida requiere revisar respaldo.
+Detalle único en handoff fechado «Aplicación de identidad y descargas».
+
+## 2026-09-10 — Filtros y respuestas del investigador corregidos
+
+RUC y contratos seleccionados ya no se omiten por ficha única. Nuevo finalizador
+adjunta metadatos del lote al borrador, valida sin sobrescribir y exige fuentes
+oficiales para identificadores externos. Sin cambio de resolver ni aplicación a
+jobs/descargas. Replay privado confirma entrada del control antes omitido.
+Detalle y límites: handoff fechado, «Corrección posterior al ensayo».
+
+## 2026-09-10 — Evaluación del investigador, sin cambios de producto
+
+Ocho ejecuciones Luna medium con fuentes reales y contexto local. Se recupera
+identidad y detectan asociaciones erróneas; prompt no supera consistentemente al
+control. Solo 2/4 salidas pasan validador real. Contrato de otro rol puede quedar
+sin investigación por ficha única: brecha pendiente. No validado MCP desplegado
+ni aplicación a descargas. Job intacto (3196 hashes); resultados privados en
+`backend/datos_pivote/eval-identidad-20260910/`, informe/handoff a nivel sistema.
+
+## 2026-09-10 — Punto 2: investigación separada
+
+El checkpoint previo está en `382ee7b`. Investigación integrada después en código
+local: endpoint/MCP de contexto, paso 6, prompt y planificador/validador Node.
+No se ha ejecutado investigación real con esta integración ni aplicado propuestas
+al job. Backend/MCP no reiniciados, plugin no reconstruido. El contexto probado
+offline incluye positivos con señales de ambigüedad además de pendientes.
+Pruebas actuales: 1479 backend pasan, 25 omitidas; 35 MCP y 7 script pasan.
+Ver `../handoffs/2026-09-10_codex.md` y `skill/references/investigacion-identidad.md`.
+
 ## 2026-09-10 — Lote integrado de identidad y lectura de fuentes
 
 Implementado en código local: ID InfoObras explícito estable, clasificación de
