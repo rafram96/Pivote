@@ -5,6 +5,13 @@ agent: Codex
 
 # Handoff — punto de continuación
 
+## Checkpoint de implementación etiquetado
+
+Lote autorizado para commit y tag `checkpoint-identidad-documental-20260910`.
+Revalidación: 49 backend y 34 Node pasan; no es release desplegada ni validación
+documental integral. [Detalle](2026-09-10_codex.md#checkpoint-de-implementación-con-tag).
+
+
 ## Checkpoint documental
 
 Por pedido del usuario se commitea primero `.ai/`; código e instrucciones de la

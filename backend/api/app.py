@@ -19,6 +19,7 @@ import os
 import threading
 import time
 import uuid
+from copy import deepcopy
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -1000,6 +1001,121 @@ def _estado_veredicto(texto: str) -> str:
     return "por_confirmar"
 
 
+@app.get("/api/pivote/jobs/{job_id}/investigacion-identidad")
+def contexto_investigacion_identidad(job_id: str):
+    """Foto de lectura del primer resultado; no activa investigación ni descargas."""
+    job = _job_o_404(job_id)
+    estado = getattr(job.estado, "value", job.estado)
+    if estado not in {"completado", "requiere_revision"}:
+        raise HTTPException(409, "El resultado inicial todavía no está disponible para investigar")
+    from entregables.investigacion_identidad import preparar_contexto
+    espejo = _espejo_o_404(job_id)
+    tipo = tipo_evaluacion_del_espejo(espejo)
+    if tipo not in {"obras", "expedientes"}:
+        raise HTTPException(409, "La ruta de evaluación debe estar determinada antes de investigar")
+    return preparar_contexto(job_id, espejo, repo.cargar_enriquecimiento(job_id) or {},
+                             tipo)
+
+
+def _descargar_identidad_aplicada(job_id: str):
+    from orquestador.recontraste_identidad import recontrastar_asociaciones
+    directorio = _dir_job(job_id)
+    try:
+        with _lock_descargas(job_id):
+            pendiente = json.loads((directorio / "identidad_contraste_pendiente.json").read_text(encoding="utf-8"))
+            espejo = repo.cargar_espejo(job_id)
+            nuevo = recontrastar_asociaciones(espejo, repo.cargar_enriquecimiento(job_id), pendiente["casos"])
+            repo.guardar_enriquecimiento(job_id, nuevo)
+        _asegurar_descargas(job_id)
+        with _lock_descargas(job_id):
+            job = repo.cargar(job_id)
+            if not job or job.descargas_estado not in {"listas", "listas_con_errores"}:
+                raise RuntimeError("Descarga incompleta")
+            if not (directorio / "infoobras.zip").is_file():
+                raise RuntimeError("ZIP no publicado")
+            actual = json.loads((directorio / "identidad_contraste_pendiente.json").read_text(encoding="utf-8"))
+            if actual["revision"] != pendiente["revision"]:
+                raise RuntimeError("La revisión cambió durante la publicación")
+            enr = repo.cargar_enriquecimiento(job_id)
+            afectados = {tuple(map(int, cid.split(":")[:2])) for cid in pendiente["casos"]}
+            revisiones = {(it.n_prof, it.n_exp): (it.motivo, it.accion_sugerida)
+                          for it in job.items_revision if not it.resuelto and (it.n_prof, it.n_exp) not in afectados}
+            for np, ne in afectados:
+                revisiones[np, ne] = ((enr.get(f"{np}:{ne}") or {}).get("decision"),
+                                      "Revisar las fuentes corregidas; el sistema no emite dictamen.")
+            # El respaldo conserva la cola anterior. La cola activa no debe
+            # seguir diciendo que falta el CUI que acaba de corregirse.
+            etapas_identidad = {pipeline.Etapa.RESOLUCION_CUI, pipeline.Etapa.INFOOBRAS, pipeline.Etapa.REGLAS}
+            job.items_revision = [it for it in job.items_revision
+                if (it.n_prof, it.n_exp) not in afectados or it.etapa not in etapas_identidad]
+            for np, ne in sorted(afectados):
+                motivo, accion = revisiones[np, ne]
+                job.items_revision.append(pipeline.ItemRevision(n_prof=np, n_exp=ne,
+                    etapa=pipeline.Etapa.INFOOBRAS, motivo=motivo or "Identidad corregida; revisar evidencia.",
+                    accion_sugerida=accion))
+            completar_revisiones_privadas(revisiones, enr)
+            temporal = directorio / "identidad_nueva.xlsx"
+            regenerar_excel_final(deepcopy(espejo), deepcopy(enr), temporal, revisiones,
+                                  mapear_certificados(DATA_DIR, job_id), confiabilidad=_confiabilidad_excel(job))
+            os.replace(temporal, directorio / "final.xlsx")
+            job.excel_final = f"/api/pivote/jobs/{job_id}/excel"
+            job.revision_estado = "completada"
+            job.revision_error = None
+            job.observaciones.append(pipeline.Observacion(codigo="IDENTIDAD_ACTUALIZADA",
+                mensaje="Fuentes y contraste actualizados tras corrección de identidad; faltantes explícitos en cada experiencia. Las observaciones de etapas anteriores son históricas.",
+                origen=pipeline.Etapa.INFOOBRAS))
+            repo.guardar(job)
+            # El diario principal se retira al final: no existe ventana con un
+            # entregable habilitado mientras el otro todavía conserva datos viejos.
+            (directorio / "identidad_contraste_pendiente.json").unlink()
+            (directorio / "identidad_pendiente.json").unlink()
+    except Exception:
+        logger.exception("Recontraste de identidad job %s incompleto", job_id)
+        with _lock_descargas(job_id):
+            job = repo.cargar(job_id)
+            if job:
+                job.revision_estado = "error"
+                job.revision_error = "Publicación de identidad incompleta; entregables bloqueados y respaldo conservado."
+                repo.guardar(job)
+
+
+@app.post("/api/pivote/jobs/{job_id}/investigacion-identidad/aplicar", status_code=202)
+def aplicar_investigacion_identidad(job_id: str, tareas: BackgroundTasks, body: dict):
+    """Aplica selecciones explícitas a fuentes documentales, nunca dictámenes."""
+    from orquestador.aplicar_identidad import proyectar_asociaciones, publicar_asociaciones
+    with _lock_descargas(job_id):
+        job = _job_o_404(job_id)
+        if (getattr(job.estado, "value", job.estado) not in {"completado", "requiere_revision"}
+                or job.revision_estado == "en_curso" or job.descargas_estado == "en_progreso"
+                or (_dir_job(job_id) / "identidad_pendiente.json").exists()):
+            raise HTTPException(409, "El job está ocupado o tiene una aplicación pendiente")
+        espejo = _espejo_o_404(job_id)
+        tipo = tipo_evaluacion_del_espejo(espejo)
+        if tipo not in {"obras", "expedientes"}:
+            raise HTTPException(409, "Ruta de evaluación indeterminada")
+        previo = repo.cargar_enriquecimiento(job_id) or {}
+        try:
+            nuevo, afectados = proyectar_asociaciones(
+                job_id, espejo, previo, tipo, body.get("resultados"))
+        except (ValueError, TypeError, KeyError, AttributeError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+        _sembrar_ledger_legado(job)
+        revision = publicar_asociaciones(repo, _dir_job(job_id), job_id, previo, nuevo, afectados)
+        job.estado = pipeline.JobEstado.REQUIERE_REVISION
+        job.confiabilidad = "revisar"
+        job.observaciones.append(pipeline.Observacion(
+            mensaje="Identidad investigada aplicada: actualización de fuentes y contraste en curso. No reutilizar conclusiones anteriores.",
+            origen=pipeline.Etapa.INFOOBRAS, severidad=pipeline.Severidad.ADVERTENCIA))
+        job.descargas_estado = "pendiente"
+        job.revision_estado = "en_curso"
+        job.revision_error = None
+        repo.guardar(job)
+    tareas.add_task(_descargar_identidad_aplicada, job_id)
+    return {"revision": revision, "casos_aplicados": [c["caso_id"] for c in afectados],
+            "descargas_estado": "pendiente", "contraste_derivado": "pendiente",
+            "aviso": "Se actualizan fuentes, contraste y cálculos auxiliares; no es un dictamen. Entregables bloqueados hasta finalizar."}
+
+
 @app.get("/api/pivote/jobs/{job_id}/espejo")
 def extraccion(job_id: str):
     _job_o_404(job_id)
@@ -1226,6 +1342,9 @@ def decidir_alerta(job_id: str, body: dict):
 @app.get("/api/pivote/jobs/{job_id}/excel")
 def descargar_excel(job_id: str):
     job = _job_o_404(job_id)
+    if any((_dir_job(job_id) / n).exists() for n in
+           ("identidad_pendiente.json", "identidad_contraste_pendiente.json")):
+        raise HTTPException(409, "Identidad corregida: contraste derivado pendiente; no se sirve un Excel anterior")
     espejo = _espejo_o_404(job_id)
     ruta = _dir_job(job_id) / "final.xlsx"
     if not ruta.exists():
@@ -1256,6 +1375,9 @@ _zip_build_lock = threading.Lock()
 @app.get("/api/pivote/jobs/{job_id}/zip")
 def descargar_zip(job_id: str):
     job = _job_o_404(job_id)
+    if any((_dir_job(job_id) / n).exists() for n in
+           ("identidad_pendiente.json", "identidad_contraste_pendiente.json")):
+        raise HTTPException(409, "Aplicación de identidad o descarga pendiente; ZIP anterior retirado")
     ruta = _dir_job(job_id) / "infoobras.zip"
     en_prep = {"descargas_estado": job.descargas_estado,
                "mensaje": "El ZIP se está preparando: descargando los documentos de InfoObras."}

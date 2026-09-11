@@ -50,6 +50,10 @@ NOTA_SEACE_DESCARGA_FALLIDA = (
 )
 
 _NOTAS_SEACE_AUSENCIA: dict[str, str] = {
+    "identidad_pendiente": (
+        "La investigación no dejó un proceso o contrato exacto comprobado para "
+        "esta experiencia. No se reutilizan los documentos de la asociación anterior."
+    ),
     "fuente_no_disponible": (
         "La consulta a los datos abiertos del SEACE no respondió en esta corrida, "
         "así que no fue posible obtener este documento."

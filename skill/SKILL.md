@@ -275,32 +275,31 @@ y suele salir peor.
 
 Persiste todo en `~/InfoObras/analisis/<analisis_id>/`.
 
-### Paso 4.5 — La resolución de CUI la hace el BACKEND (tú NO consultas nada)
+### Paso 4.5 — Primera pasada: resolución de CUI en el backend
 **No consultes InfoObras ni el MEF desde aquí.** Tu trabajo con el CUI termina en la
 extracción: transcribir **literal** el código que el certificado cita (`cui`) y dejar
 `null` cuando no lo cita. Nada más.
 
-Toda la resolución y verificación es del backend, que tiene la base local del Banco de
-Inversiones del MEF (~453k CUI con nombre oficial, ubigeo y entidad) y la consulta a
-InfoObras por código: resuelve por identidad en milisegundos, con candados contra
-homónimos, compuerta de rubro y verificación de valorizaciones. Hacerlo desde la skill
-cuesta millones de tokens, es más lento y **acierta menos**. Lo que el backend no pueda
-confirmar cae a "Por confirmar" en el panel con candidatos sugeridos, como debe.
+El backend hace la primera búsqueda con su base MEF y consultas por código.
+Sus candidatos y asociaciones no son verdad comprobada. Después del primer
+resultado, el Paso 6 permite investigar pendientes y posibles falsos positivos;
+esa investigación se guarda separada, nunca como CUI declarado en el espejo.
 
 - **Anti-alucinación:** un CUI que no esté impreso en el certificado **no se escribe**.
   Jamás un CUI "de memoria" ni deducido: mejor `null` que un CUI dudoso — el backend
   trata lo que llega como pista autoritativa del certificado.
 - **SNIP viejo (5-6 díg.) vs CUI (7 díg.):** transcribe lo que diga el documento; el
   backend normaliza al código canónico.
-- **Cliente PRIVADO:** no tiene CUI — `null` sin insistir (el backend ni siquiera lo
-  busca: InfoObras solo registra obra pública).
+- **Privada:** distinguir naturaleza del proyecto y emisor del certificado.
+  Una empresa privada puede certificar servicios sobre una obra pública.
 
 ### Paso 4.6 — Verificación de EXPEDIENTES: la hace el BACKEND (no tú)
 Para las experiencias de **expediente técnico/estudio**, el contraste del contrato
 detrás del certificado (contratista / N° de contrato / monto / resolución de
 aprobación contra SEACE y el Banco de Inversiones del MEF) **lo hace el backend por
 código**, automáticamente, cuando recibe el espejo. NO lo hagas tú por navegador:
-sería trabajo duplicado y podría chocar con lo del backend.
+sería trabajo duplicado y podría chocar con lo del backend. La excepción posterior
+es investigar identidad en el Paso 6, no repetir las descargas documentales.
 
 **Tu única responsabilidad para que esto funcione:** que los CUI **citados** lleguen
 transcritos literal y el resto llegue `cui: null` limpio (Paso 4.5). El backend
@@ -332,6 +331,21 @@ manual: `docs/prompt-verificacion-expediente.md`.)
 **Fallback (Camino B, solo si el MCP/backend NO responde):** deja Excel + JSON en
 la carpeta del análisis y dile al usuario que los suba por el dropzone del panel.
 No te quedes esperando: si el backend está apagado, reporta el fallback y termina.
+
+### Paso 6 — Investigación de identidad posterior al resultado inicial
+
+Cuando el job termine (`completado` o `requiere_revision`), sigue
+`references/investigacion-identidad.md`. No vuelvas a subir el análisis ni relances
+el backend para investigar. Usa `prompts/agent-investigador-identidad.md` por caso,
+solo con modelo y presupuesto acordados para esta ejecución. Si faltan herramientas
+o autorización, informa la fase pendiente y conserva el resultado inicial.
+
+La salida es `investigacion_identidad.json`, separada del espejo y del job:
+propuestas con evidencia, ambigüedades y consultas fallidas. No es un dictamen,
+no cambia CUI declarados y no activa descargas. Una ficha única en un listado
+tampoco demuestra que la experiencia esté bien identificada. Si el usuario pide
+aplicar asociaciones, usar la acción explícita de la misma referencia; no confundir
+investigar con autorizar cambios. La aplicación no recalcula cumplimiento.
 
 ## Validación y retry
 

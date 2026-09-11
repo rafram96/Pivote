@@ -41,6 +41,42 @@ after(() => {
 
 const cli = () => crearCliente({ serverUrl: BASE });
 
+describe("aplicarInvestigacionIdentidad", () => {
+  it("envía solo el lote explícito y conserva aceptación o rechazo del backend", async () => {
+    const resultados = [{ caso_id: "1:1", estado: "ambiguo" }];
+    responder(202, { revision: "revision-test", contraste_derivado: "pendiente" });
+    const r = await cli().aplicarInvestigacionIdentidad({job_id:"abcdef123456", resultados});
+    assert.equal(r.ok, true);
+    assert.equal(pedidos[0].metodo, "POST");
+    assert.equal(pedidos[0].url, BASE + "/api/pivote/jobs/abcdef123456/investigacion-identidad/aplicar");
+    assert.deepEqual(JSON.parse(pedidos[0].cuerpo), {resultados});
+    responder(422, {detail:"Contexto obsoleto"});
+    assert.equal((await cli().aplicarInvestigacionIdentidad({job_id:"abcdef123456",resultados})).status_http,422);
+  });
+  it("rechaza ID inválido y lote vacío sin red", async () => {
+    assert.equal((await cli().aplicarInvestigacionIdentidad({job_id:"../otro",resultados:[{}]})).ok,false);
+    assert.equal((await cli().aplicarInvestigacionIdentidad({job_id:"abcdef123456",resultados:[]})).ok,false);
+    assert.equal(pedidos.length,0);
+  });
+});
+
+describe("prepararInvestigacionIdentidad", () => {
+  it("consulta contexto mediante GET sin modificar el job", async () => {
+    responder(200, {version:1, job_id:"abcdef123456", casos:[]});
+    const r = await cli().prepararInvestigacionIdentidad({job_id:"abcdef123456"});
+    assert.equal(r.ok,true);
+    assert.equal(pedidos[0].metodo,"GET");
+    assert.equal(pedidos[0].url,`${BASE}/api/pivote/jobs/abcdef123456/investigacion-identidad`);
+  });
+  it("conserva 409 y rechaza ID inválido sin red", async () => {
+    responder(409, {detail:"Todavía no disponible"});
+    assert.equal((await cli().prepararInvestigacionIdentidad({job_id:"abcdef123456"})).status_http,409);
+    pedidos=[];
+    assert.equal((await cli().prepararInvestigacionIdentidad({job_id:"../otro"})).ok,false);
+    assert.equal(pedidos.length,0);
+  });
+});
+
 async function carpetaAnalisis(raiz, nombre = "licitacion") {
   const carpeta = join(raiz, nombre);
   await mkdir(carpeta, { recursive: true });

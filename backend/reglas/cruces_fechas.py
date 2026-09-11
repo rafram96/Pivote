@@ -275,6 +275,12 @@ def expediente_verificado(verificacion: Optional[dict]) -> tuple[bool, str]:
     if not isinstance(verificacion, dict):
         return False, ("esta experiencia no tiene verificación del expediente "
                        "contra el Banco de Inversiones del MEF")
+    if verificacion.get("estado") == "no_recontrastado":
+        return False, "el cruce MEF no se ha actualizado tras corregir la identidad; no se reutiliza el del proyecto anterior"
+    if verificacion.get("estado") == "recontrastado" and not verificacion.get("verificado_en_mef"):
+        return False, str(verificacion.get("motivo") or "la nueva consulta MEF no permitió asociar el contrato exacto")
+    if verificacion.get("estado") == "recontrastado" and verificacion.get("aprobacion_identificada") is not True:
+        return False, "el contrato fue recontrastado, pero la aprobación de este encargo aún no se identificó por contenido; no se usa la fecha de un enlace candidato"
     if not verificacion.get("verificado_en_mef"):
         return False, ("este análisis no dispone de contratos ni Formato 08-A para este "
                        "proyecto, así que no hay expediente que cotejar")

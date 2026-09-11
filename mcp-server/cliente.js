@@ -253,9 +253,28 @@ export function crearCliente({
     },
 
     /**
-     * Consulta en solo lectura los candidatos que la fuente InfoObras asocia
-     * a un CUI/SNIP. No selecciona una obra ni inicia ningún trabajo.
+     * Obtiene el contexto del primer resultado para investigación separada.
+     * No inicia agentes, descargas ni cambios de identidad.
      */
+    async prepararInvestigacionIdentidad({ job_id }) {
+      if (typeof job_id !== "string" || !/^[a-f0-9]{12}$/.test(job_id)) {
+        return { ok: false, error: "job_id debe ser el identificador de 12 caracteres recibido del backend." };
+      }
+      const r = await pedir("GET", `/api/pivote/jobs/${job_id}/investigacion-identidad`);
+      if (!r.ok) return { ok: false, status_http: r.status, error: r.data };
+      return { ok: true, ...r.data };
+    },
+
+    async aplicarInvestigacionIdentidad({ job_id, resultados }) {
+      if (typeof job_id !== "string" || !/^[a-f0-9]{12}$/.test(job_id)
+          || !Array.isArray(resultados) || !resultados.length)
+        return { ok: false, error: "Se requiere job_id válido y resultados explícitos." };
+      const r = await pedir("POST", `/api/pivote/jobs/${job_id}/investigacion-identidad/aplicar`,
+        { json: { resultados }, timeout: uploadTimeoutMs });
+      if (!r.ok) return { ok: false, status_http: r.status, error: r.data };
+      return { ok: true, ...r.data };
+    },
+
     async listarFichasInfoobras({ cui }) {
       if (typeof cui !== "string" || !/^[0-9]{1,10}$/.test(cui)) {
         return { ok: false, error: "El CUI debe contener entre 1 y 10 dígitos ASCII." };

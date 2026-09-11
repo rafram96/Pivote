@@ -1,5 +1,10 @@
 # Estado actual del proyecto
 
+Checkpoint autorizado de implementación: `checkpoint-identidad-documental-20260910`.
+Investigación, aplicación y recontraste versionados junto con skill/MCP; sin push
+ni despliegue. [Pruebas y límites](../handoffs/2026-09-10_codex.md#checkpoint-de-implementación-con-tag).
+
+
 ## 2026-09-10 — Piloto de correspondencia documental
 
 Prueba aislada con PDF reales: tipo/alcance y asociación se devuelven por separado.

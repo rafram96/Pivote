@@ -138,6 +138,20 @@ server.tool(
 // ── Consulta y descarga de una obra por su CUI ───────────────────────────────
 
 server.tool(
+  "preparar_investigacion_identidad",
+  "Lee el contexto de identidad de un job terminado: pendientes, asociaciones con señales de ambigüedad y positivos que necesitan comprobar cuántas fichas tiene su CUI. No resuelve, no modifica el job ni descarga PDFs. Devuelve contexto y huella para una investigación separada; 409 indica que el primer resultado aún no está disponible.",
+  { job_id: z.string().regex(/^[a-f0-9]{12}$/).describe("Identificador devuelto por subir_analisis.") },
+  async (args) => comoTexto(await cli.prepararInvestigacionIdentidad(args))
+);
+
+server.tool(
+  "aplicar_investigacion_identidad",
+  "Aplica un lote explícitamente autorizado de investigación al job vigente. Comprueba ficha/proceso exactos, respalda documentos anteriores e inicia descargas de las fuentes seleccionadas. Ambiguo/sin candidato retiran fuentes previas y mantienen pendiente; no promueven candidatos. Invalida Excel previo; el contraste derivado queda pendiente. No usar para diagnóstico. No decide cumplimiento.",
+  { job_id: z.string().regex(/^[a-f0-9]{12}$/), resultados: z.array(z.record(z.unknown())).min(1) },
+  async (args) => comoTexto(await cli.aplicarInvestigacionIdentidad(args))
+);
+
+server.tool(
   "buscar_cui",
   "Busca el código único de inversión (CUI) de una obra por su nombre, en la base local del MEF que tiene el servidor de InfoObras. Úsala cuando el usuario pregunte «cuál es el CUI de…», «búscame el hospital de Abancay» o tenga el nombre de una obra y le falte el código. Es una consulta local: no sale a internet ni depende de portales. Devuelve los mejores candidatos con nombre, ubicación y entidad.",
   {
