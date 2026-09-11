@@ -165,7 +165,8 @@ def test_regla_a_se_abstiene_sin_proceso_publicado():
     cruce = evaluar_inicio_vs_contrato(
         {"estado": "sin_procesos", "cui": "2337618"}, c)
     assert cruce.resultado == POR_CONFIRMAR
-    assert "2018" in cruce.motivo
+    assert "2018" not in cruce.motivo
+    assert "no demuestra que no exista" in cruce.motivo
     assert cruce.fecha_fuente is None
 
 
@@ -384,12 +385,13 @@ def test_regla_a_sin_enriquecimiento_se_comporta_como_antes():
         == POR_CONFIRMAR
 
 
-# 2 · «la cobertura empieza en 2018» solo para experiencias pre-2018.
+# 2 · Una fecha no demuestra por qué la búsqueda no obtuvo procesos.
 
-def test_motivo_sin_proceso_solo_culpa_a_la_cobertura_antes_de_2018():
+def test_motivo_sin_proceso_no_inventa_causa_por_antiguedad():
     viejo = cert(fecha_inicial="2015-01-01", fecha_final="2016-01-01")
     m = evaluar_inicio_vs_contrato({"estado": "sin_procesos"}, viejo).motivo
-    assert "la cobertura empieza en 2018" in m
+    assert "cobertura" not in m
+    assert "no demuestra que no exista ni establece la causa" in m
 
     nuevo = cert(tipo_experiencia="expediente", fecha_inicial="2022-01-10",
                  fecha_final="2022-11-11")
@@ -400,9 +402,8 @@ def test_motivo_sin_proceso_solo_culpa_a_la_cobertura_antes_de_2018():
 
 
 def test_motivo_sin_proceso_en_el_borde_exacto_de_2018():
-    """El término manda (no el inicio): un servicio que arrancó en 2017 y cerró
-    en 2018 ya cae dentro de la cobertura."""
-    assert "cobertura" in evaluar_inicio_vs_contrato(
+    """A ambos lados del año se informa el resultado, no una causa inferida."""
+    assert "cobertura" not in evaluar_inicio_vs_contrato(
         {"estado": "sin_procesos"},
         cert(fecha_inicial="2016-01-01", fecha_final="2017-12-31")).motivo
     assert "cobertura" not in evaluar_inicio_vs_contrato(
@@ -648,8 +649,9 @@ def test_hoja_cronologia_de_un_job_viejo_sin_datos_lleva_nota():
     espejo = _espejo_una_experiencia(cert())
     ws, filas, textos = _hoja(espejo, {"1:1": {"cui": "2337618"}})
     unido = " ".join(textos)
-    assert "Sin procesos verificables" in unido
-    assert "no es un defecto de la propuesta" in unido.lower()
+    assert "En esta corrida no se obtuvo" in unido
+    assert "Esto no prueba que no existan" in unido
+    assert "cobertura empieza" not in unido
     assert filas == 1                       # la experiencia igual se lista
     assert "POR VERIFICAR" in textos
 
@@ -782,7 +784,8 @@ def test_bloque_por_profesional_una_entrada_por_experiencia(tmp_path):
     fila_exp2 = _buscar(ws, "EXPERIENCIA 2 · obra")[0]
     notas = " ".join(str(f[0].value) for f in ws.iter_rows(
         min_row=fila_exp2, min_col=1, max_col=1) if f[0].value)
-    assert "no se identificó el proceso" in notas and "2018" in notas
+    assert "no se halló el proceso" in notas and "2018" not in notas
+    assert "no demuestra que no exista" in notas
 
 
 def test_bloque_por_profesional_colorea_como_la_hoja_global(tmp_path):

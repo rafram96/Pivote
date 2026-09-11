@@ -486,13 +486,21 @@ def clasificar_proceso(comp: dict) -> tuple[str, bool]:
     texto = _minusculas(f"{t.get('title') or ''} {t.get('description') or ''} "
                         f"{t.get('procurementMethodDetails') or ''}")
     es_saldo = bool(_RE_SALDO.search(texto))
+    # La categoría oficial manda sobre las palabras que aparezcan en la
+    # descripción: una adquisición de bienes puede mencionar la ejecución,
+    # expediente o supervisión del proyecto destinatario sin ser ninguno de
+    # esos procesos. Normalizamos espacios/case para no depender del formato
+    # que entregue OCDS.
+    categoria = re.sub(r"\s+", " ", _minusculas(t.get("mainProcurementCategory"))).strip()
+    if categoria == "goods":
+        return TIPO_OTRO, es_saldo
     if _RE_PREINV.search(texto):
         return TIPO_PREINVERSION, es_saldo
     if _RE_SUPERV.search(texto):
         return TIPO_SUPERVISION, es_saldo
     if _RE_EXPED.search(texto):
         return TIPO_EXPEDIENTE, es_saldo
-    if _RE_EJEC.search(texto) or (t.get("mainProcurementCategory") == "works"):
+    if _RE_EJEC.search(texto) or categoria == "works":
         return TIPO_EJECUCION, es_saldo
     return TIPO_OTRO, es_saldo
 

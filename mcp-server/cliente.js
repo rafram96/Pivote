@@ -253,6 +253,38 @@ export function crearCliente({
     },
 
     /**
+     * Consulta en solo lectura los candidatos que la fuente InfoObras asocia
+     * a un CUI/SNIP. No selecciona una obra ni inicia ningún trabajo.
+     */
+    async listarFichasInfoobras({ cui }) {
+      if (typeof cui !== "string" || !/^[0-9]{1,10}$/.test(cui)) {
+        return { ok: false, error: "El CUI debe contener entre 1 y 10 dígitos ASCII." };
+      }
+      const params = new URLSearchParams();
+      params.set("cui", cui);
+      const r = await pedir("GET", `/api/pivote/infoobras/candidatos?${params.toString()}`);
+      if (!r.ok) return { ok: false, status_http: r.status, error: r.data };
+      return { ok: true, ...r.data };
+    },
+
+    /** Consulta una ficha concreta de InfoObras por CUI y obra_id, sin descargarla. */
+    async consultarFichaInfoobras({ cui, obra_id }) {
+      if (typeof cui !== "string" || !/^[0-9]{1,10}$/.test(cui)) {
+        return { ok: false, error: "El CUI debe contener entre 1 y 10 dígitos ASCII." };
+      }
+      if (typeof obra_id !== "number" || !Number.isInteger(obra_id)
+        || obra_id <= 0 || obra_id > 2147483647) {
+        return { ok: false, error: "obra_id debe ser un entero positivo de 32 bits." };
+      }
+      const params = new URLSearchParams();
+      params.set("cui", cui);
+      params.set("obra_id", String(obra_id));
+      const r = await pedir("GET", `/api/pivote/infoobras/ficha?${params.toString()}`);
+      if (!r.ok) return { ok: false, status_http: r.status, error: r.data };
+      return { ok: true, ...r.data };
+    },
+
+    /**
      * Inicia la descarga de TODOS los documentos de InfoObras de una obra (por su
      * CUI). Devuelve al instante un número de seguimiento: el trabajo sigue en el
      * servidor. Los archivos NO viajan por aquí — se bajan del ZIP del backend.

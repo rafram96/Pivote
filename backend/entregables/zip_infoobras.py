@@ -870,9 +870,14 @@ def _linea_candado_seace(info: dict) -> Optional[str]:
     """
     seace = info.get("seace") if isinstance(info.get("seace"), dict) else {}
     candado = seace.get("candado") if isinstance(seace.get("candado"), dict) else {}
-    from validacion.candado_seace import rotulo
+    from validacion.candado_seace import observaciones_temporales, rotulo
     texto = rotulo(candado.get("resultado"))
-    return f"Documentos del proceso (SEACE): {texto}" if texto else None
+    if not texto:
+        return None
+    observaciones = observaciones_temporales(candado)
+    if observaciones:
+        texto += "\nObservación de fechas: " + " ".join(observaciones)
+    return f"Documentos del proceso (SEACE): {texto}"
 
 
 def _indice_txt(meta: dict, registros: list[dict], cabecera: list[str]) -> str:
@@ -999,6 +1004,22 @@ def _estado_seccion_legible(estado: dict, nombre: str = "documentos") -> str:
     return f"por verificar ({bajados}/{esperados} descargados)"
 
 
+def _lineas_ficha_infoobras(info: dict) -> list[str]:
+    """Procedencia de la ficha, separada de la identidad CUI y del éxito de red."""
+    ficha = info.get("obra_ficha") or info.get("ficha") or {}
+    consultada = ficha.get("obra_id") or ficha.get("codigo_infoobras")
+    inicial = (info.get("obra_inicial") or info.get("obra") or {}).get("obra_id")
+    lineas = []
+    if consultada:
+        lineas.append(f"Ficha InfoObras consultada para el contraste: {consultada}")
+    if inicial and consultada and str(inicial) != str(consultada):
+        lineas.append(f"Ficha de la búsqueda inicial: {inicial} (no es la ficha del contraste)")
+    documental = (info.get("descargas_reales") or {}).get("obra_id")
+    if documental:
+        lineas.append(f"Ficha InfoObras utilizada para solicitar documentos: {documental}")
+    return lineas
+
+
 def construir_zip_infoobras(
     espejo: dict,
     descargas: dict[tuple[int, int], Path],
@@ -1068,13 +1089,19 @@ def construir_zip_infoobras(
                 detalle_cui = rotulo_cui(procedencia)
                 lineas_identidad = [detalle_cui,
                                     f"Vía: {procedencia['via'] or 'no informada'}"]
+                lineas_identidad.extend(_lineas_ficha_infoobras(info))
                 if identificacion:
                     lineas_identidad.append(f"Identificación: {identificacion['etiqueta']}")
+                datos_subobras = [s for s in (info.get("sub_obras") or [])
+                                  if isinstance(s, dict)]
                 for pos, sub in enumerate(procedencia['sub_obras'], 1):
                     lineas_identidad.append(
                         f"Sub-obra {pos}: {sub['nombre'] or 'sin nombre registrado'} · "
                         f"CUI: {sub['cui'] or 'no registrado'} · "
                         f"Estado: {sub['estado'] or 'no informado'}")
+                    datos_sub = datos_subobras[pos - 1]
+                    lineas_identidad.extend(
+                        f"  {linea}" for linea in _lineas_ficha_infoobras(datos_sub))
                 zf.writestr(f"{base}/IDENTIFICACION.txt", "\n".join(lineas_identidad) + "\n")
                 manifiesto = (info.get("descargas_reales")
                               if isinstance(info.get("descargas_reales"), dict) else {})

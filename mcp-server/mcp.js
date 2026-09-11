@@ -152,6 +152,28 @@ server.tool(
 );
 
 server.tool(
+  "listar_fichas_infoobras",
+  "Consulta en solo lectura web los candidatos de InfoObras para un CUI/SNIP (incluido SNIP legado). La lista no confirma la identidad ni elige una obra; asume hasta 20 registros del alcance que responda la fuente. Una fuente_no_respondio no significa ausencia. No inicia jobs ni descarga PDFs.",
+  {
+    cui: z.string().regex(/^[0-9]{1,10}$/, "El CUI debe contener entre 1 y 10 dígitos ASCII.")
+      .describe("CUI o SNIP legado, entre 1 y 10 dígitos ASCII."),
+  },
+  async ({ cui }) => comoTexto(await cli.listarFichasInfoobras({ cui }))
+);
+
+server.tool(
+  "consultar_ficha_infoobras",
+  "Consulta en solo lectura la ficha de InfoObras para el CUI/SNIP y obra_id indicados. Exige el ID explícito de la obra y no selecciona otro. No inicia jobs ni descarga PDFs; una fuente_no_respondio no significa ausencia.",
+  {
+    cui: z.string().regex(/^[0-9]{1,10}$/, "El CUI debe contener entre 1 y 10 dígitos ASCII.")
+      .describe("CUI o SNIP legado, entre 1 y 10 dígitos ASCII."),
+    obra_id: z.number().int().positive().max(2147483647)
+      .describe("ID entero positivo de la obra, hasta 2147483647."),
+  },
+  async ({ cui, obra_id }) => comoTexto(await cli.consultarFichaInfoobras({ cui, obra_id }))
+);
+
+server.tool(
   "descargar_documentos_cui",
   "Pide al servidor que baje de InfoObras TODOS los documentos de una obra a partir de su CUI: valorizaciones, informes de control, datos de cierre y la aprobación del expediente. Úsala cuando el usuario diga «bájame los papeles/documentos de esta obra» o «descarga el CUI X». Contesta al instante con un número de seguimiento; la descarga sigue en el servidor y puede tardar minutos. Los archivos NO viajan por el chat: al terminar se entrega la dirección del ZIP.",
   {

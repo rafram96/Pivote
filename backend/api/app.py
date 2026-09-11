@@ -1468,6 +1468,25 @@ def buscar_en_base_mef(q: str = "", dpto: str = "", prov: str = "", dist: str = 
         raise HTTPException(400, str(e)) from None
 
 
+# Lectura investigativa: sin selección automática, cálculo ni descarga de PDFs.
+@app.get("/api/pivote/infoobras/candidatos")
+def listar_fichas_infoobras(cui: str):
+    from scraping.consulta_infoobras import ConsultaIdentidadInvalida, listar_fichas
+    try:
+        return listar_fichas(cui)
+    except ConsultaIdentidadInvalida as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
+@app.get("/api/pivote/infoobras/ficha")
+def consultar_ficha_infoobras(cui: str, obra_id: str):
+    from scraping.consulta_infoobras import ConsultaIdentidadInvalida, consultar_ficha
+    try:
+        return consultar_ficha(cui, obra_id)
+    except ConsultaIdentidadInvalida as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
 # ── Salud de portales ────────────────────────────────────────────────────────
 
 _SALUD_CACHE: dict = {"ts": 0.0, "data": None}

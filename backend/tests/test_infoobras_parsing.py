@@ -355,23 +355,34 @@ def test_seleccionar_obra_desempate_deterministico_sin_solape():
     assert infoobras.seleccionar_obra([b, a], ci, cf)["codigoObra"] == 200
 
 
-def test_elegir_obra_raw_valida_el_bypass_por_cobertura():
-    # Valdizán: el resolver puede pasar 71173 (no cubre el cert); el bypass debe
-    # corregir a 33900 (la que cubre). Si pasa 33900, se respeta.
+def test_elegir_obra_raw_preserva_id_explicito_sin_validar_cobertura():
+    # Valdizán: aunque 71173 no cubra el certificado, el ID explícito identifica
+    # la ficha y no debe sustituirse por 33900.
     a = _obra("Finalizado", date(2014, 10, 30), date(2015, 2, 27), codigoObra=33900)
     b = _obra("Finalizado", date(2017, 6, 1), date(2018, 12, 1), codigoObra=71173)
     rangos = {33900: (date(2015, 1, 1), date(2016, 7, 1)),
               71173: (date(2017, 6, 1), date(2021, 4, 1))}
     ci, cf, rv = date(2016, 6, 10), date(2017, 5, 15), lambda oid: rangos[oid]
 
-    # bypass con obra que NO cubre → corrige por solape a 33900
-    assert infoobras.elegir_obra_raw([a, b], ci, cf, 71173, rv)["codigoObra"] == 33900
-    # bypass con obra que SÍ cubre → se respeta
+    # El callback no debe consultarse cuando el ID ya fija la ficha.
+    def no_consultar(_oid):
+        raise AssertionError("no se deben consultar valorizaciones con ID explícito")
+
+    assert infoobras.elegir_obra_raw([a, b], ci, cf, 71173, no_consultar)["codigoObra"] == 71173
+    # También se respeta aunque sí cubra.
     assert infoobras.elegir_obra_raw([a, b], ci, cf, 33900, rv)["codigoObra"] == 33900
     # sin obra_id → selección por solape
     assert infoobras.elegir_obra_raw([a, b], ci, cf, None, rv)["codigoObra"] == 33900
     # sin fechas de certificado → no se puede validar, se respeta el bypass
     assert infoobras.elegir_obra_raw([a, b], None, None, 71173, rv)["codigoObra"] == 71173
+
+
+def test_elegir_obra_raw_normaliza_id_string_y_rechaza_desconocido():
+    a = _obra("Finalizado", date(2014, 1, 1), date(2015, 1, 1), codigoObra="33900")
+    b = _obra("Finalizado", date(2021, 1, 1), date(2022, 1, 1), codigoObra=71173)
+    assert infoobras.elegir_obra_raw([a, b], date(2020, 1, 1), date(2020, 2, 1), 33900) is a
+    assert infoobras.elegir_obra_raw([a, b], date(2020, 1, 1), date(2020, 2, 1), "71173") is b
+    assert infoobras.elegir_obra_raw([a, b], date(2020, 1, 1), date(2020, 2, 1), 99999) is None
 
 
 def test_coincide_codigo_filtra_colision_por_substring():
@@ -517,3 +528,118 @@ def test_fetch_by_cui_con_bypass_obra_id(monkeypatch):
     assert res is not None
     assert res.obra_id == 222
     assert res.nombre == "OBRA 2 PRINCIPAL"
+
+
+def test_fetch_by_cui_retorna_none_si_el_id_desaparece_en_reintento(monkeypatch):
+    import scraping.infoobras as infoobras_mod
+
+    class FakeSession:
+        headers = {}
+
+        def get(self, *args, **kwargs):
+            class R:
+                text = "var lAvances = [];"
+                def raise_for_status(self):
+                    return None
+            return R()
+
+    monkeypatch.setattr(infoobras_mod, "_crear_session", lambda: FakeSession())
+    primera = [{"nombrObra": "Ficha inicial sin ID"}]
+    segunda = [{"codigoObra": 333, "nombrObra": "Ficha final"}]
+    llamadas = iter([primera, segunda])
+    cantidad_busquedas = {"total": 0}
+    def buscar(*_):
+        cantidad_busquedas["total"] += 1
+        return next(llamadas)
+    monkeypatch.setattr(infoobras_mod, "_buscar_por_cui", buscar)
+    monkeypatch.setattr(infoobras_mod.time, "sleep", lambda *_: None)
+
+    resultado = infoobras_mod.fetch_by_cui("133630")
+    assert resultado is not None and resultado.obra_id == 333
+    assert cantidad_busquedas["total"] == 2
+
+
+def test_fetch_by_cui_preserva_obra_id_alternativo(monkeypatch):
+    import scraping.infoobras as infoobras_mod
+
+    class FakeSession:
+        headers = {}
+        def get(self, *args, **kwargs):
+            class R:
+                text = "var lAvances = [];"
+                def raise_for_status(self):
+                    return None
+            return R()
+
+    monkeypatch.setattr(infoobras_mod, "_crear_session", lambda: FakeSession())
+    monkeypatch.setattr(
+        infoobras_mod, "_buscar_por_cui",
+        lambda *_: [{"obraId": "222", "nombrObra": "Ficha por obraId"}],
+    )
+    monkeypatch.setattr(infoobras_mod.time, "sleep", lambda *_: None)
+
+    resultado = infoobras_mod.fetch_by_cui("133630", obra_id="222")
+    assert resultado is not None and resultado.obra_id == 222
+
+
+def test_busqueda_http200_json_error_no_se_confunde_con_sin_resultados(monkeypatch):
+    class Respuesta:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"error": "servicio temporalmente no disponible"}
+
+    class Sesion:
+        llamadas = 0
+
+        def post(self, *args, **kwargs):
+            self.llamadas += 1
+            return Respuesta()
+
+    sesion = Sesion()
+    monkeypatch.setattr(infoobras.time, "sleep", lambda *_: None)
+    with pytest.raises(ValueError, match="formato reconocido"):
+        infoobras._buscar_por_cui(sesion, "133630")
+    assert sesion.llamadas == 1
+
+
+@pytest.mark.parametrize("payload", [
+    {"Result": {"codSnip": "133630"}},
+    {"data": [{"codSnip": "133630"}]},
+    {"obras": [{"codSnip": "133630"}]},
+])
+def test_busqueda_acepta_envelopes_de_registro_y_listas(payload, monkeypatch):
+    class Respuesta:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return payload
+
+    class Sesion:
+        def post(self, *args, **kwargs):
+            return Respuesta()
+
+    assert infoobras._buscar_por_cui(Sesion(), "133630")[0]["codSnip"] == "133630"
+
+
+def test_busqueda_lista_vacia_http200_conserva_reintentos_y_resultado_vacio(monkeypatch):
+    class Respuesta:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"Result": []}
+
+    class Sesion:
+        llamadas = 0
+
+        def post(self, *args, **kwargs):
+            self.llamadas += 1
+            return Respuesta()
+
+    sesion = Sesion()
+    monkeypatch.setattr(infoobras.time, "sleep", lambda *_: None)
+    assert infoobras._buscar_por_cui(sesion, "133630") == []
+    assert sesion.llamadas == 3

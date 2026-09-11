@@ -12,7 +12,7 @@ from datetime import date
 import pytest
 
 from scraping.seace_abierto import (
-    TIPO_EJECUCION, TIPO_EXPEDIENTE, TIPO_PREINVERSION, TIPO_SUPERVISION,
+    TIPO_EJECUCION, TIPO_EXPEDIENTE, TIPO_OTRO, TIPO_PREINVERSION, TIPO_SUPERVISION,
     CacheConosce, clasificar_proceso, codigo_convocatoria,
     crear_session, descargar_archivo, doc_bases_integradas, doc_contrato_firmado,
     archivo_valido, cabecera_valida, extension_documento, procesos_por_cui,
@@ -50,6 +50,21 @@ def test_supervision_gana_sobre_expediente():
     # "supervisión de la elaboración del expediente" usa bases DE SUPERVISIÓN
     p = _proc("x", "Supervisión de la elaboración del expediente técnico del Hospital X")
     assert clasificar_proceso(p)[0] == TIPO_SUPERVISION
+
+
+def test_bienes_no_se_clasifican_por_el_proyecto_mencionado():
+    """La categoría goods identifica adquisición, aunque la descripción
+    nombre ejecución, expediente o supervisión del proyecto destinatario."""
+    for palabra in ("ejecución de obra", "expediente técnico", "supervisión"):
+        p = _proc("x", f"Adquisición de bienes para la {palabra} del hospital",
+                  categoria="  GOODS  ")
+        assert clasificar_proceso(p)[0] == TIPO_OTRO
+
+
+def test_works_con_equipamiento_conserva_ejecucion():
+    p = _proc("x", "Ejecución de obra con equipamiento del hospital",
+              categoria=" WORKS ")
+    assert clasificar_proceso(p)[0] == TIPO_EJECUCION
 
 
 def test_saldo_se_marca_sin_cambiar_el_tipo():

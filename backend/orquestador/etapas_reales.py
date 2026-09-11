@@ -20,6 +20,7 @@ import logging
 import threading
 import os
 import re
+from copy import deepcopy
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from pathlib import Path
@@ -204,6 +205,7 @@ def _fx_de_obra(obra, cui) -> dict:
     para que ambas se rendericen con el MISMO formato."""
     fi, ff = getattr(obra, "fecha_inicio", None), getattr(obra, "fecha_fin", None)
     return {
+        "obra_id": getattr(obra, "obra_id", None),
         "codigo_infoobras": getattr(obra, "codigo_infoobras", None),
         "cui": cui,
         "estado": getattr(obra, "estado", None),
@@ -226,6 +228,24 @@ def _fx_de_obra(obra, cui) -> dict:
             for m in (getattr(obra, "modificaciones_plazo", []) or [])
         ],
     }
+
+
+def _registrar_obra_consultada(enr: dict, obra, cui) -> None:
+    """Persistir la MISMA ficha que alimenta el cálculo, sin volver a elegirla.
+
+    La búsqueda inicial queda como procedencia, no como otra selección activa.
+    No cambia CUI, vía, certeza ni datos declarados en el espejo.
+    """
+    anterior = enr.get("obra") if isinstance(enr.get("obra"), dict) else {}
+    if "obra_inicial" not in enr:
+        enr["obra_inicial"] = deepcopy(anterior)
+    enr["obra"] = {
+        **anterior,
+        "obra_id": getattr(obra, "obra_id", None),
+        "nombre_obra": getattr(obra, "nombre", None),
+        "cui": cui,
+    }
+    enr.pop("sin_registro_infoobras", None)
 
 
 # ── 1 · Revisión de consistencia (las notas puras del validador) ─────────────
@@ -762,13 +782,14 @@ class EtapaInfoObrasReal:
                            if _tipo == "antes_inicio_obra" else {}),
                     })
             enr.pop("sin_verificar", None)  # se trajo OK: ya no es incierta
+            _registrar_obra_consultada(enr, obra, cui)
             enr["codigo_infoobras"] = getattr(obra, "codigo_infoobras", None)
             enr["obra_nombre"] = getattr(obra, "nombre", None)
             # ficha de la obra + todas las valorizaciones + modificaciones de plazo,
             # con el helper compartido (misma forma que la ficha de cada sub-obra).
             _fx = _fx_de_obra(obra, cui)
             enr["obra_ficha"] = {k: _fx[k] for k in
-                                 ("cui", "codigo_infoobras", "estado", "monto",
+                                 ("cui", "obra_id", "codigo_infoobras", "estado", "monto",
                                   "fecha_inicio", "fecha_fin")}
             enr["valorizaciones"] = _fx["valorizaciones"]
             enr["modificaciones_plazo"] = _fx["modificaciones_plazo"]
@@ -862,8 +883,7 @@ class EtapaInfoObrasReal:
 
             # La DESCARGA de documentos ya NO ocurre aquí: se DIFIERE a después del
             # pipeline (descargar_documentos_job, disparada por la API) usando el
-            # obra_id ya persistido en el enriquecimiento. Así el veredicto/Excel
-            # quedan listos en ~1 min sin esperar ~1 GB de PDFs (que solo sirven al ZIP).
+            # obra_id de la ficha CONSULTADA, no el de la búsqueda inicial.
 
         def _enriquecer_subobra(s: dict) -> dict:
             """Cert MULTI-OBRA: para una sub-obra YA resuelta por código, baja su
@@ -881,6 +901,7 @@ class EtapaInfoObrasReal:
                 s["sin_verificar"] = True   # portal flaky → ficha desconocida (no invalida)
                 return s
             s.pop("sin_verificar", None)     # se trajo OK (quizá en la 2ª pasada)
+            _registrar_obra_consultada(s, obra, cui)
             avances = getattr(obra, "avances", []) or []
             meses = [date(a.anio, a.mes, 1) for a in avances
                      if getattr(a, "anio", 0) and getattr(a, "mes", 0)]
@@ -968,10 +989,13 @@ class EtapaInfoObrasReal:
             enr.pop("paralizaciones", None)
             enr.pop("sin_verificar", None)
             enr["sin_registro_infoobras"] = True
+            if isinstance(enr.get("obra"), dict):
+                enr.setdefault("obra_inicial", deepcopy(enr["obra"]))
+                enr["obra"] = {**enr["obra"], "obra_id": None}
             enr["codigo_infoobras"] = None
             enr["obra_nombre"] = ((enr.get("obra") or {}).get("nombre_obra")
                                   if isinstance(enr.get("obra"), dict) else None)
-            enr["obra_ficha"] = {"cui": cui, "codigo_infoobras": None, "estado": None,
+            enr["obra_ficha"] = {"cui": cui, "obra_id": None, "codigo_infoobras": None, "estado": None,
                                  "monto": None, "fecha_inicio": None, "fecha_fin": None}
             enr["valorizaciones"] = []
             enr["modificaciones_plazo"] = []
@@ -1142,7 +1166,8 @@ class EtapaInfoObrasReal:
                 if not procesos:
                     enr["seace"] = {
                         "estado": "sin_procesos", "cui": cui,
-                        "motivo": "el CUI no figura en los datos abiertos disponibles (cobertura 2018+)",
+                        "motivo": "la consulta por CUI no devolvió procesos; no demuestra "
+                                  "que no existan en SEACE ni establece la causa",
                     }
                     ctx.enriquecimiento[k] = enr
                     continue
@@ -1604,7 +1629,8 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
     from scraping.errores_red import corto
     base = carpeta_job(Path(dir_descargas), job_id) / "descargas"
     from orquestador.descargas_infoobras import (
-        CacheDescargasInfoObras, secciones_en_error)
+        CacheDescargasInfoObras, preparar_destino_infoobras, guardar_marca_infoobras,
+        secciones_en_error)
     from orquestador.descargas_seace import (
         DOCUMENTOS_SEACE, CacheDescargasSeace, clave_archivo_seace,
         etiqueta_documento_seace,
@@ -1851,7 +1877,26 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
             if sub_pos is not None:
                 destino = destino / f"Subobra {sub_pos:02d}"
                 marca += f"_S{sub_pos}"
+            ok = base / f"{marca}.ok"
+            previo = (enr.get("descargas_reales")
+                      if isinstance(enr.get("descargas_reales"), dict) else {})
+            inicial = enr.get("obra_inicial") or obra or {}
+            # Una marca pertenece a una ficha, no solo a P/E. Un cambio retira el
+            # corpus anterior fuera del ZIP antes de consultar la nueva fuente.
+            # Si el retiro falla, se aborta el armado: no publicar una mezcla.
+            terminal_infoobras = preparar_destino_infoobras(
+                destino, ok, obra_id,
+                obra_id_legado=previo.get("obra_id", inicial.get("obra_id")),
+            )
             if not obra_id and not seace:
+                if sub_pos is None and previo:
+                    restantes, hitos_restantes = _inventario_real_descarga(destino)
+                    enr["descargas_reales"] = {
+                        "obra_id": None, "completada": False, "archivos": restantes,
+                        "por_hito": hitos_restantes, "secciones": {},
+                        "avisos": ["No hay fuente documental seleccionada; "
+                                   "el corpus InfoObras anterior no se reutiliza."],
+                    }
                 if sub_pos is not None:
                     motivo = ("Obra privada: no aplica la descarga de obra pública."
                               if enr.get("estado") in {"privada", "na"}
@@ -1874,16 +1919,13 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                 nombre_obra = (enr.get("obra_nombre") or (obra or {}).get("nombre")
                                or e.get("proyecto") or f"obra {obra_id}")
                 reportar(procesadas, total_desc, _recorte(nombre_obra))
-            ok = base / f"{marca}.ok"
             ok_seace = base / f"{marca}.seace.ok"
             hizo_trabajo = False
-            previo = (enr.get("descargas_reales")
-                      if isinstance(enr.get("descargas_reales"), dict) else {})
             avisos = list(previo.get("avisos") or [])
             secciones = dict(previo.get("secciones") or {})
             fallos_antes = len(descargas_stats().get("fallidos") or [])
             try:
-                if obra_id and not ok.exists():
+                if obra_id and not terminal_infoobras:
                     avisos, secciones = [], {}
                     clave_fuente = f"infoobras:{obra_id}"
                     resultado_cache = resultados_por_obra.get(str(obra_id))
@@ -1936,7 +1978,7 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                         base.mkdir(parents=True, exist_ok=True)
                         # La marca significa «intento terminal», incluso si hubo
                         # secciones fallidas. No habilita una segunda descarga.
-                        ok.write_text("ok", encoding="utf-8")
+                        guardar_marca_infoobras(ok, obra_id)
                 if seace and not ok_seace.exists():
                     hizo_trabajo = True
                     _bajar_seace(seace, destino)
@@ -1979,6 +2021,7 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                 "no se pudo" in str(a).lower() or "no descargado" in str(a).lower()
                 for a in avisos)
             enr["descargas_reales"] = {
+                "obra_id": obra_id,
                 "completada": completa_terminal,
                 "archivos": archivos_reales,
                 "por_hito": por_hito,
@@ -2564,7 +2607,7 @@ class EtapaRenipressReal:
 # hueco intermedio es corto y no-codicioso para no saltar a otra cifra de la frase.
 _UNIDAD_TIEMPO_RE = r"a[ñn]os?|meses|mes|d[ií]as?"
 _RE_MINIMO = re.compile(
-    rf"m[ií]nim[ao][^0-9]{{0,20}}?(\d+(?:[.,]\d+)?)\s*({_UNIDAD_TIEMPO_RE})",
+    rf"m[ií]nim[ao][^0-9]{{0,20}}?(\d+(?:[.,]\d+)?)\s*\)?\s*({_UNIDAD_TIEMPO_RE})",
     re.I,
 )
 _RE_EQUIVALENCIA_TIEMPO = re.compile(
@@ -2583,7 +2626,41 @@ def _minimo_exigido(requisitos) -> Optional[tuple[int, str]]:
     Se compara en DÍAS y no en años porque es la unidad que el Paso 5 calcula sin
     pérdida: convertir los efectivos a años y redondear puede volcar un caso de
     borde (2.996 años redondea a 3.0 y un mínimo de "3 años" pasaría a cumplir)."""
-    for v in (requisitos or {}).values():
+    requisitos = requisitos or {}
+    estructurado = requisitos.get("minimo_experiencia")
+    cantidad = unidad = None
+    if isinstance(estructurado, dict):
+        valor = estructurado.get("cantidad")
+        unidad_declarada = estructurado.get("unidad")
+        unidad = {"anios": "años", "meses": "meses", "dias": "días"}.get(
+            unidad_declarada) if isinstance(unidad_declarada, str) else None
+        if not isinstance(valor, bool) and isinstance(valor, (str, int, float)):
+            try:
+                cantidad = Decimal(str(valor).replace(",", "."))
+            except InvalidOperation:
+                pass
+        if cantidad is not None and (not cantidad.is_finite() or cantidad <= 0):
+            cantidad = None
+    if cantidad is not None and unidad:
+        # Conserva equivalencias literales como 0.5 años (6 meses), solo cuando
+        # la cifra principal coincide con el mínimo estructurado de las bases.
+        texto = "Experiencia mínima: " + str(estructurado.get("texto") or "")
+        m = _RE_MINIMO.search(texto)
+        if m and Decimal(m.group(1).replace(",", ".")) == cantidad \
+                and m.group(2).lower()[0] == unidad[0]:
+            equivalencia = _RE_EQUIVALENCIA_TIEMPO.search(texto[m.end():m.end() + 80])
+            if equivalencia:
+                cantidad = Decimal(equivalencia.group(1).replace(",", "."))
+                unidad = equivalencia.group(2)
+        if cantidad <= 0:
+            return None
+        dias = int((cantidad * _DIAS_POR_UNIDAD[unidad.lower()[0]]).to_integral_value(
+            rounding=ROUND_CEILING))
+        return dias, f"{cantidad:g} {unidad}"
+
+    for v in requisitos.values():
+        if not isinstance(v, str):
+            continue  # no interpretar cifras de objetos/fuentes serializados
         texto = str(v)
         m = _RE_MINIMO.search(texto)
         if not m:

@@ -603,12 +603,28 @@ function auditarEvaluacion(ev, profs) {
 
 // ════════════════════════════════════════════════════════════════════════════
 
+function minimoExperienciaDe(c) {
+  for (const [campo, unidad] of [["tiempo_minimo_dias", "dias"],
+    ["tiempo_minimo_meses", "meses"], ["tiempo_minimo_anios", "anios"]]) {
+    const valor = c[campo];
+    if (typeof valor !== "number" && typeof valor !== "string") continue;
+    if (!/^\d+(?:[.,]\d+)?$/.test(String(valor).trim())) continue;
+    const cantidad = Number(String(valor).trim().replace(",", "."));
+    if (!Number.isFinite(cantidad) || cantidad <= 0) continue;
+    return { cantidad, unidad, texto: c.tiempo_minimo_experiencia ?? null,
+      folio: pick(c.folio_experiencia, c.folio, c.folio_requisito, c.folio_tdr),
+      fuente: pick(c.fuente, c.fuente_requisito) };
+  }
+  return null;
+}
+
 function requisitosDe(bases, cargoNum) {
   const c = (bases.personal_clave || []).find((x) => x.numero === cargoNum);
   if (!c) return null;
   return {
     cargos_validos: (c.cargos_similares_validos || []).join("; "),
     tipo_experiencia_valida: `Experiencia mínima: ${c.tiempo_minimo_experiencia}. Profesión aceptada: ${(c.profesiones_aceptadas || []).join(" / ")}.`,
+    minimo_experiencia: minimoExperienciaDe(c),
     tipo_obra_valida: c.tipos_obra_validos || null,
     // Participación en el Factor A es una regla de las bases, no un juicio del
     // evaluador. Viaja estructurada para que el servidor puntúe solo el exceso
@@ -1119,6 +1135,7 @@ const main = (WS, opts) => consolidar(WS, opts).espejo;
 
 module.exports = {
   normalizarEval, normalizarFactores, auditarEvaluacion, extraerCuiLiteral, reglasEvaluacionDe,
+  requisitosDe,
   consolidar, main,
   normalizarTipoEvaluacion, inferirTipoEvaluacion, tipoEvaluacion, TIPOS_EVALUACION,
 };

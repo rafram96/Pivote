@@ -35,30 +35,21 @@ Los tres principios que gobiernan el módulo
    adjudicatario y la lección del selector por solape (familia ADR-005): *lo que
    se verifica no puede elegir su propia identidad*.
 
-3. **Abstención por defecto.** Sin fuente (proceso pre-2018, CUI sin procesos
-   publicados, expediente sin verificar en el MEF, fecha ilegible) el resultado
+3. **Abstención por defecto.** Sin fuente (consulta sin procesos devueltos,
+   expediente sin verificar en el MEF, fecha ilegible) el resultado
    es `POR_CONFIRMAR` con la razón escrita en lenguaje de evaluador. Nunca una
    alerta «porque falta el dato», nunca un NO CUMPLE. Misma regla legal que el
    clamp del Paso 5: la falta de información es a favor del que declara.
 
 Por qué la Regla A NO es la señal `temporal` del candado F5
 ───────────────────────────────────────────────────────────
-`validacion/candado_seace.py` ya compara firma vs inicio, pero para decidir
-**si el proceso es el del certificado** (identidad). Aquí la misma aritmética
-decide otra cosa: **si lo que el certificado declara cabe dentro de lo que el
-contrato permite** (sustancia). De ahí el gate: la Regla A solo habla cuando la
-identidad del proceso está sostenida por las OTRAS señales fuertes (entidad,
-adjudicatario, objeto). En esa configuración el candado global queda en
-`contradice` — y el motivo de esa contradicción es exactamente lo que esta
-regla nombra en lenguaje de evaluador, en vez de dejarlo dicho como «los
-documentos no coinciden».
-
-Consecuencia práctica, dicha sin adornos:
-  · candado `confirmado`  → la Regla A concluye COINCIDE (las fechas cuadran).
-  · candado `contradice` SOLO por la señal temporal, con ≥2 señales fuertes no
-    temporales a favor → la Regla A DISPARA.
-  · cualquier otro caso (`por_confirmar`, contradicción de entidad/objeto, job
-    anterior a F5, sin proceso) → ABSTENCIÓN con nota.
+`validacion/candado_seace.py` conserva firma vs inicio como señal débil; no
+decide identidad con esa fecha. Aquí se presenta el contraste fecha declarada
+vs contrato solo cuando la identidad está sostenida por señales independientes
+(entidad, adjudicatario, objeto). Identidad confirmada puede coexistir con
+discrepancia temporal: no significa que las fechas coincidan ni que el
+profesional incumpla. Los jobs antiguos que persistieron temporal como fuerte
+se tratan por sus señales no temporales, no por su rótulo global.
 
 Módulo PURO: sin red, sin disco, sin openpyxl. Recibe el enriquecimiento de una
 experiencia (lo que ya persisten las etapas SEACE/InfoObras/MEF) y los campos
@@ -142,10 +133,8 @@ FUENTE_APROBACION_MEF = (
 FUENTE_FIRMA_SEACE = "proceso de contratación publicado (SEACE)"
 FUENTE_FIRMA_CONTRATO_MEF = "contrato del expediente (MEF)"
 
-# Primer año con cobertura en los datos abiertos de contrataciones. Solo por
-# DEBAJO de este año la ausencia de proceso se explica por la cobertura; para
-# una experiencia posterior el proceso simplemente no se halló, y decir «la
-# cobertura empieza en 2018» sobre un certificado de 2022 es falso.
+# Constante heredada para compatibilidad; no establece por qué una consulta
+# concreta no devolvió procesos y ya no se usa para construir ese motivo.
 COBERTURA_SEACE_DESDE = 2018
 
 # Veredictos de `verificacion_expediente.contrato` que significan «este contrato
@@ -362,23 +351,16 @@ def es_experiencia_de_expediente(enr: Optional[dict], cert: Optional[dict]) -> b
 def motivo_sin_proceso_seace(cert: Optional[dict], es_expediente: bool) -> str:
     """Por qué la Regla A no tiene contrato del proceso con el que comparar.
 
-    La coletilla «la cobertura empieza en 2018» SOLO es cierta cuando el
-    certificado termina antes de 2018; escribirla sobre una experiencia de 2022
-    le echa la culpa a la cobertura de una búsqueda que simplemente no halló el
-    proceso. Termina en PUNTO a propósito: el Excel concatena este motivo con el
-    de la Regla B y sin él las dos frases salían pegadas.
+    La fecha del certificado no demuestra la causa de una búsqueda sin
+    resultados. Se mantiene ``cert`` por compatibilidad, sin usarlo para
+    atribuir la ausencia a la cobertura del portal. Termina en punto porque
+    el Excel concatena este motivo con el de la Regla B.
     """
-    cert = cert or {}
-    termino = _fecha(cert.get("fecha_final")) or _fecha(cert.get("fecha_inicial"))
-    if termino and termino.year < COBERTURA_SEACE_DESDE:
-        return ("no se identificó el proceso de contratación de esta experiencia "
-                "en los datos abiertos del Estado (la cobertura empieza en "
-                f"{COBERTURA_SEACE_DESDE}), así que no hay contrato con el que "
-                "comparar el inicio declarado.")
     sujeto = "de este expediente" if es_expediente else "de esta experiencia"
     return (f"no se halló el proceso de contratación {sujeto} en los datos "
-            "abiertos de SEACE, así que no hay contrato con el que comparar el "
-            "inicio declarado.")
+            "abiertos de SEACE en esta consulta; esto no demuestra que no "
+            "exista ni establece la causa. No se obtuvo un contrato con el "
+            "que comparar el inicio declarado.")
 
 
 def firma_de_contrato_mef(enr: Optional[dict]) -> tuple[Optional[date], Optional[str]]:

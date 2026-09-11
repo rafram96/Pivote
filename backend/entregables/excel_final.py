@@ -48,6 +48,7 @@ from reglas import (
     restar_paralizaciones,
 )
 from schemas.cargo import etiqueta_hoja
+from validacion.candado_seace import observaciones_temporales
 from scripts.generar_excel import (
     AL_HEAD, AL_WRAP, BORDER, F_BOLD, F_CELL, F_HEAD, F_PARTE, F_PROF,
     FILL_BACKEND, FILL_CLAUDE, FILL_HEAD, FILL_PARTE, FILL_PEND, FILL_PROF,
@@ -1047,6 +1048,7 @@ def _cron_proyectos(espejo: dict, fichas: dict) -> list[dict]:
                 orden.append(clave)
                 por_clave[clave] = {"cui": cui, "nombre": nombre, "seace": None,
                                     "aprobacion": None, "verificacion": None,
+                                    "observacion_fechas": [],
                                     "modificaciones": [], "experiencias": 0,
                                     "via": fx.get("via"),
                                     "privada_pendiente": fx.get("privada_pendiente")}
@@ -1056,6 +1058,15 @@ def _cron_proyectos(espejo: dict, fichas: dict) -> list[dict]:
             seace = fx.get("seace")
             if isinstance(seace, dict) and seace.get("estado") == "seleccionado":
                 bloque["seace"] = bloque["seace"] or seace
+                obs = observaciones_temporales(seace.get("candado") or {})
+                if obs:
+                    proceso_obs = seace.get("proceso") or {}
+                    nomenclatura = (proceso_obs.get("nomenclatura")
+                                    or seace.get("codigoconvocatoria")
+                                    or "proceso SEACE")
+                    prefijo = f"P{prof.get('n_prof')} E{e.get('n')}"
+                    bloque["observacion_fechas"].extend(
+                        f"{prefijo} · {nomenclatura}: {detalle}" for detalle in obs)
             if fx.get("aprobacion_expediente"):
                 bloque["aprobacion"] = bloque["aprobacion"] or fx["aprobacion_expediente"]
             if fx.get("verificacion_expediente"):
@@ -1197,12 +1208,10 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
     banda(f"1 · FICHA POR PROYECTO ({len(con_hito)} de {len(proyectos)} con "
           f"documentos publicados)")
     if not con_hito:
-        parrafo("Sin procesos verificables: ninguno de los proyectos de esta "
-                "propuesta tiene un proceso de contratación en los datos abiertos "
-                "del Estado (la cobertura empieza en 2018) ni una aprobación de "
-                "expediente publicada. No es un defecto de la propuesta ni del "
-                "análisis: es lo que las fuentes publican. Los periodos declarados "
-                "se evalúan con el resto del expediente, sin este contraste.",
+        parrafo("En esta corrida no se obtuvo un proceso de contratación ni una "
+                "aprobación de expediente para los proyectos examinados. Esto no "
+                "prueba que no existan; los periodos declarados se evalúan con el "
+                "resto del expediente, sin este contraste.",
                 FILL_PEND, filas=3)
     for p in con_hito:
         r += 1
@@ -1229,6 +1238,8 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
             if rot:
                 campo("¿El proceso corresponde a este certificado?", rot,
                       None if candado.get("resultado") == "confirmado" else FILL_PEND)
+            if p.get("observacion_fechas"):
+                campo("Observación de fechas", " ".join(p["observacion_fechas"]), FILL_PEND)
         elif str(p.get("via") or "").upper() == "PRIVADA":
             campo("Proceso de contratación",
                   ("REVISIÓN — RUTA PRIVADA / SUNAT PENDIENTE" if
@@ -1237,7 +1248,8 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
                   FILL_PEND if p.get("privada_pendiente") else None)
         else:
             campo("Proceso de contratación",
-                  "No figura en los datos abiertos del Estado (cobertura desde 2018)",
+                  "En esta corrida no se obtuvo un proceso de contratación para este "
+                  "proyecto. Esto no prueba que no exista.",
                   FILL_PEND)
         res = ((p["verificacion"] or {}).get("resolucion")) or {}
         aprob = p["aprobacion"] or {}
@@ -1773,7 +1785,8 @@ def construir_hoja_profesional(
         if estado != "seleccionado":
             textos = {
                 "fuente_no_disponible": "Por confirmar — la fuente no respondió.",
-                "sin_procesos": "No disponible en datos abiertos (cobertura desde 2018).",
+                "sin_procesos": "En esta corrida no se obtuvieron procesos de contratación "
+                                "para este CUI. Esto no prueba que no existan.",
                 "sin_tipo": "No se encontró un proceso del tipo correspondiente a la experiencia.",
             }
             texto = textos.get(estado, datos.get("motivo") or "Por confirmar.")
@@ -1818,6 +1831,14 @@ def construir_hoja_profesional(
             if (etiqueta == "Correspondencia con el certificado"
                     and candado.get("resultado") != "confirmado"):
                 cv.fill = FILL_PEND
+            rr += 1
+        observaciones = observaciones_temporales(candado)
+        if observaciones:
+            texto = "Observación de fechas — " + " ".join(observaciones)
+            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
+            c = ws.cell(rr, 6, texto)
+            c.font, c.fill, c.border, c.alignment = F_CELL, FILL_PEND, BORDER, AL_WRAP
+            ws.row_dimensions[rr].height = max(15, (-(-len(texto) // 70)) * 13 + 2)
             rr += 1
         if rotulo_candado and candado.get("resultado") != "confirmado":
             texto = str(candado.get("motivo") or "")

@@ -1,9 +1,57 @@
 # Estado actual del proyecto
 
+## 2026-09-10 — Lote integrado de identidad y lectura de fuentes
+
+Implementado en código local: ID InfoObras explícito estable, clasificación de
+bienes SEACE, temporal débil con diferencias visibles y API/MCP de lectura sin
+PDFs/jobs. No se atribuyen resultados vacíos a cobertura 2018. Ver
+[handoff y límites](../handoffs/2026-09-10_codex.md#ficha-explícita-estable-y-lectura-investigativa).
+No cargado en el servidor del usuario ni aplicado a entregables existentes.
+El piloto previo sí terminó; la investigación todavía no está integrada en la skill.
+Validación integrada: 1472 pruebas backend pasan / 25 omitidas; 33 MCP pasan.
+
+## 2026-09-10 — Candado e identidad SEACE
+
+Clasificación de procesos y candado temporal actualizados en el ámbito de la
+tarea. `goods` se trata como adquisición (`otro`) aunque su descripción cite
+ejecución, expediente o supervisión; `works` sigue siendo ejecución. Fechas y
+periodos se conservan, pero la señal temporal es débil y no decide identidad.
+Pruebas focales: 79 passed. Ver handoff técnico
+`../handoffs/2026-09-10_seace_identidad.md`.
+
 > Última actualización: **2026-09-10** · rama de trabajo: `demo`
 
+Corrección local posterior: cálculo/ficha/descarga usan la misma selección
+InfoObras; la inicial queda como procedencia y no se mezcla un corpus anterior
+al cambiar de ficha. [Validación y límites](../handoffs/2026-09-10_codex.md#identidad-única-entre-ficha-y-descarga).
+Sin reiniciar backend ni modificar entregables reales; sin commit. Piloto de
+búsqueda preparado por separado, todavía no ejecutado.
+
+Corrida **97ffb97a308e** terminó con revisión y ZIP con errores; mínimos y
+abstención de Chupaca comprobados en JSON, no auditoría integral de entregables.
+[Estado operativo](../../../.ai/context/current_state.md#nueva-corrida-pucallpa-autorizada-10-sep-1626-lima).
+Supersede backend apagado y pendiente de reproceso; no implica aceptación.
+
+Backend local apagado posteriormente por pedido del usuario, puerto 8001 sin
+listener. [Estado operativo](../../../.ai/context/current_state.md#backend-local-detenido-por-el-usuario-10-sep).
+Supersede las referencias a proceso activo siguientes; datos conservados.
+
+Implementadas correcciones de identidad por rubro desconocido y mínimos
+profesionales. Pucallpa comprobado de forma aislada, no reprocesado: 43 registros
+congelados, solo cementerio→revisión; los 12 mínimos reales ahora legibles.
+[Alcance y validación](../handoffs/2026-09-10_codex.md#correcciones-1-y-2-identidad-de-establecimiento-y-mínimos-profesionales).
+Backend activo y sus entregables conservan el código/resultado anterior; sin commit.
+
+Corrección local posterior: Excel ya no formatea un límite de puntaje nulo.
+135 pruebas focales pasan / 1 omitida. Reanudado `9c1409a6e9ba`: Excel listo,
+estado requiere_revision, descarga de fuentes en progreso; etapas previas
+reutilizadas. [Detalle y límites](../handoffs/2026-09-10_codex.md#excel-con-límite-de-puntaje-nulo-y-reintento).
+Supersede las menciones anteriores de Pucallpa sin reintento; fix sin commit.
+
 Correcciones versionadas: **8c6c43c** privadas y **c665c0d** multiobra;
-1371 passed / 25 skipped. No se reinició backend ni relanzó Pucallpa.
+1371 passed / 25 skipped. Posteriormente se inició el backend local con
+`4dd2e1a` y se actualizó MEF, por autorización expresa; no se relanzó Pucallpa.
+[Estado operativo comprobado en nivel sistema](../../../.ai/context/current_state.md#preparación-operativa-local-10-sep-1220-lima).
 
 Descarga multiobra implementada localmente con subcarpetas/estado por obra,
 cachés compartidas y notas conservadas en ZIP. Ver [handoff](../handoffs/2026-09-10_codex.md#descarga-multiobra-implementada-tras-diagnóstico-de-pucallpa).

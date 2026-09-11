@@ -2273,7 +2273,24 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
     # intervención. El veto de rubro no la frena porque la obra también es
     # educativa; aquí se manda a revisión con la obra a la vista (nunca resuelve).
     _rub_cert = rubros_de(proyecto)
-    _rub_extra = (rubros_de((best or {}).get("nombre_obra") or "") - _rub_cert) if best else set()
+    _rub_obra = rubros_de((best or {}).get("nombre_obra") or "")
+    # Un topónimo compartido no acredita que sea el mismo establecimiento.
+    # No es contradicción de rubro: es falta de corroboración para NOMBRE/PROBABLE.
+    # Las vías de código, RUC y número conservan sus propios controles anteriores.
+    _rub_oficial = set()
+    if best and _rub_cert and not _rub_obra and base and base.disponible():
+        _rub_oficial = _rubros_ficha_mef(
+            _ficha_mef(best["cui"], base, exp.setdefault("_fichas_mef", {})))
+    if best and _rub_cert and not _rub_obra and not (_rub_cert & _rub_oficial):
+        _traza().ev("rubro_obra_indeterminado", cui=best["cui"],
+                    rubro_certificado=sorted(_rub_cert))
+        return {"estado": "revision", "cui": None, "via": "NOMBRE",
+                "decision": _con_pista_mef(exp,
+                    "la obra hallada no permite corroborar el tipo "
+                    "de establecimiento o servicio del certificado; compartir "
+                    "el lugar no confirma que sea la misma obra — verificar"),
+                "candidatos": candidatos, "obra": None}
+    _rub_extra = _rub_obra - _rub_cert
     if best and _rub_cert and _rub_extra and not best.get("ruc_match"):
         _traza().ev("rubro_anadido_por_obra", cui=best["cui"], extra=sorted(_rub_extra))
         return {"estado": "revision", "cui": None, "via": "NOMBRE",

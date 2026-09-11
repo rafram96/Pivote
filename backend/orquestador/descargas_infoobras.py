@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -20,6 +21,7 @@ _MARCA_PARCIAL = ".parcial"
 _ESTADO = ".estado.json"
 _INFORMES = "Informes de control"
 _TEMPORAL = re.compile(r"^\..+\.[0-9a-f]{8,}\.part$")
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ResultadoCacheInfoObras:
@@ -75,6 +77,57 @@ def _leer_estado(ruta: Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return datos if isinstance(datos, dict) else None
+
+
+def guardar_marca_infoobras(ruta: Path, obra_id: int | str | None) -> None:
+    """Publicar atómicamente la identidad a la que pertenece una materialización."""
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    temporal = ruta.with_name(ruta.name + ".part")
+    temporal.write_text(json.dumps({"obra_id": str(obra_id) if obra_id else None}),
+                        encoding="utf-8")
+    os.replace(temporal, ruta)
+
+
+def preparar_destino_infoobras(destino: Path, marca: Path,
+                              obra_id: int | str | None, *,
+                              obra_id_legado: int | str | None = None) -> bool:
+    """¿El intento terminal pertenece a esta ficha? Retirar lo ajeno sin borrarlo.
+
+    La identidad se escribe ANTES del intento; `.ok` solo tras materializar.
+    Un reinicio conserva el ledger de fuentes (no se habilitan redescargas).
+    Las marcas antiguas `ok` se interpretan con la selección que las produjo.
+    """
+    # Fuera de `descargas/`: no es documento ni cuenta en el inventario/ZIP.
+    fuente = marca.parent.parent / "fuentes_descarga" / f"{marca.stem}.json"
+    estado = _leer_estado(fuente) or _leer_estado(marca)
+    anterior = estado.get("obra_id") if estado is not None else obra_id_legado
+    conocida = estado is not None
+    if not conocida and marca.is_file():
+        conocida = marca.read_text(encoding="utf-8").strip() == "ok"
+    hay_marca = fuente.exists() or marca.exists()
+    actual = str(obra_id) if obra_id else None
+    anterior = str(anterior) if anterior else None
+    if hay_marca and (not conocida or anterior != actual):
+        base = marca.parent.resolve()
+        # Solo un destino P/E del árbol de descargas; jamás el job ni la raíz.
+        destino_real = destino.resolve()
+        if destino_real == base or not destino_real.is_relative_to(base):
+            raise ValueError("Destino documental fuera del árbol de descargas")
+        respaldo = base.parent / "descargas_previas" / f"{marca.stem}-{uuid.uuid4().hex}"
+        respaldo.mkdir(parents=True)
+        if destino.is_dir():
+            for hijo in list(destino.iterdir()):
+                if hijo.is_file() and es_archivo_seace(hijo.name):
+                    continue
+                os.replace(hijo, respaldo / hijo.name)
+        for archivo in (marca, fuente):
+            if archivo.exists():
+                os.replace(archivo, respaldo / archivo.name)
+        logger.info("Cambio de ficha %s: %s → %s; corpus anterior conservado en %s",
+                    marca.stem, anterior, actual, respaldo)
+    if obra_id or hay_marca:
+        guardar_marca_infoobras(fuente, obra_id)
+    return marca.is_file()
 
 
 def purgar_secciones_en_error(directorio: Path, obra_id: int | str) -> tuple[str, ...]:

@@ -20,8 +20,39 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 
 const {
-  auditarEvaluacion, normalizarEval, normalizarFactores, extraerCuiLiteral, main,
+  auditarEvaluacion, normalizarEval, normalizarFactores, extraerCuiLiteral, main, requisitosDe,
 } = require("./consolidar_espejo");
+
+test("conserva mínimo estructurado, texto y fuente del cargo de bases", () => {
+  const bases = { personal_clave: [{ numero: 1, tiempo_minimo_anios: 6,
+    tiempo_minimo_experiencia: "Acreditar mínimo (6) años desde la colegiatura",
+    folio_experiencia: 93, folio: "89,93", fuente: "terminos_de_referencia" }] };
+  const previo = JSON.stringify(bases);
+  const r = requisitosDe(bases, 1);
+  assert.deepStrictEqual(r.minimo_experiencia, { cantidad: 6, unidad: "anios",
+    texto: bases.personal_clave[0].tiempo_minimo_experiencia, folio: 93,
+    fuente: "terminos_de_referencia" });
+  assert.match(r.tipo_experiencia_valida, /\(6\) años/);
+  assert.strictEqual(JSON.stringify(bases), previo);
+});
+
+test("mínimos admiten unidades y decimales explícitos, nunca cifras inventadas", () => {
+  for (const [campo, valor, cantidad, unidad] of [
+    ["tiempo_minimo_anios", "0,5", 0.5, "anios"],
+    ["tiempo_minimo_meses", 24, 24, "meses"],
+    ["tiempo_minimo_dias", 180, 180, "dias"],
+  ]) {
+    const r = requisitosDe({ personal_clave: [{ numero: 1, [campo]: valor }] }, 1);
+    assert.strictEqual(r.minimo_experiencia.cantidad, cantidad);
+    assert.strictEqual(r.minimo_experiencia.unidad, unidad);
+  }
+  for (const valor of [null, undefined, true, 0, -1, "5 o 6", "NaN", Infinity]) {
+    const r = requisitosDe({ personal_clave: [{ numero: 1, tiempo_minimo_anios: valor,
+      tiempo_minimo_experiencia: "mínimo (5) años" }] }, 1);
+    assert.strictEqual(r.minimo_experiencia, null);
+    assert.match(r.tipo_experiencia_valida, /\(5\) años/);
+  }
+});
 
 test("#66 · extrae CUI incrustado al final del párrafo del servicio", () => {
   const texto = 'Supervisión de la Ejecución de la Obra "Mejoramiento del Acceso – Región Pasco" con CUI N° 2198318.';
@@ -523,6 +554,23 @@ test("e2e · evaluación sana: ningún aviso crítico en el espejo", () => {
   assert.strictEqual(espejo.profesionales[1].requisitos.factor_a_aplica, true);
   assert.strictEqual(espejo.profesionales[0].requisitos.factor_a_aplica, false);
   fs.rmSync(ws, { recursive: true, force: true });
+});
+
+test("mínimo profesional estructurado llega al espejo y pasa zod", () => {
+  const ws = taller(SANA);
+  try {
+    const archivo = path.join(ws, "bases.json");
+    const bases = JSON.parse(fs.readFileSync(archivo, "utf8"));
+    Object.assign(bases.personal_clave[0], { tiempo_minimo_anios: 6,
+      tiempo_minimo_experiencia: "Acreditar mínimo (6) años desde la colegiatura",
+      folio_experiencia: 93, fuente: "terminos_de_referencia" });
+    fs.writeFileSync(archivo, JSON.stringify(bases));
+    const espejo = main(ws);
+    assert.strictEqual(espejo.profesionales[0].requisitos.minimo_experiencia.cantidad, 6);
+    const validacion = spawnSync(process.execPath,
+      [path.join(__dirname, "validar_espejo.js"), path.join(ws, "espejo.json")], { encoding: "utf8" });
+    assert.strictEqual(validacion.status, 0, validacion.stdout + validacion.stderr);
+  } finally { fs.rmSync(ws, { recursive: true, force: true }); }
 });
 
 test("entrada crítica · mínimo de bases llega al espejo aunque el evaluador lo omita", () => {

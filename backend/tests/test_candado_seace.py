@@ -18,7 +18,8 @@ from entregables import (construir_zip_infoobras, desempaquetar_enriquecimiento,
                          generar_excel_final)
 from validacion.candado_seace import (
     CONFIRMADO, CONTRADICE, POR_CONFIRMAR, TOLERANCIA_DIAS_FIRMA,
-    confirmado_sin_adjudicatario, evaluar_candado, resumen_proceso, rotulo,
+    confirmado_sin_adjudicatario, evaluar_candado, observaciones_temporales,
+    resumen_proceso, rotulo,
 )
 
 
@@ -99,6 +100,19 @@ def test_gate_issue83_acepta_dos_senales_independientes():
     assert confirmado_sin_adjudicatario(c) is True
 
 
+def test_gate_issue83_ignora_temporal_fuerte_persistida():
+    """Jobs antiguos pueden haber guardado la fecha como FUERTE; nunca debe
+    convertir ese metadato en una señal de identidad."""
+    base = {"resultado": CONFIRMADO, "senales": [
+        {"nombre": "entidad", "fuerza": "fuerte", "sentido": "a_favor"},
+        {"nombre": "objeto", "fuerza": "fuerte", "sentido": "a_favor"},
+        {"nombre": "temporal", "fuerza": "fuerte", "sentido": "a_favor"},
+    ]}
+    assert confirmado_sin_adjudicatario(base) is True
+    solo_fecha = {**base, "senales": [base["senales"][2]]}
+    assert confirmado_sin_adjudicatario(solo_fecha) is False
+
+
 # ── 2 · Degradación por metadata incompleta ──────────────────────────────────
 
 def test_degradacion_metadata_incompleta():
@@ -153,8 +167,22 @@ def test_contradice_sin_un_dia_en_comun():
     cert = {**cert_sanchez_meza(), "fecha_inicial": "2015-01-01",
             "fecha_final": "2016-01-01"}
     c = evaluar_candado(proceso_sanchez_meza(), cert)
-    assert c.resultado == CONTRADICE
-    assert "temporal" in [s.nombre for s in c.en_contra]
+    # Las fechas siguen reportándose con precisión, pero son débiles: no
+    # pueden vetar una identidad respaldada por entidad y objeto.
+    assert c.resultado == CONFIRMADO
+    temporal = next(s for s in c.senales if s.nombre == "temporal")
+    assert temporal.fuerza == "debil" and temporal.sentido == "en_contra"
+
+
+def test_confirmado_con_discrepancia_temporal_la_conserva_en_motivo():
+    c = evaluar_candado(proceso_sanchez_meza(), {
+        **cert_sanchez_meza(), "fecha_inicial": "2015-01-01", "fecha_final": "2016-01-01"
+    })
+    assert c.resultado == CONFIRMADO
+    assert observaciones_temporales(c) == [next(
+        s.detalle for s in c.senales if s.nombre == "temporal")]
+    assert "señal fuerte de identidad" in c.motivo
+    assert "Observación de fechas:" in c.motivo
 
 
 # ── 4 · Zona gris de similitud ───────────────────────────────────────────────
@@ -207,8 +235,9 @@ def test_temporal_mismo_mes_dias_incompatibles():
     c = evaluar_candado(proceso, cert)
     temporal = next(s for s in c.senales if s.nombre == "temporal")
     assert temporal.sentido == "en_contra", temporal.detalle
+    assert temporal.fuerza == "debil"
     assert "25 días" in temporal.detalle
-    assert c.resultado == CONTRADICE
+    assert c.resultado == CONFIRMADO
 
 
 def test_temporal_dentro_de_la_tolerancia_en_dias():
@@ -223,6 +252,7 @@ def test_temporal_dentro_de_la_tolerancia_en_dias():
     c = evaluar_candado(proceso, cert)
     temporal = next(s for s in c.senales if s.nombre == "temporal")
     assert temporal.sentido == "a_favor", temporal.detalle
+    assert temporal.fuerza == "debil"
 
 
 def test_temporal_un_dia_mas_alla_de_la_tolerancia_contradice():
@@ -234,6 +264,8 @@ def test_temporal_un_dia_mas_alla_de_la_tolerancia_contradice():
     c = evaluar_candado(proceso, cert)
     temporal = next(s for s in c.senales if s.nombre == "temporal")
     assert temporal.sentido == "en_contra", temporal.detalle
+    assert temporal.fuerza == "debil"
+    assert c.resultado == CONFIRMADO
 
 
 # ── 6 · Monto: señal débil que ni veta ni promueve sola ──────────────────────
@@ -362,7 +394,9 @@ def test_resumen_abarca_todos_los_contratos_no_solo_el_primero():
     cert = {**cert_sanchez_meza(), "entidad_contratante": None,
             "fecha_inicial": "2018-05-29", "fecha_final": "2020-03-15"}
     c = evaluar_candado(r, cert)
-    assert c.resultado == CONFIRMADO, [s.detalle for s in c.senales]
+    # Tipo y fechas no bastan: el proceso queda por confirmar sin dos señales
+    # fuertes de identidad independientes.
+    assert c.resultado == POR_CONFIRMAR, [s.detalle for s in c.senales]
 
 
 # ── 9 · Los entregables muestran el rótulo correcto en los 3 estados ─────────
@@ -425,6 +459,38 @@ def test_excel_de_job_viejo_sin_candado_no_rompe(tmp_path):
     assert "Correspondencia con el certificado" not in texto
 
 
+def test_excel_confirmado_no_oculta_observacion_temporal(tmp_path):
+    candado = evaluar_candado(proceso_sanchez_meza(), {
+        **cert_sanchez_meza(), "fecha_inicial": "2015-01-01", "fecha_final": "2016-01-01"
+    }).como_dict()
+    texto = _textos_excel(tmp_path, _seace(candado))
+    assert candado["resultado"] == CONFIRMADO
+    assert "Observación de fechas" in texto
+    assert candado["senales"][3]["detalle"] in texto
+
+
+def test_resumen_mismo_cui_acumula_observaciones_por_experiencia():
+    from entregables.excel_final import _cron_proyectos
+    c1 = evaluar_candado(proceso_sanchez_meza(), {
+        **cert_sanchez_meza(), "fecha_inicial": "2015-01-01", "fecha_final": "2016-01-01"
+    }).como_dict()
+    c2 = evaluar_candado(proceso_sanchez_meza(), {
+        **cert_sanchez_meza(), "fecha_inicial": "2014-01-01", "fecha_final": "2014-12-31"
+    }).como_dict()
+    espejo = {**ESPEJO, "profesionales": [{
+        **ESPEJO["profesionales"][0], "experiencias": [
+            {"n": 1, "proyecto": "Mismo proyecto", "cui": "2337618"},
+            {"n": 2, "proyecto": "Mismo proyecto", "cui": "2337618"},
+        ]}]}
+    fichas = {(1, 1): {"cui": "2337618", "seace": _seace(c1)},
+              (1, 2): {"cui": "2337618", "seace": _seace(c2)}}
+    proyectos = _cron_proyectos(espejo, fichas)
+    observacion = proyectos[0]["observacion_fechas"]
+    assert len(observacion) == 2
+    assert observacion[0].startswith("P1 E1 · AS-SM-28-2021-GRJ-CS-1:")
+    assert observacion[1].startswith("P1 E2 · AS-SM-28-2021-GRJ-CS-1:")
+
+
 @pytest.mark.parametrize("resultado", [CONFIRMADO, POR_CONFIRMAR, CONTRADICE])
 def test_indice_del_zip_muestra_el_rotulo(tmp_path, resultado):
     origen = tmp_path / "P1E1"
@@ -438,6 +504,24 @@ def test_indice_del_zip_muestra_el_rotulo(tmp_path, resultado):
     with zipfile.ZipFile(salida) as zf:
         indice = zf.read("indice.txt").decode("utf-8")
     assert rotulo(resultado) in indice
+
+
+def test_indice_zip_confirmado_conserva_observacion_temporal(tmp_path):
+    origen = tmp_path / "P1E1"
+    origen.mkdir()
+    (origen / "BASES_INTEGRADAS.pdf").write_bytes(b"%PDF-1.4\n")
+    candado = evaluar_candado(proceso_sanchez_meza(), {
+        **cert_sanchez_meza(), "fecha_inicial": "2015-01-01", "fecha_final": "2016-01-01"
+    }).como_dict()
+    salida = tmp_path / "z.zip"
+    construir_zip_infoobras(
+        ESPEJO, {(1, 1): origen}, salida,
+        enriquecimiento={"1:1": {"cui": "2337618", "seace": _seace(candado)}})
+    with zipfile.ZipFile(salida) as zf:
+        indice = zf.read("indice.txt").decode("utf-8")
+    assert candado["resultado"] == CONFIRMADO
+    assert "Observación de fechas" in indice
+    assert candado["senales"][3]["detalle"] in indice
 
 
 def test_indice_de_job_viejo_sin_candado_queda_igual(tmp_path):

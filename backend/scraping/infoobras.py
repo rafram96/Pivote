@@ -318,14 +318,38 @@ def _buscar_por_cui(session: requests.Session, cui: str) -> list[dict]:
     def _consultar() -> list[dict]:
         r = session.post(url, params=query, timeout=15)
         r.raise_for_status()
-        data = r.json()
-        result = data.get("Result", data)
-        if isinstance(result, list):
-            obras = result
-        elif isinstance(result, dict):
-            obras = result.get("data", result.get("obras", [result]))
+        try:
+            data = r.json()
+        except requests.exceptions.JSONDecodeError:
+            # HTTP respondió; HTML/login o JSON roto no es una fuente caída ni
+            # una búsqueda vacía. No repetirlo como fallo de transporte.
+            raise ValueError("La búsqueda no devolvió JSON interpretable") from None
+        if isinstance(data, list):
+            obras = data
+        elif isinstance(data, dict):
+            # El portal ha entregado tanto Result como envoltorios directos;
+            # después se valida siempre la forma, para no tratar errores JSON
+            # (null/dict desconocido) como una búsqueda vacía reintentable.
+            result = data.get("Result", data)
+            if isinstance(result, list):
+                obras = result
+            elif isinstance(result, dict):
+                if isinstance(result.get("data"), list):
+                    obras = result["data"]
+                elif isinstance(result.get("obras"), list):
+                    obras = result["obras"]
+                elif "codSnip" in result or "codUniqInv" in result:
+                    obras = [result]
+                else:
+                    raise ValueError("Respuesta de búsqueda no tiene un formato reconocido")
+            else:
+                raise ValueError("Respuesta de búsqueda con envelope Result inválido")
         else:
-            obras = []
+            raise ValueError("Respuesta de búsqueda no tiene un formato reconocido")
+        if any(not isinstance(o, dict) for o in obras):
+            raise ValueError("Respuesta de búsqueda no es una lista de registros")
+        if any("codSnip" not in o and "codUniqInv" not in o for o in obras):
+            raise ValueError("Registro de búsqueda sin campos de código reconocidos")
         # filtro exacto: la API matchea codSnip por substring (buscar '95555' trae
         # '2595555'). Quedarse solo con los registros del código pedido.
         encontradas = [o for o in obras if coincide_codigo(o, cui)]
@@ -979,14 +1003,28 @@ def coincide_codigo(o: dict, codigo: str) -> bool:
     return any(str(o.get(c) or "").strip() == codigo for c in ("codSnip", "codUniqInv"))
 
 
+def _normalizar_id_obra(valor: object) -> Optional[int]:
+    """Convierte IDs del portal/resolver a una forma numérica comparable."""
+    try:
+        return int(str(valor).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _id_de_registro_obra(obra: dict) -> Optional[int]:
+    """Obtiene el primer ID válido del registro, usando ambas claves del portal."""
+    for clave in ("codigoObra", "obraId"):
+        identificador = _normalizar_id_obra(obra.get(clave))
+        if identificador is not None:
+            return identificador
+    return None
+
+
 def _cod_obra(o: dict) -> int:
     """Desempate DETERMINÍSTICO entre obras del mismo CUI: el orden que devuelve
     el portal NO es estable entre corridas, así que se rompe por menor codigoObra
     (cae a obraId, luego 0)."""
-    try:
-        return int(o.get("codigoObra") or o.get("obraId") or 0)
-    except (TypeError, ValueError):
-        return 0
+    return (_normalizar_id_obra(o.get("codigoObra") or o.get("obraId")) or 0)
 
 
 def seleccionar_obra(
@@ -1053,29 +1091,28 @@ def elegir_obra_raw(
     obras: list[dict],
     cert_inicio: Optional[date],
     cert_fin: Optional[date],
-    obra_id: Optional[int],
+    obra_id: Optional[int | str],
     rango_valorizaciones: Optional[Callable[[object], tuple]] = None,
 ) -> Optional[dict]:
-    """Elige el registro de obra. Respeta el bypass por `obra_id` (la obra que
-    eligió el resolver por nombre/RUC) SOLO si esa obra cubre el certificado; si
-    no cubre —o no se pasó obra_id— delega en `seleccionar_obra` (solape real).
+    """Elige una ficha, respetando una identificación explícita del resolver.
 
-    El resolver puede caer en una obra con 0% de solape: Valdizán por nombre
-    idéntico (33900 vs 71173), o re-registros del mismo CUI. La validación por
-    cobertura evita que el bypass fuerce una obra equivocada. Sin fechas del
-    certificado no hay con qué validar → se respeta el bypass."""
+    Cuando ``obra_id`` se proporciona, la ficha con ese identificador es la
+    única válida, incluso si sus fechas no solapan el certificado. Un ID
+    desconocido produce ``None`` y no habilita un fallback por calendario.
+    Solo cuando ``obra_id`` es ``None`` se conserva la selección histórica de
+    ``seleccionar_obra``. En consecuencia, las valorizaciones no se consultan
+    para validar una ficha fijada por ID.
+    """
     if not obras:
         return None
-    if obra_id:
-        cand = next((o for o in obras
-                     if (o.get("codigoObra") or o.get("obraId")) == obra_id), None)
-        if cand is not None:
-            if not (cert_inicio and cert_fin):
-                return cand  # sin fechas no se puede validar → respetar bypass
-            oi, of = _ventana_obra(cand, rango_valorizaciones)
-            if oi and (min(of, cert_fin) - max(oi, cert_inicio)).days > 0:
-                return cand  # cubre el certificado → respetar bypass
-            # no cubre → cae a selección por solape (puede haber un hermano que sí)
+    if obra_id is not None:
+        solicitado = _normalizar_id_obra(obra_id)
+        for obra in obras:
+            for clave in ("codigoObra", "obraId"):
+                registrado = _normalizar_id_obra(obra.get(clave))
+                if solicitado is not None and registrado == solicitado:
+                    return obra
+        return None
     return seleccionar_obra(obras, cert_inicio, cert_fin, rango_valorizaciones)
 
 
@@ -1159,7 +1196,7 @@ def fetch_by_cui(
     cui: str,
     cert_inicio: Optional[date] = None,
     cert_fin: Optional[date] = None,
-    obra_id: Optional[int] = None,
+    obra_id: Optional[int | str] = None,
 ) -> Optional[WorkInfo]:
     """
     Consulta InfoObras por CUI y retorna datos completos de la obra.
@@ -1182,8 +1219,8 @@ def fetch_by_cui(
             return None
 
         # Rango real de valorizaciones por obra (perezoso, con cache). El solape
-        # se mide sobre la ventana real (las fechas de cabecera mienten: caso
-        # 133630/33900). Sirve para validar el bypass Y para seleccionar_obra.
+        # se mide sobre la ventana de avances en la selección histórica SIN ID.
+        # Nunca se usa para sustituir una ficha explícita.
         _cache_rango: dict[object, tuple] = {}
 
         def _rango_val(oid):
@@ -1203,8 +1240,8 @@ def fetch_by_cui(
             return rango
 
         # Un CUI puede traer varias obras (ejecución, contingencia, supervisión,
-        # re-registros). Se respeta el bypass por obra_id del resolver solo si esa
-        # obra cubre el certificado; si no, se elige por solape real.
+        # re-registros). Un ID explícito es una identidad ya resuelta y no se
+        # sustituye por otra ficha según las fechas del certificado.
         if len(obras) > 1:
             logger.info(
                 "InfoObras: CUI %s devolvió %d obras (estados: %s) — seleccionando",
@@ -1213,11 +1250,17 @@ def fetch_by_cui(
             )
         obra_id_req = obra_id  # el obra_id que pidió el resolver (para el reintento)
         obra_raw = elegir_obra_raw(obras, cert_inicio, cert_fin, obra_id, _rango_val)
-        obra_id = obra_raw.get("codigoObra")
+        if obra_raw is None:
+            logger.warning(
+                "InfoObras: consulta CUI %s no devolvió la ficha solicitada (obra_id=%s)",
+                cui, obra_id,
+            )
+            return None
+        obra_id = _id_de_registro_obra(obra_raw)
 
         # InfoObras a veces devuelve la obra sin codigoObra en el 1er request
         # (warmup de session). Reintentar 1 vez con un pequeno delay — respetando
-        # el mismo bypass-validado-por-cobertura que la ruta normal.
+        # el mismo ID explícito de la ruta normal, si se proporcionó.
         if not obra_id:
             logger.info(
                 "InfoObras: 1er request sin codigoObra para CUI %s, reintentando", cui)
@@ -1225,7 +1268,13 @@ def fetch_by_cui(
             obras_retry = _buscar_por_cui(session, cui)
             if obras_retry:
                 obra_raw = elegir_obra_raw(obras_retry, cert_inicio, cert_fin, obra_id_req, _rango_val)
-                obra_id = obra_raw.get("codigoObra")
+                if obra_raw is None:
+                    logger.warning(
+                        "InfoObras: reintento CUI %s no devolvió la ficha solicitada "
+                        "(obra_id=%s)", cui, obra_id_req,
+                    )
+                    return None
+                obra_id = _id_de_registro_obra(obra_raw)
 
         if not obra_id:
             logger.warning(

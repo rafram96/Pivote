@@ -57,9 +57,11 @@ FUERTES
                  INDEPENDIENTE (defensa en profundidad: si alguna vez se toca el
                  selector, el candado sigue siendo el que responde).
 
-  temporal       Coherencia de fechas, en DÍAS COMPLETOS (ver abajo).
-
 DÉBIL
+
+  temporal       Coherencia de fechas, en DÍAS COMPLETOS (ver abajo). Conserva
+                 la evidencia exacta, pero nunca confirma ni contradice por sí
+                 sola la identidad del proceso.
 
   monto          Monto del proceso vs monto del contrato que declara el
                  certificado, si AMBOS lados lo publican. Nunca veta y nunca
@@ -384,7 +386,7 @@ def _senal_objeto(proceso: dict, cert: dict) -> Senal:
 
 
 def _senal_temporal(proceso: dict, cert: dict) -> Senal:
-    """(c) Ventana temporal, en DÍAS COMPLETOS.
+    """(c) Ventana temporal, en DÍAS COMPLETOS; siempre señal DÉBIL.
 
     Dos condiciones, ambas necesarias para sumar a favor:
       1. la firma del contrato no puede ser posterior al inicio declarado por
@@ -399,17 +401,17 @@ def _senal_temporal(proceso: dict, cert: dict) -> Senal:
     vig_ini = _fecha(proceso.get("vigencia_inicio"))
     vig_fin = _fecha(proceso.get("vigencia_fin"))
     if not ini:
-        return Senal("temporal", FUERTE, SIN_DATO,
+        return Senal("temporal", DEBIL, SIN_DATO,
                      "El certificado no declara fecha de inicio; no hay nada que "
                      "comparar contra las fechas del proceso.")
     if not firma and not (vig_ini and vig_fin):
-        return Senal("temporal", FUERTE, SIN_DATO,
+        return Senal("temporal", DEBIL, SIN_DATO,
                      "El proceso no publica fecha de firma ni vigencia.")
 
     if firma:
         holgura = (firma - ini).days      # >0 = el contrato se firmó DESPUÉS
         if holgura > TOLERANCIA_DIAS_FIRMA:
-            return Senal("temporal", FUERTE, EN_CONTRA,
+            return Senal("temporal", DEBIL, EN_CONTRA,
                          f"Fechas: el profesional declara inicio el "
                          f"{ini.strftime('%d/%m/%Y')} pero el contrato del proceso "
                          f"se firmó el {firma.strftime('%d/%m/%Y')} — {holgura} días "
@@ -419,13 +421,13 @@ def _senal_temporal(proceso: dict, cert: dict) -> Senal:
     if vig_ini and vig_fin and fin:
         solape = (min(fin, vig_fin) - max(ini, vig_ini)).days + 1
         if solape <= 0:
-            return Senal("temporal", FUERTE, EN_CONTRA,
+            return Senal("temporal", DEBIL, EN_CONTRA,
                          f"Fechas: el periodo del certificado "
                          f"({ini.strftime('%d/%m/%Y')}–{fin.strftime('%d/%m/%Y')}) no "
                          f"toca ni un día la vigencia del proceso "
                          f"({vig_ini.strftime('%d/%m/%Y')}–"
                          f"{vig_fin.strftime('%d/%m/%Y')}).")
-        return Senal("temporal", FUERTE, A_FAVOR,
+        return Senal("temporal", DEBIL, A_FAVOR,
                      f"Fechas: el periodo del certificado "
                      f"({ini.strftime('%d/%m/%Y')}–{fin.strftime('%d/%m/%Y')}) cae "
                      f"dentro de la vigencia del proceso "
@@ -433,11 +435,11 @@ def _senal_temporal(proceso: dict, cert: dict) -> Senal:
                      f"), con {solape} días en común.")
 
     if firma:
-        return Senal("temporal", FUERTE, A_FAVOR,
+        return Senal("temporal", DEBIL, A_FAVOR,
                      f"Fechas: el contrato se firmó el "
                      f"{firma.strftime('%d/%m/%Y')}, antes del inicio declarado "
                      f"({ini.strftime('%d/%m/%Y')}) → coherente.")
-    return Senal("temporal", FUERTE, SIN_DATO,
+    return Senal("temporal", DEBIL, SIN_DATO,
                  "El proceso no publica una vigencia completa que comparar.")
 
 
@@ -487,16 +489,41 @@ def evaluar_candado(proceso: dict, cert: dict) -> Candado:
             + " ".join(s.detalle for s in contra),
             senales)
     if len(favor) >= MINIMO_SENALES_CONFIRMAR:
+        observaciones = observaciones_temporales(Candado(CONFIRMADO, "", senales))
+        motivo = (f"{len(favor)} señales independientes confirman que el proceso "
+                  "corresponde al certificado, y ninguna señal fuerte de identidad "
+                  "lo contradice.")
+        if observaciones:
+            motivo += " Observación de fechas: " + " ".join(observaciones)
         return Candado(
             CONFIRMADO,
-            f"{len(favor)} señales independientes confirman que el proceso "
-            f"corresponde al certificado, y ninguna lo contradice.",
+            motivo,
             senales)
     return Candado(
         POR_CONFIRMAR,
         f"Evidencia insuficiente para dar el proceso por verificado: "
         f"{len(favor)} de {MINIMO_SENALES_CONFIRMAR} señales necesarias.",
         senales)
+
+
+def observaciones_temporales(candado: Candado | dict) -> list[str]:
+    """Detalles literales de señales temporales en contra, incluso heredadas.
+
+    La observación conserva una discrepancia de fechas para el evaluador, pero
+    no altera el resultado del candado ni su tratamiento como señal débil.
+    """
+    if isinstance(candado, Candado):
+        senales = candado.senales
+    else:
+        senales = (candado or {}).get("senales") or []
+    observaciones = []
+    for senal in senales:
+        nombre = senal.get("nombre") if isinstance(senal, dict) else getattr(senal, "nombre", None)
+        sentido = senal.get("sentido") if isinstance(senal, dict) else getattr(senal, "sentido", None)
+        detalle = senal.get("detalle") if isinstance(senal, dict) else getattr(senal, "detalle", None)
+        if nombre == "temporal" and sentido == EN_CONTRA and detalle:
+            observaciones.append(str(detalle))
+    return observaciones
 
 
 def confirmado_sin_adjudicatario(candado: Candado | dict) -> bool:
@@ -518,7 +545,11 @@ def confirmado_sin_adjudicatario(candado: Candado | dict) -> bool:
         senales = candado.get("senales") or []
     if resultado != CONFIRMADO:
         return False
-    independientes = [s for s in senales if s.get("nombre") != "adjudicatario"
+    # La fecha es metadato útil para el evaluador, nunca una pata de identidad
+    # (ni siquiera si un job antiguo la persistió como FUERTE). El adjudicatario
+    # también se excluye porque es precisamente el dato bajo auditoría.
+    independientes = [s for s in senales
+                       if s.get("nombre") not in {"adjudicatario", "temporal"}
                        and s.get("fuerza") == FUERTE]
     if any(s.get("sentido") == EN_CONTRA for s in independientes):
         return False

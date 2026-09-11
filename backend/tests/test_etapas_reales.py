@@ -1188,15 +1188,24 @@ def _espejo_sunat_issue83(entidad: str, ruc: str | None = None) -> dict:
 
 
 def _enriquecimiento_seace_issue83(*, independiente: bool = True) -> dict:
-    senales = [
-        {"nombre": "objeto", "fuerza": "fuerte", "sentido": "a_favor",
-         "detalle": "objeto coincide"},
-        {"nombre": "adjudicatario", "fuerza": "fuerte", "sentido": "a_favor",
-         "detalle": "RUC coincide"},
-    ]
     if independiente:
-        senales.append({"nombre": "temporal", "fuerza": "fuerte",
-                        "sentido": "a_favor", "detalle": "fechas coinciden"})
+        # La fixture positiva debe ejercitar dos patas de identidad que no
+        # dependan del adjudicatario cuyo RUC se intenta enriquecer.
+        senales = [
+            {"nombre": "entidad", "fuerza": "fuerte", "sentido": "a_favor",
+             "detalle": "entidad coincide"},
+            {"nombre": "objeto", "fuerza": "fuerte", "sentido": "a_favor",
+             "detalle": "objeto coincide"},
+        ]
+    else:
+        # Caso circular legado: adjudicatario + objeto puede dar confirmado,
+        # pero no habilita usar el adjudicatario para elegir el RUC del emisor.
+        senales = [
+            {"nombre": "objeto", "fuerza": "fuerte", "sentido": "a_favor",
+             "detalle": "objeto coincide"},
+            {"nombre": "adjudicatario", "fuerza": "fuerte", "sentido": "a_favor",
+             "detalle": "RUC coincide"},
+        ]
     return {"1:1": {"seace": {
         "estado": "seleccionado",
         "candado": {"resultado": "confirmado", "motivo": "fixture",
@@ -1325,6 +1334,40 @@ def test_issue83_job_f5_antiguo_sin_nombre_no_cambia_sunat():
 
     sunat = ctx.enriquecimiento["1:1"]["sunat"]
     assert sunat["ambiguo"] == 2 and "seace_emisor" not in sunat
+
+
+def test_issue83_metadatos_legados_objeto_temporal_no_habilitan_seace_y_siguen_sunat():
+    """Un candado histórico objeto+temporal no puede enriquecer por SEACE.
+
+    La consulta SUNAT conserva el flujo previo: un único resultado por nombre
+    resuelve el emisor, sin etiquetarlo como adjudicatario del proceso.
+    """
+    from orquestador.etapas import Contexto
+    from orquestador.etapas_reales import EtapaSunatReal
+
+    enriquecimiento = _enriquecimiento_seace_issue83()
+    enriquecimiento["1:1"]["seace"]["candado"]["senales"] = [
+        {"nombre": "objeto", "fuerza": "fuerte", "sentido": "a_favor"},
+        {"nombre": "temporal", "fuerza": "fuerte", "sentido": "a_favor"},
+    ]
+    ctx = Contexto(
+        job=None,
+        espejo=_espejo_sunat_issue83("INSTITUTO DE CONSULTORIA S.A."),
+        enriquecimiento=enriquecimiento,
+    )
+    EtapaSunatReal(
+        consultor=lambda _: EmpresaFake("20263373058", "INSTITUTO DE CONSULTORIA S.A.",
+                                         date(2000, 1, 1)),
+        buscador=lambda _: [{"ruc": "20263373058",
+                             "razon_social": "INSTITUTO DE CONSULTORIA S.A."}],
+        extras=SIN_EXTRAS_SUNAT,
+    ).correr(ctx)
+
+    sunat = ctx.enriquecimiento["1:1"]["sunat"]
+    assert sunat["ruc"] == "20263373058"
+    assert sunat["via"] == "nombre"
+    assert "seace_adjudicatario" not in sunat
+    assert "seace_emisor" not in sunat
 
 
 def test_issue83_ruc_distinto_pero_nombre_de_integrante_no_alerta():
@@ -1831,6 +1874,29 @@ def test_traslape_bajo_minimo_sin_cruce_queda_provisional(tmp_path):
     # El disco conserva el espejo de ingreso; el desglose durable vive en el
     # enriquecimiento y se reinyecta al regenerar el Excel.
     assert "total_backend" not in prof
+
+
+@pytest.mark.parametrize("requisitos", [
+    {"tipo_experiencia_valida": "Acreditar mínimo (5) años desde la colegiatura"},
+    {"minimo_experiencia": {"cantidad": 5, "unidad": "anios", "folio": 93}},
+])
+def test_minimo_profesional_llega_al_calculo_y_a_la_proyeccion(tmp_path, requisitos):
+    from entregables.excel_final import inyectar_veredicto_backend
+    espejo = _espejo_bim(BIM_PERIODOS)
+    espejo["profesionales"][0]["requisitos"] = requisitos
+    repo = RepositorioMemoria()
+    motor = Motor(etapas_reales(tmp_path, consulta_cui=ConsultaFake(),
+                                fetcher_infoobras=lambda *a, **k: None,
+                                consultor_sunat=lambda r: None,
+                                descargar=lambda *a, **k: None), repo)
+    job = motor.correr(motor.crear_job(espejo).job_id)
+    enriquecimiento = repo.cargar_enriquecimiento(job.job_id)
+    assert enriquecimiento["prof:1"]["minimo_dias"] == 1825
+    assert enriquecimiento["prof:1"]["minimo_texto"] == "5 años"
+    assert enriquecimiento["prof:1"]["dias_efectivos"] == 716
+    inyectar_veredicto_backend(espejo, enriquecimiento)
+    assert espejo["profesionales"][0]["minimo_exigido_backend"] == "5 años"
+    assert "sin dato" not in espejo["profesionales"][0]["cumple_backend"]
 
 
 def test_el_veredicto_del_backend_llega_al_excel_al_regenerar(tmp_path):

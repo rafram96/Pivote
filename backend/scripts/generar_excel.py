@@ -762,9 +762,12 @@ def construir_hoja_evaluacion(ws, espejo: dict,
         # Vitarte). Ahora dice lo que pasó, en amarillo de «por verificar».
         _pje = fac.get("puntaje")
         _pendiente = _pje in (None, "")
-        if _pendiente and fac.get("puntaje_confirmado") is not None:
-            _pje = (f"{fac.get('puntaje_confirmado'):g}–"
-                    f"{fac.get('puntaje_maximo_posible'):g}")
+        _min = fac.get("puntaje_confirmado")
+        _max = fac.get("puntaje_maximo_posible")
+        # Un límite ausente no equivale a cero ni permite presentar un rango.
+        if (_pendiente and isinstance(_min, (int, float))
+                and isinstance(_max, (int, float))):
+            _pje = f"{_min:g}–{_max:g}"
         b.row([fac.get("factor"), fac.get("criterio"), fac.get("folio"),
                fac.get("detalle"), "POR CONFIRMAR" if _pje in (None, "") else _pje],
               fmts={5: FMT_INT}, fills={5: FILL_PEND} if _pendiente else None)

@@ -23,7 +23,10 @@ let pedidos = [];
 
 function responder(status, data) {
   globalThis.fetch = async (url, opciones = {}) => {
-    pedidos.push({ url: String(url), metodo: opciones.method, cuerpo: opciones.body });
+    pedidos.push({
+      url: String(url), metodo: opciones.method, cuerpo: opciones.body,
+      autorizacion: opciones.headers?.Authorization,
+    });
     return { ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(data) };
   };
 }
@@ -203,6 +206,57 @@ describe("buscarCui", () => {
     const r = await cli().buscarCui({ q: "hospital", limite: 999 });
     assert.equal(r.ok, false);
     assert.equal(r.status_http, 400);
+  });
+});
+
+describe("consultas de fichas InfoObras", () => {
+  it("consulta candidatos con GET, query exacta y Bearer heredado", async () => {
+    responder(200, { estado: "ok", fuente: "infoobras", candidatos: [{ obra_id: 7 }] });
+    const cliente = crearCliente({ serverUrl: BASE, token: "secreto" });
+    const r = await cliente.listarFichasInfoobras({ cui: "00123" });
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.candidatos, [{ obra_id: 7 }]);
+    assert.equal(pedidos[0].metodo, "GET");
+    assert.equal(pedidos[0].url, `${BASE}/api/pivote/infoobras/candidatos?cui=00123`);
+    assert.equal(pedidos[0].autorizacion, "Bearer secreto");
+    assert.equal(pedidos[0].cuerpo, undefined);
+  });
+
+  it("consulta ficha con query exacta y preserva estado y ficha", async () => {
+    responder(200, {
+      estado: "fuente_no_respondio", fuente: "infoobras", ficha: null,
+      detalle: "portal temporalmente no disponible",
+    });
+    const r = await cli().consultarFichaInfoobras({ cui: "123", obra_id: 214 });
+    assert.equal(r.ok, true);
+    assert.equal(r.estado, "fuente_no_respondio");
+    assert.equal(r.fuente, "infoobras");
+    assert.equal(r.ficha, null);
+    assert.equal(r.detalle, "portal temporalmente no disponible");
+    assert.equal(pedidos[0].url, `${BASE}/api/pivote/infoobras/ficha?cui=123&obra_id=214`);
+    assert.equal(pedidos[0].cuerpo, undefined);
+  });
+
+  it("preserva un fallo HTTP como error sin perder el cuerpo", async () => {
+    responder(503, { estado: "fuente_no_respondio", fuente: "infoobras", candidatos: [] });
+    const r = await cli().listarFichasInfoobras({ cui: "9" });
+    assert.equal(r.ok, false);
+    assert.equal(r.status_http, 503);
+    assert.deepEqual(r.error, { estado: "fuente_no_respondio", fuente: "infoobras", candidatos: [] });
+  });
+
+  it("valida CUI y obra_id sin hacer requests ni enviar POST", async () => {
+    responder(200, {});
+    for (const argumentos of [
+      { cui: "", obra_id: 1 }, { cui: "12345678901", obra_id: 1 },
+      { cui: "12a", obra_id: 1 }, { cui: "12", obra_id: true },
+      { cui: "12", obra_id: [] }, { cui: "12", obra_id: 0 },
+      { cui: "12", obra_id: 2147483648 },
+    ]) {
+      const r = await cli().consultarFichaInfoobras(argumentos);
+      assert.equal(r.ok, false);
+    }
+    assert.equal(pedidos.length, 0);
   });
 });
 

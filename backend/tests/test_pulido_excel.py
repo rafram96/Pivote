@@ -92,6 +92,29 @@ def test_el_puntaje_retirado_habla_y_se_pinta_por_verificar(tmp_path):
     assert ws.cell(fila_a + 4, 5).value == "NO APLICA"
 
 
+@pytest.mark.parametrize("minimo,maximo,esperado", [
+    (0, None, "POR CONFIRMAR"),
+    (None, 60, "POR CONFIRMAR"),
+    (None, None, "POR CONFIRMAR"),
+    (0, 60, "0–60"),
+    (0, 0, "0–0"),
+])
+def test_factor_con_rango_incompleto_no_interrumpe_el_excel(
+        tmp_path, minimo, maximo, esperado):
+    espejo = _espejo_factor_retirado()
+    espejo["resumen_evaluacion"]["factores"][0].update(
+        puntaje_confirmado=minimo, puntaje_maximo_posible=maximo)
+    salida = generar_excel(espejo, tmp_path / "rango.xlsx")
+    wb = openpyxl.load_workbook(salida)
+    try:
+        ws = wb["CLAUDE"]
+        fila = _buscar(ws, "FACTOR").row + 1
+        assert ws.cell(fila, 5).value == esperado
+        assert _fill(ws.cell(fila, 5)) == AMARILLO_SUAVE
+    finally:
+        wb.close()
+
+
 def test_la_nota_sale_de_la_tabla_y_no_la_contradice(tmp_path):
     salida = generar_excel(_espejo_factor_retirado(), tmp_path / "p5.xlsx")
     ws = openpyxl.load_workbook(salida)["CLAUDE"]
@@ -314,10 +337,13 @@ def test_lo_que_esta_por_verificar_usa_el_amarillo_suave(tmp_path):
         generar_excel_final(espejo, tmp_path / "am.xlsx", **extras))
     hoja = wb.worksheets[2]
 
-    for texto in ("No disponible en datos abiertos", "🟡 ALT04",
+    for texto in ("En esta corrida", "🟡 ALT04",
                   "PROVISIONAL — POR VERIFICAR"):
         celda = _buscar(hoja, texto)
         assert celda is not None, f"el caso no ejercitó «{texto}»"
+        if texto == "En esta corrida":
+            assert "cobertura" not in celda.value and "2018" not in celda.value
+            assert "Esto no prueba que no existan" in celda.value
         assert _fill(celda) == AMARILLO_SUAVE, (
             f"«{texto}» sigue en el amarillo del dato declarado")
 

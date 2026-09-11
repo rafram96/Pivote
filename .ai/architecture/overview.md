@@ -6,11 +6,13 @@
 > cuando Pivote se clona solo (ADR-S002 del nivel sistema). Si editas la
 > forma del sistema, edita topology.md primero y este resumen después.
 
-**InfoObras Pivote** audita propuestas técnicas de concursos públicos OSCE
-(consultoría/supervisión de obra, Perú) para el cliente Indeconsult (Ing. Manuel
-Echandía). Detecta si la experiencia declarada por cada profesional es real:
-un **falso CUMPLE es el peor fallo posible**; ante la duda el sistema se abstiene
-("Por confirmar"), nunca adivina.
+**InfoObras Pivote** extrae datos y reúne fuentes para contrastar propuestas
+técnicas de concursos públicos OSCE (consultoría/supervisión de obra, Perú).
+Identifica proyecto, intervención y contratación; conserva diferencias y
+documentos con su procedencia. La verificación y sustentación final pertenecen
+al ingeniero (aclaración del usuario, 10-sep-2026). Los cálculos/rótulos
+existentes son auxiliares; no certifican autenticidad ni dictamen final.
+Ante ambigüedad de identidad, "Por confirmar", nunca adivinar.
 
 ## Arquitectura híbrida (regla inquebrantable)
 

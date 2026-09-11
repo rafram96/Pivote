@@ -1,9 +1,55 @@
 ---
-timestamp: "2026-09-08"
+timestamp: "2026-09-10"
 agent: Codex
 ---
 
 # Handoff — punto de continuación
+
+[Lote posterior de identidad y lectura](2026-09-10_codex.md#ficha-explícita-estable-y-lectura-investigativa):
+ID explícito sin sustitución por fechas, SEACE sin certeza temporal, observaciones
+visibles y consultas nuevas API/MCP de solo lectura. Pruebas offline; sin reinicio
+ni regeneración real, sin commit. Investigación y asociación documental siguen
+pendientes. El piloto previo sí se ejecutó (ver nivel sistema); esta nota
+supersede las menciones históricas de «piloto sin ejecutar/modelo pendiente».
+
+## 2026-09-10 — Identidad SEACE (Codex seace_identidad)
+
+Plan cerrado implementado: bienes (`mainProcurementCategory=goods`) quedan en
+`otro` aunque el texto mencione el proyecto; `works` mantiene ejecución con
+equipamiento. La señal temporal reporta las fechas exactas pero es siempre
+`DEBIL`; solo dos señales fuertes no temporales pueden confirmar y el helper
+anticircular ignora temporal también en metadatos antiguos. Focal:
+**79 passed** (`test_candado_seace.py` + `test_seace_abierto.py`). Sin jobs,
+servicios, red ni cambios fuera del ámbito. Ver
+`2026-09-10_seace_identidad.md`.
+
+[Identidad de ficha y descarga corregida localmente](2026-09-10_codex.md#identidad-única-entre-ficha-y-descarga):
+una selección activa y procedencia inicial conservada, también en subobras;
+marcas ligadas a la ficha y retiro recuperable del corpus anterior. No cambia
+scoring ni promueve candidatos. Suite 1425/25; entrega real aún sin regenerar.
+Piloto separado preparado, sin ejecutar agentes; modelo/presupuesto pendientes.
+
+Job Pucallpa **97ffb97a308e** terminado, requiere revisión; Excel generado y
+ZIP con errores. [Continuidad y comprobación limitada](2026-09-10_codex.md#nueva-corrida-autorizada).
+No usar el job anterior como si ya contuviera estas correcciones ni confundir
+archivo generado con contenido validado. Backend del usuario sin reinicio.
+
+Backend local detenido por petición del usuario, sin borrar datos ni tocar
+PostgreSQL/Panel. [Cierre operativo](2026-09-10_codex.md#parada-local-posterior).
+
+Correcciones 1 y 2 implementadas localmente: rubro indeterminado ya no confirma
+identidad por lugar; mínimos estructurados y formato `(6)/(5) años` se leen.
+[Pruebas, replay focal y límites](2026-09-10_codex.md#correcciones-1-y-2-identidad-de-establecimiento-y-mínimos-profesionales).
+No reiniciado backend ni regenerado el job; sin commit. Golden sigue ausente.
+
+Pucallpa `9c1409a6e9ba` reanudado por autorización: Excel OK tras corregir
+el formateo de límites nulos; 135 pruebas focales pasan / 1 omitida. No se
+repitieron etapas previas; ZIP descargando. [Continuidad técnica](2026-09-10_codex.md#excel-con-límite-de-puntaje-nulo-y-reintento).
+Esto supersede el estado sin reintento siguiente; no hay commit del fix.
+
+Preparativos autorizados completados: backend actual iniciado y MEF actualizado.
+No se ejecutó Pucallpa ni se regeneraron entregables; [continuidad operativa](2026-09-10_codex.md#preparación-operativa-autorizada).
+Esto supersede las menciones históricas de no reinicio siguientes.
 
 Código del 10-sep versionado: **8c6c43c** privadas, **c665c0d** multiobra.
 1371 pruebas pasan / 25 omitidas. Sin push/reinicio ni nueva corrida;

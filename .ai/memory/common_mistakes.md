@@ -113,3 +113,19 @@
   lugar, no la obra. Toda señal de identidad por lugar (número, nombre de colegio,
   topónimo) necesita que la obra no añada un rubro ausente en el certificado. Y
   antes de promover una vía nueva: replay offline sobre un job real, siempre.
+- **Ficha final distinta de la que descarga el ZIP**: actualizar solo el código
+  visible en el Excel deja al descargador leyendo la búsqueda inicial. Persistir
+  la ficha consultada como selección activa y la inicial como procedencia; probar
+  el recorrido hasta ZIP, no solo la respuesta de búsqueda. Una marca `P/E.ok`
+  sin identidad tampoco acredita que el corpus pertenezca a la ficha actual.
+  Al cambiarla, retirar el corpus anterior de forma recuperable, incluso si la
+  fuente nueva falla. Esto no demuestra que la selección semántica sea correcta.
+- **Identidad no se decide con las fechas que se van a contrastar**: fijado un
+  ID, preservarlo aunque el periodo difiera. En SEACE, objeto+temporal no bastan
+  para confirmar, ni para obtener por circularidad un RUC adjudicatario. Al
+  debilitar temporal, seguir mostrando su discrepancia en Excel/ZIP; «identidad
+  confirmada» no significa «fechas coincidentes».
+- **HTTP 200 no significa datos válidos**: JSON de error/HTML/login no es lista
+  vacía. InfoObras además incluye un título de layout antes del título de ficha;
+  probar contra HTML real y rechazar IDs contradictorios. Nunca inferir ausencia
+  documental ni causa de cobertura solo desde falta de resultados.

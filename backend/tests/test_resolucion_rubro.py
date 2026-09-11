@@ -15,9 +15,57 @@ deportiva; la correcta si el ranking la deja, o revisión visible.
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from resolucion.cui import resolver, rubros_de, _rubro_contradice  # noqa: E402
+
+
+class ConsultaRubroIndeterminado:
+    def __init__(self, nombre, **campos):
+        self.obra = {"nombrObra": nombre, "codUniqInv": "2999001",
+                     "codigoObra": 90001, "nombrDepartamento": "JUNIN", **campos}
+
+    def buscar(self, nombre):
+        return [dict(self.obra)]
+
+    def por_codigo(self, codigo):
+        return [dict(self.obra)] if str(codigo) == "2999001" else []
+
+
+@pytest.mark.parametrize("proyecto,nombre", [
+    ("Hospital de Villa Serena, departamento de Junin",
+     "MEJORAMIENTO DEL CEMENTERIO GENERAL DE VILLA SERENA, JUNIN"),
+    ("Hospital de Villa Serena, departamento de Junin",
+     "MEJORAMIENTO DEL MERCADO CENTRAL DE VILLA SERENA, JUNIN"),
+    ("Colegio Villa Serena, departamento de Junin",
+     "MEJORAMIENTO DEL ALMACEN DE VILLA SERENA, JUNIN"),
+])
+def test_lugar_compartido_no_confirma_rubro_desconocido(proyecto, nombre):
+    assert rubros_de(nombre) == set()
+    r = resolver({"proyecto": proyecto}, ConsultaRubroIndeterminado(nombre))
+    assert r["estado"] == "revision"
+    assert r["cui"] is None and r["obra"] is None
+    assert "tipo de establecimiento o servicio" in r["decision"]
+    assert any(c["cui"] == "2999001" for c in r["candidatos"])
+
+
+def test_hospital_con_nombre_y_rubro_compatibles_conserva_identificacion():
+    r = resolver({"proyecto": "Hospital de Villa Serena, Junin"},
+                 ConsultaRubroIndeterminado("MEJORAMIENTO DEL HOSPITAL DE VILLA SERENA, JUNIN"))
+    assert r["estado"] == "resuelto" and r["cui"] == "2999001"
+
+
+@pytest.mark.parametrize("evidencia,via", [
+    ({"cui": "2999001"}, "CUI_TEXTO"),
+    ({"ruc_emisor": "20123456789"}, "RUC"),
+])
+def test_nombre_truncado_con_evidencia_directa_no_es_contradiccion(evidencia, via):
+    r = resolver({"proyecto": "Hospital de Villa Serena, Junin", **evidencia},
+                 ConsultaRubroIndeterminado("MEJORAMIENTO DE VILLA SERENA, JUNIN",
+                                           rucEjecutor="20123456789"))
+    assert r["estado"] == "resuelto" and r["via"] == via
 
 EXP_CHINCHINGA = {
     "proyecto": ("Mejoramiento y Ampliación de los Servicios del Puesto de Salud "
@@ -159,6 +207,16 @@ def test_cui_citado_con_funcion_mef_compatible_conserva_paso_cero():
 
     assert r["estado"] == "resuelto"
     assert r["cui"] == "2173445"
+
+
+@pytest.mark.parametrize("funcion,estado", [("SALUD", "resuelto"), (None, "revision")])
+def test_nombre_truncado_se_coteja_con_rubro_oficial_sin_adivinar(funcion, estado):
+    ficha = {"cui": "2999001", "nombre": "MEJORAMIENTO DE VILLA SERENA, JUNIN",
+             "dpto": "JUNIN", "funcion": funcion}
+    r = resolver({"proyecto": "Hospital de Villa Serena, Junin"},
+                 ConsultaRubroIndeterminado(ficha["nombre"]), base=_BaseFicha(ficha))
+    assert r["estado"] == estado
+    assert r["cui"] == ("2999001" if estado == "resuelto" else None)
 
 
 class ConsultaCongeladaAbancay:

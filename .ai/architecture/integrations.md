@@ -13,3 +13,22 @@
 
 Regla transversal: **nunca inventar** un CUI/documento/número; lo no publicado
 se declara pendiente y cae a «Por confirmar».
+
+## Lectura de identidad InfoObras (código local, 10-sep)
+
+`scraping/consulta_infoobras.py` añade lectura con estados de fuente a través
+de dos GET `/api/pivote/infoobras/candidatos` y `/api/pivote/infoobras/ficha`.
+El MCP expone `listar_fichas_infoobras` y `consultar_ficha_infoobras`; no lanza
+jobs ni baja PDFs, y exige `obra_id` explícito para leer ficha. Reutiliza
+búsqueda por código, limita texto por sección y declara que la lista del portal
+no está certificada como completa. Un fallo HTTP/formato/transporte no es
+ausencia. Títulos internos con otro ID no se aceptan como ficha solicitada.
+Datos fuente, fechas y enlaces quedan sin dictamen ni clasificación documental.
+Backend/MCP necesitan reinicio/reentrega para usar estas adiciones; no se hizo.
+
+En el fetch del pipeline, una ficha explícita ya no se reemplaza por una con
+mejor solape temporal. Sin ID explícito sigue la selección histórica: pendiente
+de separar alternativas de identidad en el orquestador y los entregables.
+SEACE: `goods` no se clasifica como obra por el texto del proyecto; la señal
+temporal se conserva débil y visible, sin confirmar/vetar identidad por sí sola.
+La consulta sin procesos no se atribuye automáticamente a cobertura desde 2018.
