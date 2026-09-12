@@ -129,3 +129,9 @@
   vacía. InfoObras además incluye un título de layout antes del título de ficha;
   probar contra HTML real y rechazar IDs contradictorios. Nunca inferir ausencia
   documental ni causa de cobertura solo desde falta de resultados.
+- **Guardas que no viajan y pruebas con contexto fabricado**: una pluralidad
+  detectada en el resumen debe quedar persistida para que el consumidor de fechas
+  la respete; probar la cadena completa, no dos funciones aisladas. Un paquete de
+  prueba tampoco puede rellenar el CUI declarado desde el utilizado ni cambiarse
+  después de calcular la huella. Probar declaración, identidad/hash de adjuntos y
+  comandos reales de finalización; JSON válido no verifica fidelidad semántica.

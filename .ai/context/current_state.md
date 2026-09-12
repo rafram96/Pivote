@@ -1,5 +1,102 @@
 # Estado actual del proyecto
 
+## 2026-09-12 — Consultas repetidas y checkpoint por fuente
+
+[Cierre del cuarto tramo](../handoffs/2026-09-12_codex.md#consultas-repetidas-y-checkpoint-por-fuente):
+caché exacta de búsquedas SUNAT con candidatos y persistencia al terminar cada
+fuente. Aislamiento/fusión evita sobrescribir datos hermanos; reanudación no repite
+lo guardado. Sonda offline con salidas conservadas, no medición de un job real.
+No cambia identidad, A/B o entregables. Sin reinicio, históricos alterados ni commit.
+
+## 2026-09-12 — Cálculo independiente de Excel
+
+[Cierre del tercer tramo](../handoffs/2026-09-12_codex.md#cálculo-separado-de-la-generación-excel):
+conciliación, mínimos, Factor A y conclusiones fuera del generador; aliases
+compatibles. Comparación con implementaciones anteriores de ambas rutas y
+ejecución en proceso frío sin Excel/orquestador. No cambia criterios ni resolver;
+no hubo jobs ni regeneraciones históricas. Consultas y persistencia con medición
+se implementaron en el tramo superior, sin prometer una aceleración total no medida.
+
+## 2026-09-12 — Proyección compartida de identidad
+
+[Cierre del segundo tramo](../handoffs/2026-09-12_codex.md#proyección-compartida-de-identidad):
+composición común de procedencia/certeza en API, ZIP y Excel. Contexto original
+preservado en ficha efímera; sin cambios del contrato externo, rutas ni reglas.
+1664 tests pasan, 25 omitidos. Comparación offline con baseline del árbol sucio
+en ambas rutas: API igual, bytes ZIP iguales, Excel igual salvo timestamp.
+No hay nueva corrida ni validación factual global. Cálculo/presentación en el tramo superior.
+
+## 2026-09-12 — Eficiencia y fallos silenciosos: primer tramo
+
+[Implementación y aceptación](../handoffs/2026-09-12_codex.md#primer-tramo-de-eficiencia-y-fallos-silenciosos):
+script de montos alineado con el mapa y selector sin fallback al primer candidato.
+Prueba local sobre 14 contratos evita 195 lecturas OCR y 13 falsos ausentes.
+No se cambió selección normal, no se relanzaron jobs ni se declara validada la
+precisión global. Este apartado antecede al tramo de proyección superior;
+la separación cálculo/presentación se cerró en el tramo superior.
+
+## 2026-09-12 — Identidad y lectura prioritaria
+
+[Continuación implementada](../handoffs/2026-09-12_codex.md#continuación-identidad-y-lectura-prioritaria):
+abstención ante procedimientos hermanos y naturaleza público/privada en conflicto;
+candado sin confirmación por entidad+tipo; investigación incluye privadas y
+documentos prioritarios con cobertura de lectura explícita. Sin nuevas promociones
+del resolver, jobs, cambio de A/B o regeneración histórica. No afirmar precisión
+global ni correspondencia documental universal desde estas pruebas focales.
+
+## 2026-09-12 — Adjuntos SEACE integrados
+
+[Cierre local y aceptación](../handoffs/2026-09-12_codex.md): conservar todos los
+adjuntos, identidad/hash por archivo y retirar selecciones anteriores del ZIP.
+Datos del proceso y contenido pendiente separados en Excel/ZIP. No cambia el
+resolver ni acredita el encargo por metadata; sin jobs ni entregas regeneradas.
+
+## 2026-09-11 — Controles de extracción corregidos
+
+[Implementación y aceptación](../handoffs/2026-09-11_codex.md#cierre-directo-de-controles-de-extracción).
+Skill local preparada antes de evaluar/consolidar: incertidumbre temporal trazada,
+funciones con fuente, cálculos determinísticos y relectura por campo, sin alterar
+esquema espejo ni A/B. 125 tests Node y 1597 backend pasan (25 omitidos).
+Validación focal sobre artefactos reales, no una corrida integral de identificación.
+
+## 2026-09-11 — Prueba adicional de extracción
+
+[Resultado](../handoffs/2026-09-11_codex.md#prueba-adicional-del-control-factual):
+control experimental con utilidad parcial, no incorporado a producción.
+No cambia código, versión cargada, jobs ni entregables.
+
+## 2026-09-11 — Rótulo CUI corregido y prueba multirruta
+
+[Detalle y evidencia](../handoffs/2026-09-11_codex.md#corrección-del-rótulo-cui-y-prueba-multirruta).
+Procedencia visible en ambas rutas, sin igualdad rotulada como verificación.
+Luna: tres profesionales/17 periodos; prueba focal, no corrida integral.
+Código local probado, servidor e históricos intactos. Subsisten errores de
+extracción; no se declara cierre de identidad ni cobertura documental.
+
+## 2026-09-11 — Prueba focal real con Luna
+
+Extracción nueva y sonda local: [resultados y límites](../handoffs/2026-09-11_codex.md#prueba-focal-posterior-extracción-con-luna).
+Sin cambios productivos. Pendientes confirmados de presentación CUI en obras,
+evento temporal extraído y motivos de servicio; no equivalen a cierre integral.
+
+## 2026-09-11 — Servicio esperado y declarado
+
+ADR-S013 implementado localmente: evidencia de bases/certificado separada,
+contraste común Excel/API/Panel/ZIP y candado SEACE sin usar default como prueba.
+A/B y CUI no cambian por una diferencia. Datos de otra fase no comprueban el
+periodo del servicio. [Detalle y validación](../handoffs/2026-09-11_codex.md#servicio-esperado-y-declarado-adr-s013).
+Sin corrida nueva de skill, migración histórica, reinicio o commit.
+
+## 2026-09-11 — Descarga documental MEF por experiencia
+
+Continuación: no mezclar lecturas de resoluciones, conservar actos contractuales
+separados de aprobación y abstenerse del rol SEACE inferido solo por el proyecto.
+No es cierre semántico ni validación de entregables nuevos.
+
+Implementación posterior al checkpoint: fuente MEF independiente de InfoObras y
+copias de selección explícita, con huella del PDF leído y motivos por documento.
+[Detalle y límites](../handoffs/2026-09-11_codex.md). No modifica jobs existentes.
+
 Checkpoint autorizado de implementación: `checkpoint-identidad-documental-20260910`.
 Investigación, aplicación y recontraste versionados junto con skill/MCP; sin push
 ni despliegue. [Pruebas y límites](../handoffs/2026-09-10_codex.md#checkpoint-de-implementación-con-tag).
@@ -1327,3 +1424,11 @@ Validación focal: test nuevo **5 passed**. En conjunto con
 `test_cronologia_gantt.py`: **28 passed, 1 failed**, por la expectativa
 concurrente de ancho (`ws.max_column == 4` frente a `MIN_COLUMNAS == 80`), sin
 editar ese test. Avisos: pytest no pudo escribir `.pytest_cache` (`WinError 5`).
+## 2026-09-12 — candado SEACE y encargo
+
+El candado ya no confirma solo por entidad+objeto: exige adjudicatario a favor
+además de dos señales fuertes, y los resúmenes con varios contratos identificados
+quedan `por_confirmar` sin perder candidatos. Se persisten IDs/títulos/awards de
+contrato y descripción/items del tender para investigación. Los cruces de fechas
+rechazan el rescate circular histórico por entidad+objeto y conservan fechas como
+observación débil. Ver handoff fechado para pruebas y pendientes de consumidores.

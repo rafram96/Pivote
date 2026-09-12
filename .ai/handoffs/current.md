@@ -1,9 +1,117 @@
 ---
-timestamp: "2026-09-10"
+timestamp: "2026-09-12"
 agent: Codex
 ---
 
+## 12-sep — Checkpoint antes de estados de fuente
+
+[Cinco commits de código](2026-09-12_codex.md#checkpoint-de-los-tramos-terminados)
+hasta `2f44a33`. Continúa la corrección de estados; la comprobación real de ambas
+rutas (punto 3) no está iniciada. Las notas «sin commit» inferiores son históricas.
+
+## 12-sep — SUNAT y checkpoint por fuente integrados
+
+[Implementación y medición](2026-09-12_codex.md#consultas-repetidas-y-checkpoint-por-fuente):
+20 búsquedas repetidas → 1 en sonda offline con las mismas salidas; vacíos/errores
+no se cachean. Fuentes con entradas aisladas, fusión por campo y guardado al
+terminar cada rama. Reanudación y fallos de disco probados; no hay corridas reales,
+reinicio ni commit. No confundir esta medición con latencia real de los portales.
+Regresión final: 1715 pruebas pasan, 25 omitidas; 29 tests nuevos.
+
+## 12-sep — Cálculo independiente del generador Excel
+
+[Implementación y aceptación](2026-09-12_codex.md#cálculo-separado-de-la-generación-excel):
+mínimos, Factor A, conciliación e inyección en reglas; conclusiones independientes
+del renderer. Misma conducta en ambas rutas frente a copias previas; imports en
+frío sin Excel ni etapas. No cambian criterios, jobs ni entregas históricas.
+Regresión final: 1686 tests pasan, 25 omitidos; validación documental raíz válida,
+Pivote conserva los 71 errores previos de metadatos.
+La optimización acotada de consultas/persistencia está en el tramo superior.
+
+## 12-sep — Proyección compartida de identidad integrada
+
+[Implementación y aceptación](2026-09-12_codex.md#proyección-compartida-de-identidad):
+Excel, ZIP y API usan la misma preparación de identidad; ficha Excel conserva
+contexto original sin persistirlo. 1664 pruebas backend pasan; comparación offline
+de las dos rutas conserva API, Excel y ZIP. Sin jobs, reinicio ni commit.
+La separación cálculo/presentación está en el tramo superior; no afirmar precisión global de CUI.
+
+## 12-sep — Primer tramo de eficiencia implementado
+
+[Montos y fallo del selector](2026-09-12_codex.md#primer-tramo-de-eficiencia-y-fallos-silenciosos):
+importe existente respetado, rango exacto y procedencia conservados; fallo de
+selección a revisión con candidatos, sin elección automática ni herencia por
+dedup. Pruebas y límites de replay en el cierre fechado. Sin jobs, restart o
+commit. La proyección de identidad se implementa en el tramo superior;
+la separación cálculo/presentación se cerró en el tramo superior.
+
+## 12-sep: identidad y lectura prioritaria (bloque anterior)
+
+[Continuación y aceptación](2026-09-12_codex.md#continuación-identidad-y-lectura-prioritaria).
+Procedimientos múltiples sin elección por calendario; entidad+tipo insuficientes
+para confirmar encargo; conflicto de naturaleza va a revisión conservando pistas.
+La investigación incluye privadas y documentos prioritarios con lectura/pendiente
+registrados. Son guardas de abstención, no nuevas promociones ni un dictamen.
+
+## 12-sep: adjuntos SEACE integrados al flujo
+
+[Implementación, aceptación y límites](2026-09-12_codex.md).
+Colección completa, selección exacta, manifiesto con hash, retiro recuperable y
+entregables que separan datos del proceso de contenido pendiente. No se cambió
+resolver ni A/B, no hubo nueva corrida ni regeneración de entregas históricas.
+
+## 12-sep: componente de colección SEACE (antecedente)
+
+Implementada y probada `documentos_prioritarios`, con bases integradas y
+adjuntos contractuales completos, filtro exacto por contrato, orden estable,
+dedupe lógico y enlaces faltantes preservados. Ver
+[handoff fechado](2026-09-12_coleccion-seace.md). Sin red, jobs ni migración.
+
 # Handoff — punto de continuación
+
+## 11-sep: correcciones directas integradas
+
+[Cierre de controles de extracción](2026-09-11_codex.md#cierre-directo-de-controles-de-extracción).
+Preparación común integrada al Paso 2.6 y consolidador; instalada vía junction.
+125 tests Node y 1597 backend pasan; relectura focal y transporte real comprobados.
+No volver a diagnosticar los mismos defectos ni repetir propuestas completas.
+Los apartados siguientes son historia previa a este cierre local.
+
+## 11-sep: prueba adicional del control factual
+
+[Resultado y límites](2026-09-11_codex.md#prueba-adicional-del-control-factual).
+Ensayo de prompt, no cambio instalado. Persiste evento temporal mal atribuido;
+la validación de tipos también encuentra errores. No relanzar jobs para retomarlo.
+
+## 11-sep: rótulo CUI corregido y prueba multirruta
+
+[Cambio local y comprobación con Luna medium](2026-09-11_codex.md#corrección-del-rótulo-cui-y-prueba-multirruta).
+Supera el pendiente de presentación CUI de la prueba anterior; siguen defectos
+de extracción y motivos de ausencia. No hubo job, red ni cambios de entregas.
+
+## 11-sep: prueba focal nueva con Luna
+
+[Prueba real acotada y pendientes reproducidos](2026-09-11_codex.md#prueba-focal-posterior-extracción-con-luna).
+No relanzar extracción ni jobs para recuperar contexto. La muestra conserva el
+contraste de servicio; aún no da por buenos todos los rótulos ni datos de entrada.
+
+## 11-sep: esperado frente a declarado
+
+[ADR-S013 implementado y probado en aislamiento](2026-09-11_codex.md#servicio-esperado-y-declarado-adr-s013).
+Ruta A/B global preservada; evidencia literal nueva no se toma del evaluador.
+No usar el tipo de búsqueda para sumar señal fuerte. Excel, API/Panel y ZIP
+explican el mismo contraste. No se ha corrido la skill completa ni alterado jobs.
+
+## 11-sep: bloque documental MEF
+
+[Continuación](2026-09-11_codex.md#continuación-coherencia-documental-y-rol-del-servicio):
+lectura indivisible, actos contractuales conservados aparte y tipo SEACE sin
+ejecución presumida por título. Medido sobre dos jobs sin modificarlos. Consorcio
+no identificado por metadatos de anexos; lectura semántica pendiente.
+
+[Implementación y límites](2026-09-11_codex.md): descarga por selección de
+experiencia, independiente de ficha, sin reselección. Pruebas aisladas; no migración
+histórica ni reconocimiento semántico de aprobación. Sin commit ni despliegue.
 
 ## Checkpoint de implementación etiquetado
 
@@ -1462,3 +1570,18 @@ suben, cero correcto→incorrecto. Nunca relajar compuertas para "ganar" casos
 - **Vía MEF** (mismo día, commits `9b9389c` y `f64e357`): 7 de 8 «no detectables» estaban en la base MEF con nombre exacto; el resolver los perdía en `_fusionar_mef` por exigir obra en InfoObras. Ahora la ficha compite (`_solo_ficha`, solo expedientes) y resuelve con candados propios; la etapa verifica solo contra el MEF (`_procesar_sin_obra`) y, sin documentos MEF, marca `sin_documentos_mef` en vez de `sin_verificar`. Corrida real: pendientes **21 → 7**, profesionales por confirmar 9 → 6. Suite 1102 passed. Ideas abiertas: 2ª pasada del buscador MEF por establecimiento para los casos donde la ficha correcta no queda arriba (I.E. 14038, Hospital Chulucanas).
 - **Correcciones del Excel (tarde 2026-09-05, commits `6fdfcb9`…`e5bb1c2`)**: veto por etapa en el resolver; plausibilidad de la fecha de resolución (`fecha_descartada`/`fecha_motivo`); bloque MEF con el contrato del emisor (`elegido_por`, `contrato_emisor`); multi-obra 0/N a revisión; cruces con contrato MEF y textos honestos; `entregables/certeza.py` + Parte 5 de expedientes (Identificación, Alerta, fila MEF, totales por certeza, DÍAS EFECTIVOS = reconciliar). Suite 1198. Tag de retorno: `checkpoint-2026-09-05-pre-correcciones-excel`. Pendiente: Panel con la misma certeza; corrida real completa.
 - **API de certeza para el Panel** (`ef54b38`, `447ecfa`): `/espejo` y `/resumen` exponen `identificacion`, `alertas`, `fuente_mef`, `certeza` y `tipo_evaluacion` (solo expedientes); paridad con la Parte 5 del Excel probada. La vía RESOLUCION persiste la lectura confirmante. Panel actualizado en `d91375d`. Pendiente: réplica para ejecución de obra.
+## 2026-09-11 — extracción focal Pucallpa P1 EXPEDIENTES
+
+RAW generado para Marcos Díaz Espinoza: `backend/datos_pivote/prueba-rutas-luna-20260911/pucallpa_expediente/_prof/`.
+Incluye `profesional_01.json` y `auditoria_extraccion.json`; 8 periodos extraídos
+de páginas físicas 306–311, con imágenes y vecinos ±2 revisados. Validación JSON
+OK. `ai-cli validate` queda bloqueado por frontmatter histórico ya existente en
+tasks/decisions.
+## 2026-09-12 — guardas de encargo SEACE
+
+Implementadas en `2026-09-12_candado_encargo.md`: promoción con adjudicatario
+favorable obligatorio, abstención por varios contratos con IDs distintos,
+resumen ampliado para investigación, rótulo honesto y gates de fechas sin
+rescate entidad+objeto. Focal: 96 pruebas pasadas. La pluralidad se persiste como
+`contratos_multiples` derivada de IDs distintos y los gates exigen adjudicatario
+fuerte favorable. Consumidores SUNAT/Gantt ajustados: suite relacionada 104 passed.

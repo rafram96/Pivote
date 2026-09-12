@@ -1,5 +1,24 @@
 # Integraciones externas (todas estatales, Perú)
 
+ADR-S013 (11-sep): el tipo SEACE elegido para buscar y el servicio sustentado
+por el certificado son independientes. El candado de objeto exige evidencia
+literal con página y coherencia de tipo; `camino`/`por_defecto` no suman señal.
+La diferencia frente al concurso no cambia CUI/A/B. Fuentes de otra fase no se
+usan como comprobación temporal. No añade IA al backend ni llamadas nuevas.
+
+Actualización 11-sep: descarga MEF diferida por selección de experiencia,
+independiente de ficha InfoObras. Ya no usa el descargador genérico que reelige
+contrato; la aplicación investigada puede materializar su contrato MEF exacto.
+[Alcance, compatibilidad y límites](../handoffs/2026-09-11_codex.md).
+Supersede la limitación «contrato exacto solo vía SEACE» del registro siguiente;
+la identificación de aprobación por contenido sigue pendiente.
+
+Continuación local: el inventario 08-A conserva por separado etiquetas de actos
+contractuales y las descarga sin presentarlas como aprobación. Lectura/selección
+MEF permanecen ligadas al mismo PDF. SEACE registra la procedencia del tipo y no
+selecciona ejecución si solo la sugiere el título del proyecto. El contrato de
+consorcio sigue sin adquisición específica; `contractAnnexe` no acredita ese tipo.
+
 La investigación de identidad dispone de `preparar_investigacion_identidad` por
 MCP (GET del contexto del job), junto con lectura de candidatos y fichas. No
 descarga ni promueve selecciones. El cliente ejecuta la investigación, si tiene
