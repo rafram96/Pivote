@@ -6,6 +6,11 @@ NO añadir pandas/duckdb/sqlalchemy/SQLite sin ADR.
 
 ## Módulos principales
 
+12-sep: `entregables/estado_fuentes.py` proyecta `consultas_fuentes` y los estados
+de `descargas_reales.secciones[].documentos` sin ejecutar red ni decidir identidad.
+MEF/SUNAT/InfoObras admiten diagnóstico optativo conservando la API legacy. Es
+observabilidad por recurso, no un criterio del resolver ni una aprobación documental.
+
 | Ruta | Rol |
 |---|---|
 | `api/app.py` | FastAPI: concursos, `POST /api/pivote/analizar` (espejo+excel+certificados), jobs, ZIP bajo demanda (`/jobs/{id}/zip`, se construye lazy) |

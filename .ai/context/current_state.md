@@ -1,5 +1,13 @@
 # Estado actual del proyecto
 
+## 2026-09-12 — Estados de consulta y documento
+
+Checkpoint de tramos anteriores hasta `1a195ad`; [punto 2 implementado](../handoffs/2026-09-12_codex.md#estados-de-consulta-y-documento-separados).
+Consulta vacía no equivale a portal caído; descarga no acredita correspondencia.
+Estados por recurso llegan a API, Excel, ZIP y Panel. Código `1194ff6`: 1764 tests
+pasan, 25 omitidos; Panel `9c575f6`, TypeScript limpio. No se inició la aceptación
+real de ambas rutas (punto 3). Validación .ai de Pivote: mismos 71 errores previos.
+
 ## 2026-09-12 — Consultas repetidas y checkpoint por fuente
 
 [Cierre del cuarto tramo](../handoffs/2026-09-12_codex.md#consultas-repetidas-y-checkpoint-por-fuente):

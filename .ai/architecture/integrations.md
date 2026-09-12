@@ -1,5 +1,12 @@
 # Integraciones externas (todas estatales, Perú)
 
+12-sep: consultas de verificación conservan estados por recurso en
+`consultas_fuentes`. Vacío reconocido (`sin_resultados`) solo describe esa
+consulta; error/HTML desconocido no se convierte en ausencia. MEF cachea también
+la causa de fallo durante TTL; SUNAT conserva diagnósticos junto a datos cacheados.
+Los adaptadores legacy sin canal no permiten reconstruir la causa y quedan
+`no_registrado`. No afecta umbrales, candidatos o elección del resolver.
+
 ADR-S013 (11-sep): el tipo SEACE elegido para buscar y el servicio sustentado
 por el certificado son independientes. El candado de objeto exige evidencia
 literal con página y coherencia de tipo; `camino`/`por_defecto` no suman señal.

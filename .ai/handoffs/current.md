@@ -3,6 +3,15 @@ timestamp: "2026-09-12"
 agent: Codex
 ---
 
+## 12-sep — Estados de fuente y documento separados
+
+[Punto 2 implementado](2026-09-12_codex.md#estados-de-consulta-y-documento-separados):
+portal no disponible, respuesta vacía reconocida y desconocida conservadas por
+recurso; descarga y correspondencia no se confunden. API/Excel/ZIP/Panel comparten
+la explicación. Código `1194ff6`; 1764 tests pasan, 25 omitidos; Panel `9c575f6`
+y TypeScript limpio. Punto 3 real todavía no iniciado. Documentación raíz válida;
+Pivote conserva 71 errores previos de metadatos.
+
 ## 12-sep — Checkpoint antes de estados de fuente
 
 [Cinco commits de código](2026-09-12_codex.md#checkpoint-de-los-tramos-terminados)
