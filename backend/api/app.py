@@ -39,10 +39,10 @@ from entregables import (
     regenerar_excel_final, _zip_carpeta,
 )
 from entregables.certeza import (
-    alertas_experiencia, fuente_mef_panel, identificacion_panel,
+    fuente_mef_panel,
     normalizar_motivo_fuente, resumen_certeza_profesional,
 )
-from entregables.procedencia import procedencia_cui
+from entregables.identidad import proyectar_identidad
 from orquestador import Motor, RepositorioArchivos, etapas_esqueleto, etapas_reales
 from orquestador.progreso import REGISTRO
 from resolucion.cui import TIPO_EXPEDIENTES, tipo_evaluacion_del_espejo
@@ -1155,9 +1155,10 @@ def extraccion(job_id: str):
             # enriquecimiento del backend: CUI resuelto + quién ejecutó/supervisó
             # la obra en InfoObras (Representante de obra) + verificación SUNAT.
             ev = enr.get(f"{np_}:{e.get('n')}")
+            proyeccion = proyectar_identidad(e, ev, tipo_eval)
             if isinstance(ev, dict):
                 obra = ev.get("obra") or {}
-                d["cui_resuelto"] = (procedencia_cui(e, ev)["cui_utilizado"]
+                d["cui_resuelto"] = (proyeccion["procedencia"]["cui_utilizado"]
                                      if certeza_aplica else obra.get("cui") or ev.get("cui"))
                 d["obra_nombre"] = ev.get("obra_nombre") or obra.get("nombre_obra")
                 d["via_resolucion"] = ev.get("via")
@@ -1183,8 +1184,8 @@ def extraccion(job_id: str):
                 # Misma clasificación (y mismos textos) que pinta el entregable:
                 # una sola fuente de verdad para Excel y Panel.
                 evd = ev if isinstance(ev, dict) else {}
-                d["identificacion"] = identificacion_panel(e, evd)
-                d["alertas"] = alertas_experiencia(e, evd)
+                d["identificacion"] = proyeccion["identificacion"]
+                d["alertas"] = proyeccion["alertas"]
                 d["fuente_mef"] = fuente_mef_panel(evd)
                 cruces = evd.get("cruces_fechas")
                 if isinstance(cruces, list):

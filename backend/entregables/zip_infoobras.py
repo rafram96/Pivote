@@ -36,8 +36,9 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 import requests
 
-from entregables.certeza import identificacion_panel, normalizar_motivo_fuente
-from entregables.procedencia import procedencia_cui, rotulo_cui
+from entregables.certeza import normalizar_motivo_fuente
+from entregables.identidad import proyectar_identidad
+from entregables.procedencia import rotulo_cui
 from entregables.servicio_experiencia import lineas_contraste_servicio
 
 logger = logging.getLogger(__name__)
@@ -1087,9 +1088,11 @@ def construir_zip_infoobras(
 
                 origen = descargas.get((n_prof, n_exp))
                 info = enr.get(f"{n_prof}:{n_exp}") or {}
-                procedencia = procedencia_cui(e, info)
-                identificacion = identificacion_panel(e, info) if es_expediente else None
-                detalle_cui = rotulo_cui(procedencia)
+                proyeccion = proyectar_identidad(
+                    e, info, "expedientes" if es_expediente else "obras")
+                procedencia = proyeccion["procedencia"]
+                identificacion = proyeccion["identificacion"]
+                detalle_cui = proyeccion["rotulo_cui"]
                 lineas_identidad = [detalle_cui,
                                     f"Vía: {procedencia['via'] or 'no informada'}"]
                 lineas_identidad.extend(_lineas_ficha_infoobras(info))

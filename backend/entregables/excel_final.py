@@ -36,11 +36,12 @@ from openpyxl.utils import get_column_letter
 
 import entregables.cronologia as cronologia
 from entregables.procedencia import procedencia_cui, rotulo_cui
+from entregables.identidad import proyectar_identidad
 from entregables.leyenda_gantt import COLORES_GANTT, MARCAS_GANTT, NOTAS_GANTT
 from entregables.certeza import (
     BUCKET_CONFIRMADO, BUCKET_INFERIDO, BUCKET_PRIVADA, BUCKET_SIN_IDENTIFICAR,
     COLOR_INFERIDO, COLOR_PRIVADA, COLOR_SIN_IDENTIFICAR, COLOR_VERIFICADO,
-    alertas_experiencia, bucket_certeza, clasificar_identificacion,
+    bucket_certeza, clasificar_identificacion,
     es_provisional, fuente_mef, normalizar_motivo_fuente,
 )
 from reglas import (
@@ -484,9 +485,9 @@ def construir_hoja_base_datos(ws, espejo: dict, cuis: Optional[dict] = None,
         for e in prof.get("experiencias", []):
             clave = (prof.get("n_prof"), e.get("n"))
             fx = fichas.get(clave) or {}
-            procedencia = {**(fx.get("_procedencia_cui") or procedencia_cui(e, {
-                **fx, "cui": cuis.get(clave) or fx.get("cui")})),
-                "cui_declarado": str(e.get("cui") or "").strip() or None}
+            identidad = proyectar_identidad(
+                e, {**fx, "cui": cuis.get(clave) or fx.get("cui")})
+            procedencia = identidad["procedencia"]
             sup = set(prof.get("supuestos") or []) | set(e.get("supuestos") or [])
             privada = _es_ruta_privada(
                 revisiones.get((prof.get("n_prof"), e.get("n"))))
@@ -716,6 +717,9 @@ def _bloques_linea_de_tiempo(espejo: dict, fichas: dict,
             resolucion = cronologia.hito_resolucion(fx)
             hitos += [firma, resolucion]
             p = presentacion_cruces(e, fx, tipo_evaluacion)
+            color_identidad = (proyectar_identidad(e, fx, tipo_evaluacion)["certeza"]["color"]
+                               if tipo_evaluacion == "expedientes"
+                               else clasificar_identificacion(e, fx)["color"])
             crudas.append({
                 "n": e.get("n"), "proyecto": p["proyecto"] or e.get("proyecto"),
                 "cui": p["cui"], "inicio": ini, "fin": fin,
@@ -723,7 +727,7 @@ def _bloques_linea_de_tiempo(espejo: dict, fichas: dict,
                 "supuestos": set(prof.get("supuestos") or []) | set(e.get("supuestos") or []),
                 "firma": firma, "resolucion": resolucion,
                 "cruces": p,
-                "color": clasificar_identificacion(e, fx)["color"],
+                "color": color_identidad,
                 "comentario": _sin_jerga(
                     "¿Empezó después de firmado el contrato? "
                     f"{p['resp_a']}\n"
@@ -2812,9 +2816,9 @@ def construir_hoja_profesional(
         en_revision = en_revision or otra_fase
         # CUI resuelto por el backend (etapa InfoObras); si no, el del espejo
         cui = cuis.get((n_prof, n_exp)) or (fx or {}).get("cui") or e.get("cui")
-        procedencia = ((fx or {}).get("_procedencia_cui") or procedencia_cui(e, {
-            **(fx or {}), "cui": cuis.get((n_prof, n_exp)) or (fx or {}).get("cui")}))
-        procedencia = {**procedencia, "cui_declarado": str(e.get("cui") or "").strip() or None}
+        identidad = proyectar_identidad(
+            e, {**(fx or {}), "cui": cuis.get((n_prof, n_exp)) or (fx or {}).get("cui")})
+        procedencia = identidad["procedencia"]
         cert_marco(n_exp, e, ini, fin, cui, fx, procedencia)
         r_top = r  # fila del título: el bloque de obra (F:J) arranca alineado aquí
         titulo = f"EXPERIENCIA {n_exp}: {str(e.get('proyecto') or '')}"  # nombre VERBATIM, sin truncar
@@ -3221,8 +3225,9 @@ def construir_hoja_profesional(
             # `enr` de esta experiencia: la proyección que viaja en `fichas` más
             # el bloque SUNAT, que llega por su propio canal.
             enr_ = {**fx_, "sunat": sunat.get((n_prof, ne))}
-            certeza = clasificar_identificacion(e, enr_)
-            alertas = alertas_experiencia(e, enr_)
+            identidad = proyectar_identidad(e, enr_, tipo_evaluacion="expedientes")
+            certeza = identidad["certeza"]
+            alertas = identidad["alertas"]
             ini_, fin_, deducida_ = fechas_calculo(e, regla_periodos)
             motivo_periodo_ = (motivos_exclusion.get(ne)
                                or motivo_periodo_no_computable(e, regla_periodos))
@@ -3632,6 +3637,7 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
             _obra = enr.get("obra") if isinstance(enr.get("obra"), dict) else {}
             fichas[(np_, ne)] = {**(enr.get("obra_ficha") or {}),
                                  "_procedencia_cui": procedencia_cui(None, enr),
+                                 "_enriquecimiento_identidad": enr,
                                  "cui": (enr.get("cui")
                                          or (enr.get("obra_ficha") or {}).get("cui")),
                                  "obra_nombre": (enr.get("obra_nombre")
