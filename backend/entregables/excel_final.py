@@ -48,6 +48,13 @@ from reglas import (
     anios, dias_efectivos_profesional, dias_inclusivos, periodo_fechas,
     restar_paralizaciones,
 )
+from reglas.conclusiones import (
+    conclusion_expedientes as _conclusion_expedientes,
+    conclusion_tiempo_efectivo,
+)
+from reglas.resultados_profesionales import (
+    reconciliar_resultados_profesionales, inyectar_veredicto_backend,
+)
 from schemas.cargo import etiqueta_hoja
 from validacion.candado_seace import observaciones_temporales
 from validacion.servicio_experiencia import contrastar_servicio, fase_servicio_incompatible
@@ -56,7 +63,7 @@ from scripts.generar_excel import (
     AL_HEAD, AL_WRAP, BORDER, F_BOLD, F_CELL, F_HEAD, F_PARTE, F_PROF,
     FILL_BACKEND, FILL_CLAUDE, FILL_HEAD, FILL_PARTE, FILL_PEND, FILL_PROF,
     FILL_SUPUESTO, FMT_DEC, FMT_FECHA, FMT_INT, _fill_veredicto, _sin_jerga,
-    conciliar_conclusion, construir_hoja_evaluacion, fecha_excel,
+    construir_hoja_evaluacion, fecha_excel,
 )
 
 logger = logging.getLogger(__name__)
@@ -245,131 +252,6 @@ def _fecha_iso(v) -> Optional[date]:
     return None
 
 
-def reconciliar_resultados_profesionales(espejo: dict,
-                                         enriquecimiento: Optional[dict]) -> dict[int, dict]:
-    """Reconstruye el resultado efectivo que comparten API y Excel.
-
-    Los jobs anteriores a la separación de rutas pueden conservar en
-    ``prof:N`` paralizaciones o avisos de InfoObras que ya no aplican a una
-    experiencia de expediente o privada. El entregable nuevo ya presentaba
-    esas rutas correctamente por experiencia, pero el resumen seguía leyendo
-    el agregado histórico. Se recalcula solo con datos persistidos, sin red y
-    sin modificar el resolver.
-    """
-    from orquestador.etapas_reales import _minimo_exigido
-    from resolucion.cui import (TIPO_EXPEDIENTES, es_expediente_exp,
-                                tipo_evaluacion_del_espejo)
-    from validacion.recalculo import fechas_calculo, regla_periodos_de
-
-    enriquecimiento = enriquecimiento or {}
-    tipo_evaluacion = tipo_evaluacion_del_espejo(espejo)   # ADR-010
-    # La correccion historica se activa solo cuando la convocatoria declaro su
-    # tipo. Un espejo antiguo sin tipo no se reclasifica por texto ni por CUI.
-    if tipo_evaluacion == TIPO_EXPEDIENTES:
-        from entregables.expedientes import reconciliar_expedientes
-        return reconciliar_expedientes(espejo, enriquecimiento)
-    regla_periodos = regla_periodos_de(espejo)             # #93 · mes completo si lo dicen las bases
-    salida: dict[int, dict] = {}
-    for prof in (espejo or {}).get("profesionales", []):
-        np_ = prof.get("n_prof")
-        periodos: list[tuple[date, date]] = []
-        paral_por_idx: dict[int, list[tuple[date, date]]] = {}
-        sin_verificar: list[int] = []
-        cobertura_baja: list[int] = []
-        privadas_pendientes: list[int] = []
-        fechas_invalidas: list[int] = []
-
-        for exp in prof.get("experiencias", []):
-            ne = exp.get("n")
-            # Mismas fechas que usa el pipeline: cierta, o borde mensual si las
-            # bases lo autorizan. Leer solo el ISO completo descartaba en silencio
-            # los certificados con mes y año (dos profesionales bajo el mínimo).
-            ini, fin, _deducida = fechas_calculo(exp, regla_periodos)
-            if not (ini and fin) or fin < ini:
-                if exp.get("fecha_inicial") or exp.get("fecha_final"):
-                    fechas_invalidas.append(ne)
-                continue
-
-            idx = len(periodos)
-            periodos.append((ini, fin))
-            datos_exp = enriquecimiento.get(f"{np_}:{ne}") or {}
-            privada = str(datos_exp.get("via") or "").upper() == "PRIVADA"
-            expediente = es_expediente_exp(exp, tipo_evaluacion)
-
-            # La ejecución física no descuenta tiempo de un expediente y las
-            # fuentes públicas no aplican a una obra privada.
-            if not (privada or expediente):
-                paral_crudo = [periodo_fechas(x)
-                               for x in datos_exp.get("paralizaciones", [])]
-                paral = [(a, b) for a, b in paral_crudo if b >= a]
-                if paral:
-                    paral_por_idx[idx] = paral
-
-            if privada:
-                if not (datos_exp.get("sunat") or {}).get("ruc"):
-                    privadas_pendientes.append(ne)
-                continue
-            if datos_exp.get("sin_verificar"):
-                sin_verificar.append(ne)
-            if not expediente and datos_exp.get("cobertura_baja") is not None:
-                cobertura_baja.append(ne)
-
-        anterior = dict(enriquecimiento.get(f"prof:{np_}") or {})
-        for campo in ("cumple_backend", "veredicto_provisional", "cobertura_baja"):
-            anterior.pop(campo, None)
-        if not periodos:
-            salida[np_] = anterior
-            continue
-
-        res = dias_efectivos_profesional(periodos, paral_por_idx)
-        anios_ef = round(anios(res.dias_efectivos), 2)
-        datos = {
-            **anterior,
-            "dias_brutos": res.dias_brutos,
-            "dias_paralizados": res.dias_paralizados,
-            "dias_traslape": res.dias_traslape,
-            "dias_efectivos": res.dias_efectivos,
-            "anios_efectivos": anios_ef,
-        }
-        exigido = _minimo_exigido(prof.get("requisitos"))
-        if exigido:
-            minimo_dias, minimo_texto = exigido
-            datos.update(
-                minimo_dias=minimo_dias,
-                minimo_texto=minimo_texto,
-                minimo_anios=(minimo_dias // 365 if minimo_dias % 365 == 0
-                               else round(minimo_dias / 365, 2)),
-            )
-            if res.dias_efectivos < minimo_dias:
-                datos["cumple_backend"] = (
-                    f"NO CUMPLE — {res.dias_efectivos} días efectivos "
-                    f"({anios_ef} años) contra un mínimo de {minimo_texto}")
-
-        provisionales = sorted(set(sin_verificar + cobertura_baja
-                                   + privadas_pendientes + fechas_invalidas))
-        if provisionales:
-            datos["veredicto_provisional"] = provisionales
-            if cobertura_baja:
-                datos["cobertura_baja"] = cobertura_baja
-            causas = []
-            if sin_verificar:
-                causas.append("no se pudo consultar la obra en InfoObras")
-            if cobertura_baja:
-                causas.append("la obra encontrada casi no cubre el periodo del certificado "
-                              "(puede ser la obra equivocada)")
-            if privadas_pendientes:
-                causas.append("SUNAT no identificó inequívocamente al emisor privado")
-            if fechas_invalidas:
-                causas.append("hay una fecha del certificado sin leer")
-            exps = ", ".join(map(str, provisionales))
-            minimo = datos.get("minimo_texto", datos.get("minimo_anios", "sin dato"))
-            datos["cumple_backend"] = (
-                f"POR VERIFICAR — {res.dias_efectivos} días efectivos PROVISIONALES "
-                f"({anios_ef} años) contra un mínimo de {minimo}: en la(s) "
-                f"experiencia(s) {exps}, {'; '.join(causas)}. La ausencia de datos NO "
-                "invalida la experiencia; confirmar la evidencia antes de concluir.")
-        salida[np_] = datos
-    return salida
 
 
 def _ddmmaa(v) -> str:
@@ -1388,63 +1270,6 @@ def _xl(v):
     return _sin_jerga(v)
 
 
-def _conclusion_expedientes(prof: dict, dias_ef: int, traslape: int,
-                            dias_inferidos: int, dias_sin_identificar: int,
-                            hay_provisional: bool) -> str:
-    """Conclusión del profesional en un concurso de EXPEDIENTES.
-
-    UNA sola fuente de verdad: los días efectivos que acaba de imprimir la
-    PARTE 5 — que son los de `reconciliar_resultados_profesionales`. Reglas:
-
-    · Si el backend ya dictó `cumple_backend` (NO CUMPLE o POR VERIFICAR), esa
-      línea manda tal cual: ya cita el mismo número.
-    · Si no lo dictó, se redacta aquí desde los días efectivos y el mínimo. Un
-      «CUMPLE» heredado del evaluador NUNCA sobrevive a unos días efectivos por
-      debajo del mínimo (caso real P9: la hoja decía «CUMPLE — 574 días» con un
-      mínimo de 24 meses, porque tabla y conclusión contaban cosas distintas).
-    · Siempre se dice cuántos de esos días dependen de un CUI inferido o de una
-      experiencia sin identificar: es la información que la tabla acaba de
-      desglosar y la que decide si el veredicto se puede firmar.
-    """
-    from orquestador.etapas_reales import _minimo_exigido
-
-    exigido = _minimo_exigido(prof.get("requisitos"))
-    minimo_dias, minimo_texto = exigido if exigido else (
-        None, prof.get("minimo_exigido_backend"))
-    anios_ef = round(anios(dias_ef), 2)
-    base = _sin_jerga(prof.get("cumple_backend") or "") or None
-    bajo_minimo = bool(minimo_dias) and dias_ef < minimo_dias
-
-    if base and (bajo_minimo or not base.strip().upper().startswith("CUMPLE")):
-        texto = base
-    elif minimo_dias is None:
-        texto = (f"POR VERIFICAR — {dias_ef} días efectivos ({anios_ef} años) "
-                 f"tras descontar {traslape} días de traslape; las bases no "
-                 f"consignan un mínimo con el que compararlos")
-    elif bajo_minimo:
-        texto = (f"NO CUMPLE — {dias_ef} días efectivos ({anios_ef} años) tras "
-                 f"descontar {traslape} días de traslape, contra un mínimo de "
-                 f"{minimo_texto} ({minimo_dias} días)")
-    else:
-        texto = (f"CUMPLE — {dias_ef} días efectivos ({anios_ef} años) tras "
-                 f"descontar {traslape} días de traslape, contra un mínimo de "
-                 f"{minimo_texto} ({minimo_dias} días)")
-
-    dependientes = []
-    if dias_inferidos:
-        dependientes.append(f"{dias_inferidos} días corresponden a identificación "
-                            f"inferida por nombre")
-    if dias_sin_identificar:
-        dependientes.append(f"{dias_sin_identificar} días corresponden a expedientes "
-                            f"sin identificar")
-    texto = texto.rstrip().rstrip(".")     # `cumple_backend` ya trae su punto final
-    if dependientes:
-        texto += (". Antes de descontar traslapes, " + " y ".join(dependientes)
-                  + "; la identificación no acredita por sí sola el tiempo ni el cargo")
-    else:
-        texto += (". La identificación del expediente no acredita por sí sola el "
-                  "tiempo ni el cargo")
-    return texto + "."
 
 
 def construir_hoja_profesional(
@@ -3146,11 +2971,10 @@ def construir_hoja_profesional(
     def _p5_tot_exp(label, efec_v, fill_e):
         _p5_tot(label, None, efec_v, fill_e)
 
+    _sd = _se = _n_decl = 0
     if not _es_concurso_expedientes:
         # ── camino histórico (concursos de OBRA): intacto ───────────────────
         _p5_head()
-        _sd = _se = 0
-        _n_decl = 0    # periodos que sí aportan días declarados (desfase máximo)
         for e in prof.get("experiencias", []):
             ne = e.get("n")
             ini_, fin_ = _fecha_iso(e.get("fecha_inicial")), _fecha_iso(e.get("fecha_final"))
@@ -3206,7 +3030,7 @@ def construir_hoja_profesional(
         _dias_por_nivel: dict[str, int] = {}
         _hay_provisional = False
         _filas_exp: list[tuple] = []
-        from entregables.expedientes import (motivo_periodo_no_computable,
+        from reglas.expedientes import (motivo_periodo_no_computable,
                                              reconciliar_expedientes)
         enr_prof = {f"{n_prof}:{e.get('n')}": {
             **(fichas.get((n_prof, e.get("n"))) or {}),
@@ -3304,25 +3128,12 @@ def construir_hoja_profesional(
         F_BOLD, _fill_anios, BORDER, FMT_DEC)
 
     r += 2
-    veredicto = prof.get("cumple_backend") or prof.get("cumple") or "POR VERIFICAR — sin conclusión"
+    conclusion = conclusion_tiempo_efectivo(prof, _sd, _n_decl, _conclusion)
+    veredicto, _visible = conclusion["veredicto"], conclusion["texto"]
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
     cvl = ws.cell(r, 1, "CONCLUSIÓN DEL TIEMPO EFECTIVO")
     cvl.font, cvl.fill, cvl.border, cvl.alignment = F_BOLD, FILL_RECAP, BORDER, AL_HEAD
     ws.merge_cells(start_row=r, start_column=7, end_row=r, end_column=19)
-    if _conclusion is not None:
-        # Expedientes: el texto lo arma `_conclusion_expedientes` desde los MISMOS
-        # días efectivos que acaba de imprimir la tabla. Nada de `conciliar_
-        # conclusion`, que reescribía la frase con el total DECLARADO.
-        veredicto = _visible = _conclusion
-    else:
-        # La conclusión y la PARTE 5 de arriba tienen que decir el MISMO número: si el
-        # veredicto del evaluador cita el conteo sin bordes, se antepone el total
-        # declarado verificado (`_sd`, el que acaba de imprimirse) y se explica el
-        # otro. La línea del equipo evaluador (`cumple_backend`) no se toca: esa ya
-        # trae su propia cifra, la de los días efectivos.
-        _visible = _sin_jerga(veredicto)
-        if not prof.get("cumple_backend"):
-            _visible = conciliar_conclusion(_visible, _sd, _n_decl)
     cver = ws.cell(r, 7, _visible)
     cver.font, cver.border, cver.alignment = F_BOLD, BORDER, AL_WRAP
     # El color sale del veredicto ORIGINAL: con el prefijo delante,
@@ -3693,42 +3504,6 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
     return paral, cuis, fichas, sunat
 
 
-def inyectar_veredicto_backend(espejo: dict, enriquecimiento: Optional[dict]) -> None:
-    """Copia veredicto y desglose de totales del enriquecimiento al espejo.
-
-    El espejo se persiste UNA vez (al crear el job) y no se vuelve a guardar; el
-    enriquecimiento sí se persiste tras cada etapa. En la corrida en vivo la etapa
-    REGLAS ya deja el veredicto en el espejo en memoria, pero al REGENERAR el Excel
-    desde disco ese espejo viene sin él — y la hoja resumen volvería a mostrar solo
-    el veredicto del LLM, que es justo el defecto de #51. Modifica `espejo` in situ.
-    """
-    resultados = reconciliar_resultados_profesionales(espejo, enriquecimiento)
-    for p in (espejo or {}).get("profesionales", []):
-        np_ = p.get("n_prof")
-        d = resultados.get(np_) or {}
-        if isinstance(enriquecimiento, dict) and d:
-            # La copia cargada para el Excel queda alineada con lo que se
-            # presenta. El repositorio no se escribe desde este helper.
-            enriquecimiento[f"prof:{np_}"] = d
-        if d:
-            p["total_backend"] = {
-                "dias_declarados": d.get("dias_brutos"),
-                "dias_paralizados": d.get("dias_paralizados"),
-                "dias_traslape": d.get("dias_traslape"),
-                "dias_efectivos": d.get("dias_efectivos"),
-                "anios_efectivos": d.get("anios_efectivos"),
-                "incompleto": bool(d.get("veredicto_provisional")),
-            }
-            p["dias_efectivos_backend"] = d.get("dias_efectivos")
-        p.pop("cumple_backend", None)
-        p.pop("minimo_exigido_backend", None)
-        if d.get("cumple_backend"):
-            p["cumple_backend"] = d["cumple_backend"]
-            p["minimo_exigido_backend"] = d.get("minimo_texto")
-    # También al regenerar desde disco: el puntaje heredado de Factor A no puede
-    # sobrevivir si los efectivos actuales no sostienen sus excedentes.
-    from orquestador.etapas_reales import _recalcular_factor_a
-    _recalcular_factor_a(espejo, enriquecimiento or {})
 
 
 def inyectar_cruces_fechas(espejo: dict, enriquecimiento: Optional[dict]) -> int:

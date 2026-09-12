@@ -2,7 +2,7 @@
 from copy import deepcopy
 
 from entregables.investigacion_identidad import preparar_contexto
-from entregables.excel_final import reconciliar_resultados_profesionales
+from reglas.resultados_profesionales import reconciliar_resultados_profesionales
 from orquestador.etapas_reales import (
     _fx_de_obra, _cobertura_cert, _fuera_de_ventana, _COBERTURA_MIN,
 )

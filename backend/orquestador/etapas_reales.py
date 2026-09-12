@@ -22,7 +22,6 @@ import os
 import re
 from copy import deepcopy
 from datetime import date, timedelta
-from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -40,8 +39,13 @@ from resolucion.cui import (es_expediente_exp, establecimiento,
                             estampar_tipo_evaluacion, fuente_camino, rubros_de,
                             tipo_evaluacion_del_espejo)
 from validacion.recalculo import fechas_calculo, regla_periodos_de
-from validacion.baremo import baremo_factor_a_valido
 from validacion.servicio_experiencia import contrastar_servicio, fase_servicio_incompatible
+from reglas.requisitos import minimo_exigido as _minimo_exigido
+from reglas.factor_a import (
+    letra_factor as _letra_factor,
+    participantes_factor_a as _participantes_factor_a,
+    recalcular_factor_a as _recalcular_factor_a,
+)
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
 from entregables import (completar_revisiones_privadas, desempaquetar_enriquecimiento,
                          generar_excel_final, inyectar_veredicto_backend,
@@ -2716,240 +2720,6 @@ class EtapaRenipressReal:
 
 
 # ── 4 · Cálculo de días efectivos (Paso 5 + mínimo de las bases) ─────────────
-
-# El mínimo exigido se escribe en AÑOS, MESES o DÍAS según las bases; el regex
-# anterior solo entendía "años" y por eso `cumple_backend` casi nunca se calculaba:
-# en el concurso de Lircay (CP-02-2025) los 17 cargos dicen "Experiencia mínima:
-# 24/36 meses" → 0 de 17 mínimos captados, y los 5 falsos CUMPLE del análisis
-# quedaron sin contraveredicto (#51).
-#
-# `m[ií]nim[ao]` cubre "mínimo de 3 años" y "Experiencia mínima: 24 meses"; el
-# hueco intermedio es corto y no-codicioso para no saltar a otra cifra de la frase.
-_UNIDAD_TIEMPO_RE = r"a[ñn]os?|meses|mes|d[ií]as?"
-_RE_MINIMO = re.compile(
-    rf"m[ií]nim[ao][^0-9]{{0,20}}?(\d+(?:[.,]\d+)?)\s*\)?\s*({_UNIDAD_TIEMPO_RE})",
-    re.I,
-)
-_RE_EQUIVALENCIA_TIEMPO = re.compile(
-    rf"\(\s*(\d+(?:[.,]\d+)?)\s*({_UNIDAD_TIEMPO_RE})\s*\)",
-    re.I,
-)
-
-# Conversión a días: la MISMA convención que `reglas.anios` (365) y `reglas.meses`
-# (30). Usar otra haría que el umbral contradiga la cifra que se muestra al lado.
-_DIAS_POR_UNIDAD = {"a": 365, "m": 30, "d": 1}
-
-
-def _minimo_exigido(requisitos) -> Optional[tuple[int, str]]:
-    """Mínimo de las bases normalizado a `(días, texto_literal)`.
-
-    Se compara en DÍAS y no en años porque es la unidad que el Paso 5 calcula sin
-    pérdida: convertir los efectivos a años y redondear puede volcar un caso de
-    borde (2.996 años redondea a 3.0 y un mínimo de "3 años" pasaría a cumplir)."""
-    requisitos = requisitos or {}
-    estructurado = requisitos.get("minimo_experiencia")
-    cantidad = unidad = None
-    if isinstance(estructurado, dict):
-        valor = estructurado.get("cantidad")
-        unidad_declarada = estructurado.get("unidad")
-        unidad = {"anios": "años", "meses": "meses", "dias": "días"}.get(
-            unidad_declarada) if isinstance(unidad_declarada, str) else None
-        if not isinstance(valor, bool) and isinstance(valor, (str, int, float)):
-            try:
-                cantidad = Decimal(str(valor).replace(",", "."))
-            except InvalidOperation:
-                pass
-        if cantidad is not None and (not cantidad.is_finite() or cantidad <= 0):
-            cantidad = None
-    if cantidad is not None and unidad:
-        # Conserva equivalencias literales como 0.5 años (6 meses), solo cuando
-        # la cifra principal coincide con el mínimo estructurado de las bases.
-        texto = "Experiencia mínima: " + str(estructurado.get("texto") or "")
-        m = _RE_MINIMO.search(texto)
-        if m and Decimal(m.group(1).replace(",", ".")) == cantidad \
-                and m.group(2).lower()[0] == unidad[0]:
-            equivalencia = _RE_EQUIVALENCIA_TIEMPO.search(texto[m.end():m.end() + 80])
-            if equivalencia:
-                cantidad = Decimal(equivalencia.group(1).replace(",", "."))
-                unidad = equivalencia.group(2)
-        if cantidad <= 0:
-            return None
-        dias = int((cantidad * _DIAS_POR_UNIDAD[unidad.lower()[0]]).to_integral_value(
-            rounding=ROUND_CEILING))
-        return dias, f"{cantidad:g} {unidad}"
-
-    for v in requisitos.values():
-        if not isinstance(v, str):
-            continue  # no interpretar cifras de objetos/fuentes serializados
-        texto = str(v)
-        m = _RE_MINIMO.search(texto)
-        if not m:
-            continue
-
-        # Si las bases escriben la equivalencia de manera literal —p. ej.
-        # «0.5 años (6 meses)»— esa unidad explícita gana. Evita convertir seis
-        # meses en 182.5 días y respeta la convención mensual del mismo documento.
-        equivalencia = _RE_EQUIVALENCIA_TIEMPO.search(texto[m.end():m.end() + 80])
-        elegido = equivalencia or m
-        numero_literal, unidad_literal = elegido.group(1), elegido.group(2)
-        try:
-            numero = Decimal(numero_literal.replace(",", "."))
-        except InvalidOperation:
-            continue
-        if numero <= 0:
-            continue
-
-        unidad = unidad_literal.lower()[0]
-        dias = int((numero * _DIAS_POR_UNIDAD[unidad]).to_integral_value(
-            rounding=ROUND_CEILING))
-        return dias, f"{numero_literal} {unidad_literal}"
-    return None
-
-
-_RE_LETRA_FACTOR = re.compile(r"^\s*(?:factor\s+)?([A-Za-z])(?=\s*[—–\-:.)]|\s|$)", re.I)
-
-
-def _letra_factor(f: dict) -> str:
-    """Letra del factor ('A') venga sola ("A"), con rótulo ("Factor A") o con su
-    nombre ("A — Experiencia específica…", formato que emite el consolidador
-    desde #88). Un nombre sin letra inicial aislada ("Certificaciones del
-    personal clave") devuelve "". Antes se comparaba `== "A"` literal y el
-    Factor A de un espejo real nunca se recalculaba: puntaje mudo en Excel y Panel."""
-    m = _RE_LETRA_FACTOR.match(str((f or {}).get("factor") or ""))
-    return m.group(1).upper() if m else ""
-
-
-def _participantes_factor_a(espejo: dict) -> set[int]:
-    """Cargos que participan según las bases; legado: recupera la lista que
-    quedó escrita en el detalle del factor, sin confiar en sus resultados."""
-    estructurados = {
-        p.get("n_prof") for p in espejo.get("profesionales", [])
-        if (p.get("requisitos") or {}).get("factor_a_aplica") is True
-    }
-    if estructurados:
-        return estructurados
-    factor = next((f for f in (espejo.get("resumen_evaluacion") or {}).get("factores", [])
-                   if _letra_factor(f) == "A"), None)
-    texto = str((factor or {}).get("detalle") or "")
-    # Formato histórico real: "Factor A (nº 2 ..., 3 ..., 4 ..., 6 ...)".
-    # El paréntesis termina antes de las cifras de años/porcentaje del resultado.
-    parentesis = re.search(r"factor\s*a\s*\(([^)]+)\)", texto, flags=re.I)
-    if parentesis:
-        numeros = {int(x) for x in re.findall(r"\b\d+\b", parentesis.group(1))}
-        existentes = {p.get("n_prof") for p in espejo.get("profesionales", [])}
-        if numeros & existentes:
-            return numeros & existentes
-    m = re.search(r"participan[^:]*:\s*([^.;]+)", texto, flags=re.I)
-    return {int(x) for x in re.findall(r"\d+", m.group(1))} if m else set()
-
-
-def _recalcular_factor_a(espejo: dict, enriquecimiento: dict) -> None:
-    """El Factor A solo existe sobre tiempo efectivo que excede el mínimo.
-
-    Con contrato v1.4 el baremo viaja estructurado. Los casos pendientes generan
-    un límite inferior/superior; solo se publica un puntaje único si ambos caen
-    en el mismo tramo. En espejos antiguos sin baremo se conserva la abstención.
-    """
-    resumen = espejo.get("resumen_evaluacion") or {}
-    factor = next((f for f in resumen.get("factores", [])
-                   if _letra_factor(f) == "A"), None)
-    if not factor:
-        return
-    participantes = _participantes_factor_a(espejo)
-    if not participantes:
-        return
-    regla = (espejo.get("reglas_evaluacion") or {}).get("factor_a") or {}
-    if not baremo_factor_a_valido(regla):
-        factor.update(puntaje=None, puntaje_confirmado=None, puntaje_maximo_posible=None,
-                      estado_puntaje="condicionado", detalle=(
-                          "POR VERIFICAR — umbral o baremo del Factor A ausente, incompleto o incompatible. "
-                          "No se puede determinar cuántos cargos califican ni asignar puntaje; revisar las bases."))
-        for p in espejo.get("profesionales", []):
-            if p.get("n_prof") in participantes:
-                p["anios_adicionales"] = "POR VERIFICAR — falta umbral o baremo válido del Factor A"
-        reconciliar_puntajes(espejo)
-        return
-    tramos = regla["tramos"]
-    adicional_requerido = regla.get("dias_adicionales_requeridos")
-    califican: list[int] = []
-    pendientes: list[int] = []
-    for p in espejo.get("profesionales", []):
-        np_ = p.get("n_prof")
-        if np_ not in participantes:
-            continue
-        d = enriquecimiento.get(f"prof:{np_}") or {}
-        minimo, efectivos = d.get("minimo_dias"), d.get("dias_efectivos")
-        # La falta de InfoObras es una verificación complementaria y no invalida
-        # el contrato/constancia salvo que la regla documental lo marque así.
-        documental_pendiente = d.get("factor_a_documental") == "por_verificar"
-        if minimo is None or efectivos is None or documental_pendiente:
-            pendientes.append(np_)
-            p["anios_adicionales"] = "POR VERIFICAR — el tiempo efectivo no es definitivo"
-            continue
-        exceso = max(0, efectivos - minimo)
-        p["anios_adicionales"] = f"{round(exceso / 365, 2)} años efectivos adicionales"
-        if exceso >= adicional_requerido:
-            califican.append(np_)
-    porcentaje_confirmado = (len(califican) * 100 / len(participantes))
-    porcentaje_maximo = ((len(califican) + len(pendientes)) * 100 / len(participantes))
-
-    def _en_tramo(pct: float, tramo: dict) -> bool:
-        desde, hasta = tramo.get("desde_porcentaje"), tramo.get("hasta_porcentaje")
-        if desde is not None:
-            if pct < desde or (pct == desde and tramo.get("desde_inclusivo") is False):
-                return False
-        if hasta is not None:
-            if pct > hasta or (pct == hasta and tramo.get("hasta_inclusivo") is not True):
-                return False
-        return True
-
-    def _puntaje(pct: float):
-        for tramo in tramos:
-            if isinstance(tramo, dict) and _en_tramo(pct, tramo):
-                return tramo.get("puntaje")
-        return None
-
-    puntaje_min, puntaje_max = _puntaje(porcentaje_confirmado), _puntaje(porcentaje_maximo)
-    factor["puntaje_confirmado"] = puntaje_min
-    factor["puntaje_maximo_posible"] = puntaje_max
-    if puntaje_min is not None and puntaje_min == puntaje_max:
-        factor["puntaje"] = puntaje_min
-        factor["estado_puntaje"] = "definitivo"
-    else:
-        factor["puntaje"] = None
-        factor["estado_puntaje"] = "condicionado"
-    factor["detalle"] = (
-        f"{len(califican)} de {len(participantes)} cargos acreditan al menos "
-        f"{adicional_requerido} días "
-        f"efectivo adicional (profesionales {', '.join(map(str, califican)) or 'ninguno'}). "
-        + (f"Revisión documental pendiente: {', '.join(map(str, pendientes))}. " if pendientes else "")
-        + (f"Tramo definitivo: {puntaje_min} puntos."
-           if factor["estado_puntaje"] == "definitivo" else
-           f"Resultado condicionado entre {puntaje_min if puntaje_min is not None else 'sin dato'} "
-           f"y {puntaje_max if puntaje_max is not None else 'sin dato'} puntos.")
-    )
-    minimos, maximos, condicionado = [], [], False
-    for f in resumen.get("factores", []):
-        if f.get("aplica") is False or isinstance(f.get("puntaje"), str):
-            continue
-        p = f.get("puntaje")
-        pmin = f.get("puntaje_confirmado", p)
-        pmax = f.get("puntaje_maximo_posible", p)
-        if isinstance(pmin, (int, float)):
-            minimos.append(pmin)
-        if isinstance(pmax, (int, float)):
-            maximos.append(pmax)
-        condicionado = condicionado or f.get("estado_puntaje") == "condicionado" or p is None
-    if tramos:
-        resumen["puntaje_confirmado"] = sum(minimos)
-        resumen["puntaje_maximo_posible"] = sum(maximos)
-        resumen["estado_puntaje"] = "condicionado" if condicionado else "definitivo"
-        resumen["puntaje_total"] = None if condicionado else sum(minimos)
-    resumen["nota"] = (
-        "Puntajes y total generados desde los valores finales reconciliados. "
-        + ("El total es condicionado mientras existan factores por verificar."
-           if resumen.get("estado_puntaje") == "condicionado" else
-           "El total es definitivo."))
 
 
 class EtapaReglasReal:

@@ -35,7 +35,7 @@ from pydantic import ValidationError
 
 from entregables import (
     completar_revisiones_privadas, construir_zip_infoobras, descargar_cui,
-    generar_excel_final, mapear_certificados, reconciliar_resultados_profesionales,
+    generar_excel_final, mapear_certificados,
     regenerar_excel_final, _zip_carpeta,
 )
 from entregables.certeza import (
@@ -43,6 +43,7 @@ from entregables.certeza import (
     normalizar_motivo_fuente, resumen_certeza_profesional,
 )
 from entregables.identidad import proyectar_identidad
+from reglas.resultados_profesionales import reconciliar_resultados_profesionales
 from orquestador import Motor, RepositorioArchivos, etapas_esqueleto, etapas_reales
 from orquestador.progreso import REGISTRO
 from resolucion.cui import TIPO_EXPEDIENTES, tipo_evaluacion_del_espejo
