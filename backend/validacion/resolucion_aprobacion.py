@@ -30,6 +30,9 @@ Trampas que esta implementación evita (todas vistas en la medición):
     sirve, `fecha` va en None y el motivo queda en `fecha_motivo` (mejor sin
     fecha que con una que dispare una alerta roja falsa de miles de días).
 
+El enlace de entrada es candidato: extraer fecha/emisor no clasifica el acto
+como aprobación. Esa distinción sigue pendiente de análisis documental.
+
 Funciones PURAS salvo `leer_resolucion`, que descarga y lee (red + OCR) con
 descargador y extractor inyectables para los tests.
 """
@@ -40,6 +43,7 @@ import json
 import logging
 import re
 import unicodedata
+from copy import deepcopy
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -47,6 +51,21 @@ from typing import Any, Callable, Optional
 from rapidfuzz import fuzz
 
 logger = logging.getLogger(__name__)
+
+
+def conservar_lectura_resolucion(previa: Optional[dict], nueva: Optional[dict]) -> dict:
+    """Una lectura es una unidad: no completar fecha/número desde otro PDF."""
+    elegida = previa if (not nueva or (previa and previa.get("coincide_emisor") == "confirma"
+                         and nueva.get("coincide_emisor") != "confirma")) else nueva
+    salida = deepcopy(elegida or {})
+    if salida.get("fecha_de_resolucion_numero"):
+        salida["fecha_descartada"] = salida.get("fecha")
+        salida["fecha"] = None
+        salida["fecha_motivo"] = "Fecha heredada de otra resolución; requiere lectura del documento conservado."
+        salida.pop("fecha_de_resolucion_numero", None)
+        # El resumen legado también podía publicar la fecha prestada.
+        salida["resumen"] = salida["fecha_motivo"] + " Los demás datos corresponden a la lectura conservada."
+    return salida
 
 MESES = {"ENERO": 1, "FEBRERO": 2, "MARZO": 3, "ABRIL": 4, "MAYO": 5, "JUNIO": 6,
          "JULIO": 7, "AGOSTO": 8, "SETIEMBRE": 9, "SEPTIEMBRE": 9, "OCTUBRE": 10,
@@ -348,7 +367,7 @@ def interpretar_resolucion(texto: str, emisor: str, cui: Optional[str] = None,
             numero_ok = nc in re.sub(r"[^A-Z0-9]", "", T)
     partes = []
     if f:
-        partes.append(f"Resolución de aprobación del {f.strftime('%d/%m/%Y')}.")
+        partes.append(f"Documento MEF del {f.strftime('%d/%m/%Y')}; tipo de acto por confirmar.")
     elif not descartada:
         partes.append("La resolución no muestra una fecha legible.")
     if descartada:
@@ -445,7 +464,10 @@ def leer_resolucion(url: str, destino_dir, *, emisor: str, cui: Optional[str],
         destino_dir = Path(destino_dir)
         destino_dir.mkdir(parents=True, exist_ok=True)
         base = re.sub(r"[^A-Za-z0-9]+", "_", f"{cui or 'sin_cui'}_{numero or 'resolucion'}")[:80]
-        ruta = destino_dir / f"{base}.pdf"
+        # Número/CUI no identifican un adjunto: puede haber varias resoluciones
+        # sin número o con la misma etiqueta. No reutilizar bytes de otra URL.
+        identidad_url = hashlib.sha256(url.encode()).hexdigest()[:16]
+        ruta = destino_dir / f"{base}_{identidad_url}.pdf"
         if not ruta.exists():
             if descargar is None:
                 from scraping import mef
@@ -468,6 +490,7 @@ def leer_resolucion(url: str, destino_dir, *, emisor: str, cui: Optional[str],
         out = interpretar_resolucion(texto, emisor, cui, numero_citado, fecha_contrato,
                                      numero=numero or numero_citado)
         out.update({"numero": numero, "url": url, "archivo": ruta.name,
+                    "sha256": _huella_pdf(ruta),
                     "paginas": paginas, "texto_fuente": fuente,
                     "texto_reutilizado": previo is not None})
         return out

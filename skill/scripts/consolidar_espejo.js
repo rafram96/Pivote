@@ -48,12 +48,27 @@ const path = require("path");
 const { matchCargoBases, _norm, _toks } = require("./match_cargo");
 const { auditarOrdenEscaneo } = require("./auditar_orden_experiencias");
 const { normalizarBasesCriticas, factorADe, totalPostorDesdeBases, auditarFechas } = require("./entradas_criticas");
+const { prepararProfesional } = require("./preparar_extraccion");
 
 const rd = (p) => JSON.parse(fs.readFileSync(p, "utf-8"));
 const rdOpt = (p, def) => (fs.existsSync(p) ? rd(p) : def);
 
 // ── helpers de normalización (el oro: tolerantes a la deriva de los subagentes) ──
 const pick = (...vs) => { for (const v of vs) if (v !== undefined && v !== null && v !== "") return v; return null; };
+// ADR-S013: conserva únicamente la extracción del servicio; no lo deriva del
+// cargo, título del proyecto, camino A/B ni juicio del evaluador.
+const servicioEvidencia = (v) => {
+  if (v == null) return null;
+  if (typeof v !== "object" || Array.isArray(v)) return v;
+  return {
+    tipo: v.tipo,
+    // No coercionar: un objeto aquí debe llegar al schema como inválido,
+    // nunca convertirse en una falsa literal "[object Object]".
+    texto: v.texto == null ? null : v.texto,
+    pagina_pdf: v.pagina_pdf == null ? null : v.pagina_pdf,
+    fuente: v.fuente == null ? null : v.fuente,
+  };
+};
 const numify = (v) => {
   if (v == null || v === "") return null;
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
@@ -796,13 +811,25 @@ function consolidar(WS, opts = {}) {
   if (!nums.length) { console.error(`No hay _prof/profesional_NN.json en ${dirProf}`); process.exit(1); }
 
   const profesionales = [];
+  let hayPeriodosInciertos = false;
   const hechos = [];   // insumo del candado 1:1 (quién existe, cuántas declaró)
   for (const i of nums) {
-    const raw = rd(path.join(dirProf, `profesional_${String(i).padStart(2, "0")}.json`));
+    // La misma preparación del Paso 2.6: saltarse el CLI no permite pegar
+    // hechos incompatibles ni reutilizar una copia preparada desactualizada.
+    const preparado = prepararProfesional(rd(path.join(dirProf, `profesional_${String(i).padStart(2, "0")}.json`)), i);
+    const raw = preparado.profesional;
+    avisos.push(...preparado.avisos);
+    const periodosInciertos = new Set(preparado.periodosInciertos);
+    hayPeriodosInciertos ||= periodosInciertos.size > 0;
     avisos.push(...auditarOrdenEscaneo(raw.experiencias, i));
     avisos.push(...auditarFechas(raw.experiencias, i));
     const pr = raw.profesional || {};
     const pe = PE[String(i)] || {};
+    if (periodosInciertos.size && pe.cumple) avisos.push({
+      severidad: "warning", tipo: "evaluacion_periodo_por_verificar",
+      mensaje: "Se retiran cómputo, total y conclusión por tiempo de la evaluación anterior: el periodo de servicio sigue por verificar. No equivale a incumplimiento.",
+      referencia: `P${i}`,
+    });
     const ee = EE[String(i)] || [];
     const eeByN = {}; (Array.isArray(ee) ? ee : []).forEach((x) => { if (x) eeByN[x.n] = x; });
 
@@ -839,21 +866,24 @@ function consolidar(WS, opts = {}) {
         // null = no reportada (legado). Booleano estricto: cualquier otra cosa
         // se descarta — un "sí" en texto no es una verificación.
         folio_verificado: typeof e.folio_verificado === "boolean" ? e.folio_verificado : null,
-        dias: numify(j.dias),
-        meses: numify(j.meses),
-        anios: numify(j.anios),
-        anterior_colegiatura: pick(j.anterior_colegiatura),
+        dias: periodosInciertos.has(n) ? null : numify(j.dias),
+        meses: periodosInciertos.has(n) ? null : numify(j.meses),
+        anios: periodosInciertos.has(n) ? null : numify(j.anios),
+        anterior_colegiatura: periodosInciertos.has(n) ? null : pick(j.anterior_colegiatura),
         cargo_ocupado: pick(e.cargo_ocupado, e.cargo_desempenado, e.cargo),
         cargo_bases_valido: pick(j.cargo_bases_valido),
+        // Servicio declarado: dueño exclusivo del extractor profesional.
+        // Nunca se toma de `evaluacion.json` ni se completa por heurística.
+        servicio_declarado: servicioEvidencia(e.servicio_declarado),
         // Segunda puerta del cargo (#31): las funciones son un HECHO del documento
-        // (lo extrae agent-propuesta-profesional), no un juicio; el evaluador solo
-        // es respaldo. null = el documento no las lista → no acredita funciones,
+        // (lo extrae agent-propuesta-profesional), no un juicio. El evaluador NO
+        // repone un hecho ausente. null = el documento no las lista,
         // que es lo que el candado del backend necesita distinguir.
-        funciones_similares: pick(e.funciones_similares, j.funciones_similares),
-        cert_antes_culminar: siNo(j.cert_antes_culminar, e.cert_antes_culminar),
-        incluye_covid: siNo(j.incluye_covid, e.incluye_covid),
+        funciones_similares: pick(e.funciones_similares),
+        cert_antes_culminar: e.cert_antes_culminar,
+        incluye_covid: e.incluye_covid,
         tipo_obra_valido: pick(j.tipo_obra_valido),
-        traslape: siNo(j.traslape, e.traslape),
+        traslape: periodosInciertos.has(n) ? null : siNo(j.traslape, e.traslape),
         nivel_categoria: pick(e.nivel_categoria),
         area_construida_m2: numify(e.area_construida_m2),
         monto_contrato_soles: numify(e.monto_contrato_soles),
@@ -939,15 +969,17 @@ function consolidar(WS, opts = {}) {
       folio_anexo: pick(pr.folio_anexo, rRow.folio_anexo, rRow.folio_cuadro_resumen),  // Anexo 16 en la propuesta → recorte (mejora A)
       requisitos: requisitosDe(bases, cargoNum),
       experiencias,
-      total: pe.total || {},
+      total: periodosInciertos.size ? {} : pe.total || {},
       cross_checks: crossChecks(raw.cross_checks),
       notas: Array.isArray(pr.notas) ? pr.notas : [],
       supuestos: [...new Set([
         ...(Array.isArray(pr.supuestos) ? pr.supuestos : []),
         ...(Array.isArray(pe.supuestos) ? pe.supuestos : []),
       ])],
-      cumple: pick(pe.cumple),
-      anios_adicionales: aniosAd,
+      cumple: periodosInciertos.size && pe.cumple
+        ? `POR VERIFICAR — periodo de ${[...periodosInciertos].map(n => `E${n}`).join(", ")} no acreditado como servicio; no usar el cómputo ni la conclusión anterior.`
+        : pick(pe.cumple),
+      anios_adicionales: periodosInciertos.size ? null : aniosAd,
       acreditacion_formacion: {
         titulo_declarado: pick(pr.acreditacion_formacion && pr.acreditacion_formacion.titulo_declarado, pr.titulo_declarado, pr.titulo),
         universidad_declarada: pick(pr.acreditacion_formacion && pr.acreditacion_formacion.universidad_declarada, pr.universidad_declarada, pr.universidad),
@@ -1067,6 +1099,8 @@ function consolidar(WS, opts = {}) {
       // ADR-010 · "expedientes" | "obras" | null (ver tipoEvaluacion arriba).
       tipo_evaluacion: tipoEval.valor,
       tipo_evaluacion_fuente: tipoEval.fuente,
+      // Servicio esperado: única fuente = metadata extraída por agent-bases.
+      servicio_esperado: servicioEvidencia(mc.servicio_esperado),
       entidad: pick(bases.metadata_concurso && bases.metadata_concurso.entidad),
       entidad_ruc: pick(bases.metadata_concurso && bases.metadata_concurso.entidad_ruc),
       cui: pick(bases.metadata_concurso && bases.metadata_concurso.cui),
@@ -1112,12 +1146,15 @@ function consolidar(WS, opts = {}) {
     },
     profesionales,
     resumen_evaluacion: {
-      factores: factoresNormalizados.factores,
-      puntaje_total: numify((ev.resumen_evaluacion || {}).puntaje_total),
-      nota: pick((ev.resumen_evaluacion || {}).nota),
-      estado_puntaje: pick((ev.resumen_evaluacion || {}).estado_puntaje),
-      puntaje_confirmado: numify((ev.resumen_evaluacion || {}).puntaje_confirmado),
-      puntaje_maximo_posible: numify((ev.resumen_evaluacion || {}).puntaje_maximo_posible),
+      factores: factoresNormalizados.factores.map(f => hayPeriodosInciertos && /^\s*(?:FACTOR\s*)?A\b/i.test(f.factor) && f.aplica !== false
+        ? { ...f, puntaje: null, puntaje_confirmado: null, puntaje_maximo_posible: null,
+          estado_puntaje: null, detalle: "POR VERIFICAR — existen periodos de servicio pendientes; no usar el puntaje anterior." }
+        : f),
+      puntaje_total: hayPeriodosInciertos ? null : numify((ev.resumen_evaluacion || {}).puntaje_total),
+      nota: hayPeriodosInciertos ? "POR VERIFICAR — periodos de servicio pendientes; total anterior no vigente." : pick((ev.resumen_evaluacion || {}).nota),
+      estado_puntaje: hayPeriodosInciertos ? null : pick((ev.resumen_evaluacion || {}).estado_puntaje),
+      puntaje_confirmado: hayPeriodosInciertos ? null : numify((ev.resumen_evaluacion || {}).puntaje_confirmado),
+      puntaje_maximo_posible: hayPeriodosInciertos ? null : numify((ev.resumen_evaluacion || {}).puntaje_maximo_posible),
     },
     observaciones_claude: [...avisos, ...(ev.observaciones_claude || [])],
     reglas_evaluacion: reglasEvaluacionDe(bases),

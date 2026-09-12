@@ -75,6 +75,11 @@ function planificar(valor, listados = {}) {
       razones.push("contratista_no_demuestra_intervencion");
     if (c.contexto_backend.seace?.estado === "seleccionado")
       razones.push("contrato_requiere_contraste_de_rol_y_emisor");
+    if (String(c.contexto_backend.via || "").toUpperCase() === "PRIVADA"
+        || c.contexto_backend.estado === "privada")
+      razones.push("naturaleza_privada_requiere_cotejo_del_proyecto");
+    if (c.contexto_backend.documentos_prioritarios?.length)
+      razones.push("documentos_prioritarios_requieren_lectura");
     if (c.accion === "comprobar_fichas" && !razones.length) {
       const obra = c.contexto_backend.obra || {};
       const ficha = c.contexto_backend.ficha || {};
@@ -133,6 +138,18 @@ function validarResultado(valor, paquete, casoId) {
     throw new Error("Naturaleza privada necesita evidencia sobre el proyecto, no solo el emisor");
   if (r.estado !== "no_ejecutado" && !r.consultas.length)
     throw new Error("Registrar consultas realizadas o indicar no_ejecutado");
+  // Registro de cobertura, no un clasificador semántico ni prueba de lectura real.
+  const caso = paquete.casos.find(c => c.caso_id === casoId);
+  for (const d of caso.contexto_backend.documentos_prioritarios || []) {
+    if (r.estado === "no_ejecutado") break;
+    const consultas = r.consultas.filter(c => c.consulta === `documento:${d.referencia}`);
+    if (consultas.length !== 1)
+      throw new Error(`Registrar una consulta por documento prioritario: ${d.referencia}`);
+    if (consultas[0].estado === "leido" && (!d.url || !r.evidencias.some(e =>
+      e.url === d.url && e.tipo_fuente === "oficial" && e.acceso === "leido"
+      && e.pagina_pdf !== null)))
+      throw new Error(`Documento leído requiere URL, página física y cita del contenido: ${d.referencia}`);
+  }
   return r;
 }
 
@@ -179,14 +196,26 @@ function consolidarCarpeta(carpeta) {
   const { paquete, listados } = leer(path.join(carpeta, "lote.json"));
   const plan = planificar(paquete, listados);
   const resultados = [], pendientes = [];
+  const pendientesDocumentales = [];
   for (const caso of plan.tareas) {
     const archivo = path.join(carpeta, nombreCaso(caso), "resultado.json");
     if (!fs.existsSync(archivo)) { pendientes.push(caso.caso_id); continue; }
     resultados.push(validarResultado(leer(archivo), paquete, caso.caso_id));
   }
+  for (const caso of plan.tareas) {
+    const r = resultados.find(r => r.caso_id === caso.caso_id);
+    for (const d of caso.contexto_backend.documentos_prioritarios || []) {
+      if (r?.estado !== "no_ejecutado" && r?.consultas.some(c =>
+        c.consulta === `documento:${d.referencia}` && c.estado === "leido")) continue;
+      pendientesDocumentales.push({ caso_id: caso.caso_id, referencia: d.referencia,
+        url: d.url || null, motivo: r?.consultas.find(c =>
+          c.consulta === `documento:${d.referencia}`)?.detalle || "Sin lectura registrada" });
+    }
+  }
   return { version: 1, job_id: paquete.job_id, huella_contexto: paquete.huella_contexto,
     cobertura: pendientes.length || resultados.some(r => r.estado === "no_ejecutado") ? "parcial" : "completa",
     aplicado_al_job: false, resultados, pendientes,
+    pendientes_documentales: pendientesDocumentales,
     sin_alerta_en_listado: plan.sin_alerta_en_listado, omitidos: plan.omitidos,
     limite: "Validación estructural, no prueba que las citas sean verdaderas ni que la asociación sea correcta." };
 }

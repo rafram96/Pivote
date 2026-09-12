@@ -12,7 +12,7 @@ CAMPOS_DECLARADOS = (
     "n", "proyecto", "objeto", "descripcion", "tipo_experiencia", "cui", "snip",
     "entidad_contratante", "entidad_emisora", "ruc_emisor", "ubicacion",
     "cargo_ocupado", "fecha_inicial", "fecha_final", "folio", "paginas_pdf",
-    "tipo_documento", "contrato_numero", "numero_contrato", "obras",
+    "tipo_documento", "contrato_numero", "numero_contrato", "obras", "servicio_declarado",
 )
 
 
@@ -33,22 +33,75 @@ def _contexto(ev: dict) -> dict:
     seace = _dic(ev.get("seace"))
     return {
         **_tomar(ev, ("estado", "via", "cui", "decision", "obra", "obra_inicial",
-                      "candidatos", "camino", "sin_verificar", "sin_registro_infoobras", "revision_identidad")),
+                      "candidatos", "camino", "sin_verificar", "sin_registro_infoobras", "revision_identidad",
+                      "contraste_servicio", "servicio_fase_incompatible", "naturaleza_en_conflicto")),
         "ficha": _tomar(ev.get("obra_ficha") or ev.get("ficha"),
                          ("obra_id", "codigo_infoobras", "cui", "obra_nombre",
                           "fecha_inicio", "fecha_fin", "estado")),
         "seace": _tomar(seace, ("estado", "ambiguo", "motivo", "candado", "proceso",
-                                 "candidatos", "proceso_objeto", "codigoconvocatoria")),
+                                 "candidatos", "alternativas", "ocid", "proceso_objeto", "codigoconvocatoria")),
+        "documentos_prioritarios": _documentos_prioritarios(ev),
     }
+
+
+def _documentos_prioritarios(ev: dict) -> list[dict]:
+    """Pistas documentales, no documentos leídos ni autorización de descarga.
+
+    Conserva adjuntos hermanos y actos 08-A sin clasificarlos por el título.
+    No exporta rutas internas ni el corpus de informes/valorizaciones.
+    """
+    seace = _dic(ev.get("seace"))
+    ver = _dic(ev.get("verificacion_expediente"))
+    secciones = _dic(_dic(ev.get("descargas_reales")).get("secciones"))
+    materiales = []
+    for fuente, seccion in (("SEACE", "Documentos SEACE"), ("MEF", "Verificación MEF")):
+        materiales.extend((fuente, d) for d in _dic(secciones.get(seccion)).get("documentos", [])
+                          if isinstance(d, dict))
+    pendientes = []
+    if seace.get("estado") == "seleccionado":
+        for d in seace.get("documentos") or []:
+            if isinstance(d, dict):
+                pendientes.append(("SEACE", d))
+        if "documentos" not in seace:  # compatibilidad; nunca revivir alias de colección vacía
+            for categoria, d in _dic(seace.get("docs")).items():
+                if categoria in {"bases", "contrato"} and isinstance(d, dict):
+                    pendientes.append(("SEACE", {**d, "categoria": categoria, "ocid": seace.get("ocid")}))
+    from orquestador.descargas_mef import documentos_seleccionados
+    pendientes.extend(("MEF", d) for d in documentos_seleccionados(ev))
+    pendientes.extend(("MEF", {**d, "tipo": "adjunto_08a", "titulo": d.get("label")})
+                      for d in ver.get("documentos_08a") or [] if isinstance(d, dict))
+    campos = ("categoria", "tipo", "id_documento", "id_contrato", "ocid", "url", "titulo",
+              "formato", "tipo_publicado", "numero", "etiqueta", "cui")
+    salida, vistos = [], set()
+    for fuente, d in pendientes:
+        identidad = (fuente, str(d.get("ocid") or ""), str(d.get("id_contrato") or ""),
+                     str(d.get("id_documento") or ""), str(d.get("url") or ""))
+        # Sin URL/ID no colapsar registros distintos ni borrar el faltante.
+        clave = identidad if any(identidad[1:]) else (*identidad, len(salida))
+        if clave in vistos:
+            continue
+        vistos.add(clave)
+        registro = {"fuente": fuente, **_tomar(d, campos), "contenido": "no_revisado"}
+        registro["referencia"] = hashlib.sha256(json.dumps(clave).encode()).hexdigest()
+        for origen, m in materiales:
+            if origen == fuente and d.get("url") and m.get("url") == d["url"] \
+                    and all(_id(m.get(k)) == _id(d.get(k)) for k in ("id_documento", "id_contrato", "ocid")):
+                registro.update(_tomar(m, ("estado", "motivo", "archivo_entregado", "sha256_entregado")))
+                break
+        salida.append(registro)
+    return salida
 
 
 def _disparadores(ev: dict, tipo: str, multi: bool) -> list[str]:
     motivos = []
     via = str(ev.get("via") or "").upper()
+    privada = via == "PRIVADA" or ev.get("estado") == "privada"
+    if privada:
+        motivos.append("naturaleza_privada_requiere_cotejo_del_proyecto")
     if via == "RUC":
         motivos.append("contratista_no_demuestra_intervencion")
-    if not ev.get("cui") or via in {"REVISION", "PROBABLE", "PORTAL", "NO_EXISTE"} \
-            or ev.get("estado") == "revision":
+    if not privada and (not ev.get("cui") or via in {"REVISION", "PROBABLE", "PORTAL", "NO_EXISTE"}
+                        or ev.get("estado") == "revision"):
         motivos.append("identificacion_pendiente")
     if ev.get("sin_verificar"):
         motivos.append("consulta_no_completada")
@@ -70,6 +123,8 @@ def _disparadores(ev: dict, tipo: str, multi: bool) -> list[str]:
         motivos.append("proceso_sin_identidad_independiente")
     if multi:
         motivos.append("certificado_multiobra")
+    if _documentos_prioritarios(ev):
+        motivos.append("documentos_prioritarios_requieren_lectura")
     candidatos = ev.get("candidatos") or []
     ids = {_id(c.get("obra_id")) for c in candidatos if isinstance(c, dict)
            and c.get("obra_id") and _id(c.get("cui")) == _id(ev.get("cui"))}
@@ -103,10 +158,6 @@ def preparar_contexto(job_id: str, espejo: dict, enriquecimiento: dict, tipo: st
             for pos, unidad in unidades:
                 unidad = _dic(unidad)
                 caso_id = f"{clave}:s{pos}" if pos else clave
-                if str(unidad.get("via") or "").upper() == "PRIVADA" \
-                        or unidad.get("estado") == "privada":
-                    omitidos.append({"caso_id": caso_id, "motivo": "ruta_privada_vigente_no_auditada"})
-                    continue
                 motivos = _disparadores(unidad, tipo, bool(pos or declaradas))
                 sub = _dic(declaradas[pos - 1]) if pos and pos <= len(declaradas) else None
                 casos.append({

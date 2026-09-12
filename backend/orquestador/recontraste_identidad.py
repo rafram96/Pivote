@@ -9,8 +9,9 @@ from orquestador.etapas_reales import (
 from reglas.cruces_fechas import cruces_de_experiencia
 from resolucion.cui import tipo_evaluacion_del_espejo
 from scraping.infoobras import fetch_by_cui, periodos_inactividad
-from scraping.seace_abierto import tipo_esperado
+from scraping.seace_abierto import tipo_por_experiencia
 from validacion.candado_seace import evaluar_candado
+from validacion.servicio_experiencia import contrastar_servicio, fase_servicio_incompatible
 from validacion.recalculo import fechas_calculo, regla_periodos_de
 from orquestador.recontraste_fuentes import FuentesRecontraste
 
@@ -51,6 +52,9 @@ def recontrastar_asociaciones(espejo, enriquecimiento, casos_ids, *, leer_obra=N
                     cert[campo] = unidad[campo]
         ini, fin, _ = fechas_calculo(cert, regla_periodos_de(espejo))
         expediente = unidad.get("camino") == "expediente"
+        unidad["contraste_servicio"] = contrastar_servicio(espejo, cert)
+        otra_fase = fase_servicio_incompatible(espejo, cert, expediente)
+        unidad["servicio_fase_incompatible"] = otra_fase
         for campo in ("obra_ficha", "ficha", "valorizaciones", "modificaciones_plazo",
                       "codigo_infoobras", "obra_nombre", "paralizaciones", "cobertura_baja",
                       "cobertura", "cruces_fechas", "aprobacion_expediente",
@@ -81,11 +85,11 @@ def recontrastar_asociaciones(espejo, enriquecimiento, casos_ids, *, leer_obra=N
             unidad.update(obra_nombre=obra.nombre, codigo_infoobras=obra.codigo_infoobras,
                           obra_ficha={k: v for k, v in fx.items() if k not in {"valorizaciones", "modificaciones_plazo"}},
                           valorizaciones=fx["valorizaciones"], modificaciones_plazo=fx["modificaciones_plazo"],
-                          sin_verificar=False)
+                          sin_verificar=otra_fase)
             unidad["obra"]["nombre_obra"] = obra.nombre
             if sub:
                 unidad["ficha"] = {**fx, "obra_nombre": obra.nombre}
-            if not expediente:
+            if not expediente and not otra_fase:
                 unidad["paralizaciones"] = [
                     {"inicio": p["inicio"].isoformat(), "fin": p["fin"].isoformat(), "tipo": p["tipo"]}
                     for p in periodos_inactividad(obra.avances)]
@@ -97,21 +101,20 @@ def recontrastar_asociaciones(espejo, enriquecimiento, casos_ids, *, leer_obra=N
                 cobertura = _cobertura_cert(obra.avances, ini, fin, obra.fecha_inicio)
                 if cobertura is not None and cobertura < _COBERTURA_MIN:
                     unidad["cobertura_baja"] = cobertura
-            if expediente and obra.aprobacion_expediente:
+            if expediente and not otra_fase and obra.aprobacion_expediente:
                 unidad["aprobacion_expediente"] = deepcopy(obra.aprobacion_expediente)
         seace = unidad.get("seace") or {}
         if seace.get("estado") == "seleccionado":
             seace["candado"] = evaluar_candado(seace["proceso"], {
-                **cert, "tipo_experiencia": tipo_esperado(expediente, " ".join(
-                    str(cert.get(c) or "") for c in ("proyecto", "objeto", "cargo_ocupado", "descripcion"))),
+                **cert, "tipo_experiencia": tipo_por_experiencia(expediente, cert)["tipo"],
             }).como_dict()
         estados_fuentes, faltantes_fuentes = {}, []
-        if expediente and cui:
+        if expediente and cui and not otra_fase:
             bloque, estado, motivos = fuentes.contrastar_mef(cert, str(cui), seace)
             unidad["verificacion_expediente"] = bloque
             estados_fuentes["mef"] = estado
             faltantes_fuentes.extend(motivos)
-        elif expediente:
+        elif expediente and not otra_fase:
             unidad["verificacion_expediente"] = {
                 "verificado_en_mef": False, "estado": "no_recontrastado",
                 "motivo": "Sin CUI inequívoco para consultar MEF; aprobación por verificar."}
@@ -122,6 +125,8 @@ def recontrastar_asociaciones(espejo, enriquecimiento, casos_ids, *, leer_obra=N
         faltantes_fuentes.extend(motivos)
         unidad["cruces_fechas"] = [c.como_dict() for c in cruces_de_experiencia(unidad, cert)]
         faltantes = []
+        if otra_fase:
+            faltantes.append("El certificado declara otra fase; los datos de la ruta del concurso no respaldan su periodo.")
         if fuente["estado"] != "disponible":
             faltantes.append(fuente["motivo"])
         if not seace.get("fecha_suscripcion"):

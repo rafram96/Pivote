@@ -459,7 +459,16 @@ def _avance_descargas_dict(job: pipeline.Job) -> dict:
     def _tiene_fuente(clave: tuple[int, int]) -> bool:
         d = enr.get(f"{clave[0]}:{clave[1]}") or {}
         obra = d.get("obra") if isinstance(d.get("obra"), dict) else {}
-        return bool(obra.get("obra_id") or d.get("seace"))
+        return bool(obra.get("obra_id") or d.get("seace") or _mef(clave))
+
+    from orquestador.descargas_mef import documentos_por_experiencia
+    from resolucion.cui import tipo_evaluacion_del_espejo
+    entradas = {(p["n_prof"], e["n"]): e for p in espejo.get("profesionales", [])
+                for e in p.get("experiencias", [])}
+
+    def _mef(clave):
+        return documentos_por_experiencia(entradas.get(clave) or {},
+            enr.get(f"{clave[0]}:{clave[1]}") or {}, tipo_evaluacion_del_espejo(espejo))
 
     todas = [(p["n_prof"], e["n"])
              for p in espejo.get("profesionales", [])
@@ -483,7 +492,9 @@ def _avance_descargas_dict(job: pipeline.Job) -> dict:
                         or (base / f"P{clave[0]}_E{clave[1]}.ok").exists())
         seace_ok = (not datos.get("seace")
                     or (base / f"P{clave[0]}_E{clave[1]}.seace.ok").exists())
-        return bool(infoobras_ok and seace_ok)
+        mef_ok = not _mef(clave) or (
+            base / f"P{clave[0]}_E{clave[1]}" / "Verificación MEF" / "DOCUMENTOS_MEF.json").is_file()
+        return bool(infoobras_ok and seace_ok and mef_ok)
 
     descargadas = sum(
         1 for x in bajan if _procesada(x)
@@ -1118,6 +1129,7 @@ def aplicar_investigacion_identidad(job_id: str, tareas: BackgroundTasks, body: 
 
 @app.get("/api/pivote/jobs/{job_id}/espejo")
 def extraccion(job_id: str):
+    from validacion.servicio_experiencia import contrastar_servicio
     _job_o_404(job_id)
     espejo = _espejo_o_404(job_id)
     enr = repo.cargar_enriquecimiento(job_id) or {}
@@ -1138,7 +1150,8 @@ def extraccion(job_id: str):
                 "fecha_inicial", "fecha_final", "dias", "cui",
                 "incluye_covid", "traslape", "folio", "ruc_emisor",
                 "nombre_emisor", "cargo_emisor", "fecha_emision",
-                "tipo_documento", "entidad_contratante")}
+                "tipo_documento", "entidad_contratante", "servicio_declarado")}
+            d["contraste_servicio"] = contrastar_servicio(espejo, e)
             # enriquecimiento del backend: CUI resuelto + quién ejecutó/supervisó
             # la obra en InfoObras (Representante de obra) + verificación SUNAT.
             ev = enr.get(f"{np_}:{e.get('n')}")

@@ -56,6 +56,8 @@ class FuentesRecontraste:
         bloque["estado"] = "recontrastado"
         bloque["aprobacion_identificada"] = False
         bloque["documentos_08a"] = ficha.get("documentos") or []
+        bloque["documentos_contractuales"] = [d for d in bloque["documentos_08a"]
+                                               if d.get("tipo_indicado") == "acto_contractual"]
         bloque["contratos_consultados"] = [
             {**c, "fecha_suscripcion": c["fecha_suscripcion"].isoformat() if c["fecha_suscripcion"] else None}
             for c in contratos]

@@ -5,12 +5,81 @@ penalización de scoring. Sin red.
 from __future__ import annotations
 
 import itertools
+from copy import deepcopy
 
 from resolucion.cui import (
     _es_experiencia_expediente, _es_experiencia_privada, _es_registro_expediente,
     _exp_derivada, _muni_contradice, _puntuar, _sin_prefijo, norm, resolver,
     resolver_con_dedup, resolver_obras, rubros_mixtos, tokens_distintivos,
     ubicacion, ubigeo_cert)
+
+
+def test_checkpoint_privada_abstiene_cui_citado_y_conserva_candidatos(monkeypatch):
+    import resolucion.cui as modulo
+
+    obra = {"cui": "1234567", "obra_id": 88, "nombre_obra": "OBRA PUBLICA",
+            "departamento": "LIMA"}
+    original = {"proyecto": "I.E.P. Colegio Los Pinos", "cui": "1234567"}
+    resultado = {"estado": "resuelto", "cui": "1234567", "via": "CUI_TEXTO",
+                 "obra": obra, "candidatos": [{"cui": "7654321", "score": 70}],
+                 "decision": "código verificado"}
+    entrada, salida = deepcopy(original), deepcopy(resultado)
+    llamadas = []
+
+    class ConsultaEspia:
+        def por_codigo(self, cui):
+            llamadas.append(cui)
+            return []
+
+    monkeypatch.setattr(modulo, "_resolver", lambda *args: resultado)
+    r = resolver(original, ConsultaEspia())
+    assert r["estado"] == "revision" and r["via"] == "REVISION"
+    assert r["cui"] is None and r["obra"] is None
+    assert r["candidatos"][0]["cui"] == "1234567"
+    assert r["candidatos"][1]["cui"] == "7654321"
+    assert r["naturaleza_en_conflicto"] is True
+    assert r["decision"] == "indicios de naturaleza privada del proyecto y asociación pública pendiente de cotejo"
+    r2 = resolver(original, ConsultaEspia())
+    assert r == r2
+    assert original == entrada and resultado == salida and llamadas == []
+
+
+def test_checkpoint_naturaleza_reserva_contexto_en_dedup(monkeypatch):
+    import resolucion.cui as modulo
+
+    obra = {"cui": "1234567", "obra_id": 88, "nombre_obra": "OBRA PUBLICA",
+            "departamento": "LIMA"}
+    madre = {"proyecto": "OBRA PUBLICA", "folio": "10",
+             "entidad_emisora": "MUNICIPALIDAD DISTRITAL DE LIMA", "cui": "1234567"}
+    privada = {"proyecto": "I.E.P. Colegio Los Pinos", "folio": "10",
+               "entidad_emisora": "MUNICIPALIDAD DISTRITAL DE LIMA"}
+    monkeypatch.setattr(modulo, "_resolver", lambda exp, *args: {
+        "estado": "revision" if "I.E.P." in exp.get("proyecto", "") else "resuelto",
+        "cui": None if "I.E.P." in exp.get("proyecto", "") else "1234567",
+        "via": "NOMBRE", "obra": None if "I.E.P." in exp.get("proyecto", "") else obra,
+        "candidatos": ([{"cui": "8888888", "obra_id": 99, "nombre_obra": "CANDIDATO PROPIO"}]
+                       if "I.E.P." in exp.get("proyecto", "") else [])})
+    resultados = dict(resolver_con_dedup([(madre, "madre"), (privada, "privada")],
+                                         object()))
+    assert resultados["madre"]["estado"] == "resuelto"
+    assert resultados["privada"]["estado"] == "revision"
+    assert resultados["privada"]["via"] == "REVISION"
+    assert {c["cui"] for c in resultados["privada"]["candidatos"]} == {"1234567", "8888888"}
+
+
+def test_checkpoint_naturaleza_no_usa_emisor_app_ni_iep_numerico(monkeypatch):
+    import resolucion.cui as modulo
+    resultado = {"estado": "resuelto", "cui": "1234567",
+                 "obra": {"obra_id": 1, "nombre_obra": "OBRA", "departamento": "LIMA"}}
+    monkeypatch.setattr(modulo, "_resolver", lambda *args: resultado)
+    for proyecto, extra in [
+        ("ASOCIACION PUBLICO PRIVADA APP PARA UN HOSPITAL", {}),
+        ("OBRA POR IMPUESTOS CON INVERSION PRIVADA", {}),
+        ("MEJORAMIENTO DEL SERVICIO EDUCATIVO I.E.P. N° 70480", {}),
+        ("MEJORAMIENTO DEL HOSPITAL PUBLICO", {"entidad_emisora": "COLEGIO PRIVADO SAC"}),
+    ]:
+        r = resolver({"proyecto": proyecto, **extra}, object())
+        assert r["estado"] == "resuelto", proyecto
 
 
 def test_ubicacion_no_confunde_ica_dentro_de_huancavelica():

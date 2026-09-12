@@ -88,6 +88,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Optional
 
+from validacion.servicio_experiencia import evidencia_tipo_servicio
+
 # ── Umbrales, todos con su porqué ────────────────────────────────────────────
 
 # Parecido de razón social suficiente para dar la entidad por la misma. Es el
@@ -150,6 +152,7 @@ class Candado:
     resultado: str
     motivo: str
     senales: list[Senal] = field(default_factory=list)
+    contratos_multiples: bool = False
 
     @property
     def a_favor(self) -> list[Senal]:
@@ -163,8 +166,11 @@ class Candado:
 
     def como_dict(self) -> dict:
         """Forma persistida en `enriquecimiento[…]["seace"]["candado"]`."""
-        return {"resultado": self.resultado, "motivo": self.motivo,
-                "senales": [s.como_dict() for s in self.senales]}
+        salida = {"resultado": self.resultado, "motivo": self.motivo,
+                  "senales": [s.como_dict() for s in self.senales]}
+        if self.contratos_multiples:
+            salida["contratos_multiples"] = True
+        return salida
 
 
 # ── Extracción del resumen del proceso (conoce la forma OCDS) ────────────────
@@ -277,6 +283,20 @@ def resumen_proceso(comp: dict) -> dict:
                           for c in contratos) if m]
     monto = sum(montos) if montos else _numero((tender.get("value") or {}).get("amount"))
 
+    # Estos metadatos se conservan para investigación y para no perder la
+    # relación entre el resumen y el contrato elegido. No se usan para
+    # clasificar el objeto ni para escoger un contrato por heurística.
+    contratos_resumen = [
+        {"id": _texto(c.get("id")) or None,
+         "titulo": _texto(c.get("title")) or None,
+         "award_id": (_texto(c.get("awardID"))
+                      or _texto(c.get("award_id")) or None)}
+        for c in contratos
+    ]
+    items_tender = comp.get("items")
+    if items_tender is None:
+        items_tender = tender.get("items")
+
     return {
         "entidad_convocante": _texto((comp.get("buyer") or {}).get("name")) or None,
         "rucs_adjudicatarios": [x["ruc"] for x in adjudicatarios],
@@ -293,6 +313,9 @@ def resumen_proceso(comp: dict) -> dict:
             _fecha(periodo.get("endDate"))),
         "monto": monto,
         "nomenclatura": _texto(tender.get("title")) or None,
+        "descripcion": _texto(tender.get("description")) or None,
+        "items": items_tender if isinstance(items_tender, list) else [],
+        "contratos": contratos_resumen,
     }
 
 
@@ -367,11 +390,16 @@ def _senal_adjudicatario(proceso: dict, cert: dict) -> Senal:
 
 def _senal_objeto(proceso: dict, cert: dict) -> Senal:
     """(b) Objeto del proceso vs tipo de la experiencia."""
-    esperado = _texto(cert.get("tipo_experiencia")).lower()
+    declarado = evidencia_tipo_servicio(cert)
+    esperado = (declarado.get("tipo") or "").lower()
     real = _texto(proceso.get("tipo")).lower()
     etiquetas = {"expediente": "expediente técnico", "supervision": "supervisión",
                  "ejecucion": "ejecución de obra", "preinversion": "preinversión"}
     leg = lambda t: etiquetas.get(t, t or "—")  # noqa: E731
+    if not esperado:
+        return Senal("objeto", FUERTE, SIN_DATO,
+                     "Objeto: el servicio del certificado no aporta evidencia independiente. "
+                     + declarado["motivo"])
     if not esperado or not real or real == "otro":
         return Senal("objeto", FUERTE, SIN_DATO,
                      f"Objeto: no se pudo clasificar ({leg(esperado)} buscado vs "
@@ -463,6 +491,28 @@ def _senal_monto(proceso: dict, cert: dict) -> Senal:
 
 # ── Veredicto ────────────────────────────────────────────────────────────────
 
+def hay_varios_contratos_distintos(proceso: Optional[dict]) -> bool:
+    """Indica pluralidad solo cuando la metadata trae IDs de contrato distintos.
+
+    Un resumen histórico sin la lista/IDs de contratos no permite inferir
+    pluralidad: la ausencia de metadata es desconocimiento, no evidencia.
+    """
+    contratos = (proceso or {}).get("contratos")
+    if not isinstance(contratos, list):
+        return False
+    ids = {_texto(c.get("id")) for c in contratos
+           if isinstance(c, dict) and _texto(c.get("id"))}
+    return len(ids) > 1
+
+
+def candado_tiene_adjudicatario_favorable(candado: Optional[dict]) -> bool:
+    """Comprueba la señal persistida exacta del adjudicatario, sin inferirla."""
+    return any(
+        isinstance(s, dict) and s.get("nombre") == "adjudicatario"
+        and s.get("fuerza") == FUERTE and s.get("sentido") == A_FAVOR
+        for s in (candado or {}).get("senales", [])
+    ) if isinstance(candado, dict) else False
+
 def evaluar_candado(proceso: dict, cert: dict) -> Candado:
     """Cruza el resumen del proceso contra los datos del certificado.
 
@@ -488,11 +538,22 @@ def evaluar_candado(proceso: dict, cert: dict) -> Candado:
             "El proceso encontrado CONTRADICE al certificado: "
             + " ".join(s.detalle for s in contra),
             senales)
-    if len(favor) >= MINIMO_SENALES_CONFIRMAR:
+    adjudicatario_favorable = any(
+        s.nombre == "adjudicatario" and s.sentido == A_FAVOR
+        and s.fuerza == FUERTE for s in favor)
+    if hay_varios_contratos_distintos(proceso):
+        return Candado(
+            POR_CONFIRMAR,
+            "El proceso publica varios contratos distintos; las coincidencias "
+            "de metadatos no permiten confirmar cuál encargo corresponde al "
+            "certificado. Se conservan los candidatos para investigación.",
+            senales, contratos_multiples=True)
+    if len(favor) >= MINIMO_SENALES_CONFIRMAR and adjudicatario_favorable:
         observaciones = observaciones_temporales(Candado(CONFIRMADO, "", senales))
-        motivo = (f"{len(favor)} señales independientes confirman que el proceso "
-                  "corresponde al certificado, y ninguna señal fuerte de identidad "
-                  "lo contradice.")
+        motivo = (f"{len(favor)} señales independientes muestran coincidencias "
+                  "de metadatos entre el proceso y el certificado, y ninguna señal "
+                  "fuerte de identidad lo contradice; esto no verifica por sí solo "
+                  "el documento ni el encargo íntegro.")
         if observaciones:
             motivo += " Observación de fechas: " + " ".join(observaciones)
         return Candado(
@@ -501,8 +562,10 @@ def evaluar_candado(proceso: dict, cert: dict) -> Candado:
             senales)
     return Candado(
         POR_CONFIRMAR,
-        f"Evidencia insuficiente para dar el proceso por verificado: "
-        f"{len(favor)} de {MINIMO_SENALES_CONFIRMAR} señales necesarias.",
+        f"Identidad pendiente. Señales fuertes a favor: {len(favor)}; se requieren "
+        f"al menos {MINIMO_SENALES_CONFIRMAR}, incluyendo al adjudicatario."
+        + (" Falta cotejar el RUC del emisor con el adjudicatario."
+           if not adjudicatario_favorable else ""),
         senales)
 
 
@@ -527,40 +590,21 @@ def observaciones_temporales(candado: Candado | dict) -> list[str]:
 
 
 def confirmado_sin_adjudicatario(candado: Candado | dict) -> bool:
-    """Gate anticircular de #83: confirma el proceso sin usar la señal cuyo
-    dato se quiere verificar.
+    """Gate anticircular de #83; actualmente no habilita rescate de RUC.
 
-    Un candado `confirmado` por ``adjudicatario + objeto`` NO habilita que ese
-    mismo adjudicatario elija el RUC del emisor. Se exigen, como en el candado
-    principal, dos señales fuertes independientes y cero contradicciones.
-    Acepta la forma viva o la persistida para que SUNAT no tenga que reconsultar
-    SEACE ni reconstruir el certificado.
+    Sin adjudicatario solo quedan entidad y tipo genérico: no identifican el
+    encargo. Usar el mismo RUC que se intenta recuperar sería circular. Se
+    conserva la interfaz viva/histórica, pero no se habilitan señales hipotéticas
+    sin productor ni validación. La consulta SUNAT ordinaria sigue funcionando.
     """
-    if isinstance(candado, Candado):
-        resultado = candado.resultado
-        senales = [s.como_dict() for s in candado.senales]
-    else:
-        candado = candado or {}
-        resultado = candado.get("resultado")
-        senales = candado.get("senales") or []
-    if resultado != CONFIRMADO:
-        return False
-    # La fecha es metadato útil para el evaluador, nunca una pata de identidad
-    # (ni siquiera si un job antiguo la persistió como FUERTE). El adjudicatario
-    # también se excluye porque es precisamente el dato bajo auditoría.
-    independientes = [s for s in senales
-                       if s.get("nombre") not in {"adjudicatario", "temporal"}
-                       and s.get("fuerza") == FUERTE]
-    if any(s.get("sentido") == EN_CONTRA for s in independientes):
-        return False
-    return sum(s.get("sentido") == A_FAVOR for s in independientes) \
-        >= MINIMO_SENALES_CONFIRMAR
+    return False
 
 
 # ── Rótulos para los entregables (una sola fuente de verdad) ─────────────────
 
 ROTULOS = {
-    CONFIRMADO: "Identificado y verificado contra el certificado",
+    CONFIRMADO: "Coincidencias de metadatos del proceso con el certificado; "
+                "no verifica por sí solo el documento ni el encargo íntegro",
     POR_CONFIRMAR: "Por confirmar — no se pudo verificar contra el certificado",
     CONTRADICE: "Por confirmar — los datos del proceso NO coinciden con el certificado",
 }

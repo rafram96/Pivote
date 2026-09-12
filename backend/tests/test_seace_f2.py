@@ -1,6 +1,7 @@
 """Integración offline de T-004 F2: descarga diferida, ZIP y Excel."""
 from __future__ import annotations
 
+import json
 import zipfile
 
 import openpyxl
@@ -158,14 +159,13 @@ def test_descarga_seace_escribe_notas_honestas(tmp_path):
     }}
     descargar_documentos_job(ESPEJO, enr, "job-notas", tmp_path)
     destino = carpeta_job(tmp_path, "job-notas") / "descargas" / "P1_E1"
-    notas = sorted(p.name for p in destino.glob("*_ERROR.txt"))
-    assert notas == [
-        "BASES_INTEGRADAS_ERROR.txt",
-        "CONTRATO_FIRMADO_ERROR.txt",
-    ]
-    texto = (destino / notas[0]).read_text(encoding="utf-8")
+    carpeta = destino / "Documentos SEACE"
+    texto = (carpeta / "DOCUMENTOS_SEACE.txt").read_text(encoding="utf-8")
     assert "no fue posible obtener" in texto
-    assert "reintentar" not in texto.lower()
+    assert "Estado de fuente: fuente_no_disponible" in texto
+    manifiesto = json.loads((carpeta / "DOCUMENTOS_SEACE.json").read_text(encoding="utf-8"))
+    assert manifiesto["documentos"] == []
+    assert not list(carpeta.glob("*.pdf"))
 
 
 def test_notas_seace_hablan_en_frases_de_evaluador(tmp_path):
@@ -187,8 +187,12 @@ def test_notas_seace_hablan_en_frases_de_evaluador(tmp_path):
                                  "motivo": "detalle técnico que no va a la nota"}}}
         descargar_documentos_job(ESPEJO, enr, f"job-{estado}", tmp_path)
         destino = carpeta_job(tmp_path, f"job-{estado}") / "descargas" / "P1_E1"
-        nota = (destino / f"BASES_INTEGRADAS_{sufijo}.txt").read_text(encoding="utf-8")
-        assert nota == texto + "\n"
+        carpeta = destino / "Documentos SEACE"
+        nota = (carpeta / "DOCUMENTOS_SEACE.txt").read_text(encoding="utf-8")
+        assert texto in nota
+        assert f"Estado de fuente: {estado}" in nota
+        assert json.loads((carpeta / "DOCUMENTOS_SEACE.json").read_text(encoding="utf-8"))["documentos"] == []
+        assert not list(carpeta.glob("*.pdf"))
 
 
 def test_nota_seace_de_descarga_fallida_es_terminal(tmp_path):
@@ -212,21 +216,23 @@ def test_notas_seace_llegan_al_zip_con_el_nombre_completo(tmp_path):
     }}
     descargar_documentos_job(ESPEJO, enr, "job-nombres", tmp_path)
     destino = carpeta_job(tmp_path, "job-nombres") / "descargas" / "P1_E1"
-    assert (destino / "BASES_INTEGRADAS_NO_DISPONIBLE.txt").is_file()
+    carpeta = destino / "Documentos SEACE"
+    assert (carpeta / "DOCUMENTOS_SEACE.txt").is_file()
+    texto = (carpeta / "DOCUMENTOS_SEACE.txt").read_text(encoding="utf-8")
+    assert "Estado de fuente: sin_proceso" in texto
+    assert not list(carpeta.glob("*.pdf"))
 
     salida = construir_zip_infoobras(
         ESPEJO, {(1, 1): destino}, tmp_path / "notas.zip", enriquecimiento=enr)
     with zipfile.ZipFile(salida) as zf:
         nombres = zf.namelist()
-        assert any(n.endswith("/BASES_INTEGRADAS_NO_DISPONIBLE.txt") for n in nombres)
-        assert any(n.endswith("/CONTRATO_FIRMADO_NO_DISPONIBLE.txt") for n in nombres)
-        assert not any("~" in n for n in nombres), "ningún nombre queda mutilado"
+        assert any(n.endswith("/Documentos SEACE/DOCUMENTOS_SEACE.txt") for n in nombres)
+        assert any(n.endswith("/Documentos SEACE/DOCUMENTOS_SEACE.json") for n in nombres)
         # una nota no es un documento: la experiencia sigue SIN DOCUMENTOS
         indice = zf.read("indice.txt").decode("utf-8")
         assert "SIN DOCUMENTOS" in indice
-        # el aviso rotula el documento en lenguaje de evaluador, no el archivo
-        assert "Bases Integradas (SEACE): no obtenido en esta corrida" in indice
-        assert "no publicado por la fuente" not in indice
+        # El índice cuenta la sección, no inventa documentos a partir de notas.
+        assert "SECCIÓN Documentos SEACE: sin documentos" in indice
         assert "BASES_INTEGRADAS_NO_DISPONIBLE" not in indice
 
 
@@ -300,8 +306,9 @@ def test_excel_muestra_documentos_seace_y_ambiguedad(tmp_path):
     celdas = [c for fila in ws.iter_rows() for c in fila if c.value is not None]
     texto = "\n".join(str(c.value) for c in celdas)
     assert "DOCUMENTOS DEL PROCESO (SEACE)" in texto
-    assert "Bases Integradas" in texto
-    assert "Contrato firmado" in texto
+    assert "Bases integradas" in texto
+    assert "Adjuntos del contrato" in texto
+    assert "Contenido de los documentos" in texto
     aviso = next(c for c in celdas if str(c.value).startswith("Por confirmar"))
     # Amarillo SUAVE: es «por verificar», no un dato del certificado. El amarillo
     # fuerte (FFFF00) quedó reservado para lo que la leyenda de la hoja promete.

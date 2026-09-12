@@ -21,6 +21,7 @@ def _seace(*senales):
 
 def _identidad_admitida():
     return _seace(_senal("entidad", "a_favor"),
+                  _senal("adjudicatario", "a_favor"),
                   _senal("objeto", "a_favor"))
 
 
@@ -55,6 +56,7 @@ def test_seace_seleccionado_con_candado_vacio_no_pinta_c():
 
 def test_contradiccion_solo_temporal_no_descarta_identidad():
     fx = {"seace": _seace(_senal("entidad", "a_favor"),
+                          _senal("adjudicatario", "a_favor"),
                           _senal("objeto", "a_favor"),
                           _senal("temporal", "en_contra"))}
     assert cronologia.hito_firma(fx) == date(2022, 6, 18)

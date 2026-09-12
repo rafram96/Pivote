@@ -53,6 +53,8 @@ raíz), y los datos del emisor/firmante son campos planos (no objetos anidados).
   "_meta": { "analisis_id": "...",
              "slug": "huachocolpa",   // nombre CORTO del concurso → nombre de los archivos
              "concurso": "...", "postor": "...",
+             "servicio_esperado": { "tipo": "supervision_obra", "texto": "...",
+                                    "pagina_pdf": 12, "fuente": "bases" },
              "version_contrato": "1.2.0", "generado_por": "claude-code" },
   "postor": {
     "detalle": "...",

@@ -165,6 +165,19 @@ TODA la verificación de las experiencias por este valor (contrato y resolución
 del MEF para expedientes; valorizaciones de InfoObras para obras), así que un
 valor equivocado aquí hace que cada certificado se verifique contra la fuente
 incorrecta. No lo deduzcas de los certificados de la propuesta: sale de las bases.
+
+### Servicio esperado (separado del camino A/B)
+
+Si las bases o los TDR expresan el servicio objeto del concurso, conserva en
+`metadata_concurso.servicio_esperado` el objeto `{tipo, texto, pagina_pdf,
+fuente}`. `tipo` solo puede ser `supervision_obra`, `ejecucion_obra`,
+`elaboracion_expediente`, `supervision_expediente`, `preinversion`, `otro` o
+`no_determinado`. `texto` es la frase literal y `pagina_pdf` la página física. Usa solo
+`fuente: "bases"` o `"tdr"`; no derives el tipo desde el nombre del proyecto,
+desde «construcción» o desde la orientación A/B. No confundas «supervisión de la
+ejecución» con «ejecución»; si el texto no permite distinguirlos, usa
+`tipo: "no_determinado"` y conserva la frase. Si no hay evidencia, deja el
+objeto en `null`.
 Cada entrada de `personal_clave` incluye: `numero`, `cargos_similares_validos`,
 `profesiones_aceptadas`, `tiempo_minimo_experiencia`, `tipos_obra_validos`,
 `aplica` (Factor A), `acreditacion_formacion` y **`folio`** = la página física del PDF donde aparece la

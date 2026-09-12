@@ -35,6 +35,22 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
    acá pon la página REAL que lees, NO el folio, para que el recorte tome la hoja
    correcta. `folio` queda como el número impreso (para citar).
 
+   **Servicio declarado (ADR-S013):** si el certificado expresa el servicio o
+   fase prestada, añade `servicio_declarado` con exactamente la forma
+   `{tipo, texto, pagina_pdf, fuente: "certificado"}`. `tipo` solo puede ser
+   `supervision_obra`, `ejecucion_obra`, `elaboracion_expediente`,
+   `supervision_expediente`, `preinversion`, `otro` o `no_determinado`.
+   Conserva `texto` literalmente y la página física donde se lee. Un rol
+   explícito del certificado como «Residente de obra» (ejecución) o «Supervisor
+   de obra» (supervisión) sí es evidencia; no infieras desde un cargo genérico,
+   el cargo al que postula, el nombre del proyecto («Construcción de…») ni el
+   camino A/B. «Especialista» sin fase no basta. Distingue «supervisión de la
+   ejecución» de «ejecución»; si no es distinguible usa `no_determinado`. Si no
+   hay evidencia literal, deja el objeto en `null`.
+   Si usas el cargo para identificar el servicio, **incluye también ese cargo
+   literal en `servicio_declarado.texto`**: «ha laborado en la obra» no respalda
+   ejecución por sí solo, aunque otra columna diga «Residente de obra».
+
    > ⚠ **VERIFICA el folio contra el emisor ANTES de citarlo** (#47 — tú eres el
    > único que VE las páginas; el 99.7% son escaneos y el backend no puede leerlas):
    > la página principal que cites en `paginas_pdf` debe **mostrar al emisor de esa
@@ -50,6 +66,10 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
    >   `folio_verificado: false` + observación — el backend entonces NO embebe la
    >   imagen (una imagen equivocada es peor que ninguna: es el sustento que audita
    >   el Comité).
+   `folio_verificado` confirma página física y emisor, **no** que exista una
+   numeración impresa única. Si hay varias numeraciones, conserva la física en
+   `paginas_pdf`, cita el folio legible con una nota de las alternativas y no
+   cambies el cotejo del emisor a `false` solo por esa ambigüedad.
 4. **Fechas**: ISO `YYYY-MM-DD`. Si el documento solo consigna mes/año →
    `"YYYY-MM (anotación literal)"`. Si es ilegible/no consta tras reintentar
    (NOTA 12) → `"POR VERIFICAR (motivo)"`. Nada fuera de esas tres formas.
@@ -94,6 +114,14 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
    fabricar un fin. Tampoco rellenes un día ambiguo por coincidir con un total.
    Las fechas parciales permanecen parciales; no requieren inventar un cotejo
    de día exacto. Una discrepancia se corrige desde el original, no desde OCR.
+   **El rótulo manda sobre el enum:** «TÉRMINO DE OBRA» acredita el fin de la
+   obra, no expresamente el fin del servicio del profesional. No lo renombres
+   `fin_servicio`. Busca una frase que atribuya el periodo al profesional; si
+   no existe, `fecha_final: "POR VERIFICAR (solo consta término de obra)"` y
+   conserva la fecha literal en observaciones y `fechas_fuente` con evento
+   `fin_obra`. Lo mismo para `inicio_obra`, `emision`, `firma_contrato` u
+   `orden_servicio`. No inventes una diferencia entre fechas: documenta que la
+   equivalencia no está explícita. Si existe periodo personal, cita esa frase.
 5. **Identificadores para el cruce oficial (backend)** — campos dedicados:
    - **`proyecto`: ACCIÓN + OBJETO + UBICACIÓN, con las palabras del certificado.**
      El backend busca esa obra en el registro público **con ese texto**, así que el
@@ -123,6 +151,13 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
        objeto + ubicación.
      - **NO** le pegues la metadata desprendible (m², nº de pisos, monto, SNIP/CUI):
        esa va a `area_construida_m2`, `monto_contrato_soles`, `cui`.
+     - **Ítem/componente/lote NO es metadata desprendible.** Si el certificado
+       nombra una inversión completa pero acredita solo «ITEM 1: supervisión de
+       …», conserva en `proyecto` tanto la intervención como ese alcance específico.
+       No amplíes el servicio a toda la inversión por compartir CUI.
+       Registra también `proyecto_fuente: {texto, pagina_pdf}` con el bloque literal
+       completo de objeto y alcance. Es auditoría del crudo, no un campo nuevo del
+       espejo. Si no se lee, indica la limitación; no reconstruyas un ítem.
    - **Expedientes técnicos — resolución de aprobación citada**: si el certificado
      dice que el expediente fue aprobado con una resolución («aprobado mediante
      Resolución Gerencial N° 274-2019-GRH/GR de fecha 18 de junio de 2019»), copia
@@ -206,6 +241,10 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
      que desempeñó. Por eso: copia aquí, **literales y resumidas**, las funciones
      o actividades que el documento enumere (del propio certificado o de un anexo
      adjunto que las detalle), con el prefijo `"SÍ — "`.
+     El campo es **un string o null, nunca un array**. Una lista de ambientes,
+     componentes o características de la obra no es una lista de funciones del
+     profesional. Si las hay, registra `funciones_fuente: {texto, pagina_pdf}`
+     en el crudo con la frase que las atribuye al profesional; no al proyecto.
      ⚠ **`null` en todos los demás casos.** Un certificado que solo dice
      *«desempeñando el cargo de X, del … al …, en la obra Y»* **NO acredita
      funciones** — por más que el cargo suene descriptivo. Nunca deduzcas las
@@ -215,6 +254,8 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
      caso 2026-07-25). Ante la duda → `null`.
    - la metadata desprendida va a sus campos: `area_construida_m2`,
      `monto_contrato_soles`, `nivel_categoria`.
+     `nivel_categoria` es la categoría del establecimiento (p. ej. II-1), no
+     «06 niveles» o «02 pisos»; estos últimos se conservan en observaciones.
 
 ### Cross-check anti-omisión (NOTA 1) — OBLIGATORIO
 6. Antes de devolver, **cuenta tus experiencias** y compáralas contra el
@@ -258,10 +299,10 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
    registro o portal; la verificación registral se deja al Comité.
 
 ### Alertas factuales que SÍ puedes marcar
-9. `incluye_covid`: `"SÍ"` si el periodo **se superpone** con la ventana COVID
-   **16/03/2020 – 30/06/2020** (NOTA 10) — es un rango, no una sola fecha; basta que
-   `fecha_inicial…fecha_final` intersecte esa ventana. Si no, `"NO"`.
-10. `cert_antes_culminar`: `"SÍ"` si `fecha_emision < fecha_final`; si no, `"NO"`.
+9. `incluye_covid`: déjalo `null`; la preparación calcula la intersección del
+   periodo completo con **16/03/2020 – 30/06/2020**, sin intervención del agente.
+10. `cert_antes_culminar`: déjalo `null`; la preparación compara emisión y fin
+   completos. Si falta una fecha o es incierta, queda `null`, no un «NO» supuesto.
 11. **Traslape de plazos (NOTA 9)**: como ves TODAS las experiencias de este
     profesional, detecta los periodos que **se superponen entre sí** y marca
     `traslape: "SÍ"` (en ambos), citando el `n` del otro periodo en
@@ -293,7 +334,8 @@ Produces: **1 profesional** + su lista de **experiencias atómicas** (1 fila = 1
 ## Salida
 Campos factuales con los nombres del schema espejo (`schemas/espejo.js`);
 el consolidador los transporta. `fechas_fuente` es adicional del crudo para
-auditoría: no se inserta en `profesionales[]` del espejo.
+auditoría, como `proyecto_fuente` y `funciones_fuente`: no se insertan como
+campos nuevos en `profesionales[]` del espejo.
 Rellena este **esqueleto** con los valores reales (mismas claves, mismos tipos):
 ```json
 {
@@ -322,7 +364,7 @@ Rellena este **esqueleto** con los valores reales (mismas claves, mismos tipos):
       "folio": 1160, "paginas_pdf": [1160, 1161], "folio_verificado": true,
       "cargo_ocupado": "Supervisor de Instalaciones Sanitarias",
       "funciones_similares": null,
-      "cert_antes_culminar": "NO", "incluye_covid": "SÍ", "traslape": "NO",
+      "cert_antes_culminar": null, "incluye_covid": null, "traslape": "NO",
       "nivel_categoria": "II-2", "area_construida_m2": 12000, "monto_contrato_soles": 18015551.75,
       "entidad_contratante": "GOBIERNO REGIONAL DE X", "ubicacion": "Huancavelica",
       "observaciones": null, "supuestos": []

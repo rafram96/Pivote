@@ -33,6 +33,15 @@ const fecha = z
   );
 const monto = z.number().nonnegative().nullable().optional();
 const txt = z.string().nullable().optional();
+const ServicioEvidencia = z.object({
+  tipo: z.enum([
+    "supervision_obra", "ejecucion_obra", "elaboracion_expediente",
+    "supervision_expediente", "preinversion", "otro", "no_determinado",
+  ]),
+  texto: txt,
+  pagina_pdf: z.number().int().positive().nullable().optional(),
+  fuente: z.enum(["bases", "tdr", "certificado"]).nullable().optional(),
+}).strict();
 // Folios reales: número (596), rango ("14-32 y 39-41") o texto.
 const folioT = z.union([z.string(), z.number()]).nullable().optional();
 
@@ -148,6 +157,7 @@ const ExperienciaProf = z.object({
   folio_verificado: z.boolean().nullable().optional(),
   dias: monto, meses: monto, anios: monto,
   anterior_colegiatura: txt, cargo_ocupado: txt, cargo_bases_valido: txt,
+  servicio_declarado: ServicioEvidencia.nullable().optional(),
   funciones_similares: txt, cert_antes_culminar: txt, incluye_covid: txt,
   tipo_obra_valido: txt,
   traslape: txt,                 // NOTA 9: SÍ/NO/null — Claude marca, backend re-verifica
@@ -252,6 +262,7 @@ const JsonEspejo = z.object({
     // enruta TODA la verificación por este valor; si falta cae al texto de cada
     // experiencia (frágil). Lo escribe `consolidar_espejo.js`.
     tipo_evaluacion: z.enum(["expedientes", "obras"]).nullable().optional(),
+    servicio_esperado: ServicioEvidencia.nullable().optional(),
   }).passthrough(),
   postor: z.object({
     detalle: txt,

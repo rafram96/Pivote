@@ -100,6 +100,18 @@ FolioT = Annotated[Optional[str], BeforeValidator(_coerce_folio)]
 FechaFlexible = Annotated[Optional[Union[date, str]], BeforeValidator(_coerce_fecha)]
 
 
+# ── Evidencia del servicio (ADR-S013) ───────────────────────────────────────
+class ServicioEvidencia(_Model):
+    """Servicio literalmente leído, separado del camino A/B del concurso."""
+    tipo: Literal[
+        "supervision_obra", "ejecucion_obra", "elaboracion_expediente",
+        "supervision_expediente", "preinversion", "otro", "no_determinado",
+    ]
+    texto: Optional[str] = None
+    pagina_pdf: Optional[int] = Field(default=None, strict=True, gt=0)
+    fuente: Optional[Literal["bases", "tdr", "certificado"]] = None
+
+
 # ── Meta ─────────────────────────────────────────────────────────────────────
 class Meta(_ModelLax):
     analisis_id: str = Field(min_length=1)
@@ -115,6 +127,7 @@ class Meta(_ModelLax):
     # `PIVOTE_FORZAR_EXPEDIENTES` y luego al texto de cada experiencia. Se
     # normaliza en `resolucion.cui.normalizar_tipo_evaluacion` (alias tolerados).
     tipo_evaluacion: Optional[str] = None
+    servicio_esperado: Optional["ServicioEvidencia"] = None
     version_contrato: Optional[str] = None
     generado_por: Optional[str] = None
     representante_comun: Optional[str] = None
@@ -284,6 +297,7 @@ class ExperienciaProf(_Model):
     anterior_colegiatura: Optional[str] = None
     cargo_ocupado: Optional[str] = None
     cargo_bases_valido: Optional[str] = None
+    servicio_declarado: Optional[ServicioEvidencia] = None
     funciones_similares: Optional[str] = None
     cert_antes_culminar: Optional[str] = None
     incluye_covid: Optional[str] = None

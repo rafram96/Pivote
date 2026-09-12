@@ -117,7 +117,7 @@ def preparar_destino_infoobras(destino: Path, marca: Path,
         respaldo.mkdir(parents=True)
         if destino.is_dir():
             for hijo in list(destino.iterdir()):
-                if hijo.is_file() and es_archivo_seace(hijo.name):
+                if es_archivo_seace(hijo.name) or hijo.name == "Verificación MEF":
                     continue
                 os.replace(hijo, respaldo / hijo.name)
         for archivo in (marca, fuente):
@@ -232,7 +232,7 @@ class CacheDescargasInfoObras:
         # una sección que ahora quedó vacía.
         if destino.is_dir():
             for anterior in destino.iterdir():
-                if es_archivo_seace(anterior.name):
+                if es_archivo_seace(anterior.name) or anterior.name == "Verificación MEF":
                     continue
                 if anterior.is_dir():
                     shutil.rmtree(anterior)
@@ -244,6 +244,10 @@ class CacheDescargasInfoObras:
             if not archivo.is_file() or archivo.name in {_MARCA, _MARCA_PARCIAL, _ESTADO}:
                 continue
             relativa = archivo.relative_to(origen)
+            # MEF se materializa por selección de experiencia, nunca desde el
+            # corpus compartido por obra (incluye caches anteriores al cambio).
+            if relativa.parts[0] == "Verificación MEF":
+                continue
             es_informe = relativa.parts[0] == _INFORMES
             if es_informe and not informe_en_periodo(
                     archivo.name, fecha_ini, fecha_fin):

@@ -556,6 +556,47 @@ test("e2e · evaluación sana: ningún aviso crítico en el espejo", () => {
   fs.rmSync(ws, { recursive: true, force: true });
 });
 
+test("ADR-S013 · transporta servicio literal esperado/declarado y no lo toma del evaluador", () => {
+  const ws = taller(SANA);
+  try {
+    const basesPath = path.join(ws, "bases.json");
+    const bases = JSON.parse(fs.readFileSync(basesPath, "utf8"));
+    bases.metadata_concurso.servicio_esperado = {
+      tipo: "supervision_obra", texto: "SUPERVISIÓN DE LA EJECUCIÓN DE OBRA",
+      pagina_pdf: 12, fuente: "bases",
+    };
+    fs.writeFileSync(basesPath, JSON.stringify(bases));
+    const profPath = path.join(ws, "_prof", "profesional_01.json");
+    const prof = JSON.parse(fs.readFileSync(profPath, "utf8"));
+    prof.experiencias[0].servicio_declarado = {
+      tipo: "ejecucion_obra", texto: "ejecución de obra", pagina_pdf: 101,
+      fuente: "certificado",
+    };
+    fs.writeFileSync(profPath, JSON.stringify(prof));
+    const evaluacionPath = path.join(ws, "evaluacion.json");
+    const evaluacion = JSON.parse(fs.readFileSync(evaluacionPath, "utf8"));
+    evaluacion.experiencias_eval["1"] = [{ n: 1,
+      servicio_declarado: { tipo: "supervision_obra", texto: "JUICIO NO ES FUENTE" },
+      cargo_bases_valido: "SÍ — razón", tipo_obra_valido: "SÍ — razón" }];
+    fs.writeFileSync(evaluacionPath, JSON.stringify(evaluacion));
+    const espejo = main(ws);
+    assert.deepStrictEqual(espejo._meta.servicio_esperado, bases.metadata_concurso.servicio_esperado);
+    assert.deepStrictEqual(espejo.profesionales[0].experiencias[0].servicio_declarado, prof.experiencias[0].servicio_declarado);
+    assert.strictEqual(espejo.profesionales[0].experiencias[0].servicio_declarado.texto, "ejecución de obra");
+  } finally { fs.rmSync(ws, { recursive: true, force: true }); }
+});
+
+test("ADR-S013 · servicio nulo/legacy valida y objeto sin tipo se rechaza en zod", () => {
+  const { JsonEspejo } = require("../schemas/espejo");
+  const base = { _meta: { analisis_id: "legacy", servicio_esperado: null }, postor: {},
+    profesionales: [{ n_prof: 1, cargo: "X", experiencias: [{ n: 1, servicio_declarado: null }] }] };
+  assert.doesNotThrow(() => JsonEspejo.parse(base));
+  assert.throws(() => JsonEspejo.parse({ ...base,
+    _meta: { analisis_id: "bad", servicio_esperado: { texto: "sin tipo" } } }));
+  assert.throws(() => JsonEspejo.parse({ ...base,
+    _meta: { analisis_id: "bad-text", servicio_esperado: { tipo: "otro", texto: {} } } }));
+});
+
 test("mínimo profesional estructurado llega al espejo y pasa zod", () => {
   const ws = taller(SANA);
   try {
@@ -664,6 +705,90 @@ const cli = (ws) => {
   const r = spawnSync(process.execPath, [path.join(__dirname, "consolidar_espejo.js"), ws], { encoding: "utf-8" });
   return { status: r.status, out: (r.stdout || "").trim() };
 };
+
+test("preparación e2e · fecha de obra queda pendiente sin bloquear otros profesionales", () => {
+  const ev = JSON.parse(JSON.stringify(SANA));
+  ev.resumen_evaluacion = { factores: [{ factor: "A — Experiencia adicional", aplica: true, puntaje: 40 }], puntaje_total: 40 };
+  const ws = taller(ev);
+  try {
+    const archivo = path.join(ws, "_prof", "profesional_01.json");
+    const raw = JSON.parse(fs.readFileSync(archivo, "utf8"));
+    raw.experiencias[0].fechas_fuente.fecha_final.texto = "TÉRMINO DE OBRA: 01/01/2020";
+    fs.writeFileSync(archivo, JSON.stringify(raw));
+    const original = fs.readFileSync(archivo, "utf8");
+    const gate = spawnSync(process.execPath, [path.join(__dirname, "auditar_entradas_criticas.js"), ws], { encoding: "utf8" });
+    assert.strictEqual(gate.status, 0, gate.stdout + gate.stderr);
+    assert.strictEqual(fs.readFileSync(archivo, "utf8"), original);
+    const preparados = JSON.parse(fs.readFileSync(path.join(ws, "profesionales_preparados.json"), "utf8"));
+    assert.match(preparados.profesionales[0].experiencias[0].fecha_final, /^POR VERIFICAR/);
+    assert.match(preparados.fuentes[0].sha256, /^[a-f0-9]{64}$/);
+    const cola = JSON.parse(fs.readFileSync(path.join(ws, "revisiones_extraccion.json"), "utf8"));
+    assert.ok(cola.revisiones.some(r => r.n_prof === 1 && r.n_experiencia === 1 && r.campo === "fecha_final" && r.pagina_pdf === 110));
+    // No confiar en una copia preparada manipulada o antigua.
+    preparados.profesionales[0].experiencias[0].fecha_final = "2030-01-01";
+    fs.writeFileSync(path.join(ws, "profesionales_preparados.json"), JSON.stringify(preparados));
+    const espejo = main(ws);
+    const e = espejo.profesionales[0].experiencias[0];
+    assert.match(e.fecha_final, /^POR VERIFICAR/);
+    assert.match(e.observaciones, /TÉRMINO DE OBRA/);
+    assert.strictEqual(e.dias, null);
+    assert.strictEqual(e.incluye_covid, null);
+    assert.strictEqual(e.cert_antes_culminar, null);
+    assert.match(espejo.profesionales[0].cumple, /^POR VERIFICAR/);
+    assert.deepStrictEqual(espejo.profesionales[0].total, {});
+    assert.strictEqual(espejo.resumen_evaluacion.puntaje_total, null);
+    assert.strictEqual(espejo.resumen_evaluacion.factores[0].puntaje, null);
+    assert.match(espejo.profesionales[1].cumple, /estructuras/);
+    assert.strictEqual(espejo.profesionales[1].experiencias[0].dias, 30);
+    assert.deepStrictEqual(criticos(espejo.observaciones_claude), []);
+    assert.doesNotThrow(() => require("../schemas/espejo").JsonEspejo.parse(espejo));
+  } finally { fs.rmSync(ws, { recursive: true, force: true }); }
+});
+
+test("preparación e2e · hechos no se sobrescriben desde el evaluador en ambas rutas", () => {
+  for (const tipo of ["obras", "expedientes"]) {
+    const ev = JSON.parse(JSON.stringify(SANA));
+    ev.experiencias_eval[1][0] = { ...ev.experiencias_eval[1][0], funciones_similares: "FUNCIÓN INVENTADA", incluye_covid: "SÍ", cert_antes_culminar: "SÍ" };
+    const ws = taller(ev);
+    try {
+      const archivo = path.join(ws, "_prof", "profesional_01.json");
+      const raw = JSON.parse(fs.readFileSync(archivo, "utf8"));
+      raw.experiencias[0].fecha_emision = raw.experiencias[0].fecha_final;
+      raw.experiencias[0].funciones_similares = null;
+      const segunda = raw.experiencias[1];
+      segunda.funciones_similares = ["Controló metrados", "Revisó valorizaciones"];
+      segunda.funciones_fuente = { texto: "El profesional controló metrados y revisó valorizaciones", pagina_pdf: 111 };
+      fs.writeFileSync(archivo, JSON.stringify(raw));
+      const espejo = main(ws, { tipo });
+      const e = espejo.profesionales[0].experiencias[0];
+      assert.strictEqual(e.funciones_similares, null);
+      assert.strictEqual(e.incluye_covid, "NO");
+      assert.strictEqual(e.cert_antes_culminar, "NO", "el mismo día no es antes");
+      assert.strictEqual(espejo.profesionales[0].experiencias[1].funciones_similares, "Controló metrados; Revisó valorizaciones");
+      assert.strictEqual(espejo._meta.tipo_evaluacion, tipo);
+      assert.doesNotThrow(() => require("../schemas/espejo").JsonEspejo.parse(espejo));
+    } finally { fs.rmSync(ws, { recursive: true, force: true }); }
+  }
+});
+
+test("preparación e2e · conserva ítem, literal y CUI sin promover una verificación", () => {
+  const ws = taller(SANA);
+  try {
+    const archivo = path.join(ws, "_prof", "profesional_01.json");
+    const raw = JSON.parse(fs.readFileSync(archivo, "utf8"));
+    raw.experiencias[0].proyecto = "Supervisión de remodelación del hospital — ÍTEM 1: sala de operaciones";
+    raw.experiencias[0].proyecto_fuente = { texto: raw.experiencias[0].proyecto, pagina_pdf: 110 };
+    raw.experiencias[0].cui = "2535573";
+    raw.experiencias[1].funciones_similares = ["Seis pisos", "Sala de operaciones"];
+    fs.writeFileSync(archivo, JSON.stringify(raw));
+    const espejo = main(ws);
+    assert.strictEqual(espejo.profesionales[0].experiencias[0].proyecto, raw.experiencias[0].proyecto);
+    assert.strictEqual(espejo.profesionales[0].experiencias[0].cui, "2535573");
+    assert.strictEqual(espejo.profesionales[0].experiencias[1].funciones_similares, null);
+    assert.match(espejo.profesionales[0].experiencias[1].observaciones, /Seis pisos/);
+    assert.ok(!espejo.observaciones_claude.some(a => a.referencia === "P1 E1" && /alcance/.test(a.mensaje)));
+  } finally { fs.rmSync(ws, { recursive: true, force: true }); }
+});
 
 test("cli · con un crítico: exit code 1 y en ninguna línea dice «OK»", () => {
   const ws = taller({});           // el evaluador no entregó nada

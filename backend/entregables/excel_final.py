@@ -49,6 +49,8 @@ from reglas import (
 )
 from schemas.cargo import etiqueta_hoja
 from validacion.candado_seace import observaciones_temporales
+from validacion.servicio_experiencia import contrastar_servicio, fase_servicio_incompatible
+from entregables.servicio_experiencia import filas_contraste_servicio
 from scripts.generar_excel import (
     AL_HEAD, AL_WRAP, BORDER, F_BOLD, F_CELL, F_HEAD, F_PARTE, F_PROF,
     FILL_BACKEND, FILL_CLAUDE, FILL_HEAD, FILL_PARTE, FILL_PEND, FILL_PROF,
@@ -146,10 +148,10 @@ def _accion_visible(accion) -> Optional[str]:
 
 
 def _rotulo_candado_seace(resultado) -> Optional[str]:
-    """Rótulo de confianza del candado SEACE (T-004 F5), con la fuente única en
-    `validacion/candado_seace.py`. Devuelve `None` para un job anterior a F5
-    (sin el campo `candado`): el bloque se dibuja como siempre y nada rompe."""
+    """El candado coteja datos de contratación, no el contenido documental."""
     from validacion.candado_seace import rotulo
+    if resultado == "confirmado":
+        return "Coincidencias en los datos del proceso"
     return rotulo(resultado)
 
 
@@ -1236,8 +1238,11 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
                   f"{_ddmmaa_larga(vig[1] if vig and len(vig) > 1 else None)}")
             rot = _rotulo_candado_seace(candado.get("resultado"))
             if rot:
-                campo("¿El proceso corresponde a este certificado?", rot,
+                campo("Datos del proceso vs. certificado", rot,
                       None if candado.get("resultado") == "confirmado" else FILL_PEND)
+            if seace.get("estado") == "seleccionado":
+                campo("Contenido de los documentos",
+                      "Por confirmar: tipo de documento y vínculo con el encargo", FILL_PEND)
             if p.get("observacion_fechas"):
                 campo("Observación de fechas", " ".join(p["observacion_fechas"]), FILL_PEND)
         elif str(p.get("via") or "").upper() == "PRIVADA":
@@ -1513,7 +1518,9 @@ def construir_hoja_profesional(
         es_exped = (fx.get("camino") == "expediente"
                     or normalizar_tipo_evaluacion(tipo_evaluacion) == TIPO_EXPEDIENTES)
         ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=10)
-        c = ws.cell(rr, 6, ("PROYECTO CUYO EXPEDIENTE TÉCNICO ELABORÓ ESTE CARGO "
+        c = ws.cell(rr, 6, ("FICHA DEL PROYECTO — servicio de otra fase, por verificar"
+                            if fx.get("servicio_fase_incompatible") else
+                            "PROYECTO CUYO EXPEDIENTE TÉCNICO ELABORÓ ESTE CARGO "
                             "(InfoObras / MEF)" if es_exped else
                             "OBRA EN INFOOBRAS (origen del análisis)"))
         c.font, c.fill, c.alignment = F_HEAD, FILL_HEAD, AL_HEAD
@@ -1541,6 +1548,10 @@ def construir_hoja_profesional(
         # de otra región) pasa inadvertido detrás de un código y un monto correctos.
         kv("Nombre del proyecto" if es_exped else "Nombre de la obra",
            _sin_jerga(fx.get("obra_nombre") or "— (InfoObras no devolvió el nombre)"))
+        if fx.get("servicio_fase_incompatible"):
+            kv("CUI", fx.get("cui") or "—")
+            kv("Alcance de la ficha", "Datos del proyecto identificado. No comprueban el periodo del servicio declarado, que corresponde a otra fase.")
+            return rr - 1
         # #63: un CUI puede tener varios registros de obra (plan de contingencia,
         # obra principal, saldos, ET) — cuando los hay, la ficha lo DECLARA para
         # que el evaluador sepa que se eligió uno entre varios (caso LaFora: el
@@ -1803,19 +1814,29 @@ def construir_hoja_profesional(
         }
         tipo = etiquetas.get(datos.get("proceso_objeto"), datos.get("proceso_objeto") or "—")
         filas = [("Tipo de proceso", tipo)]
-        # F5 — rótulo de confianza. `None` cuando el job es anterior al candado:
-        # entonces el bloque se dibuja exactamente como antes.
+        # El candado coteja datos del proceso, no el contenido de los adjuntos.
         candado = datos.get("candado") if isinstance(datos.get("candado"), dict) else {}
         rotulo_candado = _rotulo_candado_seace(candado.get("resultado"))
         docs = datos.get("docs") or {}
-        for clave, etiqueta in (("bases", "Bases Integradas"), ("contrato", "Contrato firmado")):
-            disponible = (docs.get(clave) or {}).get("estado") == "disponible"
-            filas.append((etiqueta, "1 archivo encontrado"
-                          if disponible else "No disponible en datos abiertos"))
+        for clave, etiqueta in (("bases", "Bases integradas"), ("contrato", "Adjuntos del contrato")):
+            if "documentos" in datos:
+                candidatos = [d for d in (datos.get("documentos") or [])
+                              if isinstance(d, dict) and d.get("categoria") == clave]
+            else:
+                legado = docs.get(clave) or {}
+                candidatos = [legado] if legado.get("url") else []
+            enlaces = sum(bool(d.get("url")) for d in candidatos)
+            valor = (("1 enlace encontrado" if enlaces == 1 else f"{enlaces} enlaces encontrados") if enlaces
+                     else "Sin enlace recuperado en esta consulta")
+            sin_enlace = len(candidatos) - enlaces
+            if sin_enlace:
+                valor += f"; {sin_enlace} registro(s) sin enlace"
+            filas.append((etiqueta, valor))
         if datos.get("fecha_suscripcion"):
             filas.append(("Fecha de firma", datos["fecha_suscripcion"]))
         if rotulo_candado:
-            filas.append(("Correspondencia con el certificado", rotulo_candado))
+            filas.append(("Datos del proceso vs. certificado", rotulo_candado))
+        filas.append(("Contenido de los documentos", "Por confirmar: tipo de documento y vínculo con el encargo"))
         entidad = (datos.get("proceso") or {}).get("entidad_convocante")
         if entidad:
             filas.append(("Entidad convocante", entidad))
@@ -1826,10 +1847,12 @@ def construir_hoja_profesional(
             ws.merge_cells(start_row=rr, start_column=8, end_row=rr, end_column=11)
             cv = ws.cell(rr, 8, valor)
             cv.font, cv.border, cv.alignment = F_CELL, BORDER, AL_WRAP
-            # Amarillo = «por verificar» (convención vigente): solo cuando el
-            # candado NO confirmó. Un `confirmado` va sin resalte.
-            if (etiqueta == "Correspondencia con el certificado"
-                    and candado.get("resultado") != "confirmado"):
+            ws.row_dimensions[rr].height = max(
+                ws.row_dimensions[rr].height or 15,
+                max(-(-len(etiqueta) // 27), -(-len(str(valor)) // 50)) * 13 + 3)
+            if (etiqueta == "Contenido de los documentos" or
+                    (etiqueta == "Datos del proceso vs. certificado"
+                     and candado.get("resultado") != "confirmado")):
                 cv.fill = FILL_PEND
             rr += 1
         observaciones = observaciones_temporales(candado)
@@ -1849,8 +1872,8 @@ def construir_hoja_profesional(
                 ws.row_dimensions[rr].height = max(15, (-(-len(texto) // 70)) * 13 + 2)
                 rr += 1
         if datos.get("ambiguo"):
-            texto = ("Por confirmar — hay varios procesos del mismo tipo; se eligió "
-                     "el más reciente. Verificar la carátula de los documentos encontrados.")
+            texto = ("Por confirmar — hay varios procesos del mismo tipo. "
+                     "La selección automática no acredita el vínculo de sus documentos con el encargo.")
             ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
             c = ws.cell(rr, 6, texto)
             c.font, c.fill, c.border, c.alignment = F_CELL, FILL_PEND, BORDER, AL_WRAP
@@ -2692,7 +2715,8 @@ def construir_hoja_profesional(
         if not (ini and fin):
             return None, None, []
         clamp = []
-        for p in paralizaciones.get((n_prof, n_exp), []):
+        otra_fase = bool((fichas.get((n_prof, n_exp)) or {}).get("servicio_fase_incompatible"))
+        for p in ([] if otra_fase else paralizaciones.get((n_prof, n_exp), [])):
             p_ini, p_fin = periodo_fechas(p)
             ci, cf = max(p_ini, ini), min(p_fin, fin)
             if cf >= ci:
@@ -2700,7 +2724,7 @@ def construir_hoja_profesional(
         tramos = restar_paralizaciones((ini, fin), clamp)
         efectivo = sum(dias_inclusivos(a, b) for a, b in tramos)
         revision = revisiones.get((n_prof, n_exp))
-        if _es_revision_efectiva(revision):
+        if _es_revision_efectiva(revision) or otra_fase:
             return dias_inclusivos(ini, fin), f"{efectivo} PROVISIONAL", clamp
         return dias_inclusivos(ini, fin), efectivo, clamp
 
@@ -2731,21 +2755,9 @@ def construir_hoja_profesional(
         periodo_io = ("— (obra no ubicada en InfoObras)" if not io_ini else
                       f"{io_ini.strftime('%d/%m/%Y')} – "
                       f"{io_fin.strftime('%d/%m/%Y') if io_fin else '(sin fin)'}")
-        cui_cert = e.get("cui")
-        if cui_cert and cui and str(cui_cert).strip() != str(cui).strip():
-            # ambos existen y difieren: el del documento manda, el del sistema se
-            # muestra al lado — nunca uno disfrazado del otro (#60)
-            cui_text = f"{cui_cert} · el sistema identificó el CUI {cui} — verificar"
-        elif cui_cert:
-            cui_text = (f"Citado en el certificado y verificado: {cui_cert}"
-                        if cui and str(cui_cert).strip() == str(cui).strip()
-                        else f"Citado en el certificado: {cui_cert}")
-        elif cui:
-            cui_text = f"No consignado en el certificado — el sistema identificó el CUI {cui}"
-        else:
-            cui_text = "No consignado en el certificado"
-        if es_exp_prof:
-            cui_text = rotulo_cui(procedencia)
+        # El CUI citado y el usado por el backend son procedencias distintas.
+        # Incluso si coinciden, esa igualdad no acredita la identidad de la obra.
+        cui_text = rotulo_cui(procedencia)
 
         sup = set(e.get("supuestos") or [])
         filas_recap = [
@@ -2756,10 +2768,16 @@ def construir_hoja_profesional(
             ("CARGO QUE OCUPÓ", e.get("cargo_ocupado"), "cargo_ocupado"),
             # Si el certificado no citó código, la identificación nació en el
             # enriquecimiento del servidor y se presenta como inferencia.
-            ("CÓDIGO (CUI/SNIP)", cui_text, "cui_inferido" if (cui and not cui_cert) else "cui"),
+            ("CÓDIGO (CUI/SNIP)", cui_text,
+             "cui_inferido" if (procedencia.get("cui_utilizado")
+                                and not procedencia.get("cui_declarado")) else "cui"),
         ]
         if not es_exp_prof:
             filas_recap.insert(4, ("PERIODO (InfoObras)", periodo_io, None))
+        contraste = (fx or {}).get("contraste_servicio")
+        if contraste:
+            filas_recap.extend((label, value, "contraste_servicio") for label, value in
+                               filas_contraste_servicio(contraste))
         for label, value, campo in filas_recap:
             cl = ws.cell(r, 1, label); cl.font, cl.fill, cl.border = F_BOLD, FILL_RECAP, BORDER
             cl.alignment = Alignment(vertical="top", wrap_text=True)
@@ -2771,6 +2789,8 @@ def construir_hoja_profesional(
                 {"fecha_inicial", "fecha_final"} & sup)
             if campo == "cui_inferido" or campo in sup or es_periodo_supuesto:
                 cv.fill = FILL_SUPUESTO
+            if campo == "contraste_servicio" and contraste.get("estado") != "coincide":
+                cv.fill = FILL_PEND
             lns = max(1, -(-len(str(value or "—")) // 35))   # B:D ≈ 35 car/línea
             ws.row_dimensions[r].height = max(15, lns * 13 + 2)
             r += 1
@@ -2788,6 +2808,8 @@ def construir_hoja_profesional(
         else:
             ini, fin = _fecha_iso(e.get("fecha_inicial")), _fecha_iso(e.get("fecha_final"))
         fx = fichas.get((n_prof, n_exp))
+        otra_fase = bool((fx or {}).get("servicio_fase_incompatible"))
+        en_revision = en_revision or otra_fase
         # CUI resuelto por el backend (etapa InfoObras); si no, el del espejo
         cui = cuis.get((n_prof, n_exp)) or (fx or {}).get("cui") or e.get("cui")
         procedencia = ((fx or {}).get("_procedencia_cui") or procedencia_cui(e, {
@@ -2797,7 +2819,7 @@ def construir_hoja_profesional(
         r_top = r  # fila del título: el bloque de obra (F:J) arranca alineado aquí
         titulo = f"EXPERIENCIA {n_exp}: {str(e.get('proyecto') or '')}"  # nombre VERBATIM, sin truncar
         extra = " · ".join(x for x in [
-            rotulo_cui(procedencia) if es_exp_prof else (f"CUI {cui}" if cui else ""),
+            rotulo_cui(procedencia),
             f"folio {e['folio']}" if e.get("folio") else ""] if x)
         banda(titulo + (f"  ({extra})" if extra else ""), F_HEAD, FILL_HEAD, 16)
 
@@ -2823,7 +2845,7 @@ def construir_hoja_profesional(
             # SOLO los que caen dentro del periodo que supervisó este profesional;
             # InfoObras trae las paralizaciones de toda la vida de la obra, pero las
             # de antes/después de su ventana no le aplican. Se recortan a [ini, fin].
-            periodos = ([] if es_exp_prof else
+            periodos = ([] if es_exp_prof or otra_fase else
                         paralizaciones.get((n_prof, n_exp), []))
             n_par = n_gap = n_fv = 0
             tuplas: list[tuple[date, date]] = []
@@ -3148,7 +3170,8 @@ def construir_hoja_profesional(
             _p5_tot("(−) Traslapes entre experiencias (ALT11)", None,
                     res5.dias_traslape, FILL_BACKEND)
         _dias_ef = res5.dias_efectivos if res5 else _se
-        _hay_revision = any(
+        _hay_revision = any(fx.get("servicio_fase_incompatible") for clave, fx in fichas.items()
+                            if clave[0] == n_prof) or any(
             _es_revision_efectiva(rev)
             for e in prof.get("experiencias", [])
             if (rev := revisiones.get((n_prof, e.get("n"))))
@@ -3460,11 +3483,22 @@ def generar_excel_final(
 
     paralizaciones = paralizaciones or {}
     cuis = cuis or {}
-    fichas = fichas or {}
+    fichas = {k: dict(v) for k, v in (fichas or {}).items()}
+    # También la generación aislada, sin etapa de búsqueda, muestra lo extraído.
+    # No altera el espejo, los CUI, las paralizaciones ni las fichas del caller.
+    for prof in espejo.get("profesionales", []):
+        for exp in prof.get("experiencias", []):
+            clave = (prof.get("n_prof"), exp.get("n"))
+            fx = fichas.setdefault(clave, {})
+            fx["contraste_servicio"] = contrastar_servicio(espejo, exp)
+            es_exped = _tipo_evaluacion_espejo(espejo) == "expedientes"
+            fx["servicio_fase_incompatible"] = fase_servicio_incompatible(espejo, exp, es_exped)
     revisiones = revisiones or {}
     sunat = sunat or {}
     certificados = certificados or {}
     revisiones_analiticas = len(revisiones)
+    revisiones_analiticas += sum(1 for fx in fichas.values()
+                                if (fx.get("contraste_servicio") or {}).get("estado") == "difiere")
     revisiones_analiticas += sum(
         1 for p in espejo.get("profesionales", []) or []
         if (((p.get("_backend") or {}).get("formacion") or {}).get("estado")
@@ -3587,6 +3621,7 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                 or enr.get("representante_obra") or enr.get("aprobacion_expediente")
                 or enr.get("verificacion_expediente") or enr.get("seace")
                 or enr.get("inventario_documental") or enr.get("cruces_fechas")
+                or enr.get("contraste_servicio")
                 or enr.get("resoluciones_candidatos")
                 or enr.get("sin_documentos_mef") or enr.get("contrato_emisor")
                 or enr.get("via") or enr.get("cui") or enr.get("sub_obras") or enr.get("obra")):
@@ -3625,6 +3660,8 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                                  "resoluciones_candidatos": enr.get("resoluciones_candidatos"),
                                  "camino": enr.get("camino"),
                                  "camino_fuente": enr.get("camino_fuente"),
+                                 "contraste_servicio": enr.get("contraste_servicio"),
+                                 "servicio_fase_incompatible": enr.get("servicio_fase_incompatible"),
                                  "seace": enr.get("seace"),
                                  "inventario_documental": enr.get("inventario_documental"),
                                  "documentos_encontrados": enr.get("documentos_encontrados"),

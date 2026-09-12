@@ -49,7 +49,7 @@ def proceso(**over) -> dict:
 
 def cert(**over) -> dict:
     """Certificado real: constancia de INDECONSULT por la supervisión."""
-    return {
+    base = {
         "entidad_contratante": "GOBIERNO REGIONAL DE JUNÍN",
         "entidad_emisora": "INSTITUTO DE CONSULTORIA S.A.",
         "ruc_emisor": "20263373058",
@@ -57,8 +57,18 @@ def cert(**over) -> dict:
         "fecha_inicial": "2021-10-01",
         "fecha_final": "2023-10-11",
         "monto_contrato_soles": None,
-        **over,
     }
+    base.update(over)
+    # Los casos positivos de este fixture representan literalmente el servicio
+    # indicado por tipo_experiencia; los negativos pueden retirar esta clave.
+    tipo = base.get("tipo_experiencia")
+    if "servicio_declarado" not in base and tipo in {"supervision", "expediente"}:
+        base["servicio_declarado"] = {
+            "tipo": "supervision_obra" if tipo == "supervision" else "elaboracion_expediente",
+            "texto": "Supervisión de obra" if tipo == "supervision" else "Elaboración del expediente técnico",
+            "pagina_pdf": 1, "fuente": "certificado",
+        }
+    return base
 
 
 def bloque_seace(proc: dict, c: dict, **over) -> dict:
@@ -146,6 +156,22 @@ def test_regla_a_se_abstiene_con_identidad_insuficiente():
     cruce = evaluar_inicio_vs_contrato(bloque_seace(proceso(), c), c)
     assert cruce.resultado == POR_CONFIRMAR
     assert "señales independientes de la fecha" in cruce.motivo
+
+
+def test_regla_a_no_rescata_historico_entidad_objeto_con_fechas_y_monto():
+    """Fechas/monto no convierten la pareja entidad+objeto en identidad.
+
+    Este fixture representa un job histórico sin RUC del emisor: conserva las
+    coincidencias visibles, pero el gate no habilita una alerta circular.
+    """
+    c = cert(ruc_emisor=None,
+             entidad_contratante="GOBIERNO REGIONAL DE JUNIN SEDE CENTRAL",
+             fecha_inicial="2020-01-01",
+             monto_contrato_soles=3798760.90)
+    proc = proceso(rucs_adjudicatarios=[], fecha_firma="2021-09-24")
+    cruce = evaluar_inicio_vs_contrato(bloque_seace(proc, c), c)
+    assert cruce.resultado == POR_CONFIRMAR
+    assert "entidad y objeto" in cruce.motivo
 
 
 def test_regla_a_se_abstiene_si_la_contradiccion_no_es_de_fechas():

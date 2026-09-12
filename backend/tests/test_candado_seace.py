@@ -47,6 +47,12 @@ def cert_sanchez_meza() -> dict:
         "entidad_emisora": "INSTITUTO DE CONSULTORIA S.A.",
         "ruc_emisor": "20263373058",
         "tipo_experiencia": "supervision",
+        "servicio_declarado": {
+            "tipo": "supervision_obra",
+            "texto": "Constancia de supervisión de obra",
+            "pagina_pdf": 1,
+            "fuente": "certificado",
+        },
         "fecha_inicial": "2021-10-01",
         "fecha_final": "2023-10-11",
         "monto_contrato_soles": None,
@@ -91,13 +97,22 @@ def test_gate_issue83_no_cuenta_adjudicatario():
     assert confirmado_sin_adjudicatario(c.como_dict()) is False
 
 
-def test_gate_issue83_acepta_dos_senales_independientes():
+def test_motivo_con_adjudicatario_unico_no_afirma_que_falta_su_ruc():
+    candado = evaluar_candado({"rucs_adjudicatarios": ["20123456789"]},
+                             {"ruc_emisor": "20123456789"})
+    assert candado.resultado == POR_CONFIRMAR
+    assert "Señales fuertes a favor: 1" in candado.motivo
+    assert "Falta cotejar el RUC" not in candado.motivo
+
+
+def test_gate_issue83_no_acepta_entidad_y_objeto_solos():
     c = evaluar_candado(proceso_sanchez_meza(), {
         **cert_sanchez_meza(), "ruc_emisor": None,
         "entidad_contratante": "GOBIERNO REGIONAL DE JUNIN SEDE CENTRAL",
     })
-    assert c.resultado == CONFIRMADO
-    assert confirmado_sin_adjudicatario(c) is True
+    # entidad+objeto ya no puede rescatar circularmente el RUC ausente.
+    assert c.resultado == POR_CONFIRMAR
+    assert confirmado_sin_adjudicatario(c) is False
 
 
 def test_gate_issue83_ignora_temporal_fuerte_persistida():
@@ -108,9 +123,19 @@ def test_gate_issue83_ignora_temporal_fuerte_persistida():
         {"nombre": "objeto", "fuerza": "fuerte", "sentido": "a_favor"},
         {"nombre": "temporal", "fuerza": "fuerte", "sentido": "a_favor"},
     ]}
-    assert confirmado_sin_adjudicatario(base) is True
+    assert confirmado_sin_adjudicatario(base) is False
     solo_fecha = {**base, "senales": [base["senales"][2]]}
     assert confirmado_sin_adjudicatario(solo_fecha) is False
+
+
+def test_gate_issue83_no_abre_senales_inventadas():
+    candado = {"resultado": CONFIRMADO, "senales": [
+        {"nombre": "entidad", "fuerza": "fuerte", "sentido": "a_favor"},
+        {"nombre": "objeto", "fuerza": "fuerte", "sentido": "a_favor"},
+        {"nombre": "productor_hipotetico", "fuerza": "fuerte", "sentido": "a_favor"},
+        {"nombre": "adjudicatario", "fuerza": "fuerte", "sentido": "a_favor"},
+    ]}
+    assert confirmado_sin_adjudicatario(candado) is False
 
 
 # ── 2 · Degradación por metadata incompleta ──────────────────────────────────
@@ -214,7 +239,7 @@ def test_entidad_identica_suma_a_favor():
     c = evaluar_candado(proceso, cert)
     entidad = next(s for s in c.senales if s.nombre == "entidad")
     assert entidad.sentido == "a_favor", entidad.detalle
-    assert c.resultado == CONFIRMADO
+    assert c.resultado == POR_CONFIRMAR
 
 
 # ── 5 · Señal temporal DÍA A DÍA (nunca truncada a mes) ──────────────────────
@@ -317,7 +342,7 @@ def test_altiplano_sin_proceso_de_supervision():
     assert {clasificar_proceso(p)[0] for p in procesos} == {"otro"}
     sel = seleccionar_proceso(procesos, "supervision")
     assert sel["elegido"] is None
-    assert "no tiene proceso de supervision" in sel["motivo"]
+    assert "consulta no devolvió" in sel["motivo"]
 
 
 # ── 8 · Extracción del resumen desde la forma OCDS real ──────────────────────
@@ -338,6 +363,8 @@ def test_resumen_proceso_desde_ocds():
              "identifier": {"scheme": "PE-RUC", "id": "20263373058"}},
         ],
         "tender": {"title": "AS-SM-28-2021-GRJ-CS-1",
+                   "description": "Servicio de supervisión del proyecto",
+                   "items": [{"id": "i1", "description": "Supervisión"}],
                    "value": {"amount": 3799140.81},
                    "tenderPeriod": {"startDate": "2021-07-14T00:00:00-05:00"}},
         "contracts": [{"dateSigned": "2021-09-24T00:00:00-05:00",
@@ -360,6 +387,9 @@ def test_resumen_proceso_desde_ocds():
     assert r["vigencia_inicio"] == "2021-09-25"
     assert r["vigencia_fin"] == "2024-03-12"
     assert r["monto"] == pytest.approx(3798760.90)
+    assert r["descripcion"] == "Servicio de supervisión del proyecto"
+    assert r["items"] == [{"id": "i1", "description": "Supervisión"}]
+    assert r["contratos"] == [{"id": None, "titulo": None, "award_id": None}]
 
 
 def test_resumen_abarca_todos_los_contratos_no_solo_el_primero():
@@ -375,17 +405,23 @@ def test_resumen_abarca_todos_los_contratos_no_solo_el_primero():
                           "INVERSIONES EN SALUD"},
         "tender": {"title": "CP-SM-9-2017-PRONIS-1"},
         "contracts": [
-            {"id": "2250234", "dateSigned": "2018-04-17T00:00:00-05:00",
+            {"id": "2250234", "title": "Liquidación", "awardID": "a1",
+             "dateSigned": "2018-04-17T00:00:00-05:00",
              "period": {"startDate": "2024-04-24T00:00:00-05:00",
                         "endDate": "2024-04-25T00:00:00-05:00"},
              "value": {"amount": 1000.0}},
-            {"id": "1153133", "dateSigned": "2018-04-17T00:00:00-05:00",
+            {"id": "1153133", "title": "Contrato principal", "awardID": "a1",
+             "dateSigned": "2018-04-17T00:00:00-05:00",
              "period": {"startDate": "2018-04-18T00:00:00-05:00",
                         "endDate": "2020-05-01T00:00:00-05:00"},
              "value": {"amount": 2000.0}},
         ],
     }
     r = resumen_proceso(comp)
+    assert r["contratos"] == [
+        {"id": "2250234", "titulo": "Liquidación", "award_id": "a1"},
+        {"id": "1153133", "titulo": "Contrato principal", "award_id": "a1"},
+    ]
     assert r["vigencia_inicio"] == "2018-04-18"
     assert r["vigencia_fin"] == "2024-04-25"
     assert r["fecha_firma"] == "2018-04-17"      # la más TEMPRANA
@@ -397,6 +433,8 @@ def test_resumen_abarca_todos_los_contratos_no_solo_el_primero():
     # Tipo y fechas no bastan: el proceso queda por confirmar sin dos señales
     # fuertes de identidad independientes.
     assert c.resultado == POR_CONFIRMAR, [s.detalle for s in c.senales]
+    assert "varios contratos distintos" in c.motivo
+    assert c.como_dict()["contratos_multiples"] is True
 
 
 # ── 9 · Los entregables muestran el rótulo correcto en los 3 estados ─────────
@@ -445,7 +483,11 @@ def test_excel_muestra_el_rotulo_de_los_tres_estados(tmp_path, resultado):
     texto = _textos_excel(
         tmp_path, _seace({"resultado": resultado, "motivo": "motivo de prueba",
                           "senales": []}))
-    assert rotulo(resultado) in texto
+    esperado = "Coincidencias en los datos del proceso" if resultado == CONFIRMADO else rotulo(resultado)
+    assert esperado in texto
+    assert "Contenido de los documentos" in texto
+    assert "Por confirmar: tipo de documento y vínculo con el encargo" in texto
+    assert rotulo(CONFIRMADO) not in texto
     if resultado == CONFIRMADO:
         assert "motivo de prueba" not in texto      # solo se explica lo dudoso
     else:
@@ -503,7 +545,10 @@ def test_indice_del_zip_muestra_el_rotulo(tmp_path, resultado):
             {"resultado": resultado, "motivo": "m", "senales": []})}})
     with zipfile.ZipFile(salida) as zf:
         indice = zf.read("indice.txt").decode("utf-8")
-    assert rotulo(resultado) in indice
+    esperado = "Coincidencias en los datos del proceso" if resultado == CONFIRMADO else rotulo(resultado)
+    assert esperado in indice
+    assert "Descargar no equivale a verificar" in indice
+    assert rotulo(CONFIRMADO) not in indice
 
 
 def test_indice_zip_confirmado_conserva_observacion_temporal(tmp_path):

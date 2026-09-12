@@ -97,27 +97,30 @@ def test_sin_proceso_del_tipo_devuelve_none_jamas_otro_tipo():
     solo_obra = [HOSPITAL[3]]
     r = seleccionar_proceso(solo_obra, TIPO_EXPEDIENTE)
     assert r["elegido"] is None, "antes de cruzar de tipo, se devuelve nada"
-    assert "no tiene proceso de expediente" in r["motivo"]
+    assert "consulta no devolvió" in r["motivo"]
     assert "ejecucion" in r["motivo"]  # y dice qué SÍ había
 
 
-def test_desempate_por_vigencia_solo_dentro_del_mismo_tipo():
+def test_varios_del_tipo_con_solape_quedan_pendientes_de_identidad():
     madre = _proc("m", "Supervisión de la obra: Hospital X",
                   contratos=[{"period": {"startDate": "2019-01-01", "endDate": "2021-06-30"}}])
     saldo = _proc("s", "Supervisión del saldo de obra: Hospital X",
                   contratos=[{"period": {"startDate": "2022-01-01", "endDate": "2023-06-30"}}])
     r = seleccionar_proceso([madre, saldo], TIPO_SUPERVISION,
                             periodo=(date(2022, 3, 1), date(2023, 1, 31)))
-    assert r["elegido"]["ocid"] == "s"
-    assert r["seleccion"] == "objeto+vigencia"
-    assert "solapa" in r["motivo"]
+    assert r["elegido"] is None
+    assert r["seleccion"] is None
+    assert r["ambiguo"] is True
+    assert "identidad de contratación pendiente" in r["motivo"]
 
 
-def test_sin_periodo_prefiere_el_proceso_madre():
+def test_madre_y_saldo_en_cualquier_orden_quedan_ambiguos():
     madre = _proc("m", "Supervisión de la obra: Hospital X")
     saldo = _proc("s", "Supervisión del saldo de obra: Hospital X")
     r = seleccionar_proceso([saldo, madre], TIPO_SUPERVISION)
-    assert r["elegido"]["ocid"] == "m"
+    assert r["elegido"] is None
+    assert r["seleccion"] is None
+    assert r["ambiguo"] is True
 
 
 # ── documentos ───────────────────────────────────────────────────────────────
@@ -353,21 +356,43 @@ def test_actualizar_es_atomico_y_tolera_fallos(tmp_path):
     assert r2["vigentes"] == ["contratos_2018.xlsx"] and not pedidos
 
 
-def test_dos_procesos_del_tipo_sin_solape_elige_el_mas_reciente_y_lo_marca():
-    """Caso real (CUI 2279396, prueba de humo 29-jul): supervisiones de 2017 y
-    2022 sin vigencias en la fuente. Ni silencio ni azar: el más reciente, con
-    la ambigüedad marcada para que aguas abajo se pida verificación."""
+def test_dos_procesos_del_tipo_sin_solape_quedan_ambiguos():
+    """La fecha ausente no habilita escoger un proceso por recencia."""
     viejo = _proc("v", "Supervisión de la obra: Hospital X")
     viejo["date"] = "2017-06-01T00:00:00Z"
     nuevo = _proc("n", "Supervisión de la obra: Hospital X")
     nuevo["date"] = "2022-09-01T00:00:00Z"
     r = seleccionar_proceso([viejo, nuevo], TIPO_SUPERVISION)
-    assert r["elegido"]["ocid"] == "n"
+    assert r["elegido"] is None
+    assert r["seleccion"] is None
     assert r["ambiguo"] is True
-    assert "VERIFICAR" in r["motivo"]
+    assert "identidad de contratación pendiente" in r["motivo"]
     # y con uno solo del tipo, nada de ambigüedad
     r1 = seleccionar_proceso([nuevo], TIPO_SUPERVISION)
     assert r1.get("ambiguo") in (None, False)
+
+
+def test_alternativas_conservan_identidad_basica_y_contratos_sin_documentos():
+    proceso = _proc("ocid-1", "Supervisión de la obra X",
+                     contratos=[{"id": "c-1", "title": "Contrato X",
+                                 "documents": [{"url": "secreto"}]}])
+    r = seleccionar_proceso([proceso], TIPO_SUPERVISION)
+    assert r["alternativas"] == [{
+        "ocid": "ocid-1", "nomenclatura": "Supervisión de la obra X",
+        "tipo": TIPO_SUPERVISION, "es_saldo": False,
+        "contratos": [{"id": "c-1", "titulo": "Contrato X"}],
+    }]
+
+
+def test_multiples_del_tipo_no_dependen_del_orden_ni_de_fechas():
+    a = _proc("a", "Supervisión de la obra X")
+    b = _proc("b", "Supervisión de la obra Y")
+    a["date"], b["date"] = "2026-01-01", "2010-01-01"
+    primero = seleccionar_proceso([a, b], TIPO_SUPERVISION)
+    invertido = seleccionar_proceso([b, a], TIPO_SUPERVISION)
+    for r in (primero, invertido):
+        assert r["elegido"] is None and r["seleccion"] is None
+        assert r["ambiguo"] is True
 
 
 # ── DOC/DOCX (Bases de la Universidad Nacional de Música, Muraria 6-sep-2026) ─

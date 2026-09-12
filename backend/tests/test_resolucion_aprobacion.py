@@ -239,7 +239,7 @@ def test_interpretar_publica_la_fecha_descartada_y_el_motivo():
     assert "no corresponde al año del número" in r["fecha_motivo"]
     assert ("La fecha leída (22/03/2011) no es plausible para la resolución "
             "004321-2025 y se omitió") in r["resumen"]
-    assert "Resolución de aprobación del 14/08/2025." in r["resumen"]
+    assert "Documento MEF del 14/08/2025; tipo de acto por confirmar." in r["resumen"]
 
 
 def test_interpretar_sin_ninguna_fecha_plausible_deja_fecha_en_none():

@@ -38,6 +38,7 @@ import requests
 
 from entregables.certeza import identificacion_panel, normalizar_motivo_fuente
 from entregables.procedencia import procedencia_cui, rotulo_cui
+from entregables.servicio_experiencia import lineas_contraste_servicio
 
 logger = logging.getLogger(__name__)
 
@@ -863,21 +864,23 @@ _CAMPOS_INDICE_JSON = (
 
 
 def _linea_candado_seace(info: dict) -> Optional[str]:
-    """Rótulo de confianza de los documentos SEACE de esta experiencia (F5).
-
-    `None` cuando la experiencia no tiene proceso elegido o cuando el job es
-    ANTERIOR al candado: en ese caso el índice sale byte a byte como antes.
-    """
+    """Separar coincidencia de datos del proceso de revisión de sus archivos."""
     seace = info.get("seace") if isinstance(info.get("seace"), dict) else {}
     candado = seace.get("candado") if isinstance(seace.get("candado"), dict) else {}
     from validacion.candado_seace import observaciones_temporales, rotulo
     texto = rotulo(candado.get("resultado"))
     if not texto:
-        return None
+        if seace.get("estado") != "seleccionado":
+            return None
+        texto = "Por confirmar — sin cotejo de datos del proceso registrado"
+    if candado.get("resultado") == "confirmado":
+        texto = "Coincidencias en los datos del proceso"
     observaciones = observaciones_temporales(candado)
     if observaciones:
         texto += "\nObservación de fechas: " + " ".join(observaciones)
-    return f"Documentos del proceso (SEACE): {texto}"
+    return (f"Proceso SEACE (datos de contratación): {texto}\n"
+            "Contenido de los documentos: por confirmar el tipo de documento "
+            "y su vínculo con el encargo. Descargar no equivale a verificar.")
 
 
 def _indice_txt(meta: dict, registros: list[dict], cabecera: list[str]) -> str:
@@ -1090,6 +1093,7 @@ def construir_zip_infoobras(
                 lineas_identidad = [detalle_cui,
                                     f"Vía: {procedencia['via'] or 'no informada'}"]
                 lineas_identidad.extend(_lineas_ficha_infoobras(info))
+                lineas_identidad.extend(lineas_contraste_servicio(espejo, e))
                 if identificacion:
                     lineas_identidad.append(f"Identificación: {identificacion['etiqueta']}")
                 datos_subobras = [s for s in (info.get("sub_obras") or [])
@@ -1124,7 +1128,9 @@ def construir_zip_infoobras(
                                 and p.name.upper() != "IDENTIFICACION.TXT"]
                     reales = [p for p in archivos
                               if not p.name.upper().endswith(
-                                  ("_ERROR.TXT", "_NO_DISPONIBLE.TXT", "SIN_DOCUMENTOS.TXT"))]
+                                  ("_ERROR.TXT", "_NO_DISPONIBLE.TXT", "SIN_DOCUMENTOS.TXT",
+                                   "DOCUMENTOS_MEF.JSON", "DOCUMENTOS_MEF.TXT",
+                                   "DOCUMENTOS_SEACE.JSON", "DOCUMENTOS_SEACE.TXT"))]
                     notas = [p for p in archivos if p not in reales]
                     # Notas y documentos van AMBOS al árbol de la experiencia,
                     # conservando sus subcarpetas de sección.

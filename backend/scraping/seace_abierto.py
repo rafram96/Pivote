@@ -290,6 +290,61 @@ def documentos(comp: dict) -> list[dict]:
     return docs
 
 
+def documentos_prioritarios(comp: dict, contrato_id=None) -> list[dict]:
+    """Devuelve los adjuntos documentales prioritarios del proceso.
+
+    Se conserva el orden publicado por OCDS: primero las bases integradas del
+    ``tender`` y después los adjuntos de cada contrato.  Un identificador de
+    contrato explícito es un filtro exacto, no una selección con respaldo.
+    Los registros se copian a una forma estable para que la entrada nunca sea
+    mutada y los documentos sin URL sigan siendo visibles como faltantes.
+    """
+    ocid = comp.get("ocid")
+    ocid = None if ocid is None else str(ocid)
+    resultado = []
+    vistos = set()
+
+    def agregar(doc, categoria, id_contrato=None):
+        id_documento = doc.get("id")
+        id_documento = None if id_documento is None else str(id_documento)
+        contrato = None if id_contrato is None else str(id_contrato)
+        url = doc.get("url")
+        url = None if url is None else str(url)
+        identidad = (contrato, id_documento, url)
+        # Sin ID ni enlace no hay identidad estable para colapsar registros.
+        if (id_documento or url) and identidad in vistos:
+            return
+        if id_documento or url:
+            vistos.add(identidad)
+        resultado.append({
+            "categoria": categoria,
+            "id_documento": id_documento,
+            "id_contrato": contrato,
+            "ocid": ocid,
+            "url": url,
+            "titulo": doc.get("title"),
+            "formato": doc.get("format"),
+            "tipo_publicado": doc.get("documentType"),
+            "rol_documental": "por_identificar",
+            "correspondencia": "por_confirmar",
+        })
+
+    tender = comp.get("tender") or {}
+    for doc in tender.get("documents") or []:
+        if (doc.get("documentType") == "biddingDocuments"
+                and "integrada" in _minusculas(doc.get("title"))):
+            agregar(doc, "bases")
+
+    for contrato in comp.get("contracts") or []:
+        id_contrato = contrato.get("id")
+        if contrato_id is not None and str(id_contrato) != str(contrato_id):
+            continue
+        for doc in contrato.get("documents") or []:
+            if doc.get("documentType") in {"contractSigned", "contractAnnexe"}:
+                agregar(doc, "contrato", id_contrato)
+    return resultado
+
+
 def doc_bases_integradas(comp: dict) -> Optional[dict]:
     """El PDF de Bases INTEGRADAS. Las 'Administrativas' son la versión previa
     («la administrativa es la previa» — cliente, 29-jul): solo sirven las
@@ -518,6 +573,53 @@ def tipo_esperado(es_expediente: bool, texto_experiencia: str = "") -> str:
     return TIPO_SUPERVISION      # los concursos del cliente son de supervisión
 
 
+def tipo_por_experiencia(es_expediente: bool, experiencia: dict) -> dict:
+    """Separa rol/servicio de nombre de proyecto; no presume rol por «construcción»."""
+    # Un tipo estructurado explícito orienta la selección, pero su señal fuerte
+    # solo la aporta el literal certificado validado por validacion.servicio_experiencia.
+    explicito = (experiencia.get("servicio_declarado") or {}).get("tipo") if isinstance(experiencia.get("servicio_declarado"), dict) else None
+    if isinstance(explicito, str):
+        tipo = explicito.strip().casefold()
+        mapa = {"supervision_obra": TIPO_SUPERVISION,
+                "ejecucion_obra": TIPO_EJECUCION,
+                "elaboracion_expediente": TIPO_EXPEDIENTE,
+                "preinversion": TIPO_PREINVERSION,
+                "supervision_expediente": None}
+        if tipo in mapa:
+            return {"tipo": mapa[tipo], "fuente": "tipo_declarado",
+                    "motivo": "Tipo estructurado explícito; requiere literal certificado para ser evidencia."}
+    if es_expediente:
+        return {"tipo": TIPO_EXPEDIENTE, "fuente": "camino", "motivo": "Experiencia de expediente técnico."}
+
+    def senales(texto):
+        t = _minusculas(texto)
+        return bool(_RE_SUPERV.search(t)), bool(re.search(r"\bresidente\b|\bejecucion\b|\bconstruccion\b", t))
+
+    for campo in ("cargo_ocupado", "objeto"):
+        valor = experiencia.get(campo) or ""
+        # Un objeto que solo repite el título no aporta evidencia de un rol.
+        if campo == "objeto" and _minusculas(valor) == _minusculas(experiencia.get("proyecto") or ""):
+            continue
+        supervision, ejecucion = senales(valor)
+        if supervision and ejecucion:
+            # «Supervisión de la ejecución/construcción» expresa un solo servicio;
+            # «residente / supervisor» sí conserva dos roles incompatibles.
+            if re.search(r"\bresidente\b", _minusculas(valor)):
+                return {"tipo": None, "fuente": campo, "motivo": "Se declaran roles de residencia y supervisión; confirmar el servicio."}
+        if supervision or ejecucion:
+            return {"tipo": TIPO_SUPERVISION if supervision else TIPO_EJECUCION,
+                    "fuente": campo, "motivo": "Tipo orientado por el rol o servicio declarado, no por el nombre del proyecto."}
+    texto = " ".join(str(experiencia.get(c) or "") for c in
+                     ("proyecto", "objeto", "cargo_ocupado", "descripcion"))
+    legado = tipo_esperado(False, texto)
+    if legado == TIPO_EJECUCION:
+        return {"tipo": None, "fuente": "texto_no_vinculado_al_rol",
+                "motivo": "El texto menciona ejecución o construcción, pero el cargo/objeto no identifica ese servicio. Confirmar si corresponde a supervisión o ejecución."}
+    # Conserva el comportamiento anterior fuera de la ambigüedad corregida.
+    return {"tipo": legado, "fuente": "texto" if _RE_SUPERV.search(_minusculas(texto)) else "por_defecto",
+            "motivo": "Orientación de búsqueda de supervisión; no demuestra por sí sola la identidad del contrato."}
+
+
 def _periodo_proceso(comp: dict) -> Optional[tuple[date, date]]:
     """Ventana temporal del proceso, de contracts[].period o dateSigned."""
     fechas: list[date] = []
@@ -550,59 +652,53 @@ def _solape_dias(a: tuple[date, date], b: tuple[date, date]) -> int:
 
 def seleccionar_proceso(procesos: list[dict], tipo: str,
                         periodo: Optional[tuple[date, date]] = None) -> dict:
-    """El proceso del CUI que corresponde al tipo buscado — SIN cruzar jamás de
-    tipo (requisito N°1 del cliente). Devuelve:
+    """Devuelve una selección conservadora del proceso del tipo solicitado.
 
-      {"elegido": comp|None, "tipo": …, "seleccion": "objeto"|"objeto+vigencia"|None,
-       "motivo": str, "candidatos": [(ocid, tipo, es_saldo), …]}
+    La identidad de contratación no se puede inferir por calendario, recencia,
+    orden de respuesta ni por la etiqueta madre/saldo. ``periodo`` se conserva
+    únicamente por compatibilidad con callers existentes.
 
-    El solape con el periodo declarado SOLO desempata dentro del mismo tipo
-    (obra vs su saldo) — nunca elige contra tipo (§5 del diseño)."""
+    Devuelve:
+
+      {"elegido": comp|None, "tipo": …, "seleccion": "objeto"|None,
+       "motivo": str, "candidatos": [(ocid, tipo, es_saldo), …],
+       "alternativas": [{ocid, nomenclatura, tipo, es_saldo, contratos}, …]}
+
+    ``candidatos`` conserva el resumen histórico; ``alternativas`` deja a la
+    investigación humana la identidad de contratación y no incluye documentos.
+    """
+    del periodo  # Compatibilidad de firma; no es una señal de identidad.
     candidatos = [(p, *clasificar_proceso(p)) for p in procesos]
     resumen = [(p.get("ocid"), t, s) for (p, t, s) in candidatos]
+    alternativas = []
+    for p, t, es_saldo in candidatos:
+        tender = p.get("tender") or {}
+        contratos = []
+        for contrato in p.get("contracts") or []:
+            if not isinstance(contrato, dict):
+                continue
+            contratos.append({"id": contrato.get("id"),
+                              "titulo": contrato.get("title")})
+        alternativas.append({
+            "ocid": p.get("ocid"),
+            "nomenclatura": tender.get("title") or tender.get("description"),
+            "tipo": t,
+            "es_saldo": es_saldo,
+            "contratos": contratos,
+        })
     del_tipo = [(p, s) for (p, t, s) in candidatos if t == tipo]
     if not del_tipo:
         vistos = ", ".join(sorted({t for (_, t, _) in candidatos})) or "ninguno"
         return {"elegido": None, "tipo": tipo, "seleccion": None,
-                "motivo": f"el CUI no tiene proceso de {tipo} en datos abiertos "
-                          f"(procesos vistos: {vistos})",
-                "candidatos": resumen}
+                "motivo": f"consulta no devolvió un proceso de {tipo}; "
+                          f"procesos vistos: {vistos}",
+                "candidatos": resumen, "alternativas": alternativas}
     if len(del_tipo) == 1:
         return {"elegido": del_tipo[0][0], "tipo": tipo, "seleccion": "objeto",
-                "motivo": f"único proceso de {tipo} del CUI", "candidatos": resumen}
-    # varios del mismo tipo (típico: proceso madre + saldo) → desempate
-    if periodo:
-        puntuados = []
-        for (p, _s) in del_tipo:
-            ven = _periodo_proceso(p)
-            puntuados.append((_solape_dias(ven, periodo) if ven else 0, p))
-        puntuados.sort(key=lambda x: x[0], reverse=True)
-        if puntuados[0][0] > 0:
-            return {"elegido": puntuados[0][1], "tipo": tipo,
-                    "seleccion": "objeto+vigencia",
-                    "motivo": f"{len(del_tipo)} procesos de {tipo}; se eligió el que "
-                              f"solapa el periodo del certificado "
-                              f"({puntuados[0][0]} días) — verificable en el ZIP",
-                    "candidatos": resumen}
-    # sin periodo o sin solape: preferir el proceso madre (no-saldo) y, entre
-    # varios, el MÁS RECIENTE — determinista y explícito, nunca "el primero de
-    # la lista" (caso real 2279396: supervisiones de 2017 y 2022 sin vigencias).
-    madre = [p for (p, s) in del_tipo if not s] or [p for (p, _s) in del_tipo]
-
-    def _recencia(p: dict):
-        ven = _periodo_proceso(p)
-        if ven:
-            return ven[1]
-        f = _fecha_iso((p.get("tender") or {}).get("tenderPeriod", {}).get("startDate")) \
-            or _fecha_iso(p.get("date"))
-        return f or date.min
-
-    madre.sort(key=_recencia, reverse=True)
-    ambiguo = len(madre) > 1
-    return {"elegido": madre[0], "tipo": tipo, "seleccion": "objeto",
-            "ambiguo": ambiguo,
-            "motivo": (f"{len(del_tipo)} procesos de {tipo} sin solape que desempate; "
-                       f"se eligió el más reciente — VERIFICAR contra el certificado"
-                       if ambiguo else
-                       f"{len(del_tipo)} procesos de {tipo}; se eligió el principal (no-saldo)"),
-            "candidatos": resumen}
+                "motivo": f"único proceso de {tipo} del CUI", "candidatos": resumen,
+                "alternativas": alternativas}
+    return {"elegido": None, "tipo": tipo, "seleccion": None,
+            "ambiguo": True,
+            "motivo": (f"identidad de contratación pendiente: {len(del_tipo)} "
+                       f"procesos de {tipo}; confirmar cuál corresponde al certificado"),
+            "candidatos": resumen, "alternativas": alternativas}

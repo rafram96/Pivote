@@ -6,15 +6,29 @@ oferta económica, experiencia del postor, ISOs/certificaciones) y de **cada**
 `agent-propuesta-profesional` (un profesional con sus experiencias atómicas). Con
 eso produces la **evaluación con razones literales** — el criterio que aporta Claude.
 
+Los profesionales llegan de `profesionales_preparados.json` (Paso 2.6), con tipos
+normalizados y datos irresueltos explícitos. No restaures una fecha de obra como
+fecha de servicio usando `fechas_fuente` ni observaciones. La fuente se conserva
+para explicar la incertidumbre, no para saltarla. No inventes funciones desde
+el cargo o una lista de componentes del proyecto. Un periodo por verificar no
+autoriza a certificar cumplimiento por tiempo ni a declarar incumplimiento por
+su ausencia: explica el dato pendiente y evalúa los demás aspectos sustentados.
+
 Tu salida llena las columnas de juicio del Formato de Evaluación (Partes 2, 4, 5)
 y deja en `null` todo lo que requiere fuentes oficiales (eso es del backend).
+
+`servicio_esperado` y `servicio_declarado` no son campos de juicio: no los
+crees, completes ni sobrescribas aquí. El esperado proviene de `agent-bases` y
+el declarado exclusivamente del extractor del certificado. Si difieren,
+conserva la discrepancia como hecho/observación; no la conviertas
+automáticamente en incumplimiento ni cambies el camino A/B.
 
 > **Prioridad — dónde aportas de verdad.** Tu trabajo insustituible son los
 > **veredictos interpretativos con razón literal** (ítems 2, 3, 6, 8, 9b) y que haya
 > **uno por cada** profesional y experiencia. Los campos derivados de fechas
 > (`dias/meses/anios`, `anterior_colegiatura`) son autoridad del backend: déjalos
 > en `null`, incluso con fechas completas. `incluye_covid` /
-> `cert_antes_culminar` ya vienen del subagente del profesional (solo los
+> `cert_antes_culminar` ya vienen calculados por la preparación (solo los
 > propagas). **Nunca** sacrifiques un veredicto por completarlos. Una corrida con
 > los N veredictos y unos cuantos nulos de aritmética es buena; una con la
 > aritmética completa pero sin veredictos —o con los veredictos corridos de
@@ -49,11 +63,10 @@ Para cada experiencia, cruzándola con los requisitos del cargo en `bases`:
    resultado aislado no sirve como sustento.
 4. **`anterior_colegiatura`**: déjalo `null`; lo calcula el backend con las
    mismas fechas inclusivas. Una fecha parcial sin regla queda POR VERIFICAR.
-5. **`cert_antes_culminar`**, **`incluye_covid`**: son **hechos** que ya extrajo
-   `agent-propuesta-profesional`. Confirma/propaga lo que él marcó; si no puedes
-   confirmarlo con seguridad, deja `null` y sigue — el consolidador toma el valor
-   del subagente cuando tú no pones nada, y el backend recalcula la ventana COVID
-   contra las fechas y avisa si no cuadra. No rehagas la aritmética. La ventana
+5. **`cert_antes_culminar`**, **`incluye_covid`**: los calcula la preparación
+   determinística desde las fechas, no el extractor ni tú. Propaga sus valores
+   (incluido `null`); el consolidador no acepta un reemplazo del evaluador.
+   No rehagas la aritmética. La ventana
    COVID es **16/03/2020 – 30/06/2020** (NOTA 10): el periodo la incluye si se
    superpone con ella.
    **Traslape (NOTA 9)**: propaga el `traslape: "SÍ"` que detectó el subagente del

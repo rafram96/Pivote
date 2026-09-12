@@ -13,6 +13,7 @@ from orquestador.repositorio import _escribir_atomico
 from scraping.consulta_infoobras import consultar_ficha
 from scraping.seace_abierto import (
     procesos_por_cui, clasificar_proceso, doc_bases_integradas, doc_contrato_firmado,
+    documentos_prioritarios,
 )
 from validacion.candado_seace import resumen_proceso
 
@@ -73,7 +74,12 @@ def _proceso_exacto(cui, propuesto, consultar):
             "fecha_suscripcion": resumen.get("fecha_firma"),
             "vigencia": [resumen.get("vigencia_inicio"), resumen.get("vigencia_fin")],
             "tipo": propuesto["rol"], "motivo": "Proceso exacto de investigación; no seleccionado por fechas",
-            "docs": {"bases": doc_bases_integradas(proceso), "contrato": contrato}}
+            "docs": {"bases": doc_bases_integradas(proceso), "contrato": contrato},
+            # `fuente` ya contiene únicamente el contrato exacto comprobado;
+            # pasar su ID evita recuperar adjuntos de contratos hermanos.
+            "documentos": documentos_prioritarios(
+                fuente, contrato_id=(contratos[0].get("id") if contratos else None)
+            )}
 
 
 def proyectar_asociaciones(job_id, espejo, enriquecimiento, tipo, resultados,

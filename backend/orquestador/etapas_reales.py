@@ -41,6 +41,7 @@ from resolucion.cui import (es_expediente_exp, establecimiento,
                             tipo_evaluacion_del_espejo)
 from validacion.recalculo import fechas_calculo, regla_periodos_de
 from validacion.baremo import baremo_factor_a_valido
+from validacion.servicio_experiencia import contrastar_servicio, fase_servicio_incompatible
 from reglas import anios, dias_efectivos_profesional, periodo_fechas
 from entregables import (completar_revisiones_privadas, desempaquetar_enriquecimiento,
                          generar_excel_final, inyectar_veredicto_backend,
@@ -534,6 +535,8 @@ class EtapaResolucionCuiReal:
                     "cui": None, "via": "REVISION", "sin_verificar": True,
                     "decision": r.get("decision"),
                     "candidatos": r.get("candidatos") or [],
+                    **({"seleccion_obra_pendiente": True}
+                       if r.get("seleccion_obra_pendiente") else {}),
                 }
                 ya = any(it.n_prof == np_ and it.n_exp == ne and not it.resuelto
                          for it in ctx.job.items_revision)
@@ -712,6 +715,27 @@ class EtapaInfoObrasReal:
     def _correr(self, ctx: Contexto, obs: list, cache: dict, cont: dict,
                 cron: Cronometro) -> pipeline.ResultadoEtapa:
 
+        # El contraste existe también sin CUI y en proyectos privados. El camino
+        # del concurso y la identidad del proyecto no cambian por esta señal.
+        for exp, (np_, ne) in ctx.items_experiencia():
+            clave = _clave(np_, ne)
+            enr = ctx.enriquecimiento.setdefault(clave, {})
+            enr["contraste_servicio"] = contrastar_servicio(ctx.espejo, exp)
+            es_exped = es_expediente_exp(
+                exp, tipo_evaluacion_del_espejo(ctx.espejo), self.forzar_expedientes)
+            incompatible = fase_servicio_incompatible(ctx.espejo, exp, es_exped)
+            enr["servicio_fase_incompatible"] = incompatible
+            if incompatible:
+                enr["sin_verificar"] = True
+                for campo in ("paralizaciones", "cobertura_baja", "verificacion_expediente",
+                              "aprobacion_expediente", "resolucion_aprobacion"):
+                    enr.pop(campo, None)
+            if enr["contraste_servicio"]["estado"] == "difiere" or incompatible:
+                obs.append(pipeline.Observacion(
+                    codigo="SERVICIO", severidad=pipeline.Severidad.ADVERTENCIA,
+                    mensaje=enr["contraste_servicio"]["motivo"], origen=self.nombre,
+                    referencia=f"prof={np_} exp={ne}"))
+
         def _fetch_obra(cui, cert_ini, cert_fin, obra_id=None):
             # Cachea SOLO éxitos: si la obra cae por flakiness no se memoriza el
             # None, para que la 2da pasada (o un hermano con el mismo CUI) pueda
@@ -753,11 +777,12 @@ class EtapaInfoObrasReal:
             # reconstruir por qué cada experiencia tomó el camino que tomó.
             enr["camino"] = "expediente" if _es_exped else "obra"
             enr["camino_fuente"] = fuente_camino(_e, _tipo_decl, self.forzar_expedientes)
-            es_exp_aprobado = (not _avances and _aprob_exp is not None and _es_exped)
+            _otra_fase = bool(enr.get("servicio_fase_incompatible"))
+            es_exp_aprobado = (not _otra_fase and not _avances and _aprob_exp is not None and _es_exped)
             # Las paralizaciones pertenecen a la EJECUCIÓN física. Un expediente
             # se verifica con contrato/aprobación y nunca hereda días parados de
             # una construcción posterior o simultánea.
-            periodos = ([] if _es_exped else
+            periodos = ([] if _es_exped or _otra_fase else
                         periodos_inactividad(getattr(obra, "avances", []) or []))
             enr["paralizaciones"] = [
                 {"inicio": p["inicio"].isoformat(), "fin": p["fin"].isoformat(),
@@ -769,7 +794,7 @@ class EtapaInfoObrasReal:
             # tocar su firma. Disjunto de los huecos internos → sin doble conteo.
             # A un EXPEDIENTE no se le aplica: el estudio precede a la construcción
             # y sus fechas jamás caen dentro de las valorizaciones de la obra.
-            if not (es_exp_aprobado or _es_exped):
+            if not (es_exp_aprobado or _es_exped or _otra_fase):
                 _inicio_obra = getattr(obra, "fecha_inicio", None)
                 for a, b in _fuera_de_ventana(
                         getattr(obra, "avances", []) or [], cert_ini, cert_fin,
@@ -782,6 +807,8 @@ class EtapaInfoObrasReal:
                            if _tipo == "antes_inicio_obra" else {}),
                     })
             enr.pop("sin_verificar", None)  # se trajo OK: ya no es incierta
+            if _otra_fase:
+                enr["sin_verificar"] = True  # ficha del proyecto, no respaldo del servicio
             _registrar_obra_consultada(enr, obra, cui)
             enr["codigo_infoobras"] = getattr(obra, "codigo_infoobras", None)
             enr["obra_nombre"] = getattr(obra, "nombre", None)
@@ -807,7 +834,7 @@ class EtapaInfoObrasReal:
             # Verificación de EXPEDIENTES contra el MEF (T-003): si la experiencia es
             # de expediente y hay CUI resuelto, cruzar contra el Banco de Inversiones
             # (contrato/contratista/resolución). Best-effort, no bloquea.
-            if cui and _es_exped:
+            if cui and _es_exped and not _otra_fase:
                 # el SNIP de la obra de InfoObras mejora la cobertura de contratos del MEF
                 _snip = str((getattr(obra, "raw_busqueda", {}) or {}).get("codSnip") or "").strip()
                 _vmef = self._verificar_expediente_mef(_e, cui, _snip)
@@ -846,7 +873,7 @@ class EtapaInfoObrasReal:
             _inicio_obra = getattr(obra, "fecha_inicio", None)
             cob = _cobertura_cert(
                 getattr(obra, "avances", []) or [], cert_ini, cert_fin, _inicio_obra)
-            if not (es_exp_aprobado or _es_exped) \
+            if not (es_exp_aprobado or _es_exped or _otra_fase) \
                     and cob is not None and cob < _COBERTURA_MIN:
                 pct = round(cob * 100)
                 # La etapa REGLAS necesita saberlo: si el clamp deja al profesional
@@ -885,7 +912,7 @@ class EtapaInfoObrasReal:
             # pipeline (descargar_documentos_job, disparada por la API) usando el
             # obra_id de la ficha CONSULTADA, no el de la búsqueda inicial.
 
-        def _enriquecer_subobra(s: dict) -> dict:
+        def _enriquecer_subobra(s: dict, otra_fase=False) -> dict:
             """Cert MULTI-OBRA: para una sub-obra YA resuelta por código, baja su
             ficha real de InfoObras (periodo de valorizaciones, estado, monto) para
             mostrar info+verificación en el Excel. Si el cert consignó el rango de
@@ -901,6 +928,10 @@ class EtapaInfoObrasReal:
                 s["sin_verificar"] = True   # portal flaky → ficha desconocida (no invalida)
                 return s
             s.pop("sin_verificar", None)     # se trajo OK (quizá en la 2ª pasada)
+            if otra_fase:
+                s["sin_verificar"] = True
+                s["servicio_fase_incompatible"] = True
+                s.pop("cobertura", None)
             _registrar_obra_consultada(s, obra, cui)
             avances = getattr(obra, "avances", []) or []
             meses = [date(a.anio, a.mes, 1) for a in avances
@@ -912,13 +943,14 @@ class EtapaInfoObrasReal:
             # experiencia normal. obra_nombre/periodo_valoriz son extras para el encabezado.
             s["ficha"] = {
                 **_fx_de_obra(obra, cui),
+                "servicio_fase_incompatible": otra_fase,
                 "obra_nombre": getattr(obra, "nombre", None),
                 "periodo_valoriz": [vi.isoformat() if vi else None,
                                     vf.isoformat() if vf else None],
             }
             # cruce de tiempo SOLO si el cert dio el rango POR esta obra (la regla
             # del cliente: verificar el tiempo por obra únicamente si es explícito)
-            if si and sf:
+            if si and sf and not otra_fase:
                 if not meses:
                     # obra sin valorizaciones → no hay contra qué cruzar el tiempo
                     s["cobertura"] = {"pct": None, "cubierto": None,
@@ -935,38 +967,35 @@ class EtapaInfoObrasReal:
             return s
 
         def _aplicar_lectura(enr, _vmef, _e, np_, ne, cui):
-            """Lee la resolución de aprobación (capa de texto u OCR local) y la anota
-            en el enriquecimiento: fecha oficial para la Regla B y consultor nombrado."""
-            lectura = self._leer_resolucion_aprobacion(ctx, _e, cui, _vmef)
-            if not lectura:
-                return
-            # Una lectura que CONFIRMA al emisor (vía RESOLUCION, otra resolución del
-            # mismo 08-A) no se pisa con una que no lo nombra: se conserva la
-            # confirmante y solo se toma la fecha nueva si aquella no traía.
+            """Conserva fecha y emisor del mismo documento candidato, sin clasificar el acto."""
             previa = enr.get("resolucion_aprobacion") if isinstance(enr.get("resolucion_aprobacion"), dict) else None
-            if previa and previa.get("coincide_emisor") == "confirma" \
-                    and lectura.get("coincide_emisor") != "confirma":
-                # La fecha oficial es la de la resolución numerada del 08-A; una
-                # modificatoria sin número puede traer una fecha ajena (vigencias).
-                if lectura.get("fecha") and (not previa.get("fecha") or not previa.get("numero")):
-                    previa["fecha"] = lectura["fecha"]
-                    previa["fecha_de_resolucion_numero"] = lectura.get("numero") or _vmef.get("resolucion", {}).get("numero")
-                lectura = previa
+            lectura = self._leer_resolucion_aprobacion(ctx, _e, cui, _vmef)
+            if not lectura and not previa:
+                return
+            from validacion.resolucion_aprobacion import conservar_lectura_resolucion
+            lectura = conservar_lectura_resolucion(previa, lectura)
             enr["resolucion_aprobacion"] = lectura
-            if lectura.get("fecha"):
-                _vmef.setdefault("resolucion", {})["fecha"] = lectura["fecha"]
+            # El resumen MEF también debe referirse al PDF retenido, no conservar
+            # etiqueta/URL de A con la fecha que se leyó en B.
+            _vmef["resolucion"] = {
+                "numero": lectura.get("numero"), "url": lectura.get("url"),
+                "documento": lectura.get("documento") or "Documento MEF leído",
+                "fecha": lectura.get("fecha"), "archivo": lectura.get("archivo"),
+                "sha256": lectura.get("sha256"),
+                "veredicto": "no_verificable", "detalle": "Documento leído; tipo de acto y correspondencia por confirmar.",
+            }
             if lectura.get("coincide_emisor") == "nombra_otro":
                 obs.append(pipeline.Observacion(
                     codigo="RESOLUCION_ET", severidad=pipeline.Severidad.ADVERTENCIA,
-                    mensaje=("la resolución que aprobó el expediente nombra a otro "
+                    mensaje=("el documento MEF leído nombra a otro "
                              f"consultor ({str(lectura.get('detalle_emisor') or '')[:80]}), "
-                             "no al emisor del certificado — confirmar quién lo elaboró"),
+                             "no al emisor del certificado — confirmar tipo de acto y correspondencia"),
                     origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
             elif lectura.get("coincide_emisor") == "confirma":
                 obs.append(pipeline.Observacion(
                     codigo="RESOLUCION_ET", severidad=pipeline.Severidad.INFO,
-                    mensaje="la resolución que aprobó el expediente nombra al emisor "
-                            "del certificado como consultor",
+                    mensaje="el documento MEF leído nombra al emisor del certificado "
+                            "como consultor; tipo de acto y correspondencia por confirmar",
                     origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
 
         def _procesar_sin_obra(_e, np_, ne, cui) -> bool:
@@ -978,6 +1007,15 @@ class EtapaInfoObrasReal:
             k = _clave(np_, ne)
             enr = ctx.enriquecimiento.get(k) or {}
             _tipo_decl = tipo_evaluacion_del_espejo(ctx.espejo)
+            if enr.get("servicio_fase_incompatible"):
+                # No reintentar otra fase como si el certificado la declarase.
+                enr["sin_verificar"] = True
+                enr["camino"] = "expediente" if es_expediente_exp(
+                    _e, _tipo_decl, self.forzar_expedientes) else "obra"
+                enr["camino_fuente"] = fuente_camino(_e, _tipo_decl, self.forzar_expedientes)
+                ctx.enriquecimiento[k] = enr
+                cont["rev"] += 1
+                return True
             if not es_expediente_exp(_e, _tipo_decl, self.forzar_expedientes):
                 return False
             _vmef = self._verificar_expediente_mef(_e, cui, "")
@@ -999,6 +1037,19 @@ class EtapaInfoObrasReal:
                                  "monto": None, "fecha_inicio": None, "fecha_fin": None}
             enr["valorizaciones"] = []
             enr["modificaciones_plazo"] = []
+            if not verificado and isinstance(_vmef, dict) and _vmef.get("documentos_08a"):
+                # Puede haber terminación/carta u otros adjuntos, sin aprobación.
+                # Conservarlos para descarga; no convertirlos en «sin documentos».
+                enr["verificacion_expediente"] = _vmef
+                enr.pop("sin_documentos_mef", None)
+                obs.append(pipeline.Observacion(
+                    codigo="VERIF_MEF", severidad=pipeline.Severidad.ADVERTENCIA,
+                    mensaje=f"CUI {cui}: MEF publica adjuntos, pero no se identificó "
+                            "contrato ni candidato a aprobación; contenido por verificar.",
+                    origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
+                ctx.enriquecimiento[k] = enr
+                cont["ok"] += 1
+                return True
             if not verificado:
                 # Identificado en el Banco de Inversiones (vía MEF/CONTRATO/RESOLUCION)
                 # pero el MEF no publica contrato ni resolución de ese expediente (típico
@@ -1045,7 +1096,8 @@ class EtapaInfoObrasReal:
                 enr = ctx.enriquecimiento.get(_clave(np_, ne)) or {}
                 if enr.get("via") == "MULTI_OBRA" and enr.get("sub_obras"):
                     with cron.experiencia(_clave(np_, ne)):
-                        enr["sub_obras"] = [_enriquecer_subobra(s) for s in enr["sub_obras"]]
+                        enr["sub_obras"] = [_enriquecer_subobra(s, enr.get("servicio_fase_incompatible"))
+                                            for s in enr["sub_obras"]]
                     ctx.enriquecimiento[_clave(np_, ne)] = enr
 
         # 1ª pasada: procesar lo que responda; lo que cae por flakiness se aparta
@@ -1122,7 +1174,7 @@ class EtapaInfoObrasReal:
             if not any(s.get("sin_verificar") for s in enr["sub_obras"]):
                 continue
             with cron.experiencia(_clave(np_, ne)):
-                enr["sub_obras"] = [_enriquecer_subobra(s) if s.get("sin_verificar") else s
+                enr["sub_obras"] = [_enriquecer_subobra(s, enr.get("servicio_fase_incompatible")) if s.get("sin_verificar") else s
                                     for s in enr["sub_obras"]]
             ctx.enriquecimiento[_clave(np_, ne)] = enr
 
@@ -1131,7 +1183,8 @@ class EtapaInfoObrasReal:
         # haya devuelto obra_id: SEACE se consulta por CUI y jamás cruza de tipo.
         from scraping.seace_abierto import (
             clasificar_proceso, codigo_convocatoria, doc_bases_integradas,
-            doc_contrato_firmado, seleccionar_proceso, tipo_esperado,
+            doc_contrato_firmado, documentos_prioritarios, seleccionar_proceso,
+            tipo_por_experiencia,
         )
         from validacion.candado_seace import (
             CONTRADICE, evaluar_candado, resumen_proceso)
@@ -1155,6 +1208,7 @@ class EtapaInfoObrasReal:
                     enr["seace"] = {
                         "estado": "fuente_no_disponible", "cui": cui,
                         "motivo": "la fuente de datos abiertos no respondió; reintentar",
+                        "documentos": [],
                     }
                     obs.append(pipeline.Observacion(
                         codigo="SEACE", severidad=pipeline.Severidad.ADVERTENCIA,
@@ -1168,26 +1222,48 @@ class EtapaInfoObrasReal:
                         "estado": "sin_procesos", "cui": cui,
                         "motivo": "la consulta por CUI no devolvió procesos; no demuestra "
                                   "que no existan en SEACE ni establece la causa",
+                        "documentos": [],
                     }
                     ctx.enriquecimiento[k] = enr
                     continue
 
-                texto = " ".join(str(_e.get(c) or "") for c in
-                                 ("proyecto", "objeto", "cargo_ocupado", "descripcion"))
                 es_exped = es_expediente_exp(_e, tipo_evaluacion_del_espejo(ctx.espejo),
                                              self.forzar_expedientes)   # ADR-010
-                tipo = tipo_esperado(es_exped, texto)
+                tipo_evidencia = tipo_por_experiencia(es_exped, _e)
+                tipo = tipo_evidencia["tipo"]
+                if tipo is None:
+                    enr["seace"] = {
+                        "estado": "tipo_indeterminado", "cui": cui,
+                        "proceso_objeto": None, "tipo_evidencia": tipo_evidencia,
+                        "motivo": tipo_evidencia["motivo"],
+                        "documentos": [],
+                    }
+                    ctx.enriquecimiento[k] = enr
+                    obs.append(pipeline.Observacion(
+                        codigo="SEACE", severidad=pipeline.Severidad.ADVERTENCIA,
+                        mensaje=tipo_evidencia["motivo"], origen=self.nombre,
+                        referencia=f"prof={np_} exp={ne}"))
+                    continue
                 ini, fin = _fecha_iso(_e.get("fecha_inicial")), _fecha_iso(_e.get("fecha_final"))
                 seleccion = seleccionar_proceso(
                     procesos, tipo, periodo=(ini, fin) if ini and fin else None)
                 elegido = seleccion.get("elegido")
                 if elegido is None:
+                    ambiguo = bool(seleccion.get("ambiguo"))
                     enr["seace"] = {
-                        "estado": "sin_tipo", "cui": cui, "proceso_objeto": tipo,
+                        "estado": "identidad_pendiente" if ambiguo else "sin_tipo",
+                        "ambiguo": ambiguo, "cui": cui, "proceso_objeto": tipo,
                         "seleccion": None, "motivo": seleccion.get("motivo"),
                         "candidatos": seleccion.get("candidatos") or [],
+                        "alternativas": seleccion.get("alternativas") or [],
+                        "documentos": [],
                     }
                     ctx.enriquecimiento[k] = enr
+                    if ambiguo:
+                        obs.append(pipeline.Observacion(
+                            codigo="SEACE", severidad=pipeline.Severidad.ADVERTENCIA,
+                            mensaje=seleccion["motivo"], origen=self.nombre,
+                            referencia=f"prof={np_} exp={ne}"))
                     continue
 
                 # F5: la identidad del proceso sale de `resumen_proceso`, que abarca
@@ -1204,6 +1280,7 @@ class EtapaInfoObrasReal:
                     "ocid": elegido.get("ocid"),
                     "proceso_objeto": tipo,
                     "seleccion": seleccion.get("seleccion"),
+                    "tipo_evidencia": tipo_evidencia,
                     "ambiguo": bool(seleccion.get("ambiguo")),
                     "motivo": seleccion.get("motivo"),
                     "fecha_suscripcion": resumen.get("fecha_firma"),
@@ -1223,6 +1300,9 @@ class EtapaInfoObrasReal:
                             "formato": (firmado or {}).get("format"),
                         },
                     },
+                    # Colección completa para materializadores posteriores; se
+                    # conservan `bases`/`contrato` por compatibilidad histórica.
+                    "documentos": documentos_prioritarios(elegido),
                 }
                 # T-004 F5 — candado de identidad: elegir el proceso por CUI+tipo NO
                 # prueba que sea el del certificado. El resumen del proceso se
@@ -1230,6 +1310,7 @@ class EtapaInfoObrasReal:
                 # el candado sin volver a la fuente.
                 seace["proceso"] = resumen
                 candado = evaluar_candado(resumen, {
+                    "servicio_declarado": _e.get("servicio_declarado"),
                     "entidad_contratante": _e.get("entidad_contratante"),
                     "entidad_emisora": _e.get("entidad_emisora"),
                     "ruc_emisor": _e.get("ruc_emisor"),
@@ -1248,12 +1329,6 @@ class EtapaInfoObrasReal:
                         codigo="SEACE", severidad=pipeline.Severidad.ADVERTENCIA,
                         mensaje=f"los documentos del proceso encontrado para el CUI {cui} "
                                 f"no coinciden con el certificado: {candado.motivo}",
-                        origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
-                if seace["ambiguo"]:
-                    obs.append(pipeline.Observacion(
-                        codigo="SEACE", severidad=pipeline.Severidad.ADVERTENCIA,
-                        mensaje=f"hay varios procesos de {tipo} para el CUI {cui}; "
-                                f"se eligió el más reciente y debe confirmarse en el ZIP",
                         origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
                 ctx.enriquecimiento[k] = enr
 
@@ -1326,6 +1401,8 @@ class EtapaInfoObrasReal:
             if enr.get("cui") or enr.get("via") != "REVISION":
                 continue
             if not es_expediente_exp(e, tipo_decl, self.forzar_expedientes):
+                continue
+            if fase_servicio_incompatible(ctx.espejo, e, True):
                 continue
             emisor = str(e.get("entidad_emisora") or e.get("nombre_emisor") or "").strip()
             if not emisor:
@@ -1458,6 +1535,8 @@ class EtapaInfoObrasReal:
                 continue
             if not es_expediente_exp(e, tipo_decl, self.forzar_expedientes):
                 continue
+            if fase_servicio_incompatible(ctx.espejo, e, True):
+                continue
             with self._cron.experiencia(k):
                 lecturas = []
                 vistos_cui: set[str] = set()
@@ -1495,7 +1574,9 @@ class EtapaInfoObrasReal:
         return leidas
 
 
-_NOTAS_DESCARGA = ("_ERROR.TXT", "_NO_DISPONIBLE.TXT", "SIN_DOCUMENTOS.TXT")
+_NOTAS_DESCARGA = ("_ERROR.TXT", "_NO_DISPONIBLE.TXT", "SIN_DOCUMENTOS.TXT",
+                   "DOCUMENTOS_MEF.JSON", "DOCUMENTOS_MEF.TXT",
+                   "DOCUMENTOS_SEACE.JSON", "DOCUMENTOS_SEACE.TXT")
 
 
 def _es_documento_descargado(path: Path) -> bool:
@@ -1612,7 +1693,8 @@ def _experiencias_documentales(profesional, enriquecimiento, tipo_evaluacion):
 def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                               max_descargas=None, descargar=None, reportar=None,
                               descargar_seace=None, dir_cache_seace=None,
-                              intentos_documentos=None, marcar_intento=None):
+                              intentos_documentos=None, marcar_intento=None,
+                              descargar_mef=None):
     """Descarga DIFERIDA de InfoObras y SEACE a {job}.descargas/P{n}_E{m}.
     Cada fuente tiene su propia marca idempotente: una experiencia puede traer
     documentos SEACE aunque no tenga `obra_id`, y completar una fuente no salta
@@ -1634,7 +1716,7 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
     from orquestador.descargas_seace import (
         DOCUMENTOS_SEACE, CacheDescargasSeace, clave_archivo_seace,
         etiqueta_documento_seace,
-        NOTA_SEACE_DESCARGA_FALLIDA, nota_seace_ausencia)
+        NOTA_SEACE_DESCARGA_FALLIDA, nota_seace_ausencia, es_archivo_seace)
     cache_infoobras = CacheDescargasInfoObras(
         carpeta_job(Path(dir_descargas), job_id) / "cache_obras"
     )
@@ -1664,6 +1746,17 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
         intentos_documentos.add(clave_fuente)
         return True
 
+    from orquestador.descargas_mef import DescargasMefSeleccionadas, documentos_por_experiencia
+    mef_seleccionado = DescargasMefSeleccionadas(base.parent, intentar=_intentar,
+                                              descargar=descargar_mef)
+    from orquestador.adjuntos_seace import (
+        MaterializadorAdjuntosSeace, SECCION_SEACE, ErrorIntegridadAdjuntos)
+    adjuntos_seace = MaterializadorAdjuntosSeace(
+        base.parent, cache=cache_seace, intentar=_intentar, descargar=descargar_seace)
+
+    def _docs_mef(e, enr, sub_pos):
+        return documentos_por_experiencia(e, enr, tipo_evaluacion, sub_pos)
+
     requisitos_obra: dict[str, dict] = {}
     tipo_evaluacion = tipo_evaluacion_del_espejo(espejo)
     for profesional in espejo.get("profesionales", []):
@@ -1682,10 +1775,6 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                 enr_requisito.get("camino") or "desconocido")
             if enr_requisito.get("aprobacion_expediente") and not requisito.get("aprobacion"):
                 requisito["aprobacion"] = enr_requisito["aprobacion_expediente"]
-            verificacion = enr_requisito.get("verificacion_expediente")
-            if (isinstance(verificacion, dict) and verificacion.get("cui_confirmado")
-                    and not requisito.get("verificacion")):
-                requisito["verificacion"] = verificacion
 
     def _fuentes(enr, sub_pos):
         if sub_pos is not None and enr.get("estado") != "resuelto":
@@ -1831,39 +1920,13 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                 estado["secciones"]["Aprobación del expediente"] = {"error": True}
                 estado["avisos"].append(
                     "Aprobación del expediente: la descarga falló.")
-        verificacion = requisito.get("verificacion")
-        if verificacion and _toca("Verificación MEF"):
-            try:
-                from scraping.mef import descargar_documentos_expediente
-                mef = descargar_documentos_expediente(
-                    verificacion["cui_confirmado"],
-                    destino_cache / "Verificación MEF",
-                    codsnip=verificacion.get("cod_snip") or "",
-                )
-                descargados_mef = sum(int(valor or 0) for valor in mef.values())
-                contrato_mef = verificacion.get("contrato") or {}
-                resolucion_mef = verificacion.get("resolucion") or {}
-                esperados_mef = (
-                    int(bool(contrato_mef.get("numero")))
-                    + int(bool(resolucion_mef.get("numero")
-                               or resolucion_mef.get("documento")))
-                )
-                estado["secciones"]["Verificación MEF"] = {
-                    "esperados": max(1, esperados_mef),
-                    "descargados": descargados_mef,
-                }
-            except Exception as ex:  # noqa: BLE001
-                logger.debug("verificación MEF obra %s: %s", obra_id, corto(ex))
-                estado["secciones"]["Verificación MEF"] = {"error": True}
-                estado["avisos"].append(
-                    "Verificación MEF: la consulta de documentos falló.")
         return estado
 
     # total descargable = unión de InfoObras y SEACE (una cuenta por experiencia)
     total_desc = sum(1 for prof in espejo.get("profesionales", [])
                      for e, info, pos in _experiencias_documentales(
                          prof, enriquecimiento, tipo_evaluacion)
-                     if any(_fuentes(info, pos)))
+                     if any(_fuentes(info, pos)) or _docs_mef(e, info, pos))
     procesadas = 0
     for prof in espejo.get("profesionales", []):
         np_ = prof.get("n_prof")
@@ -1872,6 +1935,7 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
             ne = e.get("n")
             obra = enr.get("obra") if isinstance(enr.get("obra"), dict) else None
             obra_id, seace = _fuentes(enr, sub_pos)
+            docs_mef = _docs_mef(e, enr, sub_pos)
             destino = base / f"P{np_}_E{ne}"
             marca = f"P{np_}_E{ne}"
             if sub_pos is not None:
@@ -1888,7 +1952,12 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                 destino, ok, obra_id,
                 obra_id_legado=previo.get("obra_id", inicial.get("obra_id")),
             )
-            if not obra_id and not seace:
+            retirar_seace_legado = not seace and destino.is_dir() and any(
+                p.is_file() and es_archivo_seace(p.name) for p in destino.iterdir())
+            if (not obra_id and not seace and not docs_mef
+                    and not retirar_seace_legado
+                    and not (destino / SECCION_SEACE).exists()
+                    and not (destino / "Verificación MEF").exists()):
                 if sub_pos is None and previo:
                     restantes, hitos_restantes = _inventario_real_descarga(destino)
                     enr["descargas_reales"] = {
@@ -1953,6 +2022,8 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                         avisos.extend(estado_cache.get("avisos") or [])
                         for nombre, datos_seccion in (
                                 estado_cache.get("secciones") or {}).items():
+                            if nombre == "Verificación MEF":
+                                continue
                             if datos_seccion.get("error"):
                                 secciones[nombre] = {"estado": "error"}
                                 continue
@@ -1979,14 +2050,63 @@ def descargar_documentos_job(espejo, enriquecimiento, job_id, dir_descargas,
                         # La marca significa «intento terminal», incluso si hubo
                         # secciones fallidas. No habilita una segunda descarga.
                         guardar_marca_infoobras(ok, obra_id)
-                if seace and not ok_seace.exists():
+            except Exception as ex:  # noqa: BLE001
+                logger.warning("InfoObras descarga ✗ P%sE%s: %s", np_, ne, corto(ex))
+                secciones["InfoObras"] = {"estado": "error"}
+                avisos.append("InfoObras: no se pudo completar la descarga de esta fuente.")
+            try:
+                # La marca legacy no acredita una colección ni una selección
+                # distinta. El manifiesto vuelve a materializar desde la caché
+                # sin repetir red y retira adjuntos de selecciones anteriores.
+                if ((seace is not None and ("documentos" in seace
+                                           or seace.get("estado") != "seleccionado"))
+                        or (destino / SECCION_SEACE).exists() or retirar_seace_legado):
+                    datos_adjuntos = seace or {"estado": "identidad_pendiente", "documentos": []}
+                    try:
+                        resultado_seace = adjuntos_seace.materializar(datos_adjuntos, destino)
+                    except Exception as exc:
+                        # Fallos de red se registran por adjunto dentro del
+                        # materializador; aquí falló la integridad del árbol.
+                        raise ErrorIntegridadAdjuntos(
+                            "No se pudo publicar la selección documental SEACE sin mezclar archivos") from exc
+                    avisos = [a for a in avisos if not str(a).startswith("Documentos SEACE:")]
+                    _estado_seccion(secciones, avisos, SECCION_SEACE,
+                                    resultado_seace["esperados"], resultado_seace["descargados"])
+                    secciones[SECCION_SEACE]["documentos"] = resultado_seace["documentos"]
+                    if datos_adjuntos.get("estado") == "fuente_no_disponible":
+                        secciones[SECCION_SEACE]["estado"] = "error"
+                        avisos.append("Documentos SEACE: " + nota_seace_ausencia("fuente_no_disponible"))
+                    for doc in resultado_seace["documentos"]:
+                        if doc["estado"] != "descargado":
+                            avisos.append(f"Documentos SEACE: {doc.get('titulo') or doc.get('id_documento') or 'adjunto'} "
+                                          f"— {doc['estado']}. {doc.get('motivo') or ''}")
+                    hizo_trabajo = True
+                elif seace and not ok_seace.exists():
                     hizo_trabajo = True
                     _bajar_seace(seace, destino)
                     base.mkdir(parents=True, exist_ok=True)
                     ok_seace.write_text("ok", encoding="utf-8")
+                if docs_mef or (destino / "Verificación MEF").exists():
+                    avisos = [a for a in avisos if not str(a).startswith(
+                        ("Verificación MEF:", "MEF contrato:", "MEF resolucion:", "MEF acto_contractual:"))]
+                    resultado_mef = mef_seleccionado.materializar(docs_mef, destino)
+                    _estado_seccion(secciones, avisos, "Verificación MEF",
+                                    resultado_mef["esperados"], resultado_mef["descargados"])
+                    secciones["Verificación MEF"]["documentos"] = resultado_mef["documentos"]
+                    if not docs_mef:
+                        avisos.append("Verificación MEF: sin selección documental vigente; "
+                                      "no se reutilizan adjuntos anteriores.")
+                    for doc in resultado_mef["documentos"]:
+                        if doc["estado"] != "descargado":
+                            aviso = f"MEF {doc['tipo']}: no descargado. {doc['motivo']}"
+                            if aviso not in avisos:
+                                avisos.append(aviso)
+                    hizo_trabajo = True
                 if hizo_trabajo:
                     bajadas += 1
             except Exception as ex:  # noqa: BLE001
+                if isinstance(ex, ErrorIntegridadAdjuntos):
+                    raise
                 logger.warning("Descargas ✗ P%sE%s: %s", np_, ne, corto(ex))
                 avisos.append("Descarga general: no se pudo completar esta experiencia.")
 

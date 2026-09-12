@@ -56,6 +56,12 @@ contrasta con el contrato y la resolución de aprobación del MEF; si es de
 expediente enrutado como obra recibe valorizaciones de una construcción que no
 le corresponde y su veredicto sale mal por una razón invisible.
 
+El camino A/B sigue siendo el tipo global del concurso y no cambia porque una
+constancia declare otra fase. `agent-bases` extrae opcionalmente
+`metadata_concurso.servicio_esperado` y el profesional extrae
+`servicio_declarado`; el evaluador conserva una discrepancia factual entre
+ambos sin convertirla automáticamente en incumplimiento.
+
 - Si el usuario ya lo dijo en su mensaje junto con los PDF («es de
   expediente», «concurso de supervisión de obra»…), anótalo y pásalo al
   consolidar con `--tipo expedientes` o `--tipo obras`. No preguntes de nuevo.
@@ -178,10 +184,24 @@ si persiste, detén la entrega y explica el problema). Los periodos de la misma
 página conservan su orden de aparición. Revisa también las advertencias de
 páginas ausentes: no equivalen a orden comprobado. El script no renumera datos.
 
-El segundo control exige mínimo del postor con fuente, baremo A calculable y
-cotejo de los inicios/fines exactos. Es compartido con el consolidador: no se
+El segundo control genera `profesionales_preparados.json` y
+`revisiones_extraccion.json`, sin modificar `_prof/`. Normaliza tipos de datos,
+calcula indicadores temporales y separa fechas cuyo literal acredita un evento
+distinto del servicio. El literal original queda en observaciones y en el crudo;
+el campo afectado queda `POR VERIFICAR`, no convertido en otra fecha.
+
+Lee la cola de revisiones **antes del evaluador**. Para cada P/E/campo, devuelve
+al extractor original solo la página indicada, el literal y el motivo. Máximo
+2 relecturas focales; no reextraer profesionales enteros ni renumerar. Corrige
+únicamente lo confirmado desde el documento en `_prof/` y ejecuta otra vez este
+control. Si el documento sigue siendo ambiguo, conserva el dato por verificar
+y su explicación: estas advertencias no bloquean los demás casos. Un exit 0
+significa preparación utilizable, no que no existan revisiones pendientes.
+
+Además exige mínimo del postor con fuente, baremo A calculable y cotejo de los
+inicios/fines exactos que se conservan como tales. Es compartido con el consolidador: no se
 puede saltar pasando directamente al Paso 4. `entrada_minimo_postor` o
-`entrada_factor_a` → corregir solo `agent-bases`; `entrada_fecha_*` → el
+`entrada_factor_a` → corregir solo `agent-bases`; los **críticos** `entrada_fecha_*` → el
 profesional indicado. Máximo 2 intentos focales contra la fuente; nunca repetir
 los 90 casos ni mandar al evaluador a arreglar lo que no extrajo. Si persiste,
 detén la entrega con el motivo. Una fecha parcial explícita no es un error.
@@ -190,7 +210,9 @@ la lectura visual ni certifica que el extractor leyó bien el documento.
 
 ### Paso 3 — `agent-evaluador` (depende de 1, 2, 2.5 y 2.6)
 Cuando bases + mapa + **todos** los profesionales estén listos, lanza
-`agent-evaluador` (`prompts/agent-evaluador.md`) pasándole esas salidas (sin PDFs).
+`agent-evaluador` (`prompts/agent-evaluador.md`) pasándole bases, mapa y la lista
+`profesionales` de `profesionales_preparados.json` recién generado (sin PDFs).
+No le pases los crudos sin preparar ni una copia anterior a la última relectura.
 Devuelve la evaluación: cumple/no-cumple por profesional, DÍAS/MESES/AÑOS por
 experiencia, ¿cargo válido para emitir?, ¿anterior a colegiatura?, traslapes en
 rojo, descalificación económica vs límite inferior, factores A/B/C/E/J con puntaje
@@ -209,6 +231,12 @@ propenso a errores en propuestas grandes):
   subagentes (cada uno diverge) y dejando `_backend` en `null`. Auto-detecta N de
   `_prof/`; si falta el bloque postor del mapa, lo deja vacío + un aviso en
   `observaciones_claude`.
+
+  Reaplica la misma preparación a los crudos actuales: no lee una copia preparada
+  antigua. El evaluador no puede sobrescribir funciones ni indicadores temporales
+  preparados. Un periodo por verificar no recupera sus días o conclusión previa
+  desde `evaluacion.json`; se conserva la explicación y el backend hará el cómputo
+  que permita la evidencia disponible.
 
   > **Tipo de concurso (ADR-010) — `_meta.tipo_evaluacion`.** El backend verifica
   > los expedientes contra el contrato y la resolución de aprobación del MEF, y
@@ -299,7 +327,8 @@ detrás del certificado (contratista / N° de contrato / monto / resolución de
 aprobación contra SEACE y el Banco de Inversiones del MEF) **lo hace el backend por
 código**, automáticamente, cuando recibe el espejo. NO lo hagas tú por navegador:
 sería trabajo duplicado y podría chocar con lo del backend. La excepción posterior
-es investigar identidad en el Paso 6, no repetir las descargas documentales.
+es investigar identidad y leer contenido prioritario en el Paso 6, sin repetir
+la adquisición masiva ni modificar entregables.
 
 **Tu única responsabilidad para que esto funcione:** que los CUI **citados** lleguen
 transcritos literal y el resto llegue `cui: null` limpio (Paso 4.5). El backend
@@ -307,10 +336,11 @@ resuelve los null con su base local del MEF, detecta el expediente por el nombre
 consulta el MEF (`traeContratoSeaceDWH` + Formato 08-A), descarga los PDFs al ZIP y
 muestra el bloque "VERIFICACIÓN SEACE/MEF" en el Excel y el panel.
 
-Diferenciación (la resuelve el backend, no la skill): si la experiencia tiene
-valorizaciones de obra → muestra valorizaciones; si es un expediente sin
-valorizaciones → en ese mismo lugar muestra la verificación MEF. Tú solo extraes y
-resuelves el CUI; el backend elige qué mostrar.
+Diferenciación: el camino global lo fija `_meta.tipo_evaluacion`, no la presencia
+de valorizaciones ni el título del proyecto. Tú transcribes el CUI citado y el
+servicio declarado; no resuelves su identidad en esta primera pasada. Si una
+constancia declara otra fase, se señala la diferencia sin cambiar A/B ni usar
+fechas de esa otra fase como periodo comprobado.
 
 (Para verificar un expediente SUELTO a mano, sin correr el análisis, existe el prompt
 manual: `docs/prompt-verificacion-expediente.md`.)
@@ -346,6 +376,12 @@ no cambia CUI declarados y no activa descargas. Una ficha única en un listado
 tampoco demuestra que la experiencia esté bien identificada. Si el usuario pide
 aplicar asociaciones, usar la acción explícita de la misma referencia; no confundir
 investigar con autorizar cambios. La aplicación no recalcula cumplimiento.
+
+El investigador también coteja las clasificaciones privadas y el contenido de
+bases, contratos y candidatos MEF que recibe. Registra lectura o pendiente por
+documento; no se consideran revisados por tener título, enlace o descarga válida.
+La identificación del acto y su vínculo al encargo siguen siendo afirmaciones
+con evidencia del investigador, no una certificación automática del backend.
 
 ## Validación y retry
 

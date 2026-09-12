@@ -1,5 +1,6 @@
 """Aplicación y descargas reales del módulo, fuentes falsas, archivos temporales."""
 from copy import deepcopy
+import json
 import zipfile
 
 import pytest
@@ -134,7 +135,11 @@ def test_cambio_retira_documentos_antiguos_y_descarga_solo_identidad_nueva(tmp_p
     assert not (destino / "obra_anterior.pdf").exists()
     if not fallar:
         assert llamadas.count(20) == 1
-        assert (destino / "CONTRATO_FIRMADO.pdf").read_bytes().endswith(b"nuevo")
+        carpeta_seace = destino / "Documentos SEACE"
+        manifiesto = json.loads((carpeta_seace / "DOCUMENTOS_SEACE.json").read_text(encoding="utf-8"))
+        assert len(manifiesto["documentos"]) == 2
+        assert all(d["estado"] == "descargado" for d in manifiesto["documentos"])
+        assert not (destino / "CONTRATO_FIRMADO.pdf").exists()
     if fallar:
         assert not (destino / "CONTRATO_FIRMADO.pdf").exists()
     salida = construir_zip_infoobras(e, {(1, 1): destino}, tmp_path / "validacion.zip", nuevo)

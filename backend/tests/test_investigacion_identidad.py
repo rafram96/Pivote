@@ -39,10 +39,50 @@ def test_multiobra_conserva_declaradas_sin_enriquecer_sin_heredar_fechas():
     assert "identificacion_pendiente" in p["casos"][1]["disparadores"]
 
 
-def test_privada_omitida_no_equivale_a_verificada():
+def test_privada_se_audita_sin_forzar_busqueda_de_cui():
     p = preparar_contexto("abcdef123456", espejo(), {"1:1": {"via": "PRIVADA"}}, "obras")
-    assert not p["casos"]
-    assert p["omitidos"][0]["motivo"] == "ruta_privada_vigente_no_auditada"
+    assert p["omitidos"] == []
+    caso = p["casos"][0]
+    assert caso["accion"] == "investigar"
+    assert caso["disparadores"] == ["naturaleza_privada_requiere_cotejo_del_proyecto"]
+
+
+def test_contexto_documental_conserva_adjuntos_distintos_y_huellas_sin_corpus():
+    docs = [{"categoria": "contrato", "id_documento": str(n), "id_contrato": "c1",
+             "ocid": "p1", "titulo": "Archivos del contrato", "url": f"https://estado.test/{n}"}
+            for n in (1, 2)]
+    material = {**docs[1], "estado": "descargado", "archivo_entregado": "CONTRATO.pdf",
+                "sha256_entregado": "a" * 64, "archivo": "RUTA_INTERNA_NO_EXPORTAR"}
+    ev = {"cui": "1234567", "seace": {"estado": "seleccionado", "documentos": docs},
+          "descargas_reales": {"secciones": {"Documentos SEACE": {"documentos": [material]},
+                                             "Informes de control": {"documentos": [{"url": "NO_EXPORTAR"}]}}}}
+    antes = deepcopy(ev)
+    p = preparar_contexto("abcdef123456", espejo(), {"1:1": ev}, "obras")
+    encontrados = p["casos"][0]["contexto_backend"]["documentos_prioritarios"]
+    assert len(encontrados) == 2
+    assert len({d["referencia"] for d in encontrados}) == 2
+    assert encontrados[1]["sha256_entregado"] == "a" * 64
+    assert "estado" not in encontrados[0]
+    assert "NO_EXPORTAR" not in str(p)
+    assert ev == antes
+    assert all(d["contenido"] == "no_revisado" for d in encontrados)
+    ev["descargas_reales"]["secciones"]["Documentos SEACE"]["documentos"][0]["sha256_entregado"] = "b" * 64
+    assert preparar_contexto("abcdef123456", espejo(), {"1:1": ev}, "obras")["huella_contexto"] != p["huella_contexto"]
+
+
+def test_no_exporta_seace_retirado_ni_alias_antiguo_y_no_clasifica_actos_mef():
+    ev = {"seace": {"estado": "identidad_pendiente", "documentos": [{"url": "antiguo"}]},
+          "verificacion_expediente": {"documentos_08a": [
+              {"label": "Resolución del contrato", "url": "https://estado.test/acto"},
+              {"label": "Otra resolución", "url": "https://estado.test/otra"}]}}
+    caso = preparar_contexto("abcdef123456", espejo(), {"1:1": ev}, "expedientes")["casos"][0]
+    docs = caso["contexto_backend"]["documentos_prioritarios"]
+    assert len(docs) == 2 and all(d["tipo"] == "adjunto_08a" for d in docs)
+    assert "antiguo" not in str(docs)
+    assert "documentos_prioritarios_requieren_lectura" in caso["disparadores"]
+    ev = {"seace": {"estado": "seleccionado", "documentos": [],
+                     "docs": {"contrato": {"url": "antiguo"}}}}
+    assert preparar_contexto("abcdef123456", espejo(), {"1:1": ev}, "obras")["casos"][0]["contexto_backend"]["documentos_prioritarios"] == []
 
 
 @pytest.mark.parametrize("tipo", ["obras", "expedientes"])

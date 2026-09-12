@@ -104,6 +104,48 @@ function totalPostorDesdeBases(requisito, anterior = {}) {
   return { ...total, ...requisito };
 }
 
+const normalizarTextoFecha = texto => String(texto || "")
+  .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  .toLowerCase().replace(/[ \t]+/g, " ").replace(/ *\n+ */g, "\n").trim();
+
+/**
+ * Comprueba el acontecimiento que describe el literal, sin extraer ni
+ * corregir fechas. Una frase de periodo personal tiene prioridad únicamente
+ * cuando es explícita; en caso mixto se devuelve una duda trazable.
+ */
+function conflictoEventoFecha(fuente, campo) {
+  if (!["fecha_inicial", "fecha_final"].includes(campo)) return null;
+  const literal = typeof fuente === "string" ? fuente : fuente?.texto ?? fuente?.literal ?? fuente?.rótulo;
+  const texto = normalizarTextoFecha(literal);
+  const plano = texto.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
+  const esperado = campo === "fecha_inicial" ? "inicio_servicio" : "fin_servicio";
+  if (fuente && typeof fuente === "object" && fuente.evento != null && fuente.evento !== esperado) {
+    return `el evento declarado (${fuente.evento}) no acredita ${esperado}`;
+  }
+  if (!texto) return null;
+  const periodo = /\b(?:desde|del)\s+\d[^.]{0,100}(?:hasta|al)\s+\d/.test(plano);
+  const verboPersonal = /\b(?:presto\s+servicios?|laboro|trabajo(?:\s+como)?|desempeno(?:\s+funciones)?|brindo\s+servicios?)\b/.test(plano);
+  const rotuloPeriodo = /\b(?:periodo(?: de)? (?:servicios|trabajo|desempeno)|tiempo de servicios)\b/.test(plano);
+  const personal = periodo && (verboPersonal || rotuloPeriodo);
+  const finObra = /\b(?:fin|termino|culminacion|finalizacion|conclusion)\s+(?:de\s+)?(?:la\s+)?obra\b/.test(plano)
+    || /\b(?:la\s+)?obra\s+(?:termino|culmino|finalizo|concluyo)\b/.test(plano);
+  const inicioObra = /\b(?:inicio|inici[oó]|inicio de)\s+(?:de\s+)?(?:la\s+)?obra\b/.test(plano)
+    || /\b(?:la\s+)?obra\s+(?:se\s+)?inicio\b/.test(plano);
+  // Solo actos fechados con rótulo explícito; una mención incidental a
+  // "orden", "aprobación" o "firma" no determina qué fecha se está usando.
+  const acto = /(?:^|\n)\s*(?:fecha\s+de\s+(?:firma|suscripcion|emision|expedicion|orden(?:\s+de\s+servicio)?|aprobacion)|firma\s+del\s+contrato|orden\s+de\s+servicio)\s*[:\-]/.test(texto)
+    || /(?:^|\n)\s*(?:emitid[ao]|firmad[ao]|expedid[ao])\s+(?:el|la)?\s*\d/.test(texto);
+  if (finObra || inicioObra) {
+    if (personal) return "el literal mezcla un evento de la obra con un periodo personal; no se puede decidir qué fecha usa para este campo (ambigüedad, releer la fuente)";
+    return `el literal atribuye ${esperado} a un evento de la obra, no al periodo personal del profesional`;
+  }
+  if (acto) {
+    if (personal) return null;
+    return `el literal parece corresponder a firma/emisión/orden y no acredita ${esperado}`;
+  }
+  return null;
+}
+
 function auditarFechas(experiencias, nProf) {
   const avisos = [];
   for (const e of experiencias || []) {
@@ -124,6 +166,10 @@ function auditarFechas(experiencias, nProf) {
       }
       if (fuente.valor !== valor) avisos.push(aviso("entrada_fecha_discrepante", `agent-propuesta-profesional: ${campo} difiere de su cotejo (${fuente.valor}). Revisar, no sustituir automáticamente.`, ref));
       if (fuente.evento !== evento) avisos.push(aviso("entrada_fecha_evento", `agent-propuesta-profesional: ${campo} debe acreditar ${evento}; fecha de orden/firma/emisión no acredita el periodo por sí sola.`, ref));
+      if (fuente.evento === evento) {
+        const conflicto = conflictoEventoFecha(fuente, campo);
+        if (conflicto) avisos.push(aviso("entrada_fecha_evento_literal", `agent-propuesta-profesional: ${campo}: ${conflicto}. Revisar el literal, sin inferir ni sustituir la fecha.`, ref));
+      }
     }
     if (/^\d{4}-\d{2}-\d{2}$/.test(e.fecha_inicial) && /^\d{4}-\d{2}-\d{2}$/.test(e.fecha_final) && e.fecha_final < e.fecha_inicial) {
       avisos.push(aviso("entrada_fecha_rango", "agent-propuesta-profesional: el fin precede al inicio; cotejar ambos extremos.", ref));
@@ -132,4 +178,4 @@ function auditarFechas(experiencias, nProf) {
   return avisos;
 }
 
-module.exports = { normalizarBasesCriticas, factorADe, totalPostorDesdeBases, auditarFechas };
+module.exports = { normalizarBasesCriticas, factorADe, totalPostorDesdeBases, auditarFechas, conflictoEventoFecha };

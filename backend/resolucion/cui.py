@@ -47,6 +47,7 @@ import json
 import logging
 import re
 import time
+from copy import deepcopy
 from datetime import date
 from typing import Optional, Protocol
 
@@ -1066,14 +1067,41 @@ def _fecha_cert(v) -> Optional[date]:
         return None
 
 
-def _elegir_obra(obras: list[dict], cert_ini=None, cert_fin=None) -> dict:
-    """Prefiere la obra FINALIZADA que cubre el periodo del certificado. Delega
-    en el selector del scraper; si no está disponible, cae a la primera."""
+def _elegir_obra(obras: list[dict], cert_ini=None, cert_fin=None) -> Optional[dict]:
+    """Delega la selección existente; un fallo no autoriza elegir otro registro."""
+    if not obras:
+        return None
     try:
         from scraping.infoobras import seleccionar_obra
-        return seleccionar_obra(obras, cert_ini, cert_fin) or obras[0]
-    except Exception:  # noqa: BLE001 — entorno sin el scraper
-        return obras[0]
+        elegida = seleccionar_obra(obras, cert_ini, cert_fin)
+        if isinstance(elegida, dict) and elegida and elegida in obras:
+            return elegida
+        motivo = "el selector no devolvió un registro válido de la consulta"
+    except Exception as ex:  # noqa: BLE001 — abstenerse sin tumbar la experiencia
+        motivo = f"{type(ex).__name__}: {ex}"
+    logger.warning("Selección de ficha InfoObras pendiente: %s", motivo)
+    _traza().ev("seleccion_obra_fallida", motivo=motivo[:200], registros=len(obras))
+    return None
+
+
+def _revision_seleccion_obra(obras: list[dict], via: str) -> dict:
+    """Conserva los registros recibidos como candidatos, no como identidad activa."""
+    return {
+        "estado": "revision", "cui": None, "obra": None, "via": via,
+        "seleccion_obra_pendiente": True,
+        "decision": ("se encontraron registros en InfoObras, pero no se pudo "
+                     "seleccionar una ficha válida; reintentar la selección o "
+                     "confirmar el registro correcto — no se confirmó la asociación"),
+        "candidatos": [
+            {"cui": _cui_de(o), "obra_id": o.get("codigoObra") or o.get("obraId"),
+             "nombre_obra": o.get("nombrObra") or "",
+             "departamento": o.get("nombrDepartamento"),
+             # El contrato de candidato exige score; cero aquí no es confianza.
+             "score": 0, "sin_puntuar": True}
+            for o in obras if isinstance(o, dict)
+        ],
+        "registros_cui": len(obras),
+    }
 
 
 # ── resolución ───────────────────────────────────────────────────────────────
@@ -1129,6 +1157,48 @@ def _es_experiencia_privada(exp: dict) -> bool:
     campos = " ".join(str(exp.get(k) or "") for k in
                       ("proyecto", "entidad_contratante", "objeto"))
     return bool(_RE_PRIVADA.search(campos))
+
+
+def _checkpoint_naturaleza(r: dict, exp: dict) -> dict:
+    """Abstiene una identidad pública ante indicios de naturaleza privada del proyecto.
+
+    El CUI y la ficha pública son evidencia de asociación, no de naturaleza del
+    promotor. La decisión se toma solo con la experiencia actual y conserva la
+    identidad candidata para que el cotejo humano no pierda la pista.
+    """
+    if r.get("estado") != "resuelto" or not r.get("cui") or not _es_experiencia_privada(exp):
+        return r
+
+    nuevo = deepcopy(r)
+    obra = deepcopy(r.get("obra") or {})
+    seleccionado = {
+        "cui": r.get("cui"),
+        "obra_id": obra.get("obra_id"),
+        "nombre_obra": obra.get("nombre_obra"),
+        "departamento": obra.get("departamento"),
+    }
+    candidatos = []
+    for candidato in [seleccionado, *(r.get("candidatos") or [])]:
+        if not isinstance(candidato, dict):
+            continue
+        candidato = deepcopy(candidato)
+        clave = (candidato.get("cui"), candidato.get("obra_id"),
+                 candidato.get("nombre_obra"))
+        if not any((x.get("cui"), x.get("obra_id"), x.get("nombre_obra")) == clave
+                   for x in candidatos):
+            candidatos.append(candidato)
+    nuevo.update({
+        "estado": "revision",
+        "via": "REVISION",
+        "cui": None,
+        "obra": None,
+        "candidatos": candidatos,
+        "naturaleza_en_conflicto": True,
+        "decision": "indicios de naturaleza privada del proyecto y asociación pública pendiente de cotejo",
+    })
+    _traza().ev("checkpoint_naturaleza_privada", cui=r.get("cui"),
+                candidatos=len(candidatos))
+    return nuevo
 
 
 # ── FASES de un mismo CUI (#63) — vocabulario CERRADO, jamás fuzzy ───────────
@@ -1255,6 +1325,7 @@ def resolver(exp: dict, consulta: Consulta, base=None) -> dict:
     tr = _traza()
     with tr.span("resolver_cui", proyecto=str(exp.get("proyecto") or "")):
         r = _resolver(exp, consulta, base)
+        r = _checkpoint_naturaleza(r, exp)
         r = _checkpoint_fase(r, exp, consulta)   # #63 · un solo sitio, todas las vías
         tr.ev("decision", estado=r.get("estado"), via=r.get("via"),
               cui=r.get("cui"), motivo=str(r.get("decision")),
@@ -1388,6 +1459,8 @@ def _paso_codigo_citado(exp: dict, consulta: Consulta, base=None) -> Optional[di
     # el periodo del certificado (de ahí salen los hitos correctos)
     ci, cf = _fecha_cert(exp.get("fecha_inicial")), _fecha_cert(exp.get("fecha_final"))
     o = _elegir_obra(obras, ci, cf)
+    if o is None:
+        return _revision_seleccion_obra(obras, "CUI_TEXTO")
     cui_out = _cui_de(o) or codigo  # preferir CUI único de 7 díg
     full = norm(o.get("nombrObra") or "")
     toks = _tokens_clave(establecimiento(proyecto))
@@ -2500,6 +2573,11 @@ def resolver_obras(obras: list[dict], consulta: Consulta, base=None,
             continue
         if registros:
             ob = _elegir_obra(registros)
+            if ob is None:
+                res = _revision_seleccion_obra(registros, "CODIGO")
+                cache[clave] = res
+                out.append({**res, **extra})
+                continue
             cui_out = _cui_de(ob) or cui
             obra_ob = {"cui": cui_out, "nombre_obra": ob.get("nombrObra"),
                        "departamento": ob.get("nombrDepartamento"),
@@ -2557,13 +2635,20 @@ def resolver_con_dedup(experiencias: list[tuple[dict, object]], consulta: Consul
     for exp, clave in experiencias:
         r = resolver(exp, consulta, base)
         fb = _folio_base(exp.get("folio"))
-        if r["estado"] == "revision" and fb and fb in por_folio:
+        if (r["estado"] == "revision" and not r.get("seleccion_obra_pendiente")
+                and fb and fb in por_folio):
             madre = por_folio[fb]
             if _emisor_compatible(exp.get("entidad_emisora"), madre["emisor"]):
                 heredado = madre["res"]
+                candidatos = [*(r.get("candidatos") or []),
+                              *(heredado.get("candidatos") or [])]
                 r = {"estado": "resuelto", "cui": heredado["cui"], "via": "DEDUP",
                      "decision": "mismo certificado que otra experiencia ya identificada",
-                     "candidatos": [], "obra": heredado.get("obra")}
+                     "candidatos": candidatos,
+                     "obra": heredado.get("obra")}
+                # La herencia se vuelve a cotejar con la experiencia actual:
+                # compartir folio/emisor no puede saltarse el guard de naturaleza.
+                r = _checkpoint_naturaleza(r, exp)
             else:
                 _traza().ev("dedup_emisor_distinto", folio=fb,
                             emisor=str(exp.get("entidad_emisora") or "")[:60],

@@ -70,7 +70,8 @@ from typing import Any, Optional
 
 from validacion.candado_seace import (
     A_FAVOR, CONFIRMADO, EN_CONTRA, FUERTE, MINIMO_SENALES_CONFIRMAR,
-    TOLERANCIA_DIAS_FIRMA,
+    TOLERANCIA_DIAS_FIRMA, candado_tiene_adjudicatario_favorable,
+    hay_varios_contratos_distintos,
 )
 
 # ── Identificadores de las reglas (mismo esquema de código que las ALT) ───────
@@ -244,6 +245,17 @@ def identidad_sostenida_sin_temporal(candado: Optional[dict]) -> tuple[bool, str
     if not isinstance(candado, dict) or not candado.get("senales"):
         return False, ("el sistema todavía no había verificado a qué proceso "
                        "corresponde este certificado")
+    # Algunos jobs persisten el resumen bajo `proceso`; aceptar ambas formas
+    # mantiene la guarda también para candados históricos enriquecidos.
+    if candado.get("contratos_multiples") is True:
+        return False, ("el proceso publica varios contratos distintos; las "
+                       "coincidencias de metadatos no identifican cuál encargo "
+                       "corresponde al certificado")
+    if (hay_varios_contratos_distintos(candado)
+            or hay_varios_contratos_distintos(candado.get("proceso"))):
+        return False, ("el proceso publica varios contratos distintos; las "
+                       "coincidencias de metadatos no identifican cuál encargo "
+                       "corresponde al certificado")
     fuertes = [s for s in candado["senales"]
                if isinstance(s, dict) and s.get("fuerza") == FUERTE
                and s.get("nombre") != "temporal"]
@@ -258,6 +270,13 @@ def identidad_sostenida_sin_temporal(candado: Optional[dict]) -> tuple[bool, str
                        f"independientes de la fecha confirman que el proceso sea "
                        f"el del certificado; cruzar fechas contra un proceso sin "
                        f"confirmar puede señalar el concurso equivocado")
+    if {s.get("nombre") for s in favor} <= {"entidad", "objeto"}:
+        return False, ("la identidad solo coincide por entidad y objeto; sin "
+                       "una evidencia independiente adicional no se cruzan "
+                       "fechas contra este proceso")
+    if not candado_tiene_adjudicatario_favorable(candado):
+        return False, ("no hay una señal fuerte a favor del adjudicatario; no se "
+                       "cruzan fechas contra un proceso sin adjudicatario cotejado")
     return True, ""
 
 
@@ -634,6 +653,14 @@ def cruces_de_experiencia(enr: Optional[dict], cert: Optional[dict]) -> list[Cru
     experiencia es de expediente técnico.
     """
     enr = enr or {}
+    if enr.get("servicio_fase_incompatible"):
+        motivo = ("El certificado declara un servicio de otra fase. No se contrastan "
+                  "sus fechas con documentos de la ruta del concurso como si fueran "
+                  "el mismo servicio; confirmar el sustento correspondiente.")
+        reglas = [REGLA_INICIO]
+        if enr.get("camino") == "expediente":
+            reglas.append(REGLA_TERMINO)
+        return [Cruce(regla, POR_CONFIRMAR, motivo) for regla in reglas]
     salida = [evaluar_inicio_vs_contrato(enr.get("seace"), cert, enr)]
     b = evaluar_termino_vs_aprobacion(enr, cert)
     if b is not None:

@@ -120,6 +120,12 @@ def test_cambio_de_ficha_no_reutiliza_marca_ni_mezcla_documentos(
         (raiz / "descargas" / f"{nombre_marca}.ok").write_text("ok", encoding="utf-8")
         (raiz / "fuentes_descarga" / f"{nombre_marca}.json").unlink(missing_ok=True)
     _verificar(espejo, enr)
+    # El contrato SEACE legacy se prepara después de verificar la ficha para
+    # probar que su marca y archivo son independientes del ciclo InfoObras.
+    info["seace"] = {"estado": "seleccionado", "docs": {
+        "bases": {"url": "https://fuente.test/bases-legado.pdf"},
+    }}
+    (raiz / "descargas" / f"{nombre_marca}.seace.ok").write_text("ok", encoding="utf-8")
     correr()
     correr()
     assert llamadas == [101, 202]

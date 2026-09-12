@@ -70,6 +70,42 @@ test('finalizador agrega metadatos sin reparaciones silenciosas ni sobreescritur
 test('privada sin evidencia del proyecto se rechaza',()=>{
   assert.throws(()=>validarResultado({...respuesta(),estado:'no_aplica_publica'},paquete(),'1:1'));
 });
+
+test('privadas y documentos no desaparecen por ficha única',()=>{
+  for (const extra of [{via:'PRIVADA'}, {documentos_prioritarios:[{referencia:'a'.repeat(64)}]}]) {
+    const p=paquete(); Object.assign(p.casos[0].contexto_backend,extra);
+    assert.equal(planificar(p,listado([{obra_id:42}])).tareas.length,1);
+  }
+});
+
+test('cada documento exige acceso registrado; leído no es enlace hallado',()=>{
+  const p=paquete(), r=respuesta(), referencia='a'.repeat(64), url='https://estado.test/contrato.pdf';
+  p.casos[0].contexto_backend.documentos_prioritarios=[{referencia,url}];
+  assert.throws(()=>validarResultado(r,p,'1:1'),/documento prioritario/);
+  r.consultas.push({fuente:'SEACE',consulta:`documento:${referencia}`,estado:'no_consultado',detalle:'Archivo no accesible en esta prueba'});
+  assert.equal(validarResultado(r,p,'1:1').estado,'sin_candidato');
+  r.consultas[1].estado='leido';
+  assert.throws(()=>validarResultado(r,p,'1:1'),/página física/);
+  r.evidencias=[{id:'doc',campo:'contrato',fuente:'SEACE',tipo_fuente:'oficial',url,ubicacion:'Documento, página física 1',pagina_pdf:1,cita:'Contrato con la entidad',acceso:'leido'}];
+  assert.equal(validarResultado(r,p,'1:1').estado,'sin_candidato');
+  r.evidencias[0].url='https://estado.test/otro.pdf';
+  assert.throws(()=>validarResultado(r,p,'1:1'),/página física/);
+});
+
+test('lote con todas las respuestas puede conservar documentos pendientes',t=>{
+  const raiz=fs.mkdtempSync(path.join(os.tmpdir(),'documentos-test-'));
+  t.after(()=>fs.rmSync(raiz,{recursive:true,force:true}));
+  const p=paquete(), r=respuesta(), referencia='a'.repeat(64);
+  p.casos[0].contexto_backend.documentos_prioritarios=[{referencia,url:'https://estado.test/acto.pdf'}];
+  r.consultas.push({fuente:'MEF',consulta:`documento:${referencia}`,estado:'no_consultado',detalle:'Sin copia disponible'});
+  const carpeta=path.join(raiz,'lote'); prepararCarpeta(p,{},carpeta);
+  fs.writeFileSync(path.join(carpeta,'P1_E1','resultado.json'),JSON.stringify(r));
+  const salida=consolidarCarpeta(carpeta);
+  assert.equal(salida.cobertura,'completa');
+  assert.equal(salida.pendientes_documentales.length,1);
+  assert.equal(salida.pendientes_documentales[0].motivo,'Sin copia disponible');
+  assert.equal(salida.aplicado_al_job,false);
+});
 test('lote parcial reanudable y sin escritura sobre el job', t => {
   const raiz=fs.mkdtempSync(path.join(os.tmpdir(),'identidad-test-'));
   t.after(()=>fs.rmSync(raiz,{recursive:true,force:true}));

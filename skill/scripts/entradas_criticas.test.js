@@ -1,7 +1,7 @@
 "use strict";
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { normalizarBasesCriticas, auditarFechas, totalPostorDesdeBases } = require("./entradas_criticas");
+const { normalizarBasesCriticas, auditarFechas, totalPostorDesdeBases, conflictoEventoFecha } = require("./entradas_criticas");
 
 function basesValidas() {
   return {
@@ -138,6 +138,47 @@ test("solo OCR, página ajena, calendario imposible o periodo invertido no pasan
     const e = experiencia(); cambiar(e);
     assert.ok(auditarFechas([e], 1).some(a => a.severidad === "critical"));
   }
+});
+
+test("el literal de término o inicio de obra contradice el evento personal aunque el enum mienta", () => {
+  assert.match(conflictoEventoFecha({ evento: "orden_servicio", texto: "Periodo: 01/02/2021" }, "fecha_inicial"), /evento declarado/);
+  assert.match(conflictoEventoFecha({ texto: "TERMINO DE OBRA:31 julio 2019" }, "fecha_final"), /evento de la obra/);
+  assert.match(conflictoEventoFecha({ texto: "TÉRMINO DE LA OBRA:30 de mayo 2017" }, "fecha_final"), /evento de la obra/);
+  assert.match(conflictoEventoFecha({ texto: "Inicio de obra: 04/02/2018" }, "fecha_inicial"), /evento de la obra/);
+  const e = experiencia();
+  e.fechas_fuente.fecha_final.texto = "TÉRMINO DE LA OBRA:30 de mayo 2017";
+  assert.ok(auditarFechas([e], 1).some(a => a.tipo === "entrada_fecha_evento_literal" && a.severidad === "critical"));
+});
+
+test("periodo personal explícito no se rechaza por mencionar la obra", () => {
+  for (const texto of [
+    "Prestó servicios en la obra del 01/02/2021 al 18/08/2022",
+    "El profesional laboró en la obra desde 01/02/2021 hasta 18/08/2022",
+  ]) {
+    assert.equal(conflictoEventoFecha({ texto }, "fecha_inicial"), null);
+    assert.equal(conflictoEventoFecha({ texto }, "fecha_final"), null);
+  }
+});
+
+test("firma, emisión u orden no acreditan inicio/fin cuando son la única referencia", () => {
+  for (const texto of ["Fecha de firma: 01/02/2021", "Fecha de emisión: 18/08/2022", "Orden de servicio: 01/02/2021"]) {
+    assert.match(conflictoEventoFecha({ texto }, "fecha_inicial"), /no acredita/);
+    assert.match(conflictoEventoFecha({ texto }, "fecha_final"), /no acredita/);
+  }
+  assert.equal(conflictoEventoFecha({ texto: "Constancia emitida; prestó servicios del 01/02/2021 al 18/08/2022" }, "fecha_final"), null);
+});
+
+test("solo rótulos de acto fechados disparan y las menciones incidentales no", () => {
+  assert.match(conflictoEventoFecha({ texto: "Fin de obra: 31/07/2019" }, "fecha_final"), /evento de la obra/);
+  assert.match(conflictoEventoFecha({ texto: "Fecha de emisión: 31/07/2019" }, "fecha_final"), /no acredita/);
+  assert.equal(conflictoEventoFecha({ texto: "Fin del servicio de supervisión de la obra Mejoramiento por orden N°12" }, "fecha_final"), null);
+});
+
+test("término de obra junto a periodo personal queda en ambigüedad", () => {
+  const motivo = conflictoEventoFecha({ texto: "Término de obra: 31/07/2019.\nPrestó servicios del 01/02/2018 al 18/08/2019" }, "fecha_final");
+  assert.match(motivo, /ambigüedad/);
+  assert.match(motivo, /evento de la obra/);
+  assert.match(motivo, /periodo personal/);
 });
 
 module.exports = { basesValidas, experiencia };

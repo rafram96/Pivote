@@ -86,6 +86,7 @@ def _fichas() -> dict:
                            "proceso": {"fecha_firma": "2022-04-20"},
                            "candado": {"senales": [
                                {"nombre": "entidad", "fuerza": "fuerte", "sentido": "a_favor"},
+                               {"nombre": "adjudicatario", "fuerza": "fuerte", "sentido": "a_favor"},
                                {"nombre": "objeto", "fuerza": "fuerte", "sentido": "a_favor"}]}},
                  "contrato_emisor": {"fecha": "2022-04-20"},
                  "resolucion_aprobacion": {"fecha": "2022-12-05", "legible": True,
@@ -460,7 +461,7 @@ def test_la_prioridad_del_hito_de_firma():
                    "candado": {"senales": [
                        {"nombre": "entidad", "fuerza": "fuerte", "sentido": "a_favor"},
                        {"nombre": "objeto", "fuerza": "fuerte", "sentido": "a_favor"}]}}}
-    ) == date(2021, 9, 24)
+    ) is None
 
 
 def test_el_rotulo_recorta_el_proyecto_y_ordena_las_marcas():

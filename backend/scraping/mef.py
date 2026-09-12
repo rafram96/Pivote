@@ -47,6 +47,10 @@ _RE_WS = re.compile(r"\s+")
 # etiquetas que delatan la resolución de aprobación del expediente (varía por entidad)
 _RE_APROB = re.compile(r"resoluci[oó]n|R\.?\s?G\.?\s?R\.?|aprobaci[oó]n|acta de aprob", re.I)
 _RE_NUM_RES = re.compile(r"N[°ºo]?\s*(\d[\w.\-/]*)")   # exige dígito tras la N°
+_RE_ACTO_CONTRACTUAL = re.compile(
+    r"resoluci[oó]n\s+(?:(?:total|parcial)\s+)?(?:del?\s+)?contrato\b|carta\s+notarial\b",
+    re.I,
+)
 
 
 def _score_aprobacion(label: str) -> int:
@@ -158,10 +162,12 @@ def _documentos_08a(html: str) -> list[dict]:
         if not idar or not label or idar in vistos:
             continue
         vistos.add(idar)
+        contractual = bool(_RE_ACTO_CONTRACTUAL.search(label))
         out.append({
             "label": label,
             "url": urljoin(BASE, url.replace("&amp;", "&")),
-            "es_aprobacion": bool(_RE_APROB.search(label)),
+            "es_aprobacion": bool(_RE_APROB.search(label)) and not contractual,
+            "tipo_indicado": "acto_contractual" if contractual else "por_identificar",
         })
     return out
 
@@ -353,6 +359,10 @@ def verificar_expediente(exp: dict, ficha: dict, contratos: list[dict]) -> dict:
             bloque["contrato"]["pdf"] = c["url_pdf"]
 
     res = ficha.get("resolucion")
+    bloque["documentos_08a"] = ficha.get("documentos") or []
+    # La etiqueta separa estas piezas de la aprobación, sin verificar el contenido.
+    bloque["documentos_contractuales"] = [d for d in ficha.get("documentos", [])
+                                           if d.get("tipo_indicado") == "acto_contractual"]
     if res:
         bloque["fuentes"].append("MEF-08A")
         bloque["verificado_en_mef"] = True
@@ -365,7 +375,9 @@ def verificar_expediente(exp: dict, ficha: dict, contratos: list[dict]) -> dict:
                                 "detalle": "sin documento de aprobación en el 08-A del MEF"}
 
     if not bloque["verificado_en_mef"]:
-        bloque["detalle"] = "el CUI no expone contratos ni 08-A en el MEF (¿entidad no cargó?)"
+        bloque["detalle"] = ("El 08-A contiene adjuntos, pero no se identificó contrato ni candidato a aprobación."
+                             if bloque["documentos_08a"] else
+                             "No se obtuvo contrato ni candidato a aprobación en la consulta MEF; no demuestra inexistencia.")
     return bloque
 
 

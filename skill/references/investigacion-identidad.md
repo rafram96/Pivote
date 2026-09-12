@@ -27,11 +27,15 @@ cumple requisitos. El investigador no reemplaza al evaluador ni al ingeniero.
    listado no permite descartar varias fichas. Identificaciones por RUC y contratos
    seleccionados requieren contraste de intervención/rol/emisor incluso con ficha
    única. No se cambia automáticamente la selección vigente. Los restantes quedan **sin alerta
-   en el listado consultado**, no verificados. Las privadas omitidas tampoco se
-   auditan en esta fase; el informe lo indica.
+   en el listado consultado**, no verificados. Las privadas también se encolan:
+   cotejar naturaleza del proyecto, no la forma jurídica del emisor. Paquetes
+   históricos con privadas en `omitidos` no acreditan esa revisión: obtener uno nuevo.
 5. Entregar a cada investigador solo su `entrada.json`, el prompt y acceso al
    certificado correspondiente o sus páginas originales. No entregar la propuesta
-   completa, datos del postor ni resultados de otros investigadores. Acordar límite
+   completa, datos del postor ni resultados de otros investigadores. El contexto
+   incluye documentos prioritarios con URL/IDs y, cuando existe, huella de la
+   copia entregada. Facilitar esas copias desde el ZIP o los artefactos locales;
+   no asumir acceso al disco del servidor. Acordar límite
    de casos y concurrencia dentro del presupuesto; los no ejecutados quedan
    pendientes. No utilizar Orca.
 6. Cada investigador escribe `borrador.json` sin metadatos del lote dentro de su
@@ -56,6 +60,10 @@ cumple requisitos. El investigador no reemplaza al evaluador ni al ingeniero.
    Exit 0: todas las tareas tienen respuesta estructural; exit 2: cobertura parcial;
    exit 1: error de contrato/archivo. No sobreescribe informes: para reanudar,
    proporcionar como tercer argumento una ruta nueva de salida JSON.
+   Revisar además `pendientes_documentales`: exit 0 NO significa que todos los
+   adjuntos estén leídos. Cada referencia exige consulta propia con lectura y cita
+   o un motivo explícito de no lectura. No clasificar por metadatos ni copiar
+   conclusiones de una revisión de otro encargo que comparte el CUI.
 
 ## Fuentes y límites
 
@@ -73,7 +81,8 @@ aplicable silenciosamente al nuevo. El validador vincula respuestas al lote, per
 no comprueba por sí mismo que una cita sea verdadera ni consulta el job actual.
 
 Reportar: casos investigados, propuestas, ambiguos, sin candidato, fuentes fallidas,
-no ejecutados, sin alerta en listado y privadas omitidas. `cobertura: completa`
+no ejecutados, sin alerta en listado, naturaleza privada cotejada/pendiente y
+documentos pendientes. `cobertura: completa`
 solo significa respuestas para todas las tareas, **no identidad correcta de todas
 las experiencias**. Confirmar siempre `aplicado_al_job: false`.
 

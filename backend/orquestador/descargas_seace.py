@@ -50,9 +50,15 @@ NOTA_SEACE_DESCARGA_FALLIDA = (
 )
 
 _NOTAS_SEACE_AUSENCIA: dict[str, str] = {
+    "tipo_indeterminado": (
+        "No se determinó si el servicio de esta experiencia corresponde a supervisión "
+        "o ejecución. El nombre del proyecto no basta para elegir sus bases y contrato. "
+        "No se seleccionaron documentos de otro rol."
+    ),
     "identidad_pendiente": (
-        "La investigación no dejó un proceso o contrato exacto comprobado para "
-        "esta experiencia. No se reutilizan los documentos de la asociación anterior."
+        "No quedó identificado un proceso o contrato exacto para esta experiencia. "
+        "Los candidatos requieren cotejo; no se elige por fechas ni se reutilizan "
+        "los documentos de la asociación anterior."
     ),
     "fuente_no_disponible": (
         "La consulta a los datos abiertos del SEACE no respondió en esta corrida, "
@@ -92,7 +98,7 @@ def es_archivo_seace(nombre: str) -> bool:
     Cubre los nombres actuales y los históricos con prefijo `SEACE_0…`.
     """
     n = str(nombre).upper()
-    return n.startswith("SEACE_") or any(
+    return n == "DOCUMENTOS SEACE" or n.startswith("SEACE_") or any(
         n.startswith(nombre_base) for _, nombre_base, _ in DOCUMENTOS_SEACE)
 
 

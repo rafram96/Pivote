@@ -1779,8 +1779,93 @@ def test_excel_cui_rotulo_distingue_certificado_vs_sistema(tmp_path):
     ws = next(s for s in wb.worksheets if s.title.startswith("P1"))
     celdas = [str(c.value) for r in ws.iter_rows() for c in r if c.value]
 
-    assert "Citado en el certificado y verificado: 111111" in celdas
-    assert "No consignado en el certificado — el sistema identificó el CUI 222222" in celdas
+    assert "CUI 111111 (declarado y utilizado)" in celdas
+    assert "CUI declarado: no consignado · CUI utilizado: 222222" in celdas
+    assert "Citado en el certificado y verificado: 111111" not in celdas
+
+
+@pytest.mark.parametrize("tipo_evaluacion", ["obras", "expedientes"])
+@pytest.mark.parametrize(
+    ("declarado", "utilizado", "con_revision", "esperado"),
+    [
+        ("111111", None, True,
+         "CUI declarado: 111111 · CUI utilizado: no registrado"),
+        ("111111", "111111", False, "CUI 111111 (declarado y utilizado)"),
+        ("111111", "222222", False,
+         "CUI declarado: 111111 · CUI utilizado: 222222"),
+        (None, "222222", False,
+         "CUI declarado: no consignado · CUI utilizado: 222222"),
+        (None, None, False,
+         "CUI declarado: no consignado · CUI utilizado: no registrado"),
+    ],
+)
+def test_generar_excel_final_rotula_procedencia_cui_en_ambas_rutas(
+    tmp_path, tipo_evaluacion, declarado, utilizado, con_revision, esperado
+):
+    """El generador conserva declarado/utilizado sin convertir igualdad en verificación."""
+    espejo = {
+        "_meta": {"tipo_evaluacion": tipo_evaluacion}, "postor": {},
+        "profesionales": [{
+            "n_prof": 1, "cargo": "JEFE", "nombre": "N",
+            "experiencias": [{
+                "n": 1, "proyecto": "Obra de prueba", "cui": declarado,
+                "fecha_inicial": "2020-01-01", "fecha_final": "2020-12-31",
+            }],
+        }],
+        "resumen_evaluacion": {"factores": []},
+    }
+    cuis = {(1, 1): utilizado} if utilizado else {}
+    fichas = {(1, 1): {"cui": utilizado}} if utilizado is not None else {}
+    revisiones = {(1, 1): "REVISION"} if con_revision else {}
+    salida = generar_excel_final(
+        espejo, tmp_path / f"{tipo_evaluacion}-{declarado}-{utilizado}.xlsx",
+        cuis=cuis, fichas=fichas, revisiones=revisiones,
+    )
+    texto = _texto(_hoja_de(salida, 1, "JEFE"))
+    assert esperado in texto
+    assert "Citado en el certificado y verificado:" not in texto
+    ws = _hoja_de(salida, 1, "JEFE")
+    fila_cui = next(c.row for fila in ws.iter_rows()
+                    for c in fila if c.value == "CÓDIGO (CUI/SNIP)")
+    assert ws.cell(fila_cui, 2).value == esperado
+    encabezado = next(c.value for fila in ws.iter_rows() for c in fila
+                      if isinstance(c.value, str) and c.value.startswith("EXPERIENCIA 1:"))
+    assert esperado in encabezado
+
+
+@pytest.mark.parametrize("tipo_evaluacion", ["obras", "expedientes"])
+def test_generar_excel_final_no_promueve_cui_declarado_sin_mapa_ni_ficha(
+    tmp_path, tipo_evaluacion
+):
+    from entregables import desempaquetar_enriquecimiento
+
+    # Este es el caso observado: REVISION conserva la procedencia del backend,
+    # pero no registra un CUI utilizado; el CUI del certificado sigue siendo solo
+    # declarado.
+    _, cuis, fichas, _ = desempaquetar_enriquecimiento({
+        "1:1": {"via": "REVISION", "cui": None, "sin_verificar": True},
+    })
+    espejo = {
+        "_meta": {"tipo_evaluacion": tipo_evaluacion}, "postor": {},
+        "profesionales": [{
+            "n_prof": 1, "cargo": "JEFE", "nombre": "N",
+            "experiencias": [{"n": 1, "proyecto": "Divino Niño", "cui": "2458463"}],
+        }],
+        "resumen_evaluacion": {"factores": []},
+    }
+    salida = generar_excel_final(
+        espejo, tmp_path / f"sin-promocion-{tipo_evaluacion}.xlsx",
+        cuis=cuis, fichas=fichas,
+    )
+    ws = _hoja_de(salida, 1, "JEFE")
+    esperado = "CUI declarado: 2458463 · CUI utilizado: no registrado"
+    fila_cui = next(c.row for fila in ws.iter_rows()
+                    for c in fila if c.value == "CÓDIGO (CUI/SNIP)")
+    assert ws.cell(fila_cui, 2).value == esperado
+    encabezado = next(c.value for fila in ws.iter_rows() for c in fila
+                      if isinstance(c.value, str) and c.value.startswith("EXPERIENCIA 1:"))
+    assert esperado in encabezado
+    assert "CUI 2458463" not in ws.cell(fila_cui, 2).value
 
 
 

@@ -1219,8 +1219,8 @@ def _enriquecimiento_seace_issue83(*, independiente: bool = True) -> dict:
     }}}
 
 
-def test_issue83_sin_ruc_promueve_por_proceso_confirmado_y_resuelve_ambiguo():
-    """Caso 2 ≥85: el RUC oficial gana solo después del gate independiente."""
+def test_issue83_sin_ruc_con_gate_circular_conserva_nombre_exacto():
+    """Sin gate independiente, SUNAT conserva su resolución por nombre exacto."""
     from orquestador.etapas import Contexto
     from orquestador.etapas_reales import EtapaSunatReal
 
@@ -1243,8 +1243,8 @@ def test_issue83_sin_ruc_promueve_por_proceso_confirmado_y_resuelve_ambiguo():
     sunat = ctx.enriquecimiento["1:1"]["sunat"]
     assert consultas == ["20263373058"]
     assert sunat["ruc"] == "20263373058"
-    assert sunat["via"] == "seace_adjudicatario"
-    assert sunat["seace_emisor"]["ambiguedad_resuelta"] == 2
+    assert sunat["via"] == "nombre_exacto"
+    assert "seace_emisor" not in sunat
     assert not [o for o in res.observaciones
                 if o.codigo == "SEACE_RUC_EMISOR" and o.severidad.value == "alerta"]
 
@@ -1271,8 +1271,8 @@ def test_issue83_gate_anticircular_no_promueve():
     assert "ruc" not in sunat and "seace_emisor" not in sunat
 
 
-def test_issue83_ruc_declarado_igual_queda_verificado():
-    """Caso 1a: la igualdad exacta agrega respaldo, sin cambiar el RUC."""
+def test_issue83_ruc_declarado_igual_con_gate_circular_no_rotula_seace():
+    """El RUC declarado se conserva sin atribuirlo al adjudicatario SEACE."""
     from orquestador.etapas import Contexto
     from orquestador.etapas_reales import EtapaSunatReal
 
@@ -1288,11 +1288,11 @@ def test_issue83_ruc_declarado_igual_queda_verificado():
 
     sunat = ctx.enriquecimiento["1:1"]["sunat"]
     assert sunat["ruc"] == ruc and sunat["via"] == "cert"
-    assert sunat["seace_emisor"]["estado"] == "ruc_verificado"
+    assert "seace_emisor" not in sunat
 
 
-def test_issue83_zona_gris_conserva_busqueda_por_nombre():
-    """Caso 2, 60–84: #83 informa pero no elige; manda el flujo anterior."""
+def test_issue83_sin_gate_conserva_busqueda_por_nombre():
+    """Sin gate independiente, el flujo previo de búsqueda por nombre continúa."""
     from orquestador.etapas import Contexto
     from orquestador.etapas_reales import EtapaSunatReal
 
@@ -1310,8 +1310,7 @@ def test_issue83_zona_gris_conserva_busqueda_por_nombre():
 
     sunat = ctx.enriquecimiento["1:1"]["sunat"]
     assert sunat["ruc"] == encontrado and sunat["via"] == "nombre"
-    assert sunat["seace_emisor"]["estado"] == "zona_gris"
-    assert 60 <= sunat["seace_emisor"]["score_nombre"] < 85
+    assert "seace_emisor" not in sunat
 
 
 def test_issue83_job_f5_antiguo_sin_nombre_no_cambia_sunat():
@@ -1370,8 +1369,8 @@ def test_issue83_metadatos_legados_objeto_temporal_no_habilitan_seace_y_siguen_s
     assert "seace_emisor" not in sunat
 
 
-def test_issue83_ruc_distinto_pero_nombre_de_integrante_no_alerta():
-    """Caso 1b: se conserva el RUC declarado y se rotula la relación."""
+def test_issue83_ruc_distinto_sin_gate_no_rotula_integrante():
+    """Se conserva el RUC declarado sin rotular relación SEACE."""
     from orquestador.etapas import Contexto
     from orquestador.etapas_reales import EtapaSunatReal
 
@@ -1388,13 +1387,13 @@ def test_issue83_ruc_distinto_pero_nombre_de_integrante_no_alerta():
 
     sunat = ctx.enriquecimiento["1:1"]["sunat"]
     assert sunat["ruc"] == declarado and sunat["via"] == "cert"
-    assert sunat["seace_emisor"]["estado"] == "integrante_adjudicatario"
+    assert "seace_emisor" not in sunat
     assert not [o for o in res.observaciones
                 if o.codigo == "SEACE_RUC_EMISOR" and o.severidad.value == "alerta"]
 
 
-def test_issue83_ruc_declarado_ajeno_alerta_sin_reemplazar():
-    """Caso 1c: confronta el certificado; SUNAT sigue consultando lo declarado."""
+def test_issue83_ruc_declarado_ajeno_sin_gate_conserva_consulta():
+    """Sin gate, SUNAT consulta y conserva el RUC declarado sin alerta SEACE."""
     from orquestador.etapas import Contexto
     from orquestador.etapas_reales import EtapaSunatReal
 
@@ -1411,15 +1410,13 @@ def test_issue83_ruc_declarado_ajeno_alerta_sin_reemplazar():
 
     assert consultas == [declarado]
     assert ctx.enriquecimiento["1:1"]["sunat"]["ruc"] == declarado
-    assert ctx.enriquecimiento["1:1"]["sunat"]["seace_emisor"]["estado"] \
-        == "ruc_no_coincide"
-    assert [o for o in res.observaciones
-            if o.codigo == "SEACE_RUC_EMISOR" and o.severidad.value == "alerta"]
+    assert "seace_emisor" not in ctx.enriquecimiento["1:1"]["sunat"]
+    assert not [o for o in res.observaciones
+                if o.codigo == "SEACE_RUC_EMISOR" and o.severidad.value == "alerta"]
 
 
-def test_issue83_sin_ruc_y_nombre_ajeno_no_contamina_sunat():
-    """Caso 3: ni siquiera un único match textual puede vencer la contradicción
-    con el adjudicatario del proceso confirmado."""
+def test_issue83_sin_ruc_y_nombre_ajeno_sigue_flujo_nombre_sin_gate():
+    """Sin gate, un match textual sigue el flujo SUNAT y no se atribuye a SEACE."""
     from orquestador.etapas import Contexto
     from orquestador.etapas_reales import EtapaSunatReal
 
@@ -1427,18 +1424,17 @@ def test_issue83_sin_ruc_y_nombre_ajeno_no_contamina_sunat():
                    espejo=_espejo_sunat_issue83("EMPRESA TOTALMENTE AJENA"),
                    enriquecimiento=_enriquecimiento_seace_issue83())
     res = EtapaSunatReal(
-        consultor=lambda _: pytest.fail("no debe consultar el RUC contaminante"),
+        consultor=lambda r: EmpresaFake(r, "EMPRESA TOTALMENTE AJENA", date(2000, 1, 1)),
         buscador=lambda _: [{"ruc": "20512345678",
                              "razon_social": "EMPRESA TOTALMENTE AJENA"}],
         extras=SIN_EXTRAS_SUNAT,
     ).correr(ctx)
 
     sunat = ctx.enriquecimiento["1:1"]["sunat"]
-    assert "ruc" not in sunat
-    assert sunat["candidato_nombre_no_usado"]["ruc"] == "20512345678"
-    assert sunat["seace_emisor"]["estado"] == "emisor_no_coincide"
-    assert [o for o in res.observaciones
-            if o.codigo == "SEACE_RUC_EMISOR" and o.severidad.value == "alerta"]
+    assert sunat["ruc"] == "20512345678"
+    assert "seace_emisor" not in sunat
+    assert not [o for o in res.observaciones
+                if o.codigo == "SEACE_RUC_EMISOR" and o.severidad.value == "alerta"]
 
 
 def test_issue83_sin_proceso_pre2018_conserva_flujo_anterior():

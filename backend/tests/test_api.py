@@ -736,6 +736,23 @@ def test_avance_descargas_job_antiguo_usa_marcas_de_fuente(cliente):
     assert avance["faltan"] == 0
 
 
+def test_avance_incluye_mef_sin_ficha_y_no_lo_da_por_terminado(cliente):
+    import api.app as modulo
+    from schemas import pipeline
+    job = pipeline.Job(job_id="mef-aislado", analisis_id="a")
+    modulo.repo.guardar(job)
+    modulo.repo.guardar_espejo(job.job_id, {"_meta": {"tipo_evaluacion": "expedientes"},
+        "profesionales": [{"n_prof": 1, "experiencias": [{"n": 1}]}]})
+    info = {"1:1": {"via": "MEF", "camino": "expediente", "verificacion_expediente": {
+        "contrato": {"numero": "C-1", "pdf": "https://mef/c.pdf"}}}}
+    modulo.repo.guardar_enriquecimiento(job.job_id, info)
+    avance = modulo._avance_descargas_dict(job)
+    assert avance["total"] == 1 and avance["descargadas"] == 0
+    info["1:1"]["descargas_reales"] = {"completada": True, "archivos": 1}
+    modulo.repo.guardar_enriquecimiento(job.job_id, info)
+    assert modulo._avance_descargas_dict(job)["descargadas"] == 1
+
+
 def test_armar_progreso_fusiona_vivo_y_checkpoint(cliente):
     """Etapa ya OK (checkpoint) vs etapa en curso (RegistroProgreso) vs pendiente."""
     import api.app as modulo
