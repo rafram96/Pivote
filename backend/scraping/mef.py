@@ -15,6 +15,7 @@ Mismo patrón que scraping/infoobras.py (session con UA, reintentos, `corto`).
 from __future__ import annotations
 
 import logging
+import inspect
 import re
 import time   # el backoff duerme en errores_red; se deja para parchear `mef.time.sleep`
 from datetime import date, datetime
@@ -392,9 +393,9 @@ def crear_session(session: Optional[requests.Session] = None) -> requests.Sessio
 def _get(session: requests.Session, url: str, **kw) -> Optional[requests.Response]:
     """GET/POST con reintentos + backoff. None si el portal no respondió.
 
-    ⚠ El `None` de esta función tapa dos cosas distintas (4xx = no existe · portal
-    caído). Se conserva porque es el contrato que consumen sus llamadores; adentro
-    la distinción sí existe (`Resultado.respondio`)."""
+    `None` conserva la API histórica; el canal diagnóstico optativo registra
+    consulta no completada. Un HTTP 4xx no prueba inexistencia documental."""
+    diagnostico = kw.pop("diagnostico", None)
     metodo = kw.pop("metodo", "GET")
     timeout = kw.pop("timeout", 30)      # una sola vez: antes el pop vivía dentro
                                          # del bucle y el 2º intento perdía el valor
@@ -414,7 +415,46 @@ def _get(session: requests.Session, url: str, **kw) -> Optional[requests.Respons
     if not res.respondio:
         logger.info("MEF %s %s: no respondió tras %d intentos (%s)",
                     metodo, url[-40:], res.intentos, corto(res.error))
-    return res.valor_o(None)
+    respuesta = res.valor_o(None)
+    if isinstance(diagnostico, dict) and respuesta is None:
+        diagnostico.update(estado="fuente_no_disponible",
+                           motivo="el portal no respondió o devolvió un HTTP no utilizable")
+    return respuesta
+
+
+def _diagnostico(diagnostico: Optional[dict], estado: str, motivo: str) -> None:
+    if isinstance(diagnostico, dict):
+        diagnostico.update(estado=estado, motivo=motivo)
+
+
+def _llamar_con_diagnostico(func, *args, diagnostico: dict, **kwargs):
+    """Llama adaptadores antiguos sin reenviarles el keyword nuevo."""
+    try:
+        parametros = inspect.signature(func).parameters
+        acepta = ("diagnostico" in parametros or
+                  any(p.kind == inspect.Parameter.VAR_KEYWORD
+                      for p in parametros.values()))
+    except (TypeError, ValueError):
+        acepta = False
+    if acepta:
+        return func(*args, diagnostico=diagnostico, **kwargs)
+    return func(*args, **kwargs)
+
+
+def _estado_ficha_html(html: str) -> dict:
+    """Clasifica HTML sin confundir una página de error con ficha sin datos."""
+    if not html.strip():
+        return {"estado": "respuesta_no_reconocida", "motivo": "HTML vacío"}
+    ficha = parsear_ficha_08a(html)
+    if ficha.get("tiene_ficha"):
+        return {"estado": "con_resultados", "motivo": "ficha 08-A reconocida"}
+    if re.search(r"<title>[^<]*(?:error|login|mantenimiento)[^<]*</title>|"
+                 r"(?:sesión|sesion)\s+expirada|servicio\s+no\s+disponible|"
+                 r"class=[\"'][^\"']*(?:error|login)[^\"']*[\"']", html, re.I):
+        return {"estado": "respuesta_no_reconocida", "motivo": "HTML de error o autenticación"}
+    if re.search(r"ETAPA\s*:|ESTADO\s*:|Datos de la fase", html, re.I):
+        return {"estado": "sin_resultados", "motivo": "ficha 08-A reconocida sin datos ni adjuntos"}
+    return {"estado": "respuesta_no_reconocida", "motivo": "HTML sin estructura reconocida de 08-A"}
 
 
 class CacheMef:
@@ -439,6 +479,10 @@ class CacheMef:
         self._reloj = reloj
         self._fichas: dict[str, str] = {}
         self._contratos: dict[tuple[str, str], list] = {}
+        self._estado_fichas: dict[str, dict] = {}
+        self._estado_contratos: dict[tuple[str, str], dict] = {}
+        self._fallo_fichas: dict[str, dict] = {}
+        self._fallo_contratos: dict[tuple[str, str], dict] = {}
         self._fallos: dict[tuple, float] = {}          # (recurso, clave) → instante
         self.peticiones = 0
         self.aciertos = 0
@@ -448,39 +492,79 @@ class CacheMef:
         t = self._fallos.get(clave)
         return t is not None and (self._reloj() - t) < self.ttl_fallo
 
-    def ficha_08a(self, cui) -> Optional[str]:
+    def ficha_08a(self, cui, *, diagnostico: Optional[dict] = None) -> Optional[str]:
         cui = str(cui).strip()
         if cui in self._fichas:
             self.aciertos += 1
+            if diagnostico is not None:
+                diagnostico.update(self._estado_fichas.get(cui, {
+                    "estado": "no_registrado", "motivo": "estado no conservado"}))
             return self._fichas[cui]
         k = ("ficha", cui)
         if self._fallo_reciente(k):
             self.evitadas_por_fallo += 1
+            estado = self._fallo_fichas.get(cui, {
+                "estado": "fuente_no_disponible", "motivo": "fallo de ficha vigente en TTL"})
+            if diagnostico is not None:
+                diagnostico.update(estado)
             return None
         self.peticiones += 1
-        html = fetch_ficha_08a(cui, self.session)
+        estado = {}
+        html = _llamar_con_diagnostico(fetch_ficha_08a, cui, self.session,
+                                       diagnostico=estado)
         if html is None:
             self._fallos[k] = self._reloj()
-        else:
+            _diagnostico(estado, "fuente_no_disponible", "ficha 08-A no disponible")
+            self._fallo_fichas[cui] = dict(estado)
+        elif not estado:
+            estado.update(_estado_ficha_html(html))
+        if html is not None and estado.get("estado") == "respuesta_no_reconocida":
+            self._fallos[k] = self._reloj()
+            self._fallo_fichas[cui] = dict(estado)
+        elif html is not None:
             self._fichas[cui] = html
+            self._estado_fichas[cui] = dict(estado or {
+                "estado": "no_registrado", "motivo": "estado no conservado"})
+        if diagnostico is not None:
+            diagnostico.update(estado)
         return html
 
-    def contratos(self, cui, codsnip="") -> list[dict]:
+    def contratos(self, cui, codsnip="", *, diagnostico: Optional[dict] = None) -> list[dict]:
         cui = str(cui).strip()
         k = (cui, str(codsnip or "0"))
         if k in self._contratos:
             self.aciertos += 1
+            if diagnostico is not None:
+                diagnostico.update(self._estado_contratos.get(k, {
+                    "estado": "no_registrado", "motivo": "estado no conservado"}))
             return self._contratos[k]
         kf = ("contratos",) + k
         if self._fallo_reciente(kf):
             self.evitadas_por_fallo += 1
+            estado = self._fallo_contratos.get(kf, {
+                "estado": "fuente_no_disponible", "motivo": "fallo de contratos vigente en TTL"})
+            if diagnostico is not None:
+                diagnostico.update(estado)
             return []
         self.peticiones += 1
-        crudo = _fetch_contratos_crudo(cui, codsnip, self.session)
+        estado = {}
+        crudo = _llamar_con_diagnostico(_fetch_contratos_crudo, cui, codsnip,
+                                        self.session, diagnostico=estado)
         if crudo is None:                              # sin respuesta o respuesta inválida
             self._fallos[kf] = self._reloj()
+            self._fallo_contratos[kf] = dict(estado or {
+                "estado": "fuente_no_disponible", "motivo": "endpoint de contratos no disponible"})
+            if diagnostico is not None:
+                diagnostico.update(self._fallo_contratos[kf])
             return []
+        if not estado:
+            _diagnostico(estado, "con_resultados" if crudo else "sin_resultados",
+                         "contratos recibidos" if crudo else "lista contractual vacía")
         self._contratos[k] = crudo                     # lista (vacía o no) = dato
+        self._estado_contratos[k] = dict(estado or {
+            "estado": "no_registrado", "motivo": "estado no conservado"})
+        if diagnostico is not None:
+            diagnostico.update(estado)
         return crudo
 
     def resumen(self) -> str:
@@ -489,37 +573,63 @@ class CacheMef:
 
 
 def fetch_ficha_08a(cui, session: Optional[requests.Session] = None,
-                    cache: Optional[CacheMef] = None) -> Optional[str]:
+                    cache: Optional[CacheMef] = None,
+                    diagnostico: Optional[dict] = None) -> Optional[str]:
     """HTML del Formato 08-A del CUI, o None si el portal no respondió."""
     if cache is not None:
-        return cache.ficha_08a(cui)
-    r = _get(crear_session(session), f"{FICHA_08A}{cui}")
-    return r.text if r is not None else None
+        return cache.ficha_08a(cui, diagnostico=diagnostico)
+    estado = diagnostico if isinstance(diagnostico, dict) else {}
+    r = _llamar_con_diagnostico(_get, crear_session(session), f"{FICHA_08A}{cui}",
+                                diagnostico=estado)
+    if r is None:
+        _diagnostico(estado, "fuente_no_disponible", "ficha 08-A no disponible")
+        return None
+    html = r.text
+    estado.update(_estado_ficha_html(html))
+    if diagnostico is not None:
+        diagnostico.update(estado)
+    return html
 
 
-def _fetch_contratos_crudo(cui, codsnip="", session: Optional[requests.Session] = None
-                           ) -> Optional[list]:
+def _fetch_contratos_crudo(cui, codsnip="", session: Optional[requests.Session] = None,
+                           diagnostico: Optional[dict] = None) -> Optional[list]:
     """Contratos crudos del DWH; None si el portal NO respondió o respondió algo
     que no es la lista esperada (HTML de error, JSON de otra forma). Solo una
     lista es dato; `[]` de la fuente significa «sin contratos»."""
-    r = _get(crear_session(session), CONTRATOS_DWH, metodo="POST",
-             data={"id": str(cui), "codsnip": str(codsnip or "0"), "vers": "v2"},
-             headers={"X-Requested-With": "XMLHttpRequest"})
+    estado = diagnostico if isinstance(diagnostico, dict) else {}
+    r = _llamar_con_diagnostico(
+        _get, crear_session(session), CONTRATOS_DWH, metodo="POST",
+        data={"id": str(cui), "codsnip": str(codsnip or "0"), "vers": "v2"},
+        headers={"X-Requested-With": "XMLHttpRequest"}, diagnostico=estado)
     if r is None:
+        if estado.get("estado") != "fuente_no_disponible":
+            _diagnostico(estado, "fuente_no_disponible", "endpoint de contratos no disponible")
         return None
     try:
         d = r.json()
     except ValueError:
+        _diagnostico(estado, "respuesta_no_reconocida", "respuesta no JSON")
         return None
-    return d if isinstance(d, list) else None
+    if not isinstance(d, list):
+        _diagnostico(estado, "respuesta_no_reconocida", "JSON no es una lista de contratos")
+        return None
+    if any(not isinstance(registro, dict) for registro in d):
+        _diagnostico(estado, "respuesta_no_reconocida", "La lista contractual contiene registros no interpretables")
+        return None
+    _diagnostico(estado, "con_resultados" if d else "sin_resultados",
+                 "contratos recibidos" if d else "lista contractual vacía")
+    if diagnostico is not None:
+        diagnostico.update(estado)
+    return d
 
 
 def fetch_contratos(cui, codsnip="", session: Optional[requests.Session] = None,
-                    cache: Optional[CacheMef] = None) -> list[dict]:
+                    cache: Optional[CacheMef] = None,
+                    diagnostico: Optional[dict] = None) -> list[dict]:
     """Contratos SEACE del CUI (crudos del DWH). [] si no hay o el portal falló."""
     if cache is not None:
-        return cache.contratos(cui, codsnip)
-    return _fetch_contratos_crudo(cui, codsnip, session) or []
+        return cache.contratos(cui, codsnip, diagnostico=diagnostico)
+    return _fetch_contratos_crudo(cui, codsnip, session, diagnostico=diagnostico) or []
 
 
 def descargar_pdf(session: requests.Session, url: str, destino, *, timeout: float = 60.0) -> bool:
@@ -606,11 +716,18 @@ def verificar_cui(exp: dict, cui, codsnip="", session: Optional[requests.Session
     'no verificable' sin lanzar. Con `cache` (una por corrida) no repite ficha ni
     contratos de un CUI ya consultado."""
     s = cache.session if cache is not None else crear_session(session)
-    html = fetch_ficha_08a(cui, s, cache=cache)
+    consultas = {
+        "mef_ficha": {"estado": "no_registrado", "motivo": "adaptador no informó estado"},
+        "mef_contratos": {"estado": "no_registrado", "motivo": "adaptador no informó estado"},
+    }
+    html = _llamar_con_diagnostico(fetch_ficha_08a, cui, s,
+                                   diagnostico=consultas["mef_ficha"], cache=cache)
     ficha = parsear_ficha_08a(html) if html else {}
-    contratos = normalizar_contratos(fetch_contratos(cui, codsnip, s, cache=cache))
+    contratos = normalizar_contratos(_llamar_con_diagnostico(
+        fetch_contratos, cui, codsnip, s, diagnostico=consultas["mef_contratos"], cache=cache))
     b = verificar_expediente(exp, ficha, contratos)
     # el CUI CONSULTADO (7 díg., codUniqInv) manda sobre el del espejo: el skill a
     # veces escribe el SNIP (6 díg.) y el backend lo corrige al resolver.
     b["cui_confirmado"] = str(cui).strip() or b.get("cui_confirmado")
+    b["consultas_fuentes"] = consultas
     return b

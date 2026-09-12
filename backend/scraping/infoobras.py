@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import time
+import inspect
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from html import unescape as _unescape
@@ -366,7 +367,7 @@ def _buscar_por_cui(session: requests.Session, cui: str) -> list[dict]:
     return res.valor        # contestó: la lista (vacía = no está)
 
 
-def _parse_js_vars(html: str) -> dict[str, list]:
+def _parse_js_vars(html: str, diagnostico: Optional[dict] = None) -> dict[str, list]:
     """
     Parsea TODAS las declaraciones `var lXxx = [...];` del HTML.
 
@@ -418,11 +419,16 @@ def _parse_js_vars(html: str) -> dict[str, list]:
             logger.info("InfoObras [vars null]: %s", ", ".join(sorted(nulls)))
         if fallidas:
             logger.warning("InfoObras [vars no parseadas]: %s", ", ".join(fallidas))
+    if fallidas:
+        _diag(diagnostico, "infoobras_ejecucion", "respuesta_no_reconocida",
+              "Lectura parcial: no se pudieron interpretar "
+              + ", ".join(sorted(fallidas)) + ".")
 
     return variables
 
 
-def _extraer_datos_ejecucion(session: requests.Session, obra_id: int) -> dict[str, list]:
+def _extraer_datos_ejecucion(session: requests.Session, obra_id: int,
+                             diagnostico: Optional[dict] = None) -> dict[str, list]:
     """
     Descarga DatosEjecucion y extrae las variables JS embebidas (incluye
     lAvances = las valorizaciones). Retorna {nombre_variable: lista_de_dicts}.
@@ -438,12 +444,22 @@ def _extraer_datos_ejecucion(session: requests.Session, obra_id: int) -> dict[st
         try:
             r = session.get(url, params={"ObraId": obra_id}, timeout=30)
             r.raise_for_status()
-            variables = _parse_js_vars(r.text)
+            variables = _parse_js_vars(r.text, diagnostico=diagnostico)
             # modificaciones de plazo y contratista ejecutor van como tabla HTML,
             # no como var JS (lModificacionPlazo/lContratista vacíos en plantilla nueva)
-            variables["_modificaciones_plazo"] = _parsear_modificaciones_html(r.text)
-            variables["_contratistas_html"] = _parsear_contratistas_html(r.text)
-            variables["_supervisores_html"] = _parsear_supervisores_html(r.text)
+            mod = _parsear_modificaciones_html(r.text)
+            ctr = _parsear_contratistas_html(r.text)
+            sup = _parsear_supervisores_html(r.text)
+            reconocido = bool(variables) or bool(mod or ctr or sup)
+            hay_datos = any(bool(valor) for valor in variables.values()) or bool(mod or ctr or sup)
+            if not (isinstance(diagnostico, dict) and
+                    diagnostico.get("infoobras_ejecucion", {}).get("estado") == "respuesta_no_reconocida"):
+                _diag(diagnostico, "infoobras_ejecucion",
+                      ("con_resultados" if hay_datos else "sin_resultados") if reconocido else "respuesta_no_reconocida",
+                      None if reconocido else "La respuesta no contiene una ficha reconocible.")
+            variables["_modificaciones_plazo"] = mod
+            variables["_contratistas_html"] = ctr
+            variables["_supervisores_html"] = sup
             return variables
         finally:
             session.headers["Accept"] = "application/json, text/javascript, */*; q=0.01"
@@ -451,11 +467,17 @@ def _extraer_datos_ejecucion(session: requests.Session, obra_id: int) -> dict[st
     res = con_reintentos(_bajar, politica=_POLITICA,
                          etiqueta=f"InfoObras DatosEjecucion obra {obra_id}",
                          excepciones=(requests.RequestException,), log=logger)
-    res.relanzar()
+    try:
+        res.relanzar()
+    except Exception as exc:
+        estado, motivo = _estado_excepcion(exc)
+        _diag(diagnostico, "infoobras_ejecucion", estado, motivo)
+        raise
     return res.valor
 
 
-def _extraer_datos_preparacion(session: requests.Session, obra_id: int) -> dict[str, list]:
+def _extraer_datos_preparacion(session: requests.Session, obra_id: int,
+                               diagnostico: Optional[dict] = None) -> dict[str, list]:
     """
     Descarga DatosPreparacion y extrae las variables JS embebidas.
 
@@ -477,13 +499,30 @@ def _extraer_datos_preparacion(session: requests.Session, obra_id: int) -> dict[
         r.raise_for_status()
     except requests.RequestException as e:
         logger.debug("InfoObras: DatosPreparacion ObraId %s: %s", obra_id, corto(e))
+        _diag(diagnostico, "infoobras_preparacion", "fuente_no_disponible",
+              "La fuente no respondió durante esta fase.")
         return {}
     finally:
         session.headers["Accept"] = "application/json, text/javascript, */*; q=0.01"
-    return _parse_js_vars(r.text)
+    try:
+        diagnostico_parseo = {}
+        resultado = _parse_js_vars(r.text, diagnostico=diagnostico_parseo)
+    except Exception as exc:
+        estado, motivo = _estado_excepcion(exc)
+        _diag(diagnostico, "infoobras_preparacion", estado, motivo)
+        return {}
+    parcial = diagnostico_parseo.get("infoobras_ejecucion")
+    if parcial:
+        _diag(diagnostico, "infoobras_preparacion", parcial["estado"], parcial.get("motivo"))
+    else:
+        _diag(diagnostico, "infoobras_preparacion",
+              ("con_resultados" if any(resultado.values()) else "sin_resultados")
+              if resultado else "respuesta_no_reconocida")
+    return resultado
 
 
-def _extraer_todos_los_datos(session: requests.Session, obra_id: int) -> dict[str, list]:
+def _extraer_todos_los_datos(session: requests.Session, obra_id: int,
+                             diagnostico: Optional[dict] = None) -> dict[str, list]:
     """
     Descarga DatosEjecucion + DatosPreparacion y mergea sus variables JS.
 
@@ -494,9 +533,11 @@ def _extraer_todos_los_datos(session: requests.Session, obra_id: int) -> dict[st
     Si una variable aparece en ambos endpoints, prevalece la que tenga
     mas registros (defensa contra arrays vacios en uno de los dos).
     """
-    datos_ejecucion = _extraer_datos_ejecucion(session, obra_id)
+    datos_ejecucion = _llamar_con_diagnostico(
+        _extraer_datos_ejecucion, session, obra_id, diagnostico=diagnostico)
     time.sleep(_DELAY)
-    datos_preparacion = _extraer_datos_preparacion(session, obra_id)
+    datos_preparacion = _llamar_con_diagnostico(
+        _extraer_datos_preparacion, session, obra_id, diagnostico=diagnostico)
 
     merged = dict(datos_ejecucion)
     for var_name, lista in datos_preparacion.items():
@@ -1180,7 +1221,38 @@ def parsear_aprobacion_expediente(html: str) -> Optional[dict]:
     return mejor
 
 
-def _fetch_aprobacion_expediente(session: requests.Session, obra_id) -> Optional[dict]:
+def _diag(diagnostico: Optional[dict], clave: str, estado: str, motivo: str | None = None) -> None:
+    """Registra el transporte por fase sin cambiar el valor legacy retornado."""
+    if not isinstance(diagnostico, dict):
+        return
+    dato = {"estado": estado}
+    if motivo:
+        dato["motivo"] = motivo
+    diagnostico[clave] = dato
+
+
+def _llamar_con_diagnostico(fn, *args, diagnostico=None):
+    """Compatibilidad con fakes legacy: inspecciona, no reintenta por TypeError."""
+    if diagnostico is not None:
+        try:
+            parametros = inspect.signature(fn).parameters
+            acepta = ("diagnostico" in parametros or any(
+                p.kind is inspect.Parameter.VAR_KEYWORD for p in parametros.values()))
+        except (TypeError, ValueError):
+            acepta = False
+        if acepta:
+            return fn(*args, diagnostico=diagnostico)
+    return fn(*args)
+
+
+def _estado_excepcion(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, requests.RequestException):
+        return "fuente_no_disponible", "La fuente no respondió durante esta fase."
+    return "respuesta_no_reconocida", "La respuesta de la fuente no pudo interpretarse."
+
+
+def _fetch_aprobacion_expediente(session: requests.Session, obra_id,
+                                 diagnostico: Optional[dict] = None) -> Optional[dict]:
     """GET Mapa/Sumario?obraId= → parsea la 'Aprobación del proyecto'. Best-effort:
     si el portal falla o no hay hito, devuelve None (la experiencia cae a revisión)."""
     try:
@@ -1188,8 +1260,20 @@ def _fetch_aprobacion_expediente(session: requests.Session, obra_id) -> Optional
         r.raise_for_status()
     except requests.RequestException as e:
         logger.debug("InfoObras Sumario obra %s: %s", obra_id, corto(e))
+        estado, motivo = _estado_excepcion(e)
+        _diag(diagnostico, "infoobras_sumario", estado, motivo)
         return None
-    return parsear_aprobacion_expediente(r.text)
+    try:
+        resultado = parsear_aprobacion_expediente(r.text)
+    except Exception as e:
+        estado, motivo = _estado_excepcion(e)
+        _diag(diagnostico, "infoobras_sumario", estado, motivo)
+        return None
+    reconocido = bool(_RE_APROB_PROY.search(r.text) or _RE_DL_URL.search(r.text))
+    _diag(diagnostico, "infoobras_sumario",
+          "con_resultados" if resultado else "sin_resultados" if reconocido
+          else "respuesta_no_reconocida")
+    return resultado
 
 
 def fetch_by_cui(
@@ -1197,6 +1281,7 @@ def fetch_by_cui(
     cert_inicio: Optional[date] = None,
     cert_fin: Optional[date] = None,
     obra_id: Optional[int | str] = None,
+    diagnostico: Optional[dict] = None,
 ) -> Optional[WorkInfo]:
     """
     Consulta InfoObras por CUI y retorna datos completos de la obra.
@@ -1208,11 +1293,23 @@ def fetch_by_cui(
     Retorna None si no se encuentra la obra.
     """
     try:
-        session = _crear_session()
+        try:
+            session = _crear_session()
+        except Exception as exc:
+            estado, motivo = _estado_excepcion(exc)
+            _diag(diagnostico, "infoobras_busqueda", estado, motivo)
+            raise
 
         # [1] Buscar por CUI
         logger.info("InfoObras: buscando CUI %s", cui)
-        obras = _buscar_por_cui(session, cui)
+        try:
+            obras = _buscar_por_cui(session, cui)
+        except Exception as exc:
+            estado, motivo = _estado_excepcion(exc)
+            _diag(diagnostico, "infoobras_busqueda", estado, motivo)
+            raise
+        _diag(diagnostico, "infoobras_busqueda",
+              "con_resultados" if obras else "sin_resultados")
 
         if not obras:
             logger.info("InfoObras: CUI %s no encontrado", cui)
@@ -1255,6 +1352,8 @@ def fetch_by_cui(
                 "InfoObras: consulta CUI %s no devolvió la ficha solicitada (obra_id=%s)",
                 cui, obra_id,
             )
+            _diag(diagnostico, "infoobras_seleccion", "identidad_pendiente",
+                  "La búsqueda respondió, pero no se pudo seleccionar el registro solicitado.")
             return None
         obra_id = _id_de_registro_obra(obra_raw)
 
@@ -1265,7 +1364,14 @@ def fetch_by_cui(
             logger.info(
                 "InfoObras: 1er request sin codigoObra para CUI %s, reintentando", cui)
             time.sleep(2.0)
-            obras_retry = _buscar_por_cui(session, cui)
+            try:
+                obras_retry = _buscar_por_cui(session, cui)
+            except Exception as exc:
+                estado, motivo = _estado_excepcion(exc)
+                _diag(diagnostico, "infoobras_busqueda", estado, motivo)
+                raise
+            _diag(diagnostico, "infoobras_busqueda",
+                  "con_resultados" if obras_retry else "sin_resultados")
             if obras_retry:
                 obra_raw = elegir_obra_raw(obras_retry, cert_inicio, cert_fin, obra_id_req, _rango_val)
                 if obra_raw is None:
@@ -1273,6 +1379,8 @@ def fetch_by_cui(
                         "InfoObras: reintento CUI %s no devolvió la ficha solicitada "
                         "(obra_id=%s)", cui, obra_id_req,
                     )
+                    _diag(diagnostico, "infoobras_seleccion", "identidad_pendiente",
+                          "La búsqueda respondió, pero no se pudo seleccionar el registro solicitado.")
                     return None
                 obra_id = _id_de_registro_obra(obra_raw)
 
@@ -1280,6 +1388,8 @@ def fetch_by_cui(
             logger.warning(
                 "InfoObras: obra sin codigoObra para CUI %s tras reintento", cui,
             )
+            _diag(diagnostico, "infoobras_seleccion", "no_seleccionado",
+                  "Los registros recuperados no contienen un identificador de ficha utilizable.")
             return None
 
         logger.info(
@@ -1295,7 +1405,8 @@ def fetch_by_cui(
         # lPersonal, lRevisionET (criticos para obras nuevas tipo PRONIS
         # donde DatosEjecucion solo expone lAvances).
         logger.info("InfoObras: descargando DatosEjecucion+Preparacion ObraId %s", obra_id)
-        datos = _extraer_todos_los_datos(session, obra_id)
+        datos = _llamar_con_diagnostico(
+            _extraer_todos_los_datos, session, obra_id, diagnostico=diagnostico)
 
         # Procesar datos
         supervisores = _procesar_supervisores(datos.get("lSupervisor", []))
@@ -1340,7 +1451,8 @@ def fetch_by_cui(
         # Buscar el hito "Aprobación del proyecto" en Mapa/Sumario (best-effort; None si
         # no hay o el portal falla). La decisión de ACEPTARLA la toma el orquestador y
         # solo si la experiencia es de expediente (por nombre).
-        aprobacion_exp = _fetch_aprobacion_expediente(session, obra_id) if not avances else None
+        aprobacion_exp = (_fetch_aprobacion_expediente(session, obra_id, diagnostico)
+                          if not avances else None)
 
         return WorkInfo(
             cui=cui,

@@ -38,6 +38,7 @@ import requests
 
 from entregables.certeza import normalizar_motivo_fuente
 from entregables.identidad import proyectar_identidad
+from entregables.estado_fuentes import proyectar_estado_fuentes, lineas_estado_fuentes
 from entregables.procedencia import rotulo_cui
 from entregables.servicio_experiencia import lineas_contraste_servicio
 
@@ -860,7 +861,7 @@ def _cabecera_indice(manifiestos: bool) -> list[str]:
 _CAMPOS_INDICE_JSON = (
     "n_prof", "cargo", "n_exp", "proyecto", "documentos", "compartidos",
     "propios", "notas", "sin_documentos", "motivo", "secciones_incompletas",
-    "advertencias", "seace", "procedencia", "identificacion",
+    "advertencias", "seace", "procedencia", "identificacion", "estado_fuentes",
 )
 
 
@@ -1097,6 +1098,7 @@ def construir_zip_infoobras(
                                     f"Vía: {procedencia['via'] or 'no informada'}"]
                 lineas_identidad.extend(_lineas_ficha_infoobras(info))
                 lineas_identidad.extend(lineas_contraste_servicio(espejo, e))
+                lineas_identidad.extend(lineas_estado_fuentes(info))
                 if identificacion:
                     lineas_identidad.append(f"Identificación: {identificacion['etiqueta']}")
                 datos_subobras = [s for s in (info.get("sub_obras") or [])
@@ -1120,6 +1122,7 @@ def construir_zip_infoobras(
                     "secciones_incompletas": [], "advertencias": [],
                     "seace": _linea_candado_seace(info),
                     "procedencia": procedencia, "identificacion": identificacion,
+                    "estado_fuentes": proyectar_estado_fuentes(info),
                     "_grupo_obra": None,
                 }
                 registros.append(reg)
@@ -1199,8 +1202,8 @@ def construir_zip_infoobras(
                         zf.writestr(f"{base}/MANIFIESTO_DOCUMENTOS.txt",
                                     "\n".join(manifiesto_docs) + "\n")
                     if not reales:
-                        motivo = ("la carpeta existe, pero ninguna descarga produjo "
-                                  "un documento utilizable")
+                        motivo = ("la carpeta no contiene documentos utilizables; "
+                                  "ver estados de consulta y descarga en IDENTIFICACION.txt")
                         if not any(p.name.upper() == "SIN_DOCUMENTOS.TXT" for p in archivos):
                             zf.writestr(
                                 f"{base}/SIN_DOCUMENTOS.txt",

@@ -248,11 +248,12 @@ def _parchear_get(monkeypatch, respuestas):
 
 def test_cache_mef_no_repite_ficha_ni_contratos(monkeypatch):
     from scraping.mef import CacheMef, fetch_contratos, fetch_ficha_08a
-    llamadas = _parchear_get(monkeypatch, {"2331865": "<html>ficha</html>",
+    html = "<html>ETAPA: EJECUCIÓN ESTADO: ACTIVO</html>"
+    llamadas = _parchear_get(monkeypatch, {"2331865": html,
                                            "contratos:2331865": [{"n": 1}]})
     c = CacheMef(session=_SesionMuda())
-    assert fetch_ficha_08a("2331865", cache=c) == "<html>ficha</html>"
-    assert fetch_ficha_08a("2331865", cache=c) == "<html>ficha</html>"
+    assert fetch_ficha_08a("2331865", cache=c) == html
+    assert fetch_ficha_08a("2331865", cache=c) == html
     assert fetch_contratos("2331865", "", cache=c) == [{"n": 1}]
     assert fetch_contratos("2331865", "0", cache=c) == [{"n": 1}]     # codsnip "" ≡ "0"
     assert llamadas == ["2331865", "contratos:2331865"]

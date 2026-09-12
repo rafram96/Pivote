@@ -49,6 +49,7 @@ amarillo suave `FFF2CC` (FILL_PEND) · gris `D9D9D9` (FILL_PARTE).
 from __future__ import annotations
 
 from typing import Optional
+from entregables.estado_fuentes import consultas_de, nota_ausencia_mef
 
 # ── Paleta (misma que las constantes de `excel_final`, por HEX) ──────────────
 COLOR_VERIFICADO = "D9EAD3"   # verde  → identificación sostenida por documento
@@ -363,6 +364,8 @@ def fuente_mef(enr: Optional[dict]) -> dict:
         nivel = clasificar_identificacion({}, enr)["nivel"]
         texto = (FUENTE_MEF_SIN_IDENTIFICAR
                  if nivel == SIN_IDENTIFICAR else SIN_DOCUMENTOS_MEF)
+        if any(k.startswith("mef_") for k in consultas_de(enr)):
+            texto = nota_ausencia_mef(enr)
         return {"sin_documentos": True, "contrato": texto,
                 "resolucion": "—", "consultor": "—"}
 

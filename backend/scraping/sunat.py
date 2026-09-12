@@ -444,6 +444,21 @@ def diagnosticar_html_sunat(html: str) -> Optional[str]:
     return "estructura_desconocida"
 
 
+def _publicar_diagnostico(destino: Optional[dict], estado: str, motivo: str) -> None:
+    """Escribe el diagnóstico opt-in sin cambiar la API histórica del scraper."""
+    if isinstance(destino, dict):
+        destino.clear()
+        destino.update({"estado": estado, "motivo": motivo})
+
+
+def _html_declara_sin_resultados(html: str) -> bool:
+    """Reconoce solo mensajes explícitos de ausencia de coincidencias."""
+    texto = html_module.unescape(html or "").lower()
+    return bool(re.search(
+        r"no\s+se\s+encontraron\s+(?:resultados|coincidencias|contribuyentes)"
+        r"|no\s+existen\s+(?:resultados|coincidencias)", texto))
+
+
 # ============================================================================
 # API pública
 # ============================================================================
@@ -453,6 +468,7 @@ def consultar_ruc(
     *,
     timeout: float = 15.0,
     session: Optional[requests.Session] = None,
+    diagnostico: Optional[dict] = None,
 ) -> Optional[EmpresaSUNAT]:
     """
     Consulta SUNAT por RUC (11 dígitos) y devuelve los datos del contribuyente.
@@ -487,6 +503,7 @@ def consultar_ruc(
             timeout=timeout, description=f"bootstrap RUC {ruc}",
         )
         if r_form is None or r_form.status_code >= 400:
+            _publicar_diagnostico(diagnostico, "fuente_no_disponible", "falló el bootstrap de SUNAT")
             return None
 
         # POST con retry
@@ -516,6 +533,7 @@ def consultar_ruc(
             timeout=timeout, description=f"search RUC {ruc}",
         )
         if r_search is None or r_search.status_code >= 400:
+            _publicar_diagnostico(diagnostico, "fuente_no_disponible", "falló la consulta de RUC en SUNAT")
             return None
 
         r_search.encoding = _detectar_encoding(r_search.headers.get("Content-Type", ""))
@@ -532,23 +550,29 @@ def consultar_ruc(
     # pero defendemos por si SUNAT cambia.
     if "Relación de contribuyentes" in html or "Relaci&oacute;n de contribuyentes" in html:
         logger.info("SUNAT devolvio lista para RUC %s (inesperado)", ruc)
+        _publicar_diagnostico(diagnostico, "respuesta_no_reconocida", "SUNAT devolvió una lista donde se esperaba el detalle")
         return None
 
     raw = _parse_detalle(html)
     if not raw or not raw.get("Número de RUC"):
-        diagnostico = diagnosticar_html_sunat(html)
-        if diagnostico == "ruc_inexistente":
+        diagnostico_html = diagnosticar_html_sunat(html)
+        if diagnostico_html == "ruc_inexistente":
             # respuesta NORMAL del portal: el RUC no existe. Info, no alerta.
             logger.info("SUNAT: RUC %s no es válido / no existe (respuesta normal del portal)", ruc)
-        elif diagnostico:
+        elif diagnostico_html:
             # "captcha_real" / "estructura_desconocida" SÍ es un problema del
             # scraper (alerta operativa).
             logger.warning(
                 "SUNAT no devolvio detalle parseable para RUC %s · diagnostico=%s",
-                ruc, diagnostico,
+                ruc, diagnostico_html,
             )
         else:
             logger.info("SUNAT no devolvio detalle parseable para RUC %s", ruc)
+        if diagnostico is not None:
+            if diagnostico_html == "ruc_inexistente":
+                _publicar_diagnostico(diagnostico, "sin_resultados", "SUNAT indicó que el RUC no es válido")
+            else:
+                _publicar_diagnostico(diagnostico, "respuesta_no_reconocida", f"HTML no parseable ({diagnostico_html or 'sin diagnóstico'})")
         return None
 
     # El campo "Número de RUC" viene como "12345 - RAZON SOCIAL"
@@ -557,6 +581,7 @@ def consultar_ruc(
     if " - " in nro_ruc_full:
         razon_social = nro_ruc_full.split(" - ", 1)[1].strip()
 
+    _publicar_diagnostico(diagnostico, "con_resultados", "SUNAT devolvió el detalle del RUC")
     return EmpresaSUNAT(
         ruc=ruc,
         razon_social=razon_social,
@@ -577,6 +602,7 @@ def buscar_por_razon_social(
     *,
     timeout: float = 15.0,
     session: Optional[requests.Session] = None,
+    diagnostico: Optional[dict] = None,
 ) -> list[dict[str, str]]:
     """
     Busca contribuyentes por razón social (puede devolver múltiples).
@@ -596,6 +622,7 @@ def buscar_por_razon_social(
             timeout=timeout, description=f"bootstrap razon '{razon_social[:30]}'",
         )
         if r_form is None or r_form.status_code >= 400:
+            _publicar_diagnostico(diagnostico, "fuente_no_disponible", "falló el bootstrap de SUNAT")
             return []
 
         body = {
@@ -624,6 +651,7 @@ def buscar_por_razon_social(
             timeout=timeout, description=f"search razon '{razon_social[:30]}'",
         )
         if r_search is None or r_search.status_code >= 400:
+            _publicar_diagnostico(diagnostico, "fuente_no_disponible", "falló la búsqueda de razón social en SUNAT")
             return []
 
         r_search.encoding = _detectar_encoding(r_search.headers.get("Content-Type", ""))
@@ -635,7 +663,15 @@ def buscar_por_razon_social(
         if own_session:
             session.close()
 
-    return _parse_lista(html)
+    items = _parse_lista(html)
+    if items:
+        _publicar_diagnostico(diagnostico, "con_resultados", "SUNAT devolvió coincidencias")
+    elif _html_declara_sin_resultados(html):
+        _publicar_diagnostico(diagnostico, "sin_resultados", "SUNAT indicó explícitamente que no hubo coincidencias")
+    else:
+        motivo = diagnosticar_html_sunat(html) or "estructura_desconocida"
+        _publicar_diagnostico(diagnostico, "respuesta_no_reconocida", f"HTML no reconocible ({motivo})")
+    return items
 
 
 # ============================================================================

@@ -37,6 +37,7 @@ from openpyxl.utils import get_column_letter
 import entregables.cronologia as cronologia
 from entregables.procedencia import procedencia_cui, rotulo_cui
 from entregables.identidad import proyectar_identidad
+from entregables.estado_fuentes import consultas_de, linea_consulta, resumen_estado_fuentes
 from entregables.leyenda_gantt import COLORES_GANTT, MARCAS_GANTT, NOTAS_GANTT
 from entregables.certeza import (
     BUCKET_CONFIRMADO, BUCKET_INFERIDO, BUCKET_PRIVADA, BUCKET_SIN_IDENTIFICAR,
@@ -225,8 +226,11 @@ def completar_revisiones_privadas(revisiones: dict, enriquecimiento: Optional[di
                 "confirmar el RUC correcto entre los candidatos de SUNAT y revisar el certificado",
             )
         else:
+            consultas = consultas_de(datos)
+            causa = " · ".join(linea_consulta(k, v) for k, v in consultas.items()
+                               if k.startswith("sunat_"))
             revisiones[(np_, ne)] = (
-                "[PRIVADA_PENDIENTE] SUNAT no pudo identificar al emisor privado",
+                "[PRIVADA_PENDIENTE] " + (causa or "Este análisis no identificó al emisor privado; no se registró la causa de la consulta SUNAT"),
                 "confirmar la razón social o el RUC en el certificado y reintentar SUNAT",
             )
     return revisiones
@@ -1412,7 +1416,7 @@ def construir_hoja_profesional(
             n_encontrados = sum(int(v.get("docs") or 0)
                                 for v in (fx.get("valorizaciones") or [])
                                 if isinstance(v, dict))
-        texto_encontrados = ("No se encontraron documentos" if n_encontrados == 0 else
+        texto_encontrados = ("Sin documentos en el inventario del análisis; ver estado de fuentes" if n_encontrados == 0 else
                              "1 archivo encontrado" if n_encontrados == 1 else
                              f"{n_encontrados} archivos encontrados")
         kv("Documentos encontrados", texto_encontrados)
@@ -2101,7 +2105,8 @@ def construir_hoja_profesional(
                 r += 1
             separador()
 
-    def render_emisor(top: int, s: Optional[dict], fecha_emision, ini, ruc_espejo) -> int:
+    def render_emisor(top: int, s: Optional[dict], fecha_emision, ini, ruc_espejo,
+                      fuentes=None) -> int:
         """Cuadro del EMISOR del certificado (datos SUNAT) en columnas M:P desde
         `top`, al lado de las valorizaciones. Señala ALT04 (anomalía de antigüedad
         del emisor) en rojo/verde, responde si el emisor estaba HABIDO al emitir y
@@ -2270,11 +2275,15 @@ def construir_hoja_profesional(
             fill = FILL_ALERTA
         elif s and s.get("no_encontrado"):           # buscado por nombre, sin match
             kv("Emisor (cert)", s.get("nombre") or "—")
-            txt = "Sin coincidencia en SUNAT por ese nombre — verificar."
+            consulta = consultas_de(fuentes).get("sunat_nombre")
+            txt = (linea_consulta("sunat_nombre", consulta) if consulta else
+                   "Este análisis no identificó al emisor; no se registró la causa de la consulta.")
             fill = None
         else:                                        # sin RUC ni nombre cruzable
             kv("RUC declarado", ruc_espejo or "—")
-            txt = "Emisor no verificado en SUNAT (sin datos / consulta fallida)."
+            consultas = consultas_de(fuentes)
+            txt = " · ".join(linea_consulta(k, v) for k, v in consultas.items()
+                             if k.startswith("sunat_")) or "Emisor no verificado; estado de consulta SUNAT no registrado."
             fill = None
 
         ws.merge_cells(start_row=rr, start_column=13, end_row=rr + 1, end_column=16)
@@ -2282,6 +2291,10 @@ def construir_hoja_profesional(
         c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
         if fill:
             c.fill = fill
+        alto_fila = max(15, (-(-len(txt) // 65) * 14 + 6) / 2)
+        for fila_emisor in (rr, rr + 1):
+            ws.row_dimensions[fila_emisor].height = max(
+                ws.row_dimensions[fila_emisor].height or 15, alto_fila)
         rr += 2
         return rr - 1
 
@@ -2757,7 +2770,7 @@ def construir_hoja_profesional(
         # 3ª banda (M:P): emisor del certificado (SUNAT) + ALT04, al lado de valorizaciones
         s_emisor = sunat.get((n_prof, n_exp))
         r_emi = render_emisor(r_top, s_emisor,
-                              e.get("fecha_emision"), ini, e.get("ruc_emisor"))
+                              e.get("fecha_emision"), ini, e.get("ruc_emisor"), fx)
         r = max(r, r_emi + 1)
 
         # 4ª banda (R:U): histórico SUNAT del mismo emisor, pegado al cuadro anterior
@@ -2794,6 +2807,17 @@ def construir_hoja_profesional(
                 lineas = sum(max(1, -(-len(linea) // 220)) for linea in texto.splitlines())
                 ws.row_dimensions[r].height = max(30, lineas * 14 + 6)
                 r += 1
+
+        # La misma explicación factual que se publica en API/ZIP. No agrega
+        # otra tabla de documentos ni interpreta el contenido descargado.
+        texto_fuentes = "Estado de fuentes y documentos\n" + resumen_estado_fuentes(fx)
+        for linea in texto_fuentes.splitlines():
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=26)
+            c = ws.cell(r, 1, _xl(linea))
+            c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
+            c.fill = FILL_RECAP
+            ws.row_dimensions[r].height = max(18, -(-len(linea) // 220) * 14 + 6)
+            r += 1
 
         # imagen del certificado presentado (Fase 2): la skill recortó sus folios a
         # un PDF chico (principal primero); aquí se renderiza y embebe.
@@ -3438,6 +3462,7 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
                 or enr.get("verificacion_expediente") or enr.get("seace")
                 or enr.get("inventario_documental") or enr.get("cruces_fechas")
                 or enr.get("contraste_servicio")
+                or enr.get("consultas_fuentes") or enr.get("descargas_reales")
                 or enr.get("resoluciones_candidatos")
                 or enr.get("sin_documentos_mef") or enr.get("contrato_emisor")
                 or enr.get("via") or enr.get("cui") or enr.get("sub_obras") or enr.get("obra")):
@@ -3449,6 +3474,8 @@ def desempaquetar_enriquecimiento(enriquecimiento: Optional[dict]):
             fichas[(np_, ne)] = {**(enr.get("obra_ficha") or {}),
                                  "_procedencia_cui": procedencia_cui(None, enr),
                                  "_enriquecimiento_identidad": enr,
+                                 "consultas_fuentes": enr.get("consultas_fuentes"),
+                                 "descargas_reales": enr.get("descargas_reales"),
                                  "cui": (enr.get("cui")
                                          or (enr.get("obra_ficha") or {}).get("cui")),
                                  "obra_nombre": (enr.get("obra_nombre")

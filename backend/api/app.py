@@ -43,6 +43,7 @@ from entregables.certeza import (
     normalizar_motivo_fuente, resumen_certeza_profesional,
 )
 from entregables.identidad import proyectar_identidad
+from entregables.estado_fuentes import proyectar_estado_fuentes
 from reglas.resultados_profesionales import reconciliar_resultados_profesionales
 from orquestador import Motor, RepositorioArchivos, etapas_esqueleto, etapas_reales
 from orquestador.progreso import REGISTRO
@@ -1157,6 +1158,7 @@ def extraccion(job_id: str):
             # la obra en InfoObras (Representante de obra) + verificación SUNAT.
             ev = enr.get(f"{np_}:{e.get('n')}")
             proyeccion = proyectar_identidad(e, ev, tipo_eval)
+            d["estado_fuentes"] = proyectar_estado_fuentes(ev)
             if isinstance(ev, dict):
                 obra = ev.get("obra") or {}
                 d["cui_resuelto"] = (proyeccion["procedencia"]["cui_utilizado"]

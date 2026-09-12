@@ -83,7 +83,8 @@ class DescargasMefSeleccionadas:
             os.replace(carpeta, respaldo)
         registros = []
         for doc in docs:
-            registro = {**doc, "estado": "no_descargado"}
+            registro = {**doc, "estado": "no_descargado",
+                        "rol_documental": "por_identificar", "correspondencia": "por_confirmar"}
             destino_pdf = carpeta / ("CONTRATO_SELECCIONADO.pdf" if doc["tipo"] == "contrato"
                                      else "RESOLUCION_SELECCIONADA.pdf")
             if doc["tipo"] == "acto_contractual":
@@ -106,6 +107,8 @@ class DescargasMefSeleccionadas:
                 registro.update(estado="descargado", archivo_entregado=destino_pdf.name,
                                 sha256_entregado=hashlib.sha256(destino_pdf.read_bytes()).hexdigest())
             except Exception as exc:  # una fuente fallida no impide descargar la otra
+                registro["estado"] = ("descarga_fallida" if doc.get("url") or doc.get("leida")
+                                      else "sin_enlace")
                 # Si la copia deja de ser verificable, no conservar un PDF previo como vigente.
                 if destino_pdf.exists():
                     respaldo = self.job_dir / "descargas_previas" / f"mef-{uuid.uuid4().hex}"

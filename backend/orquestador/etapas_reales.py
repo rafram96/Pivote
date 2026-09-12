@@ -629,15 +629,27 @@ class EtapaInfoObrasReal:
     def _cache_mef(self):
         return getattr(self._corrida, "cache_mef", None)
 
-    def _fetch(self, cui: str, cert_ini=None, cert_fin=None, obra_id=None):
+    def _fetch(self, cui: str, cert_ini=None, cert_fin=None, obra_id=None, *, diagnostico=None):
         with self._cron.medir("infoobras"):
-            if self._fetcher:
-                try:
-                    return self._fetcher(cui, cert_ini, cert_fin, obra_id)
-                except TypeError:
-                    return self._fetcher(cui)
             from scraping.infoobras import fetch_by_cui
-            return fetch_by_cui(cui, cert_ini, cert_fin, obra_id)
+            fetcher = self._fetcher or fetch_by_cui
+            kwargs = ({"diagnostico": diagnostico}
+                      if _acepta_parametro(fetcher, "diagnostico") else {})
+            args = (cui, cert_ini, cert_fin, obra_id)
+            # Compatibilidad con inyectores de un argumento sin repetir una
+            # llamada que haya lanzado TypeError dentro de su implementación.
+            import inspect
+            try:
+                firma = inspect.signature(fetcher)
+            except (TypeError, ValueError):
+                firma = None
+            if firma is not None:
+                try:
+                    firma.bind(*args, **kwargs)
+                except TypeError:
+                    firma.bind(cui, **kwargs)
+                    args = (cui,)
+            return fetcher(*args, **kwargs)
 
     def _leer_resolucion_aprobacion(self, ctx, exp: dict, cui, vmef: dict) -> Optional[dict]:
         """Descarga y lee la resolución de aprobación del 08-A (si el MEF la publica).
@@ -672,24 +684,34 @@ class EtapaInfoObrasReal:
             logger.debug("resolución de aprobación CUI %s: %s", cui, ex)
             return None
 
-    def _verificar_expediente_mef(self, exp: dict, cui, codsnip="") -> Optional[dict]:
+    def _verificar_expediente_mef(self, exp: dict, cui, codsnip="", *, enriquecimiento=None) -> Optional[dict]:
         """Verifica un expediente contra el MEF (contrato/contratista/resolución).
         SOLO corre si hay un verificador cableado (`verificador_mef`): la app en
         modo real pasa `scraping.mef.verificar_cui`; los tests inyectan un fake; si
         no está, se OMITE (así los tests offline no tocan red). El `codsnip` (de la
         obra de InfoObras) mejora la cobertura del endpoint de contratos. Best-effort:
         si el módulo falla o el portal no responde, devuelve None y el análisis sigue."""
+        datos = None
+        diagnostico = {"estado": "no_registrado", "motivo": "El adaptador MEF no conservó el estado de la consulta."}
         if self._verificar_mef is None:
-            return None
+            diagnostico = {"estado": "no_consultado", "motivo": "No se configuró verificador MEF en esta ejecución."}
         try:
-            with self._cron.medir("mef"):
-                if self._verificar_mef_con_cache and self._cache_mef is not None:
-                    return self._verificar_mef(exp, cui, codsnip, cache=self._cache_mef)
-                return self._verificar_mef(exp, cui, codsnip)
+            if self._verificar_mef is not None:
+                with self._cron.medir("mef"):
+                    if self._verificar_mef_con_cache and self._cache_mef is not None:
+                        datos = self._verificar_mef(exp, cui, codsnip, cache=self._cache_mef)
+                    else:
+                        datos = self._verificar_mef(exp, cui, codsnip)
         except Exception as e:  # noqa: BLE001
             from scraping.errores_red import corto
             logger.info("verificación MEF CUI %s no respondió: %s", cui, corto(e))
-            return None
+            diagnostico = {"estado": "fuente_no_disponible", "motivo": "No se pudo completar la consulta MEF; no demuestra ausencia de documentos."}
+        if isinstance(enriquecimiento, dict):
+            consultas = (datos or {}).get("consultas_fuentes") or {}
+            destino = enriquecimiento.setdefault("consultas_fuentes", {})
+            for recurso in ("mef_ficha", "mef_contratos"):
+                destino[recurso] = deepcopy(consultas.get(recurso) or diagnostico)
+        return datos
 
     def _procesos_seace(self, cui: str):
         with self._cron.medir("seace"):
@@ -740,7 +762,14 @@ class EtapaInfoObrasReal:
                     mensaje=enr["contraste_servicio"]["motivo"], origen=self.nombre,
                     referencia=f"prof={np_} exp={ne}"))
 
-        def _fetch_obra(cui, cert_ini, cert_fin, obra_id=None):
+        cache_consultas: dict[tuple, dict] = {}
+
+        def _fetch_obra(cui, cert_ini, cert_fin, obra_id=None, *, enriquecimiento=None):
+            if isinstance(enriquecimiento, dict):
+                consultas_previas = enriquecimiento.setdefault("consultas_fuentes", {})
+                for recurso in list(consultas_previas):
+                    if recurso.startswith("infoobras_"):
+                        del consultas_previas[recurso]
             # Cachea SOLO éxitos: si la obra cae por flakiness no se memoriza el
             # None, para que la 2da pasada (o un hermano con el mismo CUI) pueda
             # reintentar. La ventana del certificado desambigua si el CUI trae
@@ -748,20 +777,38 @@ class EtapaInfoObrasReal:
             if obra_id is not None:
                 ckey_lookup = (cui, None, None, obra_id)
                 if ckey_lookup in cache:
+                    if isinstance(enriquecimiento, dict):
+                        enriquecimiento.setdefault("consultas_fuentes", {}).update(
+                            deepcopy(cache_consultas.get(ckey_lookup) or {}))
                     return cache[ckey_lookup]
 
             ckey = (cui, cert_ini, cert_fin, obra_id)
             if ckey in cache:
+                if isinstance(enriquecimiento, dict):
+                    enriquecimiento.setdefault("consultas_fuentes", {}).update(
+                        deepcopy(cache_consultas.get(ckey) or {}))
                 return cache[ckey]
+            consultas = {}
             try:
-                obra = self._fetch(cui, cert_ini, cert_fin, obra_id)
+                obra = self._fetch(cui, cert_ini, cert_fin, obra_id, diagnostico=consultas)
             except Exception as ex:  # noqa: BLE001 — portal intermitente
                 logger.warning("InfoObras CUI %s: %r", cui, ex)
-                return None
+                consultas.setdefault("infoobras_busqueda", {
+                    "estado": "fuente_no_disponible", "motivo": "No se pudo completar la consulta InfoObras."})
+                obra = None
+            if not consultas:
+                consultas["infoobras_busqueda"] = {
+                    "estado": "no_registrado",
+                    "motivo": "El adaptador InfoObras no conservó el estado de la consulta; no permite afirmar ausencia."}
+            if isinstance(enriquecimiento, dict):
+                destino_consultas = enriquecimiento.setdefault("consultas_fuentes", {})
+                destino_consultas.update(deepcopy(consultas))
             if obra is not None:
                 cache[ckey] = obra
+                cache_consultas[ckey] = deepcopy(consultas)
                 if getattr(obra, "obra_id", None) is not None:
                     cache[(cui, None, None, obra.obra_id)] = obra
+                    cache_consultas[(cui, None, None, obra.obra_id)] = deepcopy(consultas)
             return obra
 
         def _procesar(_e, np_, ne, cui, cert_ini, cert_fin, obra):
@@ -841,7 +888,9 @@ class EtapaInfoObrasReal:
             if cui and _es_exped and not _otra_fase:
                 # el SNIP de la obra de InfoObras mejora la cobertura de contratos del MEF
                 _snip = str((getattr(obra, "raw_busqueda", {}) or {}).get("codSnip") or "").strip()
-                _vmef = self._verificar_expediente_mef(_e, cui, _snip)
+                _vmef = self._verificar_expediente_mef(_e, cui, _snip, enriquecimiento=enr)
+                if isinstance(_vmef, dict):
+                    enr["verificacion_expediente"] = _vmef
                 if _vmef and _vmef.get("verificado_en_mef"):
                     _vmef.setdefault("cod_snip", _snip or None)   # para re-usar en la descarga
                     enr["verificacion_expediente"] = _vmef
@@ -927,7 +976,7 @@ class EtapaInfoObrasReal:
             cui = s.get("cui")
             obra_id = (s.get("obra") or {}).get("obra_id")
             si, sf = _fecha_iso(s.get("fecha_inicial")), _fecha_iso(s.get("fecha_final"))
-            obra = _fetch_obra(cui, si, sf, obra_id)
+            obra = _fetch_obra(cui, si, sf, obra_id, enriquecimiento=s)
             if obra is None:
                 s["sin_verificar"] = True   # portal flaky → ficha desconocida (no invalida)
                 return s
@@ -1022,7 +1071,10 @@ class EtapaInfoObrasReal:
                 return True
             if not es_expediente_exp(_e, _tipo_decl, self.forzar_expedientes):
                 return False
-            _vmef = self._verificar_expediente_mef(_e, cui, "")
+            _vmef = self._verificar_expediente_mef(_e, cui, "", enriquecimiento=enr)
+            if isinstance(_vmef, dict):
+                enr["verificacion_expediente"] = _vmef
+            ctx.enriquecimiento[k] = enr
             verificado = bool(_vmef and _vmef.get("verificado_en_mef"))
             if not verificado and str(enr.get("via") or "").upper() not in _VIAS_SOLO_MEF:
                 return False   # obra flaky de InfoObras: sigue el camino normal
@@ -1055,19 +1107,15 @@ class EtapaInfoObrasReal:
                 cont["ok"] += 1
                 return True
             if not verificado:
-                # Identificado en el Banco de Inversiones (vía MEF/CONTRATO/RESOLUCION)
-                # pero el MEF no publica contrato ni resolución de ese expediente (típico
-                # de proyectos anteriores a Invierte.pe). No es un fallo transitorio que
-                # merezca «sin verificar»: la experiencia está identificada y cuenta por
-                # el certificado; el Excel lo dice en el bloque EXPEDIENTE («POR
-                # VERIFICAR — ni el MEF ni InfoObras publican…»).
-                enr.pop("verificacion_expediente", None)
+                # La marca describe los documentos disponibles para el análisis,
+                # no lo que publica el portal. Conservar la causa de consulta
+                # aparte, sin cambiar identidad ni cálculo por este diagnóstico.
                 enr["sin_documentos_mef"] = True
+                from entregables.estado_fuentes import nota_ausencia_mef
                 obs.append(pipeline.Observacion(
                     codigo="VERIF_MEF", severidad=pipeline.Severidad.INFO,
                     mensaje=f"expediente identificado en el Banco de Inversiones (CUI {cui}); "
-                            "el MEF no publica contrato ni resolución de aprobación y InfoObras "
-                            "no registra ejecución — cuenta por el certificado, sin contraste",
+                            + nota_ausencia_mef(enr),
                     origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
                 ctx.enriquecimiento[k] = enr
                 cont["ok"] += 1
@@ -1124,7 +1172,8 @@ class EtapaInfoObrasReal:
                 cert_ini, cert_fin = _fecha_iso(_e.get("fecha_inicial")), _fecha_iso(_e.get("fecha_final"))
                 obra_id = enr.get("obra", {}).get("obra_id") if isinstance(enr.get("obra"), dict) else None
                 with cron.experiencia(_clave(np_, ne)):
-                    obra = _fetch_obra(cui, cert_ini, cert_fin, obra_id)
+                    obra = _fetch_obra(cui, cert_ini, cert_fin, obra_id, enriquecimiento=enr)
+                    ctx.enriquecimiento[_clave(np_, ne)] = enr
                     if obra is None:
                         # identificado por el Banco de Inversiones: que InfoObras no lo tenga
                         # es lo esperado → verificación directa contra el MEF, sin 2ª pasada
@@ -1146,7 +1195,9 @@ class EtapaInfoObrasReal:
                     ctx.reportar(self.nombre, j, n_fall,
                                  f"Reintentando la obra {j} de {n_fall} (el portal estaba inestable)")
                     with cron.experiencia(_clave(np_, ne)):
-                        obra = _fetch_obra(cui, cert_ini, cert_fin, obra_id)
+                        enr = ctx.enriquecimiento.get(_clave(np_, ne)) or {}
+                        obra = _fetch_obra(cui, cert_ini, cert_fin, obra_id, enriquecimiento=enr)
+                        ctx.enriquecimiento[_clave(np_, ne)] = enr
                         if obra is None and _procesar_sin_obra(_e, np_, ne, cui):
                             continue   # expediente: verificado solo contra el MEF
                         if obra is None:
@@ -1162,8 +1213,8 @@ class EtapaInfoObrasReal:
                             ctx.enriquecimiento[k] = enr
                             obs.append(pipeline.Observacion(
                                 codigo="INFOOBRAS", severidad=pipeline.Severidad.ADVERTENCIA,
-                                mensaje=f"la obra CUI {cui} no respondió en InfoObras (tras 2 pasadas) "
-                                        f"— experiencia sin verificar, veredicto provisional",
+                                mensaje=f"no se obtuvo la ficha CUI {cui} en InfoObras (tras 2 pasadas) "
+                                        "— experiencia sin verificar; consultar el estado registrado de la fuente",
                                 origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
                         else:
                             _procesar(_e, np_, ne, cui, cert_ini, cert_fin, obra)
@@ -2406,17 +2457,21 @@ class EtapaSunatReal:
         self._buscador = buscador
         self._extras = extras
 
-    def _consultar(self, ruc: str):
+    def _consultar(self, ruc: str, diagnostico: Optional[dict] = None):
         if self._consultor:
+            if _acepta_parametro(self._consultor, "diagnostico"):
+                return self._consultor(ruc, diagnostico=diagnostico)
             return self._consultor(ruc)
         from scraping.sunat import consultar_ruc
-        return consultar_ruc(ruc)
+        return consultar_ruc(ruc, diagnostico=diagnostico)
 
-    def _buscar(self, nombre: str):
+    def _buscar(self, nombre: str, diagnostico: Optional[dict] = None):
         if self._buscador:
+            if _acepta_parametro(self._buscador, "diagnostico"):
+                return self._buscador(nombre, diagnostico=diagnostico)
             return self._buscador(nombre)
         from scraping.sunat import buscar_por_razon_social
-        return buscar_por_razon_social(nombre)
+        return buscar_por_razon_social(nombre, diagnostico=diagnostico)
 
     def _consultar_extras(self, ruc: str) -> tuple[list, object]:
         """Las dos consultas informativas del emisor (issue #30): representantes
@@ -2429,10 +2484,10 @@ class EtapaSunatReal:
     def correr(self, ctx: Contexto) -> pipeline.ResultadoEtapa:
         ok = err = rev = 0
         obs: list[pipeline.Observacion] = []
-        cache: dict[str, object] = {}
+        cache: dict[str, tuple[object, dict]] = {}
         # El cliente devuelve [] también cuando SUNAT falla. Solo reutilizar
         # listas con candidatos, por consulta exacta y dentro de esta ejecución.
-        cache_nombre: dict[str, list] = {}
+        cache_nombre: dict[str, tuple[list, dict]] = {}
         cache_extra: dict[str, tuple] = {}   # ruc → (representantes, historico)
         busquedas_nombre = reutilizaciones_nombre = 0
         total = 0
@@ -2474,18 +2529,36 @@ class EtapaSunatReal:
                         referencia=f"prof={np_} exp={ne}"))
             else:
                 nombre = _nombre_emisor_limpio(entidad)
+                diagnostico_nombre: dict = {}
                 if nombre and nombre in cache_nombre:
-                    matches = deepcopy(cache_nombre[nombre])
+                    matches, diagnostico_nombre = cache_nombre[nombre]
+                    matches = deepcopy(matches)
+                    diagnostico_nombre = deepcopy(diagnostico_nombre)
                     reutilizaciones_nombre += 1
                 else:
                     try:
                         busquedas_nombre += bool(nombre)
-                        matches = self._buscar(nombre) if nombre else []
+                        matches = self._buscar(nombre, diagnostico_nombre) if nombre else []
                         if nombre and matches:
-                            cache_nombre[nombre] = deepcopy(matches)
+                            cache_nombre[nombre] = (deepcopy(matches),
+                                                    deepcopy(diagnostico_nombre))
                     except Exception as ex:  # noqa: BLE001
                         logger.warning("SUNAT buscar %r: %r", nombre, ex)
                         matches = []
+                        diagnostico_nombre = {
+                            "estado": "fuente_no_disponible",
+                            "motivo": f"excepción del buscador: {type(ex).__name__}",
+                        }
+
+                if not diagnostico_nombre:
+                    diagnostico_nombre = {
+                        "estado": "no_registrado",
+                        "motivo": "el buscador no informó diagnóstico",
+                    }
+                enr.setdefault("consultas_fuentes", {})["sunat_nombre"] = {
+                    "nombre": nombre,
+                    **diagnostico_nombre,
+                }
 
                 estado_cruce = (cruce_seace or {}).get("estado")
                 if estado_cruce == "enriquecer":
@@ -2514,7 +2587,9 @@ class EtapaSunatReal:
                             "razon_social": matches[0].get("razon_social"),
                         }
                     else:
-                        bloque["no_encontrado"] = True
+                        bloque["sin_identificar"] = True
+                        if diagnostico_nombre.get("estado") == "sin_resultados":
+                            bloque["no_encontrado"] = True
                     enr["sunat"] = bloque
                     ctx.enriquecimiento[k] = enr
                     obs.append(pipeline.Observacion(
@@ -2535,7 +2610,9 @@ class EtapaSunatReal:
                                                         "razon_social": m.get("razon_social")}
                                                        for m in matches[:5]]}
                     else:
-                        enr["sunat"] = {"nombre": nombre, "no_encontrado": True}
+                        enr["sunat"] = {"nombre": nombre, "sin_identificar": True}
+                        if diagnostico_nombre.get("estado") == "sin_resultados":
+                            enr["sunat"]["no_encontrado"] = True
                     if cruce_seace:
                         enr["sunat"]["seace_emisor"] = cruce_seace
                     ctx.enriquecimiento[k] = enr
@@ -2558,11 +2635,31 @@ class EtapaSunatReal:
                             f"postor o un consorciado — posible auto-certificación de la experiencia",
                     origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
 
+            diagnostico_ruc: dict = {}
             try:
-                emp = cache[ruc] if ruc in cache else cache.setdefault(ruc, self._consultar(ruc))
+                if ruc in cache:
+                    emp, diagnostico_ruc = cache[ruc]
+                    diagnostico_ruc = deepcopy(diagnostico_ruc)
+                else:
+                    emp = self._consultar(ruc, diagnostico_ruc)
+                    cache[ruc] = (emp, deepcopy(diagnostico_ruc))
             except Exception as ex:  # noqa: BLE001
                 logger.warning("SUNAT %s: %r", ruc, ex)
                 emp = None
+                diagnostico_ruc = {
+                    "estado": "fuente_no_disponible",
+                    "motivo": f"excepción del consultor: {type(ex).__name__}",
+                }
+            if not diagnostico_ruc:
+                diagnostico_ruc = {
+                    "estado": "no_registrado",
+                    "motivo": "el consultor no informó diagnóstico",
+                }
+            enr.setdefault("consultas_fuentes", {})["sunat_ruc"] = {
+                "ruc": ruc,
+                **diagnostico_ruc,
+            }
+            ctx.enriquecimiento[k] = enr
             if emp is None:
                 err += 1
                 continue
