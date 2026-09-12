@@ -92,16 +92,61 @@ def test_misma_evidencia_en_excel_zip_y_desempaquetado(ruta, tmp_path):
     wb = openpyxl.load_workbook(salida)
     hoja = wb.worksheets[2]
     texto = " ".join(str(c.value) for fila in hoja for c in fila if c.value is not None)
-    assert "SERVICIO ESPERADO (concurso)" in texto
-    assert "SERVICIO DECLARADO (certificado)" in texto
     assert "Residente de obra" in texto and "página PDF 15" in texto
-    assert contraste["motivo"] in texto
+    assert "SERVICIO ESPERADO (concurso)" not in texto
+    assert "SERVICIO DECLARADO (certificado)" not in texto
+    assert "CONTRASTE DE SERVICIO" not in texto
+    fila_cargo = next(
+        " ".join(str(c.value) for c in fila if c.value is not None)
+        for fila in hoja.iter_rows()
+        if any(str(c.value).strip() == "CARGO QUE OCUPÓ" for c in fila)
+    )
+    assert "Residente de obra" in fila_cargo
+    esperado = ("Supervisión de obra" if ruta == "obras"
+                else "Elaboración de expediente técnico")
+    assert esperado in fila_cargo
+    assert "Por verificar: se espera" in fila_cargo
     salida_zip = construir_zip_infoobras(esp, {}, tmp_path / "servicio.zip", enr)
     with zipfile.ZipFile(salida_zip) as z:
         nombre = next(n for n in z.namelist() if n.endswith("IDENTIFICACION.txt"))
         identidad = z.read(nombre).decode("utf-8")
     assert contraste["motivo"] in identidad
     assert "Residente de obra" in identidad and "página PDF 15" in identidad
+
+
+@pytest.mark.parametrize("ruta", ["obras", "expedientes"])
+def test_servicio_coincidente_no_inserta_aviso_en_fila_cargo(ruta, tmp_path):
+    declarado = (evidencia("supervision_obra", "Servicio de supervisión de obra", "certificado", 15)
+                 if ruta == "obras" else
+                 evidencia("elaboracion_expediente", "Elaboración del expediente técnico", "certificado", 15))
+    esp = espejo_prueba(ruta, declarado)
+    contraste = contrastar_servicio(esp, esp["profesionales"][0]["experiencias"][0])
+    assert contraste["estado"] == "coincide"
+    _, _, fichas, _ = desempaquetar_enriquecimiento({"1:1": {"contraste_servicio": contraste}})
+    salida = generar_excel_final(esp, tmp_path / "coincide.xlsx", fichas=fichas)
+    hoja = openpyxl.load_workbook(salida).worksheets[2]
+    fila_cargo = next(
+        " ".join(str(c.value) for c in fila if c.value is not None)
+        for fila in hoja.iter_rows()
+        if any(str(c.value).strip() == "CARGO QUE OCUPÓ" for c in fila)
+    )
+    assert "Residente de obra" not in fila_cargo
+    assert "esperado" not in fila_cargo.lower()
+    assert "declarado" not in fila_cargo.lower()
+
+
+@pytest.mark.parametrize("ruta", ["obras", "expedientes"])
+def test_servicio_indeterminado_no_agrega_filas_de_formato(ruta, tmp_path):
+    esp = espejo_prueba(ruta)
+    contraste = contrastar_servicio(esp, esp["profesionales"][0]["experiencias"][0])
+    assert contraste["estado"] == "no_determinado"
+    _, _, fichas, _ = desempaquetar_enriquecimiento({"1:1": {"contraste_servicio": contraste}})
+    salida = generar_excel_final(esp, tmp_path / "indeterminado.xlsx", fichas=fichas)
+    hoja = openpyxl.load_workbook(salida).worksheets[2]
+    textos = [str(c.value) for fila in hoja.iter_rows() for c in fila if c.value is not None]
+    for rotulo in ("SERVICIO ESPERADO (concurso)", "SERVICIO DECLARADO (certificado)",
+                   "CONTRASTE DE SERVICIO", "Por verificar: se espera"):
+        assert rotulo not in " ".join(textos)
 
 
 def test_ficha_de_otra_fase_no_se_rotula_como_trabajo_del_profesional(tmp_path):

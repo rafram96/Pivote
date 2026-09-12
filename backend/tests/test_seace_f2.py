@@ -308,7 +308,10 @@ def test_excel_muestra_documentos_seace_y_ambiguedad(tmp_path):
     assert "DOCUMENTOS DEL PROCESO (SEACE)" in texto
     assert "Bases integradas" in texto
     assert "Adjuntos del contrato" in texto
-    assert "Contenido de los documentos" in texto
+    assert "Contenido de los documentos" not in texto
+    assert "SERVICIO ESPERADO (concurso)" not in texto
+    assert "SERVICIO DECLARADO (certificado)" not in texto
+    assert "CONTRASTE DE SERVICIO" not in texto
     aviso = next(c for c in celdas if str(c.value).startswith("Por confirmar"))
     # Amarillo SUAVE: es «por verificar», no un dato del certificado. El amarillo
     # fuerte (FFFF00) quedó reservado para lo que la leyenda de la hoja promete.

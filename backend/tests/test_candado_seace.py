@@ -485,8 +485,10 @@ def test_excel_muestra_el_rotulo_de_los_tres_estados(tmp_path, resultado):
                           "senales": []}))
     esperado = "Coincidencias en los datos del proceso" if resultado == CONFIRMADO else rotulo(resultado)
     assert esperado in texto
-    assert "Contenido de los documentos" in texto
-    assert "Por confirmar: tipo de documento y vínculo con el encargo" in texto
+    assert "Contenido de los documentos" not in texto
+    assert "SERVICIO ESPERADO (concurso)" not in texto
+    assert "SERVICIO DECLARADO (certificado)" not in texto
+    assert "CONTRASTE DE SERVICIO" not in texto
     assert rotulo(CONFIRMADO) not in texto
     if resultado == CONFIRMADO:
         assert "motivo de prueba" not in texto      # solo se explica lo dudoso

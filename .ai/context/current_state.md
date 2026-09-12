@@ -1,5 +1,19 @@
 # Estado actual del proyecto
 
+## 2026-09-12 — Formato sin ampliaciones no acordadas
+
+[Retiro autorizado](../handoffs/2026-09-12_codex.md#retiro-de-añadidos-de-presentación-no-acordados):
+el generador conserva la estructura y retira filas repetitivas de servicio y
+contenido documental. Avisos concretos permanecen, sin cambiar cálculos ni
+resumen/Gantt. Estados completos en API/ZIP. Solo nuevas generaciones.
+
+## 2026-09-12 — Retiro del bloque de fuentes en hojas profesionales
+
+[Presentación simplificada](../handoffs/2026-09-12_codex.md#bloque-de-estados-retirado-del-excel):
+el generador ya no añade «Estado de fuentes y documentos» ni sus filas en obras
+o expedientes. API/ZIP conservan estados; tarjetas conservan identidad y motivos
+específicos. Cambio solo para nuevas generaciones; sin alterar entregas guardadas.
+
 ## 2026-09-12 — Dos alertas de integridad
 
 [Corrección acotada](../handoffs/2026-09-12_codex.md#dos-alertas-falsas-de-integridad-corregidas):

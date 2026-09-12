@@ -9,6 +9,7 @@ import openpyxl
 import pytest
 
 from entregables import generar_excel_final
+from entregables.excel_final import _resumen_sunat_sin_emisor
 from entregables.certeza import clasificar_identificacion
 from entregables.estado_fuentes import proyectar_estado_fuentes
 from entregables.procedencia import procedencia_cui
@@ -106,7 +107,7 @@ def test_api_expone_estado_fuentes_por_experiencia_sin_red(tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize("tipo", ["expedientes", "obras"])
-def test_zip_e_excel_publican_estado_sin_convertir_descarga_en_verificacion(tmp_path, monkeypatch, tipo):
+def test_zip_conserva_estados_y_excel_omite_bloque_de_fuentes(tmp_path, monkeypatch, tipo):
     espejo, enr = _espejo(tipo), _enriquecimiento()
     origen = tmp_path / "descargas"
     origen.mkdir()
@@ -128,11 +129,26 @@ def test_zip_e_excel_publican_estado_sin_convertir_descarga_en_verificacion(tmp_
     salida = generar_excel_final(espejo, tmp_path / "final.xlsx",
                                  fichas={(1, 1): enr["1:1"]})
     libro = openpyxl.load_workbook(salida, read_only=True, data_only=True)
-    textos = [str(c.value) for hoja in libro.worksheets for fila in hoja.iter_rows() for c in fila if c.value]
+    hojas_profesionales = libro.worksheets[2:]
+    filas = [[str(c.value) for c in fila if c.value]
+             for hoja in hojas_profesionales for fila in hoja.iter_rows()]
+    textos = [texto for fila in filas for texto in fila]
     libro.close()
-    assert any("Estado de fuentes y documentos" in t for t in textos)
-    assert any("fuente no disponible" in t.lower() for t in textos)
-    assert any("descarga fallida" in t.lower() for t in textos)
+    rotulos_bloque = (
+        "Estado de fuentes y documentos",
+        "InfoObras · búsqueda:", "InfoObras · ejecución:", "InfoObras · preparación:",
+        "MEF · ficha 08-A:", "MEF · contratos:", "SUNAT · búsqueda por nombre:",
+        "SUNAT · ficha RUC:",
+    )
+    # El bloque se materializaba como filas propias (la primera celda llevaba
+    # el rótulo); no se prohíben observaciones SEACE legítimas dentro de una
+    # fila de experiencia ya existente.
+    filas_bloque = [fila for fila in filas if fila and fila[0].startswith(rotulos_bloque)]
+    assert filas_bloque == []
+    # La eliminación es solo de la banda de fuentes: la tarjeta conserva la
+    # explicación de identidad que el evaluador necesita para cotejar el CUI.
+    assert any("CUI declarado:" in t for t in textos)
+    assert any("CUI utilizado:" in t for t in textos)
 
 
 def test_privada_sin_ficha_ruc_no_se_vuelve_publica_ni_cambia_cui():
@@ -160,3 +176,29 @@ def test_fuentes_ausentes_y_seace_ambiguo_no_se_convierten_en_fallo():
     assert any("no quedó identificado" in nota.lower() for nota in ambiguo["notas"])
     assert any("no se elige" in nota.lower() for nota in ambiguo["notas"])
     assert not any("fuente no disponible" in nota.lower() for nota in ambiguo["notas"])
+
+
+@pytest.mark.parametrize("estado,esperado", [
+    ("con_resultados", "datos recibidos, emisor por identificar"),
+    ("sin_resultados", "sin coincidencias"),
+    ("fuente_no_disponible", "consulta no completada"),
+    ("respuesta_no_reconocida", "respuesta no interpretable"),
+    ("no_consultado", "no consultado"),
+    ("no_registrado", "consulta sin detalle"),
+])
+def test_resumen_sunat_conserva_causa_sin_repetir_traza(estado, esperado):
+    ficha = {"consultas_fuentes": {"sunat_nombre": {
+        "estado": estado, "motivo": "detalle técnico extenso que no va en la tarjeta",
+    }}}
+    assert _resumen_sunat_sin_emisor(ficha) == f"SUNAT — nombre: {esperado}"
+    assert ficha["consultas_fuentes"]["sunat_nombre"]["motivo"].startswith("detalle técnico")
+
+
+def test_resumen_sunat_no_mezcla_busqueda_vacia_y_detalle_fallido():
+    ficha = {"consultas_fuentes": {
+        "sunat_nombre": {"estado": "sin_resultados"},
+        "sunat_ruc": {"estado": "fuente_no_disponible"},
+    }}
+    assert _resumen_sunat_sin_emisor(ficha) == (
+        "SUNAT — nombre: sin coincidencias; RUC: consulta no completada")
+    assert _resumen_sunat_sin_emisor({}) == "Emisor por verificar; consulta SUNAT no registrada."

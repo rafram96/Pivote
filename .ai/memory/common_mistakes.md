@@ -1,5 +1,10 @@
 # Errores ya cometidos (no repetir)
 
+- **Corregir datos ampliando el formato sin consultarlo**: trasladar trazas de
+  fuentes y advertencias genéricas a filas por experiencia recargó el Excel.
+  Preservar el diseño acordado; motivos concretos en campos existentes, detalle
+  técnico en los datos internos/API/ZIP. Nuevas secciones requieren acuerdo.
+
 - **Confundir rótulo del adjunto con tipo/alcance del acto**: un enlace de
   aprobación puede entregar una memoria, un acta de terreno o un archivo
   vacío con HTTP200. La aprobación real también puede ser un formato firmado

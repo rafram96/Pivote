@@ -37,7 +37,7 @@ from openpyxl.utils import get_column_letter
 import entregables.cronologia as cronologia
 from entregables.procedencia import procedencia_cui, rotulo_cui
 from entregables.identidad import proyectar_identidad
-from entregables.estado_fuentes import consultas_de, linea_consulta, resumen_estado_fuentes
+from entregables.estado_fuentes import consultas_de
 from entregables.leyenda_gantt import COLORES_GANTT, MARCAS_GANTT, NOTAS_GANTT
 from entregables.certeza import (
     BUCKET_CONFIRMADO, BUCKET_INFERIDO, BUCKET_PRIVADA, BUCKET_SIN_IDENTIFICAR,
@@ -59,7 +59,7 @@ from reglas.resultados_profesionales import (
 from schemas.cargo import etiqueta_hoja
 from validacion.candado_seace import observaciones_temporales
 from validacion.servicio_experiencia import contrastar_servicio, fase_servicio_incompatible
-from entregables.servicio_experiencia import filas_contraste_servicio
+from entregables.servicio_experiencia import ETIQUETAS_SERVICIO
 from scripts.generar_excel import (
     AL_HEAD, AL_WRAP, BORDER, F_BOLD, F_CELL, F_HEAD, F_PARTE, F_PROF,
     FILL_BACKEND, FILL_CLAUDE, FILL_HEAD, FILL_PARTE, FILL_PEND, FILL_PROF,
@@ -202,6 +202,23 @@ def _es_revision_efectiva(v) -> bool:
     return bool(v) and (not _es_ruta_privada(v) or _es_privada_pendiente(v))
 
 
+def _resumen_sunat_sin_emisor(fuentes) -> str:
+    """Conserva el motivo en el cuadro existente, sin volcar la traza técnica."""
+    consultas = consultas_de(fuentes)
+    estados = {
+        "con_resultados": "datos recibidos, emisor por identificar",
+        "sin_resultados": "sin coincidencias",
+        "fuente_no_disponible": "consulta no completada",
+        "respuesta_no_reconocida": "respuesta no interpretable",
+        "no_consultado": "no consultado",
+    }
+    partes = [f"{etiqueta}: {estados.get(consultas[clave].get('estado'), 'consulta sin detalle')}"
+              for clave, etiqueta in (("sunat_nombre", "nombre"), ("sunat_ruc", "RUC"))
+              if clave in consultas]
+    return ("SUNAT — " + "; ".join(partes) if partes else
+            "Emisor por verificar; consulta SUNAT no registrada.")
+
+
 def completar_revisiones_privadas(revisiones: dict, enriquecimiento: Optional[dict]) -> dict:
     """Añade la ruta privada al mapa del Excel y distingue SUNAT verificado.
 
@@ -226,11 +243,8 @@ def completar_revisiones_privadas(revisiones: dict, enriquecimiento: Optional[di
                 "confirmar el RUC correcto entre los candidatos de SUNAT y revisar el certificado",
             )
         else:
-            consultas = consultas_de(datos)
-            causa = " · ".join(linea_consulta(k, v) for k, v in consultas.items()
-                               if k.startswith("sunat_"))
             revisiones[(np_, ne)] = (
-                "[PRIVADA_PENDIENTE] " + (causa or "Este análisis no identificó al emisor privado; no se registró la causa de la consulta SUNAT"),
+                "[PRIVADA_PENDIENTE] " + _resumen_sunat_sin_emisor(datos),
                 "confirmar la razón social o el RUC en el certificado y reintentar SUNAT",
             )
     return revisiones
@@ -1130,9 +1144,6 @@ def construir_hoja_cronologia(ws, espejo: dict, fichas: Optional[dict] = None) -
             if rot:
                 campo("Datos del proceso vs. certificado", rot,
                       None if candado.get("resultado") == "confirmado" else FILL_PEND)
-            if seace.get("estado") == "seleccionado":
-                campo("Contenido de los documentos",
-                      "Por confirmar: tipo de documento y vínculo con el encargo", FILL_PEND)
             if p.get("observacion_fechas"):
                 campo("Observación de fechas", " ".join(p["observacion_fechas"]), FILL_PEND)
         elif str(p.get("via") or "").upper() == "PRIVADA":
@@ -1416,7 +1427,7 @@ def construir_hoja_profesional(
             n_encontrados = sum(int(v.get("docs") or 0)
                                 for v in (fx.get("valorizaciones") or [])
                                 if isinstance(v, dict))
-        texto_encontrados = ("Sin documentos en el inventario del análisis; ver estado de fuentes" if n_encontrados == 0 else
+        texto_encontrados = ("Sin documentos registrados en este análisis" if n_encontrados == 0 else
                              "1 archivo encontrado" if n_encontrados == 1 else
                              f"{n_encontrados} archivos encontrados")
         kv("Documentos encontrados", texto_encontrados)
@@ -1669,7 +1680,6 @@ def construir_hoja_profesional(
             filas.append(("Fecha de firma", datos["fecha_suscripcion"]))
         if rotulo_candado:
             filas.append(("Datos del proceso vs. certificado", rotulo_candado))
-        filas.append(("Contenido de los documentos", "Por confirmar: tipo de documento y vínculo con el encargo"))
         entidad = (datos.get("proceso") or {}).get("entidad_convocante")
         if entidad:
             filas.append(("Entidad convocante", entidad))
@@ -1683,9 +1693,8 @@ def construir_hoja_profesional(
             ws.row_dimensions[rr].height = max(
                 ws.row_dimensions[rr].height or 15,
                 max(-(-len(etiqueta) // 27), -(-len(str(valor)) // 50)) * 13 + 3)
-            if (etiqueta == "Contenido de los documentos" or
-                    (etiqueta == "Datos del proceso vs. certificado"
-                     and candado.get("resultado") != "confirmado")):
+            if (etiqueta == "Datos del proceso vs. certificado"
+                    and candado.get("resultado") != "confirmado"):
                 cv.fill = FILL_PEND
             rr += 1
         observaciones = observaciones_temporales(candado)
@@ -2275,15 +2284,11 @@ def construir_hoja_profesional(
             fill = FILL_ALERTA
         elif s and s.get("no_encontrado"):           # buscado por nombre, sin match
             kv("Emisor (cert)", s.get("nombre") or "—")
-            consulta = consultas_de(fuentes).get("sunat_nombre")
-            txt = (linea_consulta("sunat_nombre", consulta) if consulta else
-                   "Este análisis no identificó al emisor; no se registró la causa de la consulta.")
+            txt = _resumen_sunat_sin_emisor(fuentes)
             fill = None
         else:                                        # sin RUC ni nombre cruzable
             kv("RUC declarado", ruc_espejo or "—")
-            consultas = consultas_de(fuentes)
-            txt = " · ".join(linea_consulta(k, v) for k, v in consultas.items()
-                             if k.startswith("sunat_")) or "Emisor no verificado; estado de consulta SUNAT no registrado."
+            txt = _resumen_sunat_sin_emisor(fuentes)
             fill = None
 
         ws.merge_cells(start_row=rr, start_column=13, end_row=rr + 1, end_column=16)
@@ -2617,10 +2622,17 @@ def construir_hoja_profesional(
         if not es_exp_prof:
             filas_recap.insert(4, ("PERIODO (InfoObras)", periodo_io, None))
         contraste = (fx or {}).get("contraste_servicio")
-        if contraste:
-            filas_recap.extend((label, value, "contraste_servicio") for label, value in
-                               filas_contraste_servicio(contraste))
         for label, value, campo in filas_recap:
+            diferencia_servicio = (campo == "cargo_ocupado" and
+                                   (contraste or {}).get("estado") == "difiere")
+            if diferencia_servicio:
+                esperado = ETIQUETAS_SERVICIO.get(
+                    (contraste.get("esperado") or {}).get("tipo"), "servicio del concurso")
+                declarado = contraste.get("declarado") or {}
+                referencia = (f" (página PDF {declarado['pagina_pdf']})"
+                              if declarado.get("pagina_pdf") else "")
+                value = (f"{value or '—'}\nPor verificar: se espera {esperado} y el certificado "
+                         f"declara «{declarado.get('texto') or 'servicio diferente'}»{referencia}.")
             cl = ws.cell(r, 1, label); cl.font, cl.fill, cl.border = F_BOLD, FILL_RECAP, BORDER
             cl.alignment = Alignment(vertical="top", wrap_text=True)
             ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=4)
@@ -2631,7 +2643,7 @@ def construir_hoja_profesional(
                 {"fecha_inicial", "fecha_final"} & sup)
             if campo == "cui_inferido" or campo in sup or es_periodo_supuesto:
                 cv.fill = FILL_SUPUESTO
-            if campo == "contraste_servicio" and contraste.get("estado") != "coincide":
+            if diferencia_servicio:
                 cv.fill = FILL_PEND
             lns = max(1, -(-len(str(value or "—")) // 35))   # B:D ≈ 35 car/línea
             ws.row_dimensions[r].height = max(15, lns * 13 + 2)
@@ -2807,17 +2819,6 @@ def construir_hoja_profesional(
                 lineas = sum(max(1, -(-len(linea) // 220)) for linea in texto.splitlines())
                 ws.row_dimensions[r].height = max(30, lineas * 14 + 6)
                 r += 1
-
-        # La misma explicación factual que se publica en API/ZIP. No agrega
-        # otra tabla de documentos ni interpreta el contenido descargado.
-        texto_fuentes = "Estado de fuentes y documentos\n" + resumen_estado_fuentes(fx)
-        for linea in texto_fuentes.splitlines():
-            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=26)
-            c = ws.cell(r, 1, _xl(linea))
-            c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
-            c.fill = FILL_RECAP
-            ws.row_dimensions[r].height = max(18, -(-len(linea) // 220) * 14 + 6)
-            r += 1
 
         # imagen del certificado presentado (Fase 2): la skill recortó sus folios a
         # un PDF chico (principal primero); aquí se renderiza y embebe.

@@ -3,6 +3,20 @@ timestamp: "2026-09-12"
 agent: Codex
 ---
 
+## 12-sep — Retiro de ampliaciones visuales no acordadas
+
+[Simplificación autorizada](2026-09-12_codex.md#retiro-de-añadidos-de-presentación-no-acordados):
+sin tres filas de servicio ni advertencia documental genérica. Diferencias reales
+en campo existente; SUNAT resumido. Conserva resumen/Gantt, identidad, cálculos
+y detalle API/ZIP. Comparación sintética y visual de ambas rutas; jobs intactos.
+
+## 12-sep — Excel sin bloque repetitivo de fuentes
+
+[Cambio de presentación solicitado](2026-09-12_codex.md#bloque-de-estados-retirado-del-excel):
+retiradas las filas «Estado de fuentes y documentos» en ambas rutas, sin dejar
+su espacio vacío. Estados internos/API/ZIP y explicaciones de identidad intactos.
+No se modificaron los Excel existentes ni se reinició el servicio.
+
 ## 12-sep — Alertas de montos y veredicto ajeno
 
 [Correcciones de integridad](2026-09-12_codex.md#dos-alertas-falsas-de-integridad-corregidas):
