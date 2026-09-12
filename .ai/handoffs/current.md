@@ -3,6 +3,15 @@ timestamp: "2026-09-12"
 agent: Codex
 ---
 
+## 12-sep — Alertas de montos y veredicto ajeno
+
+[Correcciones de integridad](2026-09-12_codex.md#dos-alertas-falsas-de-integridad-corregidas):
+importes v1.4 reconocidos; nombres propios de experiencias no se interpretan
+como especialidades ajenas. Cálculo acreditable sin cambios. **1790 tests pasan,
+25 omitidos**; contrato de la corrida nueva válido. El script global rechaza
+una muestra QA anterior parcial (cero divergencias). No se modificó el job
+ni se reinició el backend; los 71 errores documentales previos se conservan.
+
 ## 12-sep — Estados de fuente y documento separados
 
 [Punto 2 implementado](2026-09-12_codex.md#estados-de-consulta-y-documento-separados):

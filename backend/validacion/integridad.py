@@ -56,6 +56,7 @@ import re
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 # Las marcas con las que `anotar_cargo_nucleo` REESCRIBE `cargo_bases_valido`.
@@ -612,6 +613,29 @@ def _vocabulario_del_concurso(profs: list[dict]) -> set[str]:
     return {r for r, c in cuenta.items() if c >= umbral}
 
 
+def _sin_nombres_de_experiencias(texto: str, prof: dict) -> str:
+    """Excluye menciones completas a emisores/proyectos propios, no sus palabras sueltas."""
+    palabras = list(re.finditer(r"[^\W_]+", texto))
+    normalizadas = [_sin_tildes(p.group()) for p in palabras]
+    nombres = {
+        tuple(_sin_tildes(p) for p in re.findall(r"[^\W_]+", nombre))
+        for exp in _experiencias(prof)
+        for campo in ("entidad_emisora", "proyecto")
+        if isinstance(nombre := exp.get(campo), str)
+    }
+    salida = list(texto)
+    for nombre in nombres:
+        # Un campo genérico de una palabra no permite reconocer un nombre propio.
+        if len(nombre) < 2:
+            continue
+        for i in range(len(palabras) - len(nombre) + 1):
+            if tuple(normalizadas[i:i + len(nombre)]) != nombre:
+                continue
+            inicio, fin = palabras[i].start(), palabras[i + len(nombre) - 1].end()
+            salida[inicio:fin] = " " * (fin - inicio)
+    return "".join(salida)
+
+
 def veredictos_ajenos(espejo: dict) -> list[Hallazgo]:
     """Detecta veredictos que hablan de la especialidad de OTRO profesional.
 
@@ -643,7 +667,8 @@ def veredictos_ajenos(espejo: dict) -> list[Hallazgo]:
         if not propio:
             continue                   # sin vocabulario propio: abstenerse
         evaluables += 1
-        raices = _raices(texto)
+        sustento = _sin_nombres_de_experiencias(texto, prof)
+        raices = _raices(sustento)
         if raices & propio:
             continue                   # habla de lo suyo
 
@@ -658,7 +683,7 @@ def veredictos_ajenos(espejo: dict) -> list[Hallazgo]:
 
         ajeno = profs[j]
         desplazamientos.append(j - i)
-        dichas = _palabras_de(texto, pistas)
+        dichas = _palabras_de(sustento, pistas)
         out.append(Hallazgo(
             "VEREDICTO_AJENO", ALERTA,
             f"El sustento del profesional {_etiqueta(prof)} no habla de su "
@@ -942,6 +967,21 @@ MSG_NO_REVISABLE = (
 )
 
 
+def _monto_extraido_postor(fila: dict) -> Decimal | None:
+    """Primer importe positivo extraído; existencia de monto no significa acreditación."""
+    for campo in ("monto_aplicable", "monto_item", "monto_contrato", "monto"):
+        valor = fila.get(campo)
+        if valor is None or isinstance(valor, bool):
+            continue
+        try:
+            monto = Decimal(str(valor))
+        except (InvalidOperation, ValueError):
+            continue
+        if monto.is_finite() and monto > 0:
+            return monto
+    return None
+
+
 def cobertura_postor(espejo: dict) -> list[Hallazgo]:
     """Alerta si la experiencia del postor (Req. 3.4 Admisión) tiene contratos pero 0 montos extraídos."""
     if not isinstance(espejo, dict):
@@ -950,7 +990,8 @@ def cobertura_postor(espejo: dict) -> list[Hallazgo]:
     exps = postor.get("experiencia_postor") if isinstance(postor.get("experiencia_postor"), list) else []
     if not exps:
         return []
-    montos_validos = sum(1 for e in exps if isinstance(e, dict) and e.get("monto") is not None and float(e.get("monto") or 0) > 0)
+    montos_validos = sum(1 for e in exps
+                        if isinstance(e, dict) and _monto_extraido_postor(e) is not None)
     if montos_validos == 0 and len(exps) > 0:
         return [Hallazgo(
             "POSTOR_SIN_MONTOS", ALERTA,

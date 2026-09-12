@@ -40,6 +40,8 @@ movió ni ganó un hallazgo; lo que cambió fue todo hacia el lado seguro:
 from __future__ import annotations
 
 import json
+from copy import deepcopy
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -148,6 +150,54 @@ def test_mencionar_de_pasada_la_especialidad_vecina_no_es_veredicto_ajeno():
     profs[1] = dict(SANO[1], cumple="CUMPLE — sus estructuras se coordinaron con "
                                     "arquitectura y con instalaciones sanitarias.")
     assert veredictos_ajenos(_espejo(profs)) == []
+
+
+@pytest.mark.parametrize("campo,nombre,mencion", [
+    ("entidad_emisora", "Consorcio Proyecto Norte", "CONSORCIO PROYECTO NORTE"),
+    ("proyecto", "Ampliación del Proyecto Regional", "Ampliacion del Proyecto Regional"),
+    ("entidad_emisora", "Consorcio Proyecto Norte S.A.C.", "Consorcio Proyecto Norte S. A. C."),
+])
+def test_emisor_o_proyecto_propio_no_es_especialidad_ajena(campo, nombre, mencion):
+    profs = [
+        _prof(1, "Jefe de Proyecto", "CUMPLE — acredita 900 días."),
+        _prof(7, "Especialista en Tecnología, Información y Comunicaciones",
+              f"POR VERIFICAR — solo presenta una constancia de {mencion}.",
+              exps=[_exp(1, **{campo: nombre})]),
+    ]
+    espejo = _espejo(profs)
+    original = deepcopy(espejo)
+    assert veredictos_ajenos(espejo) == []
+    assert espejo == original
+
+
+def test_emisor_propio_no_oculta_una_especialidad_ajena_fuera_del_nombre():
+    profs = [
+        _prof(1, "Especialista en Estructuras", "CUMPLE — acredita 900 días."),
+        _prof(7, "Especialista en Tecnología, Información y Comunicaciones",
+              "CUMPLE — Consorcio Estructuras Norte acredita su trabajo en estructuras.",
+              exps=[_exp(1, entidad_emisora="Consorcio Estructuras Norte")]),
+    ]
+    assert [h.n_prof for h in veredictos_ajenos(_espejo(profs))] == [7]
+
+
+def test_no_se_excluyen_palabras_sueltas_de_un_nombre_no_citado():
+    profs = [
+        _prof(1, "Jefe de Proyecto", "CUMPLE — acredita 900 días."),
+        _prof(7, "Especialista en Tecnología, Información y Comunicaciones",
+              "CUMPLE — ejerció como jefe de proyecto.",
+              exps=[_exp(1, entidad_emisora="Consorcio Proyecto Norte")]),
+    ]
+    assert [h.n_prof for h in veredictos_ajenos(_espejo(profs))] == [7]
+
+
+def test_un_nombre_de_otro_profesional_no_exime_el_veredicto():
+    profs = [
+        _prof(1, "Jefe de Proyecto", "CUMPLE — acredita 900 días.",
+              exps=[_exp(1, entidad_emisora="Consorcio Proyecto Norte")]),
+        _prof(7, "Especialista en Tecnología, Información y Comunicaciones",
+              "POR VERIFICAR — solo presenta una constancia de Consorcio Proyecto Norte."),
+    ]
+    assert [h.n_prof for h in veredictos_ajenos(_espejo(profs))] == [7]
 
 
 # ── Síntoma B · ausencia de evaluación ──────────────────────────────────────
@@ -1057,6 +1107,62 @@ def test_cobertura_postor_sin_montos():
     assert len(hallazgos) == 1
     assert hallazgos[0].codigo == "POSTOR_SIN_MONTOS"
     assert "REQ 3.4" in hallazgos[0].mensaje
+
+
+@pytest.mark.parametrize("campo", ["monto_aplicable", "monto_item", "monto_contrato", "monto"])
+def test_cobertura_postor_acepta_importes_decimales_del_contrato(campo):
+    from validacion.integridad import cobertura_postor
+
+    espejo = _espejo(SANO, postor={"experiencia_postor": [
+        {"n": 1, "monto": None, campo: "3000002.50"},
+    ]})
+    original = deepcopy(espejo)
+    assert cobertura_postor(espejo) == []
+    assert espejo == original
+
+
+@pytest.mark.parametrize("valor", [None, "", "por verificar", "NaN", "sNaN", "Infinity",
+                                   "-Infinity", "0.00", "-1.50", True, False, [], {}])
+def test_cobertura_postor_no_cuenta_importes_invalidos_ni_rompe(valor):
+    from validacion.integridad import cobertura_postor
+
+    fila = dict.fromkeys(["monto_aplicable", "monto_item", "monto_contrato", "monto"], valor)
+    assert _codigos(cobertura_postor(_espejo(SANO, postor={
+        "experiencia_postor": [fila],
+    }))) == ["POSTOR_SIN_MONTOS"]
+
+
+def test_cobertura_postor_reconoce_monto_extraido_aunque_no_sea_acreditable():
+    from validacion.integridad import cobertura_postor
+
+    fila = {"monto_aplicable": "0.00", "monto_item": "por verificar",
+            "monto_contrato": "3000002.50", "monto": None, "estado_monto": "excluido"}
+    assert cobertura_postor(_espejo(SANO, postor={"experiencia_postor": [fila]})) == []
+
+
+def test_monto_extraido_respeta_precedencia_y_precision_decimal():
+    from validacion.integridad import _monto_extraido_postor
+
+    fila = {"monto_aplicable": "1.25", "monto_item": "2.50",
+            "monto_contrato": "3.75", "monto": 4}
+    for campo in ("monto_aplicable", "monto_item", "monto_contrato", "monto"):
+        assert _monto_extraido_postor(fila) == Decimal(str(fila[campo]))
+        fila[campo] = None
+    assert _monto_extraido_postor({"monto_contrato": "1e-400"}) == Decimal("1e-400")
+
+
+def test_calculo_postor_34_usa_monto_contrato_sin_promover_un_mixto():
+    from validacion.postor import recalcular_experiencia_postor
+
+    espejo = _espejo(SANO, postor={
+        "experiencia_postor": [{"n": 1, "monto": None, "monto_contrato": "3000002.50",
+                                "componentes": ["expediente", "supervisión"]}],
+        "experiencia_postor_total": {"monto_requerido": "2000000.00"},
+    })
+    total = recalcular_experiencia_postor(espejo)
+    assert total["monto_confirmado"] == "0.00"
+    assert total["monto_maximo_posible"] == "3000002.50"
+    assert espejo["postor"]["postor_cumple"].startswith("POR VERIFICAR")
 
 
 def test_extraer_montos_prosa():

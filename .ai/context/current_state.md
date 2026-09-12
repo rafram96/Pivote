@@ -1,5 +1,14 @@
 # Estado actual del proyecto
 
+## 2026-09-12 — Dos alertas de integridad
+
+[Corrección acotada](../handoffs/2026-09-12_codex.md#dos-alertas-falsas-de-integridad-corregidas):
+cobertura monetaria compatible con campos v1.4 y contraste de veredictos sin
+confundir emisores/proyectos propios con especialidades. No cambia cálculo del
+postor, extracción, identidad ni entregables guardados. Suite: 1790 pasan,
+25 omitidos; contrato de la corrida nueva válido, con un rechazo previo de QA
+parcial en el descubrimiento global de fixtures. Sin reinicio del servicio.
+
 ## 2026-09-12 — Estados de consulta y documento
 
 Checkpoint de tramos anteriores hasta `1a195ad`; [punto 2 implementado](../handoffs/2026-09-12_codex.md#estados-de-consulta-y-documento-separados).
