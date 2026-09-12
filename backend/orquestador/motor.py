@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Callable, Optional, Sequence
 
@@ -26,6 +26,7 @@ from schemas import pipeline
 from schemas.cargo import normalizar_cargos_espejo
 from .etapas import Contexto, ErrorEstructural, EtapaBase
 from .repositorio import Repositorio
+from .ramas import MARCA_CONFLICTO, aislar_contexto, incorporar_rama
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,11 @@ class Motor:
         """Corre el pipeline completo. REANUDABLE: las etapas con checkpoint OK
         se saltan, así que re-llamar tras una caída continúa donde quedó."""
         job = self._cargar(job_id)
+        # Repetir solo la perdedora borraría la discrepancia usando el dato de
+        # la ganadora como nueva base. Requiere corregir el conflicto, no retry.
+        if any((r.error or "").startswith(MARCA_CONFLICTO) for r in job.etapas):
+            logger.error("job %s: no se reanuda un conflicto entre fuentes sin corregir", job_id)
+            return self._abortar(job)
         espejo = self._repo.cargar_espejo(job_id) or {}
         ctx = Contexto(job=job, espejo=espejo,
                        enriquecimiento=self._repo.cargar_enriquecimiento(job_id),
@@ -113,15 +119,29 @@ class Motor:
                 # INFOOBRAS ∥ SUNAT ∥ RENIPRESS — solo las que no estén ya OK.
                 pendientes = [e for e in _RAMA_PARALELA if not self._etapa_ok(job, e)]
                 if pendientes:
-                    with ThreadPoolExecutor(max_workers=len(pendientes)) as pool:
-                        futuros = [pool.submit(self._ejecutar, nombre_e, ctx) for nombre_e in pendientes]
-                        resultados = [f.result() for f in futuros]
+                    base = aislar_contexto(ctx)
                     abortar = False
-                    for res in resultados:
-                        self._registrar(job, res)
-                        abortar = abortar or res.estado == pipeline.EstadoEtapa.ERROR
-                    self._repo.guardar_enriquecimiento(job.job_id, ctx.enriquecimiento)
-                    self._checkpoint(job, etapa_actual=nombre)
+                    with ThreadPoolExecutor(max_workers=len(pendientes)) as pool:
+                        futuros = {}
+                        for nombre_e in pendientes:
+                            rama = aislar_contexto(base)
+                            futuros[pool.submit(self._ejecutar, nombre_e, rama)] = rama
+                        for futuro in as_completed(futuros):
+                            res = futuro.result()
+                            try:
+                                incorporar_rama(ctx, base, futuros[futuro])
+                            except ErrorEstructural as ex:
+                                logger.error("etapa %s: %s", res.etapa.value, ex)
+                                res.estado = pipeline.EstadoEtapa.ERROR
+                                res.error = str(ex)
+                            self._registrar(job, res)
+                            job.etapas.sort(key=lambda r: orden.index(r.etapa))
+                            job.observaciones.sort(key=lambda o: orden.index(o.origen))
+                            # Datos primero, OK después: si falla el disco nunca
+                            # se salta una fuente cuyo resultado no fue guardado.
+                            self._repo.guardar_enriquecimiento(job.job_id, ctx.enriquecimiento)
+                            self._checkpoint(job, etapa_actual=res.etapa)
+                            abortar = abortar or res.estado == pipeline.EstadoEtapa.ERROR
                     if abortar:
                         return self._abortar(job)
                 i += len(_RAMA_PARALELA)

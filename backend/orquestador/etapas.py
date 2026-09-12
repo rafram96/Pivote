@@ -47,7 +47,8 @@ class Contexto:
     enriquecimiento: dict = field(default_factory=dict)
     # Progreso FINO (item por item) para la barra del panel. Firma:
     # (etapa, item_actual, items_total, descripcion_sin_jerga). Incluye la etapa
-    # porque INFOOBRAS ∥ SUNAT ∥ RENIPRESS corren sobre el MISMO ctx.
+    # porque INFOOBRAS ∥ SUNAT ∥ RENIPRESS comparten el callback de progreso,
+    # aunque el motor les da datos aislados y fusiona al terminar cada fuente.
     reportar: Callable[[pipeline.Etapa, int, int, str], None] = field(
         default=lambda *_: None)
 

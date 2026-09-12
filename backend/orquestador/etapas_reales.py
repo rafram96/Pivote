@@ -2430,7 +2430,11 @@ class EtapaSunatReal:
         ok = err = rev = 0
         obs: list[pipeline.Observacion] = []
         cache: dict[str, object] = {}
+        # El cliente devuelve [] también cuando SUNAT falla. Solo reutilizar
+        # listas con candidatos, por consulta exacta y dentro de esta ejecución.
+        cache_nombre: dict[str, list] = {}
         cache_extra: dict[str, tuple] = {}   # ruc → (representantes, historico)
+        busquedas_nombre = reutilizaciones_nombre = 0
         total = 0
         postor_rucs = _rucs_postor(ctx.espejo)
 
@@ -2470,11 +2474,18 @@ class EtapaSunatReal:
                         referencia=f"prof={np_} exp={ne}"))
             else:
                 nombre = _nombre_emisor_limpio(entidad)
-                try:
-                    matches = self._buscar(nombre) if nombre else []
-                except Exception as ex:  # noqa: BLE001
-                    logger.warning("SUNAT buscar %r: %r", nombre, ex)
-                    matches = []
+                if nombre and nombre in cache_nombre:
+                    matches = deepcopy(cache_nombre[nombre])
+                    reutilizaciones_nombre += 1
+                else:
+                    try:
+                        busquedas_nombre += bool(nombre)
+                        matches = self._buscar(nombre) if nombre else []
+                        if nombre and matches:
+                            cache_nombre[nombre] = deepcopy(matches)
+                    except Exception as ex:  # noqa: BLE001
+                        logger.warning("SUNAT buscar %r: %r", nombre, ex)
+                        matches = []
 
                 estado_cruce = (cruce_seace or {}).get("estado")
                 if estado_cruce == "enriquecer":
@@ -2625,6 +2636,8 @@ class EtapaSunatReal:
                             "confirmar la inscripción original en el histórico antes de concluir",
                     origen=self.nombre, referencia=f"prof={np_} exp={ne}"))
 
+        logger.info("SUNAT job %s · búsquedas por nombre: %d llamadas, %d reutilizaciones",
+                    getattr(ctx.job, "job_id", "?"), busquedas_nombre, reutilizaciones_nombre)
         return _res(self.nombre, EE.OK if err == 0 else EE.ERROR_PARCIAL,
                     _met(total, ok, rev, err), obs)
 
