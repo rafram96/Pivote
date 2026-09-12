@@ -82,7 +82,7 @@ function _num(txt) {
 
 /**
  * Páginas que cubre el `folio` de un contrato: "49-56", "78; 115", "121-133".
- * `holgura` extiende el rango a ambos lados porque el mapa los da APROXIMADOS
+ * `holgura` extiende solo los folios rotulados APROXIMADOS
  * ("49-56 aprox.") y el contrato real puede arrancar una página antes — medido:
  * el de Huarmaca declaraba 49-56 y su MONTO CONTRACTUAL está en la 48. La
  * holgura es segura SOLO junto al candado de emisor (`emisorCalza`): sin él,
@@ -91,8 +91,9 @@ function _num(txt) {
 function paginasDeFolio(folio, tope, holgura = 2) {
   const s = String(folio || "");
   const pags = new Set();
+  const margen = /\baprox(?:imad[oa])?\.?\b/i.test(s) ? holgura : 0;
   const add = (a, b) => {
-    for (let i = Math.max(1, a - holgura); i <= b + holgura; i++) pags.add(i);
+    for (let i = Math.max(1, a - margen); i <= b + margen; i++) pags.add(i);
   };
   for (const m of s.matchAll(/(\d{1,4})\s*[-–]\s*(\d{1,4})/g)) {
     const a = +m[1], b = +m[2];
@@ -212,11 +213,26 @@ function elegirMonto(candidatos) {
   };
 }
 
+function importeExistente(c) {
+  for (const campo of ["monto_contrato", "monto_item", "monto"]) {
+    const valor = c && c[campo];
+    if (valor !== null && valor !== undefined
+        && !(typeof valor === "string" && valor.trim() === "")) {
+      return { campo, valor };
+    }
+  }
+  return null;
+}
+
 /** Procesa el bloque del postor. `leerPagina(n)` → texto o null. */
 function rescatarMontos(experienciaPostor, leerPagina, { topePagina = null } = {}) {
   return (experienciaPostor || []).map((c, idx) => {
     const n = c.n != null ? c.n : idx + 1;
-    if (c.monto != null) return { n, ...c, _rescate: null }; // ya lo trae el mapa
+    if (importeExistente(c)) {
+      // Un segundo pase no debe borrar procedencia ni convertir un rescate
+      // previo en "dato del mapa".
+      return { n, ...c, _rescate: Object.hasOwn(c, "_rescate") ? c._rescate : null };
+    }
     const pags = paginasDeFolio(c.folio, topePagina);
     const cands = [];
     const descartadasPorEmisor = [];
@@ -235,7 +251,9 @@ function rescatarMontos(experienciaPostor, leerPagina, { topePagina = null } = {
     return {
       n,
       ...c,
-      monto: r.monto,
+      // El rescate tiene un solo destino nuevo. No crea ni rellena el alias
+      // legado `monto`, que puede significar otra cosa para consumidores.
+      monto_contrato: r.monto,
       _rescate: {
         origen: "montos_postor.js (índice OCR)",
         paginas_barridas: pags,
@@ -250,6 +268,7 @@ function rescatarMontos(experienciaPostor, leerPagina, { topePagina = null } = {
 
 module.exports = {
   rescatarMontos, elegirMonto, candidatosDePagina, paginasDeFolio, emisorCalza, _num,
+  importeExistente,
 };
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
@@ -282,24 +301,35 @@ if (require.main === module) {
   const antes = postor.experiencia_postor || [];
   const despues = rescatarMontos(antes, leerPagina);
   let rescatados = 0, sinResolver = 0;
-  for (const c of despues) {
+  despues.forEach((c, i) => {
     const r = c._rescate;
-    if (!r) { console.log(`  n=${c.n}  monto ya venía del mapa: ${c.monto}`); continue; }
-    if (c.monto != null) {
+    const existente = importeExistente(antes[i]);
+    if (existente) {
+      console.log(`  n=${c.n}  monto ya disponible (${existente.campo}): ${existente.valor}`);
+      return;
+    }
+    if (r && c.monto_contrato != null) {
       rescatados++;
-      console.log(`  ✓ n=${c.n}  ${c.monto}  ← p${r.elegido.pagina} [${r.elegido.etiqueta}]`);
+      console.log(`  ✓ n=${c.n}  ${c.monto_contrato}  ← p${r.elegido.pagina} [${r.elegido.etiqueta}]`);
       console.log(`       «${r.elegido.linea}»`);
     } else {
       sinResolver++;
       console.log(`  ⚠ n=${c.n}  SIN MONTO — ${r.motivo}`);
       for (const k of r.candidatos) console.log(`       cand: ${k.valor} p${k.pagina} [${k.etiqueta}] «${k.linea.slice(0, 80)}»`);
     }
-  }
+  });
   console.log(`\nrescatados ${rescatados} · sin resolver ${sinResolver} · total ${despues.length}`);
 
   if (escribir) {
     postor.experiencia_postor = despues;
-    fs.writeFileSync(rutaRoster, JSON.stringify(roster, null, 2), "utf8");
+    const temporal = `${rutaRoster}.tmp-${process.pid}`;
+    try {
+      fs.writeFileSync(temporal, JSON.stringify(roster, null, 2), "utf8");
+      fs.renameSync(temporal, rutaRoster);
+    } catch (e) {
+      try { fs.unlinkSync(temporal); } catch (_) { /* conservar original */ }
+      throw e;
+    }
     console.log(`→ ${rutaRoster} actualizado`);
   }
 }

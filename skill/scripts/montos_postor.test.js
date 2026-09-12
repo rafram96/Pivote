@@ -6,8 +6,13 @@
  */
 const test = require("node:test");
 const assert = require("node:assert");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 const {
   rescatarMontos, elegirMonto, candidatosDePagina, paginasDeFolio, emisorCalza, _num,
+  importeExistente,
 } = require("./montos_postor.js");
 
 // ── páginas ──────────────────────────────────────────────────────────────────
@@ -87,7 +92,8 @@ test("NO toma el monto de una página cuyo emisor no calza", () => {
     [{ n: 1, emisor: "Municipalidad Distrital de Huarmaca (Región Piura)", folio: "49-56 aprox.", monto: null }],
     (p) => paginas[p] || null,
   );
-  assert.strictEqual(c.monto, 211029);
+  assert.strictEqual(c.monto_contrato, 211029);
+  assert.equal(c.monto, null); // alias legado existente no se rellena
   assert.ok(c._rescate.paginas_descartadas_por_emisor.includes(56));
 });
 
@@ -119,4 +125,82 @@ test("sin montos en los folios citados: null con motivo, nunca inventado", () =>
   );
   assert.strictEqual(c.monto, null);
   assert.match(c._rescate.motivo, /no se hallaron montos/);
+});
+
+test("precedencia de importe existente: contrato, ítem, legado y cero presente", () => {
+  const leer = () => { throw new Error("un importe existente no consulta OCR"); };
+  for (const [entrada, campo, valor] of [
+    [{ monto_contrato: 10, monto_item: 20, monto: 30 }, "monto_contrato", 10],
+    [{ monto_contrato: "", monto_item: 20, monto: 30 }, "monto_item", 20],
+    [{ monto_item: 20, monto: 30 }, "monto_item", 20],
+    [{ monto_contrato: null, monto_item: "", monto: 30 }, "monto", 30],
+    [{ monto_contrato: "  ", monto_item: 0, monto: 30 }, "monto_item", 0],
+    [{ monto_contrato: 0, monto_item: 20, monto: 30 }, "monto_contrato", 0],
+  ]) {
+    assert.deepStrictEqual(importeExistente(entrada), { campo, valor });
+    const [salida] = rescatarMontos([{ n: 1, emisor: "X", folio: "1", ...entrada }], leer);
+    assert.deepStrictEqual(salida, { n: 1, emisor: "X", folio: "1", ...entrada, _rescate: null });
+  }
+});
+
+test("rescate no muta entrada y es idempotente", () => {
+  const entrada = { n: 1, emisor: "Huarmaca", folio: "1", monto: null };
+  const texto = () => "HUARMACA\nMONTO CONTRACTUAL: S/ 111,111.00";
+  const [primera] = rescatarMontos([entrada], texto);
+  assert.equal(entrada.monto_contrato, undefined);
+  const [segunda] = rescatarMontos([primera], () => { throw new Error("no debe leer OCR"); });
+  assert.equal(segunda.monto_contrato, primera.monto_contrato);
+  assert.deepStrictEqual(segunda._rescate, primera._rescate);
+});
+
+test("rango exacto 129-172 no incluye el vecino 173", () => {
+  assert.ok(!paginasDeFolio("129-172").includes(173));
+  assert.deepStrictEqual(paginasDeFolio("129-172", null, 0).slice(-1), [172]);
+});
+
+test("rango exacto no toma vecino del mismo emisor y respeta tope", () => {
+  const paginas = {
+    172: "HUARMACA\nMONTO CONTRACTUAL: S/ 111,111.00",
+    173: "HUARMACA\nMONTO CONTRACTUAL: S/ 222,222.00",
+  };
+  const [c] = rescatarMontos(
+    [{ n: 1, emisor: "Huarmaca", folio: "129-172", monto: null }],
+    (p) => paginas[p] || null,
+  );
+  assert.strictEqual(c.monto_contrato, 111111);
+  assert.ok(!c._rescate.paginas_barridas.includes(173));
+  assert.deepStrictEqual(paginasDeFolio("129-172", 130, 0), [129, 130]);
+});
+
+test("CLI --escribir rescata a monto_contrato sin crear alias monto", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "montos-postor-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(dir, "_ocr_propuesta"));
+  const rosterPath = path.join(dir, "roster_bundles.json");
+  fs.writeFileSync(rosterPath, JSON.stringify({ postor: { experiencia_postor: [
+    { n: 1, emisor: "Huarmaca", folio: "1", monto_contrato: null },
+    { n: 2, emisor: "Huarmaca", folio: "1", monto_contrato: 125000,
+      monto_fuente: { pagina: 5, texto: "importe extraído" } },
+  ] } }));
+  fs.writeFileSync(path.join(dir, "_ocr_propuesta", "p0001.txt"),
+    "HUARMACA\nMONTO CONTRACTUAL: S/ 111,111.00");
+  const r = spawnSync(process.execPath,
+    [path.join(__dirname, "montos_postor.js"), dir, "--escribir"],
+    { encoding: "utf8" });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.match(r.stdout, /rescatados 1 · sin resolver 0 · total 2/);
+  const guardado = JSON.parse(fs.readFileSync(rosterPath, "utf8"));
+  const [c] = guardado.postor.experiencia_postor;
+  assert.strictEqual(c.monto_contrato, 111111);
+  assert.ok(!Object.hasOwn(c, "monto"));
+  assert.ok(c._rescate && c._rescate.elegido.pagina === 1);
+  assert.strictEqual(guardado.postor.experiencia_postor[1].monto_contrato, 125000);
+  assert.deepStrictEqual(guardado.postor.experiencia_postor[1].monto_fuente,
+    { pagina: 5, texto: "importe extraído" });
+  assert.ok(!fs.readdirSync(dir).some(nombre => nombre.includes(".tmp-")));
+  const segundo = spawnSync(process.execPath,
+    [path.join(__dirname, "montos_postor.js"), dir, "--escribir"], { encoding: "utf8" });
+  assert.strictEqual(segundo.status, 0, segundo.stderr);
+  assert.match(segundo.stdout, /rescatados 0 · sin resolver 0 · total 2/);
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(rosterPath, "utf8")), guardado);
 });
