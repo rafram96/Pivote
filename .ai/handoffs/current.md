@@ -12,7 +12,9 @@ posteriores al certificado; la vía MEF sin resolver devuelve PRIVADA cuando el 
 privado por léxico. Suite 1935; replay 23 jobs sin regresiones. Base MEF reconstruida.
 Luego `aeab64d` (punto 2): contratos del SEACE antiguo sin verificar TLS, adjuntos 08-A
 sin clasificar al ZIP, fila «Documentos del MEF» en el Excel; auditoría de sustento de 23
-expedientes: 13 útil, 10 de otra fase, 0 de otro proyecto.
+expedientes: 13 útil, 10 de otra fase, 0 de otro proyecto. Luego `387db52` y `13c7a69`: la
+aprobación del expediente se toma de la sección B de la ficha 08-A (con fecha); en Tacna las
+resoluciones bajadas pasan de 21 a 40 y los casos de Pasco/Lorena toman la resolución correcta.
 
 ## 13-sep — ADR-015 implementado: el orden con la vía MEF, las variantes del establecimiento y la rama de privadas al final
 
