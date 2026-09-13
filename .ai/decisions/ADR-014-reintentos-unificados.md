@@ -1,3 +1,12 @@
+---
+id: "ADR-014"
+title: "Un solo mecanismo de reintentos y una sola semántica de fallo en scraping"
+status: "accepted"
+date: "2026-08-05"
+authors:
+  - "Raf"
+---
+
 # ADR-014 · Un solo mecanismo de reintentos y una sola semántica de fallo en scraping
 
 - Fecha: 2026-08-05 · Estado: **aprobado, implementado** (T-REFACTOR-001)

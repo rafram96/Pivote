@@ -1,3 +1,12 @@
+---
+id: "ADR-009"
+title: "ETL MEF serving-first: índice RAM + PostgreSQL"
+status: "accepted"
+date: "2026-07-23"
+authors:
+  - "Raf"
+---
+
 # ADR-009 · ETL MEF serving-first: índice RAM + PostgreSQL
 
 - Fecha: 2026-07-23; decisión final 2026-07-29

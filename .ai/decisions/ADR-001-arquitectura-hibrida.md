@@ -1,3 +1,12 @@
+---
+id: "ADR-001"
+title: "Arquitectura híbrida: Claude extrae, backend on-prem verifica"
+status: "accepted"
+date: "2026-05-01"
+authors:
+  - "Raf"
+---
+
 # ADR-001 · Arquitectura híbrida: Claude extrae, backend on-prem verifica
 
 - Fecha: 2026-05 (pivote) · Estado: vigente

@@ -1,3 +1,12 @@
+---
+id: "ADR-007"
+title: "La skill NO resuelve CUIs; solo verifica los citados"
+status: "accepted"
+date: "2026-07-21"
+authors:
+  - "Raf"
+---
+
 # ADR-007 · La skill NO resuelve CUIs; solo verifica los citados
 
 - Fecha: 2026-07-21 · Estado: vigente (requiere backend con base MEF desplegado)

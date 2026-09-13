@@ -1,3 +1,12 @@
+---
+id: "ADR-013"
+title: "Veto de departamento contradictorio y candado de nombre genérico"
+status: "accepted"
+date: "2026-07-26"
+authors:
+  - "Raf"
+---
+
 # ADR-013 · Veto de departamento contradictorio y candado de nombre genérico
 
 - Fecha: 2026-07-26 · Estado: **implementado y validado con la golden ANCHA**

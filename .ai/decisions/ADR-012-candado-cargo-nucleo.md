@@ -1,3 +1,12 @@
+---
+id: "ADR-012"
+title: "Candado determinístico de correspondencia cargo ↔ bases (núcleo de especialidad + segunda puerta de funciones)"
+status: "accepted"
+date: "2026-07-26"
+authors:
+  - "Raf"
+---
+
 # ADR-012 · Candado determinístico de correspondencia cargo ↔ bases (núcleo de especialidad + segunda puerta de funciones)
 
 - Fecha: 2026-07-26 · Estado: **aprobado, implementado** (issue #31)

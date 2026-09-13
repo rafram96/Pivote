@@ -1,6 +1,15 @@
+---
+id: "ADR-005"
+title: "Candados de abstención sobre el resolver (F7/F8)"
+status: "superseded"
+date: "2026-07-20"
+authors:
+  - "Raf"
+---
+
 # ADR-005 · Candados de abstención sobre el resolver (F7/F8)
 
-- Fecha: 2026-07-20/21 · Estado: vigente
+- Fecha: 2026-07-20/21 · Estado: **supersedido por ADR-015** (2026-09-13): los candados siguen vigentes; la golden deja de ser el criterio de calibración y la vía MEF de ADR-010 se evalúa antes del candado §1 en expedientes.
 
 ## Contexto
 La primera integración de la base MEF EMPEORÓ el sistema (26 mal-resueltos vs

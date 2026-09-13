@@ -1,3 +1,12 @@
+---
+id: "ADR-004"
+title: "Público-primero: la clasificación de privadas va AL FINAL"
+status: "accepted"
+date: "2026-07-20"
+authors:
+  - "Raf"
+---
+
 # ADR-004 · Público-primero: la clasificación de privadas va AL FINAL
 
 - Fecha: 2026-07-20 (directiva del cliente) · Estado: vigente

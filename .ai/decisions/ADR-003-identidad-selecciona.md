@@ -1,3 +1,12 @@
+---
+id: "ADR-003"
+title: "La identidad selecciona; las valorizaciones solo dictan veredicto"
+status: "accepted"
+date: "2026-07-20"
+authors:
+  - "Raf"
+---
+
 # ADR-003 · La identidad selecciona; las valorizaciones solo dictan veredicto
 
 - Fecha: 2026-07-20 (decisión del cliente) · Estado: vigente

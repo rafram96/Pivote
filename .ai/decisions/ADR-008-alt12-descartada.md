@@ -1,3 +1,12 @@
+---
+id: "ADR-008"
+title: "ALT-12 (firmante = representante legal) descartada como regla automática"
+status: "accepted"
+date: "2026-06-01"
+authors:
+  - "Raf"
+---
+
 # ADR-008 · ALT-12 (firmante = representante legal) descartada como regla automática
 
 - Fecha: 2026-06/07 (auditoría SUNAT en vivo) · Estado: vigente

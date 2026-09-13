@@ -1,3 +1,12 @@
+---
+id: "ADR-010"
+title: "El tipo de concurso (A/B) es un PARÁMETRO declarado por la skill, no una inferencia del backend"
+status: "accepted"
+date: "2026-07-25"
+authors:
+  - "Raf"
+---
+
 # ADR-010 · El tipo de concurso (A/B) es un PARÁMETRO declarado por la skill, no una inferencia del backend
 
 - Fecha: 2026-07-25 · Estado: **aprobado, pendiente de implementar**

@@ -1,3 +1,12 @@
+---
+id: "ADR-002"
+title: "Base local del Banco de Inversiones como fuente primaria de candidatos"
+status: "accepted"
+date: "2026-07-20"
+authors:
+  - "Raf"
+---
+
 # ADR-002 · Base local del Banco de Inversiones como fuente primaria de candidatos
 
 - Fecha: 2026-07-20 · Estado: vigente

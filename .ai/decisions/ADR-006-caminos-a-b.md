@@ -1,3 +1,12 @@
+---
+id: "ADR-006"
+title: "Dos caminos de verificación (expediente vs obra) + modo forzado"
+status: "accepted"
+date: "2026-07-21"
+authors:
+  - "Raf"
+---
+
 # ADR-006 · Dos caminos de verificación (expediente vs obra) + modo forzado
 
 - Fecha: 2026-07-21 · Estado: **parcialmente supersedido por ADR-010**

@@ -1,3 +1,12 @@
+---
+id: "ADR-011"
+title: "Tratamiento de certificados multi-obra: extracción por sub-obras, resolución por resolver() completo y principio de no adivinar fechas"
+status: "accepted"
+date: "2026-07-25"
+authors:
+  - "Raf"
+---
+
 # ADR-011 · Tratamiento de certificados multi-obra: extracción por sub-obras, resolución por resolver() completo y principio de no adivinar fechas
 
 - Fecha: 2026-07-25 · Estado: **implementado** (P0 + P1; P2 sigue pospuesto)
