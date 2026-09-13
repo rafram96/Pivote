@@ -1873,7 +1873,52 @@ def _con_pista_mef(exp: dict, motivo: str) -> str:
     return motivo
 
 
-def _clasificar_privada(exp: dict, candidatos: list, vetados: list, base=None) -> dict:
+_RE_SEPARADOR_ENTIDAD = re.compile(r"[-/,.]+")
+
+
+def _entidad_publica_contratante(exp: dict, best: Optional[dict], base) -> tuple:
+    """¿La entidad CONTRATANTE del certificado es pública? Devuelve
+    `(es_publica, score_catalogo)`.
+
+    Dos fuentes, en este orden:
+
+    1. El catálogo de entidades públicas del MEF (ADR-004), con su umbral fuzzy
+       de 90. **Ese umbral NO baja**: «Orden de San Agustín» matchea 82 con la
+       Municipalidad de San Agustín y bajarlo reintroduce falsos públicos.
+
+    2. La `entidad` de la FICHA MEF del candidato ganador (ADR-015, precisión de
+       ADR-004). Si el proyecto identificado pertenece a una entidad que el
+       catálogo SÍ reconoce, y la contratante del certificado es esa misma
+       entidad escrita de otra forma, la obra no es privada — por definición.
+       El caso real: «GOBIERNO REGIONAL LIMA-PROVINCIAS» (como lo escribe el
+       certificado) contra la ficha «GOBIERNO REGIONAL LIMA». El guion es un
+       SEPARADOR de palabras, no parte de una: sin normalizarlo el token queda
+       pegado («LIMA-PROVINCIAS») y el fuzzy cae a 87,2; normalizándolo, la
+       contratante contiene a la entidad de la ficha y da 100. No se toca el
+       umbral ni el catálogo: se compara contra la ficha del propio candidato,
+       que es evidencia de identidad, no de vocabulario."""
+    entidad = str(exp.get("entidad_contratante") or "").strip()
+    if not entidad or not (base and base.disponible()):
+        return False, None
+    reconocida, score = base.es_entidad_publica(entidad)
+    if reconocida:
+        return True, score
+    ficha = _ficha_mef((best or {}).get("cui"), base, exp.setdefault("_fichas_mef", {}))
+    ent_ficha = str((ficha or {}).get("entidad") or "").strip()
+    if not ent_ficha or not base.es_entidad_publica(ent_ficha)[0]:
+        return False, score
+    a = _RE_SEPARADOR_ENTIDAD.sub(" ", norm(entidad))
+    b = _RE_SEPARADOR_ENTIDAD.sub(" ", norm(ent_ficha))
+    if fuzz.token_set_ratio(a, b) >= 90:
+        _traza().ev("entidad_publica_por_ficha", entidad=entidad, ficha=ent_ficha,
+                    score_catalogo=score)
+        return True, score
+    return False, score
+
+
+def _clasificar_privada(exp: dict, candidatos: list, vetados: list, base=None,
+                        best: Optional[dict] = None,
+                        candidato_fiable: bool = False) -> dict:
     """PÚBLICO-PRIMERO · clasificación de PRIVADA al FINAL. Se invoca SOLO cuando la
     resolución pública ya se agotó sin candidato fiable (no en loc_contra ni en
     vetados-por-rubro, que conservan su propio motivo). Decide entre:
@@ -1898,10 +1943,19 @@ def _clasificar_privada(exp: dict, candidatos: list, vetados: list, base=None) -
     #    (S.A./S.A.C./E.I.R.L./S.R.L.) basta para señalar `posible_privada`. Es
     #    revisión, NUNCA 'na': ese campo llega mal llenado con el contratista de
     #    la obra pública con demasiada frecuencia para decidir con él.
+    #    ADR-015 (precisión de ADR-004): la rama corre SOLO cuando la resolución
+    #    pública terminó sin candidato fiable. Un candidato que ganó el desempate
+    #    por nombre literal NO puede ser pisado por ella: decir «posible obra
+    #    privada» de una obra cuyo proyecto está identificado en el Banco de
+    #    Inversiones es un motivo falso, y encima tapa al candidato en la cola
+    #    (auditoría 12-sep, caso 12:4). Tampoco baja el umbral 90 del catálogo:
+    #    lo que cambia es que la entidad de la FICHA MEF del ganador también
+    #    cuenta para reconocer al contratante (ver `_entidad_publica_contratante`).
     entidad = str(exp.get("entidad_contratante") or "").strip()
     con_base = bool(base and base.disponible() and entidad)
-    reconocida, score = base.es_entidad_publica(entidad) if con_base else (False, None)
-    no_publica = bool(entidad) and not reconocida and (
+    reconocida, score = _entidad_publica_contratante(exp, best, base) \
+        if con_base else (False, None)
+    no_publica = bool(entidad) and not reconocida and not candidato_fiable and (
         con_base or bool(_RE_FORMA_SOCIETARIA.search(entidad)))
     if no_publica:
         _traza().ev("posible_privada", entidad=entidad, score=score)
@@ -2663,6 +2717,7 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
                     "candidatos": _cands, "obra": None}
 
     _DELTA_EMPATE = 4.0
+    _gano_literal = False            # el desempate por nombre literal, para abajo
     if best and not _es_experiencia_privada(exp):
         # OJO: NO es `_corroborado`. Este trío está calibrado contra la golden
         # (ADR-005) y sumarle `geo_match` movería el guard de empate sin haber
@@ -2679,6 +2734,7 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
         # empata y solo el nombre literal los separa (caso 1:5).
         _lit = {c["cui"] for c in (*ranked, *vetados) if c.get("nombre_literal")}
         _separa_literal = bool(len(_lit) == 1 and best["cui"] in _lit)
+        _gano_literal = _separa_literal
         if _separa_literal:
             _traza().ev("desempate_nombre_literal", cui=best["cui"])
 
@@ -2795,7 +2851,19 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
     # alto de similitud entre dos nombres puramente genéricos ("mejoramiento del
     # servicio educativo…" de dos lugares distintos) NO identifica la obra — de ahí
     # salían los matches "que nada tienen que ver" (queja del cliente 14-jul).
-    if best and (gate or (best["score"] >= 90 and n_hit >= 1)) and not loc_contra:
+    # ADR-015 (precisión de ADR-004) · TERCERA PUERTA: el nombre LITERAL único.
+    # `n_hit` cuenta tokens propios del establecimiento, y hay nombres oficiales
+    # que no tienen ninguno («HOSPITAL REGIONAL EN LA PROVINCIA DE CAÑETE»: todo
+    # genérico y geografía). Con `toks` vacío ni `gate` ni `n_hit ≥ 1` pueden
+    # cumplirse NUNCA, así que la experiencia caía hasta la rama de privadas —
+    # que la rotulaba «posible obra privada» teniendo el proyecto identificado
+    # (auditoría 12-sep, caso 12:4). El nombre literal ÚNICO es más fuerte que un
+    # token compartido: es el nombre del certificado entero, palabra por palabra,
+    # en un solo CUI del ranking. Se exige además corroboración DURA (la lista de
+    # ADR-013) y el mismo mínimo de puntaje. No se mueve ningún umbral.
+    _literal_sostiene = bool(_gano_literal and best and _corroborado(best, exp))
+    if best and (gate or (best["score"] >= 90 and n_hit >= 1)
+                 or (_literal_sostiene and best["score"] >= 90)) and not loc_contra:
         # CANDADO DE ENTIDAD PÚBLICA (público-primero): un candidato fuerte SOLO por
         # similitud de nombre, cuya entidad contratante NO se reconoce como pública,
         # se degrada a revisión — la evidencia de PROBABLE es más débil que RUC/NOMBRE.
@@ -2803,7 +2871,7 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
         # Sin base o entidad vacía → comportamiento actual (resuelve PROBABLE).
         entidad = str(exp.get("entidad_contratante") or "").strip()
         if base and base.disponible() and entidad \
-                and not base.es_entidad_publica(entidad)[0]:
+                and not _entidad_publica_contratante(exp, best, base)[0]:
             _traza().ev("candado_entidad_probable", cui=best["cui"], entidad=entidad)
             return {"estado": "revision", "cui": None, "via": "NOMBRE",
                     "decision": "candidato fuerte pero la entidad contratante no se "
@@ -2824,7 +2892,7 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
         # privada (Trinity College): clasificarla, no mandarla a revisión de CUI.
         if _es_experiencia_privada(exp):
             return _clasificar_privada(exp, [_proj(c) for c in vetados[:3]],
-                                       vetados, base)
+                                       vetados, base, best=best)
         if all(c.get("veto") == "rubro" for c in vetados):
             motivo = "los candidatos hallados son de otro rubro de servicio — confirmar"
         elif all(c.get("veto") == "etapa" for c in vetados):
@@ -2862,7 +2930,8 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
                 "decision": motivo, "candidatos": candidatos, "obra": None}
     # Sin candidato público fiable: recién AQUÍ, agotada la resolución pública, se
     # clasifica la PRIVADA (léxico → 'na'; entidad no-pública → posible_privada).
-    return _clasificar_privada(exp, candidatos, vetados, base)
+    return _clasificar_privada(exp, candidatos, vetados, base, best=best,
+                               candidato_fiable=_literal_sostiene)
 
 
 # Campos que una SUB-OBRA hereda de su experiencia madre. El contrato del cert es
