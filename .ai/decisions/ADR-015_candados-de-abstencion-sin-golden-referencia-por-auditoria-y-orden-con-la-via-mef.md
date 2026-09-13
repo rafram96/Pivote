@@ -1,7 +1,7 @@
 ---
 id: "ADR-015"
 title: "Candados de abstención sin golden: referencia por auditoría y orden con la vía MEF"
-status: "proposed"
+status: "accepted"
 date: "2026-09-13"
 authors:
   - "Raf"
@@ -9,6 +9,7 @@ authors:
 
 # ADR-015: Candados de abstención sin golden: referencia por auditoría y orden con la vía MEF
 
+- Aceptado por el desarrollador el 2026-09-13.
 - Supersede a **ADR-005**. Conserva sus candados; retira la golden como criterio
   de calibración y fija el orden con la vía MEF de ADR-010.
 - Precisa: ADR-004 (orden de la rama de privadas) y ADR-013 (asimetría de la
