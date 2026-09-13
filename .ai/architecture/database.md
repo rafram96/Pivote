@@ -71,7 +71,7 @@ El script de ingesta `backend/scripts/actualizar_base_mef.py` descarga y consoli
 * **Volumen Total**: ~494,297 registros de inversiones consolidados y ~452,792 CUIs/SNIPs distintos a nivel nacional.
 * **Catálogo de Entidades**: 11,004 entidades públicas registradas y extracción automática de siglas (`- AGN`, `- INABIF`, etc.).
 * **Ubicación en disco**: `PIVOTE_DATA_DIR/referencia/mef/`:
-  * `inversiones.csv.gz` (~26 MB comprimido): `cui`, `snip`, `nombre`, `estado_dataset` (ACTIVO/CERRADA/DESACTIVADA), `situacion`, `ubigeo`, `dpto`, `prov`, `dist`, `entidad`.
+  * `inversiones.csv.gz` (~26 MB comprimido): `cui`, `snip`, `nombre`, `estado_dataset` (ACTIVO/CERRADA/DESACTIVADA), `situacion`, `ubigeo`, `dpto`, `prov`, `dist`, `entidad`, y desde el 2026-09-13 `fecha_registro` y `fecha_viabilidad` (ISO o vacío; las cargas anteriores no las traen y el resolver lo tolera). Precisión a ADR-009: esas dos fechas también viven en el índice local porque el resolver las necesita sin PostgreSQL (cronología de la vía MEF); el resto de fechas sigue solo en PostgreSQL.
   * `entidades_publicas.csv` (544 KB): catálogo de entidades y siglas.
   * `metadata.json`: fecha de corte, recuentos de filas por fuente y URLs de origen.
 

@@ -108,6 +108,9 @@ class BaseMef:
         self._prov: list[str] = []
         self._dist: list[str] = []
         self._entidad: list[str] = []
+        # ISO o "" (las cargas anteriores al 13-sep-2026 no las traen)
+        self._fecha_registro: list[str] = []
+        self._fecha_viabilidad: list[str] = []
         # índices
         self._por_cui: dict[str, int] = {}
         self._por_snip: dict[str, int] = {}
@@ -262,6 +265,8 @@ class BaseMef:
         self._prov.clear()
         self._dist.clear()
         self._entidad.clear()
+        self._fecha_registro.clear()
+        self._fecha_viabilidad.clear()
         self._por_cui.clear()
         self._por_snip.clear()
         self._tok_index.clear()
@@ -292,6 +297,8 @@ class BaseMef:
                 self._prov.append(intern(fila.get("prov") or ""))
                 self._dist.append(intern(fila.get("dist") or ""))
                 self._entidad.append(intern(fila.get("entidad") or ""))
+                self._fecha_registro.append(intern((fila.get("fecha_registro") or "").strip()))
+                self._fecha_viabilidad.append(intern((fila.get("fecha_viabilidad") or "").strip()))
                 if cui and cui not in self._por_cui:
                     self._por_cui[cui] = i
                 if snip and snip not in self._por_snip:
@@ -392,6 +399,8 @@ class BaseMef:
             "entidad": self._entidad[i],
             "estado_dataset": self._estado[i],
             "situacion": self._situacion[i],
+            "fecha_registro": self._fecha_registro[i] if i < len(self._fecha_registro) else "",
+            "fecha_viabilidad": self._fecha_viabilidad[i] if i < len(self._fecha_viabilidad) else "",
         }
         if score is not None:
             d["score"] = score

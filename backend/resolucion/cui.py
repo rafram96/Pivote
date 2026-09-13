@@ -2214,7 +2214,11 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
                 # ADR-010 · candidato sintetizado desde la ficha del MEF (expediente
                 # sin registro de ejecución en InfoObras) y su score de nombre MEF.
                 "solo_ficha": bool(o.get("_solo_ficha")),
-                "mef_score": ((fichas_mef or {}).get(cui) or {}).get("score")}
+                "mef_score": ((fichas_mef or {}).get(cui) or {}).get("score"),
+                # cuándo existe la inversión según el Banco (ISO o ""): la vía MEF
+                # descarta como rival a una ficha registrada DESPUÉS del certificado.
+                "mef_fecha_registro": ((ficha or {}).get("fecha_registro") or ""),
+                "mef_fecha_viabilidad": ((ficha or {}).get("fecha_viabilidad") or "")}
         if o.get("_origen"):
             cand["origen"] = o["_origen"]
             origenes.setdefault(cui, set()).add(o["_origen"])
@@ -2420,6 +2424,15 @@ _MEF_PARECIDO_BAJO = 80.0
 _DELTA_RIVAL_MEF = 3.0       # otra ficha a menos de esto en score MEF = empate
 
 
+def _fecha_existencia_mef(c: dict) -> Optional[date]:
+    """Fecha más temprana en que el Banco de Inversiones da por existente la
+    inversión del candidato (registro o viabilidad, la que sea anterior), o None
+    si la carga local no trae fechas."""
+    fechas = [_fecha_cert(c.get(k)) for k in ("mef_fecha_registro", "mef_fecha_viabilidad")]
+    fechas = [f for f in fechas if f]
+    return min(fechas) if fechas else None
+
+
 def _via_mef_expediente(exp: dict, best: dict, ranked: list, candidatos: list,
                         obra_best: Optional[dict], loc_contra: bool) -> dict:
     """Vía MEF (ADR-010): un EXPEDIENTE cuyo proyecto figura en el Banco de
@@ -2437,9 +2450,30 @@ def _via_mef_expediente(exp: dict, best: dict, ranked: list, candidatos: list,
     pal_cert = _palabras(proyecto + " " + str(exp.get("ubicacion") or ""))
     cobertura = (len(pal_mef & pal_cert) / len(pal_mef)) if pal_mef else 0.0
     rub_extra = rubros_de(best.get("nombre_obra") or "") - rubros_de(proyecto)
-    rivales = [c for c in ranked if c["cui"] != cui
-               and ((best["score"] - c["score"]) <= 4.0
-                    or float(c.get("mef_score") or 0) >= ms - _DELTA_RIVAL_MEF)]
+    cert_fin = _fecha_cert(exp.get("fecha_final"))
+    rivales, posteriores = [], []
+    for c in ranked:
+        if c["cui"] == cui:
+            continue
+        empata = ((best["score"] - c["score"]) <= 4.0
+                  or float(c.get("mef_score") or 0) >= ms - _DELTA_RIVAL_MEF)
+        if not empata:
+            continue
+        # CRONOLOGÍA DEL BANCO: una inversión que el MEF registró (y declaró
+        # viable) DESPUÉS de que terminara el certificado no puede ser el proyecto
+        # que ese certificado acredita. Es contradicción positiva, no
+        # corroboración (ADR-013): solo descarta al rival; nunca elige por sí sola.
+        # Se toma la MÁS TEMPRANA de registro y viabilidad porque el MEF re-registra
+        # inversiones antiguas con fecha de registro tardía (caso real: registro
+        # 2018 con viabilidad 2009).
+        nace = _fecha_existencia_mef(c)
+        if cert_fin and nace and nace > cert_fin:
+            posteriores.append((c["cui"], nace.isoformat()))
+            continue
+        rivales.append(c)
+    if posteriores:
+        _traza().ev("via_mef_rival_posterior", cui=cui, cert_fin=cert_fin.isoformat(),
+                    descartados=posteriores)
     motivo = None
     if ms < _UMBRAL_MEF_NOMBRE:
         motivo = "el nombre oficial no coincide lo suficiente con el del certificado"
@@ -2488,6 +2522,14 @@ def _via_mef_expediente(exp: dict, best: dict, ranked: list, candidatos: list,
     if ranked and ranked[0]["cui"] != cui:
         aviso = (f" · el candidato de mayor puntaje es el CUI {ranked[0]['cui']}, "
                  "apartado por no tener confirmación en InfoObras")
+    # La vía MEF no resolvió. Si el cliente/obra es PRIVADO por léxico (clínica,
+    # colegio particular, promotor privado…), la respuesta correcta es PRIVADA y no
+    # una revisión que cita una ficha pública parecida: antes esta salida cortaba
+    # el flujo y la rama de privadas (ADR-004/ADR-015 §6) nunca corría (auditoría
+    # 12-sep, caso de una clínica que quedó en «confirmar» con una planta de bombeo).
+    if _es_experiencia_privada(exp):
+        _traza().ev("via_mef_privada", cui=cui, mef_score=ms)
+        return _clasificar_privada(exp, candidatos, [], None)
     if ms < _MEF_PARECIDO_BAJO:
         # Parecido bajo: no hay en el Banco un proyecto con ese nombre. Decirlo
         # al revés («hay un proyecto con ese nombre… pero no coincide») hacía

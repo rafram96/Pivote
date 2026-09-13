@@ -141,6 +141,24 @@ def _col(fieldnames: list[str] | None, *candidatos: str) -> str | None:
     return None
 
 
+def _fecha_iso(v: str) -> str:
+    """Fecha del CSV del MEF a ISO `AAAA-MM-DD` (o "" si no se reconoce). El
+    índice compacto la lleva para que el resolver pueda saber, sin PostgreSQL,
+    cuándo se registró la inversión: un certificado anterior al registro no puede
+    ser de ese proyecto (precisión a ADR-009: la fecha de registro también vive
+    en el índice local; el resto de fechas sigue en PostgreSQL)."""
+    v = (v or "").strip()
+    if not v:
+        return ""
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", v)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    m = re.match(r"^(\d{2})/(\d{2})/(\d{4})", v)
+    if m:
+        return f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+    return ""
+
+
 def _valor(fila: dict, columna: str | None) -> str:
     return (fila.get(columna) or "").strip() if columna else ""
 
@@ -488,7 +506,8 @@ def _procesar(
             w = csv.writer(gz)
             w.writerow([
                 "cui", "snip", "nombre", "estado_dataset", "situacion",
-                "ubigeo", "dpto", "prov", "dist", "entidad",
+                "ubigeo", "dpto", "prov", "dist", "entidad", "fecha_registro",
+                "fecha_viabilidad",
             ])
             for archivo, tag in FUENTES:
                 ruta = dir_csv / archivo
@@ -527,6 +546,8 @@ def _procesar(
                             _valor(fila, cols["prov"]),
                             _valor(fila, cols["dist"]),
                             entidad,
+                            _fecha_iso(_valor(fila, cols["fecha_registro"])),
+                            _fecha_iso(_valor(fila, cols["fecha_viabilidad"])),
                         ])
                         if nueva_identidad:
                             pg.insertar((
