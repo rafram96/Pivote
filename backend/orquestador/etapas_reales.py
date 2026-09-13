@@ -1029,12 +1029,16 @@ class EtapaInfoObrasReal:
             lectura = conservar_lectura_resolucion(previa, lectura)
             enr["resolucion_aprobacion"] = lectura
             # El resumen MEF también debe referirse al PDF retenido, no conservar
-            # etiqueta/URL de A con la fecha que se leyó en B.
+            # etiqueta/URL de A con la fecha que se leyó en B. Lo que sí se
+            # conserva es lo que el 08-A dice de ese mismo documento: en qué
+            # sección estaba y la fecha de aprobación registrada (13-sep-2026).
+            _previo = _vmef.get("resolucion") if isinstance(_vmef.get("resolucion"), dict) else {}
             _vmef["resolucion"] = {
                 "numero": lectura.get("numero"), "url": lectura.get("url"),
                 "documento": lectura.get("documento") or "Documento MEF leído",
                 "fecha": lectura.get("fecha"), "archivo": lectura.get("archivo"),
                 "sha256": lectura.get("sha256"),
+                "fecha_08a": _previo.get("fecha_08a"), "origen": _previo.get("origen"),
                 "veredicto": "no_verificable", "detalle": "Documento leído; tipo de acto y correspondencia por confirmar.",
             }
             if lectura.get("coincide_emisor") == "nombra_otro":
