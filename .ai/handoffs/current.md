@@ -1,7 +1,38 @@
 ---
-timestamp: "2026-09-12"
+timestamp: "2026-09-13"
 agent: Claude Opus
 ---
+
+## 13-sep — ADR-015 implementado: el orden con la vía MEF, las variantes del establecimiento y la rama de privadas al final
+
+[Cuatro commits](2026-09-13_claude-opus-adr015.md) en `resolver/adr-015` (desde `27e52bf`),
+uno por cada cambio de la sección Decisión de **ADR-015**. (1) **Orden con la vía MEF**:
+en camino A, `ranked[0]` de origen `mef` se evalúa PRIMERO con los candados propios de la
+vía MEF —más estrictos— y solo si no los supera se demota; **no se relajó el candado de
+ADR-005 §1** (sumar `geo_match` sí lo habría hecho, y el caso Chinchinga sigue verde sin
+tocarse) y la resolución conserva el `obra_id` real de InfoObras cuando existe. (2)
+**Candado de variantes del mismo establecimiento**: dos CUIs que son la misma obra inscrita
+dos veces (plan de contingencia, saldo, reformulación, actualización, componente, etapa, o
+la contratación del expediente de otra inversión) mandan a revisión NOMBRANDO a los dos,
+con independencia del puntaje —en producción quedaron a 2,4 puntos y en el replay a 5,6—;
+se exige además que ambos lleven el nombre del certificado LITERAL, sin lo cual el candado
+alcanzaba 6 casos que no son variantes sino el mismo topónimo. (3) **La rama de privadas va
+al final de verdad** (precisa ADR-004): un nombre oficial de puro genérico + geografía no
+podía resolver NUNCA —ni `gate` ni `n_hit ≥ 1` son alcanzables con cero tokens propios— y
+caía rotulado «posible obra privada» con el proyecto identificado; se abre una tercera
+puerta a PROBABLE por nombre literal ÚNICO + corroboración dura, y la entidad de la ficha
+MEF del ganador cuenta para reconocer a la contratante (**el umbral 90 del catálogo no
+baja**). (4) **Aceptación**: `resuelto_por_etapa` y los multi-obra se comprueban contra el
+resultado PERSISTIDO del job, porque las vías con red no son reproducibles offline.
+**Las dos pruebas de la aceptación privada pasan** (antes fallaban por 3:1, 12:3, 12:4,
+13:3, 16:1 y 9:1) y siguen saltándose sin el archivo. **1917 pruebas pasan, 33 omitidas**
+(+16). Replay con la base del MEF sobre los 23 jobs: **20 pasan de revisión a resuelto**
+(18 por vía MEF, 2 por PROBABLE; revisadas una por una), **3 pasan de resuelto a revisión**
+—el mismo certificado auditado en tres propuestas, que el auditor dictaminó PENDIENTE— y
+**cero resueltas cambian de CUI**. ⚠ El modo documentado del CLI del replay (`base=None`)
+es CIEGO a estos cambios: la regresión del ADR exige la base local del MEF, y el CLI aún no
+tiene la opción. Cuatro notas de vigencia para precisar ADR-015 quedan en el handoff (no se
+editó el ADR). Sin push, sin cambiar de rama, sin regenerar entregables.
 
 ## 12-sep — El replay medía un universo falso, y el desempate de los falsos negativos
 
