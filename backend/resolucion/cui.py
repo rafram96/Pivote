@@ -2296,14 +2296,29 @@ def _via_mef_expediente(exp: dict, best: dict, ranked: list, candidatos: list,
     elif rivales:
         motivo = "otro proyecto del MEF compite con un nombre igual de parecido"
     obra = dict(obra_best or {})
-    obra["obra_id"] = None   # no hay obra de InfoObras detrás: jamás se fetchea
+    # Una ficha SINTETIZADA del Banco de Inversiones no tiene obra detrás: su
+    # `obra_id` es el pseudo-código `MEF:<cui>` y jamás se fetchea. Cuando el
+    # candidato SÍ trae un registro de InfoObras (ADR-015 §2: llegó por la fusión,
+    # por CÓDIGO y no por nombre), el `obra_id` es real y se conserva — es el que
+    # la etapa usa para leer la ficha de la obra.
+    if best.get("solo_ficha"):
+        obra["obra_id"] = None
     if motivo is None:
         _traza().ev("via_mef_expediente", cui=cui, mef_score=ms,
-                    cobertura=round(cobertura, 2))
+                    cobertura=round(cobertura, 2),
+                    solo_ficha=bool(best.get("solo_ficha")))
+        if best.get("solo_ficha"):
+            decision = ("el proyecto figura con ese nombre en el Banco de Inversiones "
+                        "del MEF e InfoObras no registra su ejecución; el expediente se "
+                        "verifica contra el contrato y la resolución de aprobación del MEF")
+        else:
+            decision = ("el nombre oficial del proyecto en el Banco de Inversiones del "
+                        "MEF coincide con el del certificado y ninguna otra ficha compite; "
+                        "InfoObras registra la obra por su código y no la devolvió por "
+                        "nombre — el expediente se verifica contra el contrato y la "
+                        "resolución de aprobación del MEF")
         return {"estado": "resuelto", "cui": cui, "via": "MEF",
-                "decision": ("el proyecto figura con ese nombre en el Banco de Inversiones "
-                             "del MEF e InfoObras no registra su ejecución; el expediente se "
-                             "verifica contra el contrato y la resolución de aprobación del MEF"),
+                "decision": decision,
                 "candidatos": candidatos, "obra": obra}
     _traza().ev("via_mef_expediente_revision", cui=cui, mef_score=ms, motivo=motivo)
     # El motivo no puede presentar como «el proyecto con ese nombre» a una ficha
@@ -2357,36 +2372,21 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
     # elegible: el Banco de Inversiones es su fuente primaria y la vía MEF (abajo)
     # decide con sus propios candados. Para obras el candado sigue intacto.
     #
-    # PENDIENTE DE DECISIÓN (auditoría 12-sep, casos 16:1 · 15:1 · 2:2 · 12:3): en
-    # los cuatro, el candidato que el auditor da por correcto llegó por la FUSIÓN
-    # (origen 'mef') y su provincia/distrito oficial COINCIDE con la que declara el
-    # certificado, pero el trío de este candado no mira `geo_match` y lo demota; un
-    # homónimo más débil ocupa su lugar como `best` y dispara el guard de ubicación
-    # («homónimo apartado por estar en otra ubicación»). Sumar `geo_match` acá
-    # —usar `_corroborado`, la lista que ADR-013 ya definió— los resuelve a los
-    # cuatro, PERO es relajar la sensibilidad del candado de ADR-005 §1, no un
-    # desempate: rompe el caso Chinchinga de `tests/test_resolucion_fusion.py`, que
-    # es exactamente el mismo patrón (InfoObras solo trae basura, el MEF aporta el
-    # nombre y la ubicación calza) y que el golden respaldaba. No se cambia sin
-    # decisión explícita — ver el handoff 2026-09-12_claude-opus-desempate.md.
+    # RESUELTO POR ADR-015 §2 (13-sep) — es la decisión que dejó pendiente el
+    # handoff 2026-09-12_claude-opus-desempate.md. NO se relajó este candado (sumar
+    # `geo_match` al trío habría bajado su sensibilidad y roto el caso Chinchinga,
+    # que es el mismo patrón para una OBRA): lo que cambió es el ORDEN. En camino A
+    # (expedientes), si `ranked[0]` es de origen 'mef' se evalúa PRIMERO con los
+    # candados PROPIOS de la vía MEF —más estrictos que este: nombre oficial ≥ 95,
+    # cobertura ≥ 80 %, sin contradicción de ubicación, sin rubro ajeno y sin ficha
+    # rival— y solo si no los supera se demota como siempre. Para OBRAS (camino B)
+    # el candado sigue intacto, con Chinchinga verde y sin tocar.
     _exped = es_expediente_exp(exp)
 
     def _mef_sin_corroborar(c: dict) -> bool:
         return (c.get("origen") == "mef"
                 and not (c.get("ruc_match") or c.get("num_match") or c.get("ent_match"))
                 and not (c.get("solo_ficha") and _exped))
-
-    best = next((c for c in ranked if not _mef_sin_corroborar(c)), None)
-    if ranked and (best is None or ranked[0] is not best):
-        _traza().ev("candado_mef_demote", best=(best or {}).get("cui"),
-                    demotados=[f"{c['cui']}·{c['score']}" for c in ranked
-                               if _mef_sin_corroborar(c)][:3])
-
-    n_hit = len(toks & _palabras(best["full"])) if best else 0
-    gate = bool(best and toks and n_hit >= max(1, (len(toks) + 1) // 2))
-    loc_contra = bool(deptos_hint and best and best.get("departamento")
-                      and norm(best["departamento"]) not in deptos_hint
-                      and not best.get("ruc_match"))
 
     def _proj(c: dict) -> dict:
         # `origen` (F3) viaja ADITIVO: solo si el candidato lo trae (con base=None
@@ -2396,9 +2396,49 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
             d["origen"] = c["origen"]
         return d
 
+    def _obra_de(c):
+        return c and {"cui": c["cui"], "nombre_obra": c["nombre_obra"],
+                      "departamento": c["departamento"], "obra_id": c.get("obra_id")}
+
+    def _loc_contra(c) -> bool:
+        return bool(deptos_hint and c and c.get("departamento")
+                    and norm(c["departamento"]) not in deptos_hint
+                    and not c.get("ruc_match"))
+
     candidatos = [_proj(c) for c in ranked[:3]]
-    obra_best = best and {"cui": best["cui"], "nombre_obra": best["nombre_obra"],
-                          "departamento": best["departamento"], "obra_id": best.get("obra_id")}
+
+    # -- ADR-015 §2 · ORDEN CON LA VÍA MEF (solo camino A) -------------------
+    # El candado de arriba se escribió para OBRAS: castiga al candidato que solo el
+    # MEF respalda porque InfoObras no lo devolvió por nombre. En un EXPEDIENTE eso
+    # no es sospecha, es lo normal —el Banco de Inversiones es su fuente primaria—
+    # y la vía MEF ya tiene candados propios MÁS estrictos. Con el orden viejo el
+    # candado demotaba al candidato correcto, un homónimo más débil ocupaba su
+    # lugar y la vía MEF terminaba evaluando a un SUSTITUTO: el motivo de revisión
+    # citaba un CUI que el evaluador no reconocía (auditoría 12-sep, casos 12:3 y
+    # 16:1). Ahora `ranked[0]` de origen 'mef' pasa PRIMERO por los candados de la
+    # vía MEF; si no los supera, se demota exactamente como antes. No se mueve
+    # ningún umbral ni el candado del camino B.
+    if _exped and ranked and ranked[0].get("origen") == "mef" \
+            and _mef_sin_corroborar(ranked[0]):
+        _c0 = ranked[0]
+        _r_mef = _via_mef_expediente(exp, _c0, ranked, candidatos,
+                                     _obra_de(_c0), _loc_contra(_c0))
+        if _r_mef.get("estado") == "resuelto":
+            return _r_mef
+        # no superó los candados de la vía MEF → sigue el flujo de siempre: se
+        # demota abajo y la revisión sale con el motivo que corresponda.
+
+    best = next((c for c in ranked if not _mef_sin_corroborar(c)), None)
+    if ranked and (best is None or ranked[0] is not best):
+        _traza().ev("candado_mef_demote", best=(best or {}).get("cui"),
+                    demotados=[f"{c['cui']}·{c['score']}" for c in ranked
+                               if _mef_sin_corroborar(c)][:3])
+
+    n_hit = len(toks & _palabras(best["full"])) if best else 0
+    gate = bool(best and toks and n_hit >= max(1, (len(toks) + 1) // 2))
+    loc_contra = _loc_contra(best)
+
+    obra_best = _obra_de(best)
 
     # ── #61 · VETO DE FASE: el registro del ET no respalda una experiencia de
     # obra. Un CUI puede tener en InfoObras el registro de la ELABORACIÓN DEL
