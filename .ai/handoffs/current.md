@@ -1,7 +1,22 @@
 ---
 timestamp: "2026-09-12"
-agent: Codex
+agent: Claude Opus
 ---
+
+## 12-sep — Clientes privados reconocidos y la constancia sola en el Excel
+
+[Dos cambios acotados](2026-09-12_claude-opus-privadas.md) en `mejoras/privadas-constancia`
+(desde `f17c00d`): (1) el léxico de privadas reconoce clínicas, «proyecto/obra
+privada» y contratante persona natural, con veto ante entidad pública inequívoca
+—29 experiencias pasan a privada sobre 1174 medidas, **ninguna resuelta con CUI
+cambia** y el replay solo produce `revisión → NO APLICA`; el orden de ADR-004 no
+se movió—; (2) la hoja del profesional embebe **solo la primera página** de la
+constancia con una fila de aviso, y el PDF íntegro entra al ZIP como
+`CONSTANCIA_P#_E#.pdf` rotulado como adjunto de la propuesta, no como documento
+descargado. Tacna: P1 de 1653 a 830 filas, 17 hojas de 14 415 a 12 926, 62
+constancias en el ZIP. **1883 pruebas pasan, 31 omitidas** (+12 nuevas). Sin regenerar
+entregables del cliente, sin push ni reinicio. Multifamiliares: su PRIVADA
+histórica venía de una corrección manual, no del resolver (queda identificado).
 
 ## 12-sep — Hoja del profesional de vuelta al formato compacto
 
