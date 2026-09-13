@@ -98,9 +98,9 @@ def test_ubigeo_coincide_por_termino_de_ubicacion_sin_rotulo():
 def test_ubigeo_coincide_no_cuenta_el_departamento():
     """NEGATIVO · la provincia del MEF se llama igual que el DEPARTAMENTO que
     declara el certificado: ADR-005 midió que eso no desempata homónimos."""
-    sig = ubigeo_cert({"proyecto": "CONSTRUCCION DEL HOSPITAL DE TACNA",
-                       "ubicacion": "Tacna, Departamento de Tacna"})
-    assert not _ubigeo_coincide(sig, _ficha("1234567", "X", dpto="TACNA", prov="TACNA"))
+    sig = ubigeo_cert({"proyecto": "CONSTRUCCION DEL HOSPITAL DE ICA",
+                       "ubicacion": "Ica, Departamento de Ica"})
+    assert not _ubigeo_coincide(sig, _ficha("1234567", "X", dpto="ICA", prov="ICA"))
 
 
 # ═══ CAUSA 2 · la fase SALDO del certificado ═════════════════════════════════
