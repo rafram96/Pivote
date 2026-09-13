@@ -53,32 +53,62 @@ def _digitos(v) -> str:
     return re.sub(r"\D", "", str(v or ""))
 
 
-def _obra_portal(d: dict, ruc: str = "") -> dict:
+def _obra_portal(d: dict, ruc: str = "", orden: int = 0) -> dict:
     """Mapea una obra del enriquecimiento (obra elegida o candidato) a la forma
-    que el resolver espera del portal."""
+    que el resolver espera del portal.
+
+    `codigoObra` SIEMPRE sale con valor. El enriquecimiento solo persiste el
+    `obra_id` de la obra ELEGIDA, no de los candidatos, y el resolver usa ese campo
+    como CLAVE de `vistos` (`_recolectar_candidatos`): con todos los candidatos en
+    `None` se quedaba UNO SOLO por experiencia —el primero— y el replay medía un
+    universo de un candidato donde la corrida real tuvo tres o cuatro. Se sintetiza
+    `SNAP:<orden>` (único y creciente por experiencia, nunca se consulta al portal)
+    para conservar el orden de desempate por `obra_id`."""
     return {"codUniqInv": str(d.get("cui") or ""),
-            "codigoObra": d.get("obra_id") or d.get("codigo_infoobras"),
+            "codigoObra": (d.get("obra_id") or d.get("codigo_infoobras")
+                           or f"SNAP:{orden}"),
             "nombrObra": d.get("nombre_obra") or "",
             "nombrDepartamento": d.get("departamento") or "",
             "fechaIniObra": None,
             "rucEjecutor": ruc, "rucSupervisor": ""}
 
 
-class ConsultaSnapshot:
-    """Sirve el universo registrado por la corrida original (pool por profesional)."""
+def _dedup(pool: list[dict]) -> list[dict]:
+    """Dedup por (cui, nombre) conservando la primera aparición."""
+    vistos, out = set(), []
+    for o in pool:
+        k = (o["codUniqInv"], o["nombrObra"])
+        if k not in vistos and (o["codUniqInv"] or o["nombrObra"]):
+            vistos.add(k)
+            out.append(o)
+    return out
 
-    def __init__(self, pool: list[dict]):
-        # dedup por (cui, nombre) conservando la primera aparición
-        vistos, self.pool = set(), []
-        for o in pool:
-            k = (o["codUniqInv"], o["nombrObra"])
-            if k not in vistos and (o["codUniqInv"] or o["nombrObra"]):
-                vistos.add(k)
-                self.pool.append(o)
+
+class ConsultaSnapshot:
+    """Sirve el universo registrado por la corrida original, por experiencia.
+
+    Dos canales, porque el resolver los usa para cosas distintas y confundirlos
+    falsea el replay:
+
+      · `buscar(nombre)` = lo que InfoObras devolvió POR NOMBRE. Es el universo de
+        `_recolectar_candidatos`.
+      · `por_codigo(cui)` = los registros de ese CUI en InfoObras. Lo consultan la
+        vía del CUI citado, el checkpoint de fase y la FUSIÓN con la base del MEF.
+
+    Con `pool_codigo` aparte (modo `fidelidad_mef`, ver `resolver_snapshot`) los
+    candidatos que en la corrida original vinieron de la base del MEF salen del
+    canal por CÓDIGO y no del de nombre: así la fusión los vuelve a traer con su
+    `_origen` real y el candado de ADR-005 §1 se ejercita igual que en producción.
+    Sin él, un candidato del MEF se disfraza de obra que InfoObras devolvió por
+    nombre y el replay resulta MÁS FÁCIL que la corrida real."""
+
+    def __init__(self, pool: list[dict], pool_codigo: list[dict] | None = None):
+        self.pool = _dedup(pool)
+        self.pool_codigo = _dedup([*pool, *(pool_codigo or [])])
 
     def por_codigo(self, codigo):
         c = _digitos(codigo)
-        return [o for o in self.pool if _digitos(o["codUniqInv"]) == c]
+        return [o for o in self.pool_codigo if _digitos(o["codUniqInv"]) == c]
 
     def buscar(self, nombre):
         return list(self.pool)
@@ -92,69 +122,105 @@ def _estado_antes(v: dict) -> tuple[str, str | None, str]:
     return ("resuelto", str(cui), via) if cui else ("revision", None, via)
 
 
-def replay_job(job_id: str, base_datos: Path) -> dict:
+def resolver_snapshot(job_id: str, base_datos: Path, base=None,
+                      fidelidad_mef: bool | None = None) -> tuple[dict, dict]:
+    """Re-resuelve TODAS las experiencias del job contra su snapshot y devuelve
+    `({clave: resultado}, {"sin_enr": n, "subobras": n})`.
+
+    Es el corazón del replay, extraído para que la prueba de aceptación de la
+    auditoría (`tests/test_aceptacion_auditoria.py`) reconstruya el snapshot
+    EXACTAMENTE igual sin duplicar el código. `base` se arrastra a `resolver`:
+    el replay del CLI la deja en None (aísla el efecto del cambio del resolver de
+    las señales del MEF), la aceptación le pasa la base local del MEF para
+    ejercitar los vetos/fusión que sí corrieron en la corrida original.
+
+    `fidelidad_mef` (por defecto: True cuando hay `base`) reparte los candidatos
+    persistidos por su `origen`: los que en la corrida original trajo la FUSIÓN con
+    el MEF (`origen == "mef"`) se sirven solo por CÓDIGO, para que la fusión los
+    recolecte de nuevo desde la base real y el candado de ADR-005 §1 los vea con su
+    origen verdadero. Sin `base` no hay fusión, así que el modo se apaga: apartar
+    esos candidatos los borraría del universo."""
     dj = base_datos / job_id
     espejo = json.loads((dj / "espejo.json").read_text(encoding="utf-8"))
     enr = json.loads((dj / "enriquecimiento.json").read_text(encoding="utf-8"))
+    fiel = bool(base) if fidelidad_mef is None else bool(fidelidad_mef and base)
 
-    res = {"job": job_id, "total": 0, "sin_enr": 0, "subobras": 0,
-           "igual": 0, "cambios": []}
+    meta = {"sin_enr": 0, "subobras": 0}
+    salida: dict[str, dict] = {}
     pools: dict[str, ConsultaSnapshot] = {}
 
     # parche quirúrgico: cada experiencia resuelve contra SU snapshot; el bucle
     # de herencia (resolver_con_dedup) es el de producción, sin re-implementar.
     _resolver_real = _cui.resolver
 
-    def _resolver_snapshot(exp, consulta, base=None):
-        return _resolver_real(exp, pools[exp["_clave_replay"]], base)
+    def _resolver_snapshot(exp, consulta, base_=None):
+        return _resolver_real(exp, pools[exp["_clave_replay"]], base_)
 
+    exps = []
     for prof in espejo.get("profesionales") or []:
         np_ = prof.get("n_prof")
-        exps = []
         for e in prof.get("experiencias") or []:
             ne = e.get("n")
             clave = f"{np_}:{ne}"
             if e.get("obras"):                       # multi-obra: fuera del replay
-                res["subobras"] += 1
+                meta["subobras"] += 1
                 continue
             v = enr.get(clave)
             if not isinstance(v, dict) or not v:
-                res["sin_enr"] += 1
+                meta["sin_enr"] += 1
                 continue
             ruc = ""
             if str(v.get("via") or "") == "RUC":     # el portal traía el RUC del emisor
                 ruc = _digitos((v.get("sunat") or {}).get("ruc")) \
                     or _digitos(e.get("ruc_emisor"))
-            pool = []
+            pool, pool_codigo, orden = [], [], 0
             if isinstance(v.get("obra"), dict) and v["obra"]:
-                pool.append(_obra_portal(v["obra"], ruc))
+                pool.append(_obra_portal(v["obra"], ruc, orden))
             for c in v.get("candidatos") or []:
-                if isinstance(c, dict):
-                    pool.append(_obra_portal(c))
-            pools[clave] = ConsultaSnapshot(pool)
+                if not isinstance(c, dict):
+                    continue
+                orden += 1
+                if fiel and c.get("origen") == "mef":
+                    pool_codigo.append(_obra_portal(c, "", orden))
+                else:
+                    pool.append(_obra_portal(c, "", orden))
+            pools[clave] = ConsultaSnapshot(pool, pool_codigo)
             e2 = dict(e)
             e2["_clave_replay"] = clave
             exps.append((e2, clave))
-        if not exps:
-            continue
+    # UNA sola pasada con TODAS las experiencias del job, como en producción
+    # (`etapas_reales` arma una lista plana): la herencia por folio y la de mismo
+    # proyecto cruzan profesionales, y agrupar por profesional la apagaba.
+    if exps:
         _cui.resolver = _resolver_snapshot
         try:
-            resultados = list(_cui.resolver_con_dedup(exps, None, base=None))
+            for clave, r in _cui.resolver_con_dedup(exps, None, base=base):
+                salida[clave] = r
         finally:
             _cui.resolver = _resolver_real
-        for clave, r in resultados:
-            res["total"] += 1
-            antes_estado, antes_cui, antes_via = _estado_antes(enr[clave])
-            ahora_estado, ahora_cui = r["estado"], r.get("cui")
-            if antes_estado == ahora_estado and (antes_cui or None) == (ahora_cui or None):
-                res["igual"] += 1
-            else:
-                res["cambios"].append({
-                    "clave": clave,
-                    "antes": f"{antes_estado}({antes_via or '—'}·{antes_cui or '—'})",
-                    "ahora": f"{ahora_estado}({r.get('via') or '—'}·{ahora_cui or '—'})",
-                    "decision": str(r.get("decision") or "")[:110],
-                })
+    return salida, meta
+
+
+def replay_job(job_id: str, base_datos: Path) -> dict:
+    dj = base_datos / job_id
+    enr = json.loads((dj / "enriquecimiento.json").read_text(encoding="utf-8"))
+    resultados, meta = resolver_snapshot(job_id, base_datos)
+
+    res = {"job": job_id, "total": 0, "sin_enr": meta["sin_enr"],
+           "subobras": meta["subobras"], "igual": 0, "cambios": []}
+    for clave, r in resultados.items():
+        res["total"] += 1
+        antes_estado, antes_cui, antes_via = _estado_antes(enr[clave])
+        ahora_estado, ahora_cui = r["estado"], r.get("cui")
+        if antes_estado == ahora_estado and (antes_cui or None) == (ahora_cui or None):
+            res["igual"] += 1
+        else:
+            res["cambios"].append({
+                "clave": clave,
+                "antes": f"{antes_estado}({antes_via or '—'}·{antes_cui or '—'})",
+                "ahora": f"{ahora_estado}({r.get('via') or '—'}·{ahora_cui or '—'})",
+                "decision": str(r.get("decision") or "")[:110],
+            })
     return res
 
 
