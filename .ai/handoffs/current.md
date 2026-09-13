@@ -3,6 +3,17 @@ timestamp: "2026-09-12"
 agent: Codex
 ---
 
+## 12-sep — Hoja del profesional de vuelta al formato compacto
+
+[Limpieza de diez puntos](2026-09-12_claude-opus-excel.md): sin filas de servicio,
+estado de fuentes, «Fuente: MEF-…» ni sub-bloques informativos de SUNAT; rótulos
+cortos de candado y SEACE, documentos y emisor en lenguaje de evaluador, y la
+observación de fechas solo con una fecha comparada. **2173 → 1998 filas** en las
+17 hojas del job de Tacna, **cero celdas numéricas o de fecha cambiadas**; API,
+ZIP y cálculo intactos. 1871 pruebas pasan, 31 omitidas; el único fallo es ajeno
+(`zod` sin instalar en el árbol de trabajo). Rama `excel/limpieza-texto`, sin
+regenerar entregables del cliente.
+
 ## 12-sep — Retiro de ampliaciones visuales no acordadas
 
 [Simplificación autorizada](2026-09-12_codex.md#retiro-de-añadidos-de-presentación-no-acordados):
