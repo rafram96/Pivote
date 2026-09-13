@@ -567,12 +567,18 @@ def _motivo_etapa(vetados: list[dict]) -> str:
 #   • sin ficha MEF del candidato la señal es INERTE (no cambia nada).
 _DEPTOS_SET = set(DEPTOS)
 
+# El rótulo «de» es OPCIONAL: los certificados escriben tanto «distrito de
+# Fundición de Tinyahuarco» como «Distrito Fundición de Tinyahuarco» (caso real
+# 15:1/2:2 de la auditoría del 12-sep: el campo `ubicacion` del propio certificado
+# daba el distrito EXACTO del candidato y la señal quedaba muda solo por el «de»).
+# El grupo sigue siendo perezoso y el filtro de largo ≥ 3 descarta los enganches
+# vacíos que abre la opcionalidad («distrito y provincia de X» → grupo «Y»).
 _RE_PROV_KW = re.compile(
-    r"provincia(?:l)?\s+de\s+([A-Za-zÁÉÍÓÚÜÑ.' ]+?)"
+    r"provincia(?:l)?\s+(?:de\s+|del\s+)?([A-Za-zÁÉÍÓÚÜÑ.' ]+?)"
     r"(?=\s*[,;\-–|(/]|\s+provincia|\s+distrit|\s+departamento|\s+regi[oó]n|\s+dpto|$)",
     re.I)
 _RE_DIST_KW = re.compile(
-    r"distrit(?:o|al)\s+de\s+([A-Za-zÁÉÍÓÚÜÑ.' ]+?)"
+    r"distrit(?:o|al)\s+(?:de\s+|del\s+)?([A-Za-zÁÉÍÓÚÜÑ.' ]+?)"
     r"(?=\s*[,;\-–|(/]|\s+provincia|\s+distrit|\s+departamento|\s+regi[oó]n|\s+dpto|$)",
     re.I)
 
@@ -795,15 +801,34 @@ def _ubigeo_coincide(sig: dict, ficha: Optional[dict]) -> bool:
     o un distrito DECLARADO por el certificado. Es una señal DURA de identidad (la
     usa el candado de nombre genérico, ADR-013).
 
+    La coincidencia se busca primero contra las provincias/distritos con RÓTULO
+    («provincia de X», «distrito X») y, si ahí no hay nada, contra el POOL de
+    términos de ubicación del certificado (`loc`: los segmentos del campo
+    `ubicacion` y la cola geográfica del nombre). Motivo, de la auditoría del
+    12-sep (caso 12:3): el certificado decía «La Merced - Chanchamayo» sin la
+    palabra «provincia», y la provincia del MEF era exactamente CHANCHAMAYO — una
+    coincidencia geográfica real que el rótulo ausente dejaba invisible. Los
+    términos de `loc` no son texto libre: salen del campo de ubicación o de la cola
+    geográfica del proyecto, o sea que ya llegan con intención geográfica.
+
     El DEPARTAMENTO no cuenta como coincidencia: ADR-005 midió que no desempata
     homónimos —viven en el mismo departamento—, así que admitirlo como
-    corroboración sería regalar la señal justo donde no discrimina."""
+    corroboración sería regalar la señal justo donde no discrimina. Por eso un
+    término de `loc` que ES el nombre de un departamento se ignora acá: si la
+    provincia del MEF se llama igual que el departamento que declara el certificado
+    (LIMA, TACNA, ICA…), la coincidencia no distingue nada."""
     if not ficha:
         return False
     prov_mef = norm(ficha.get("prov") or "")
     dist_mef = norm(ficha.get("dist") or "")
-    return bool((prov_mef and any(_loc_eq(c, prov_mef) for c in sig["prov"]))
-                or (dist_mef and any(_loc_eq(c, dist_mef) for c in sig["dist"])))
+    if (prov_mef and any(_loc_eq(c, prov_mef) for c in sig["prov"])) \
+            or (dist_mef and any(_loc_eq(c, dist_mef) for c in sig["dist"])):
+        return True
+    loc_no_depto = {t for t in (sig.get("loc") or set()) if t not in _DEPTOS_SET}
+    return bool((prov_mef and prov_mef not in _DEPTOS_SET
+                 and any(_loc_eq(c, prov_mef) for c in loc_no_depto))
+                or (dist_mef and dist_mef not in _DEPTOS_SET
+                    and any(_loc_eq(c, dist_mef) for c in loc_no_depto)))
 
 
 def _palabras(s: str) -> set[str]:
@@ -852,6 +877,50 @@ def tokens_distintivos(proyecto: str) -> set[str]:
     la entidad → conjunto VACÍO: ese nombre no distingue una obra de otra."""
     return {t for t in _tokens_clave(establecimiento(proyecto or ""))
             if t not in _ENTIDADES}
+
+
+# ── NOMBRE LITERAL (desempate por identidad de nombre, no por parecido) ──────
+# Palabras de enlace: se descartan de la SECUENCIA para que la comparación no se
+# rompa por un artículo de más ("SERVICIOS DE SALUD EN EL HOSPITAL" vs "SERVICIOS
+# DE SALUD DEL HOSPITAL"), que es la diferencia típica entre cómo transcribe el
+# certificado y cómo registra el Banco de Inversiones el MISMO nombre.
+_ENLACES = {"DE", "DEL", "LA", "LAS", "EL", "LOS", "Y", "E", "EN", "A", "AL",
+            "CON", "PARA", "POR", "SU", "SUS", "UN", "UNA", "UNO", "LO"}
+_MIN_TOKENS_LITERAL = 4     # menos que esto no es un nombre, es un rótulo
+
+
+def _secuencia_nombre(texto) -> list[str]:
+    """Secuencia ORDENADA de palabras del nombre de un proyecto: sin el prefijo de
+    servicio ("Elaboración del Expediente Técnico del…"), sin la cola geográfica
+    ("…, distrito de X - Y - Z") y sin palabras de enlace."""
+    t = _RE_COLA_GEO.sub("", _sin_prefijo(str(texto or "")))
+    return [w for w in re.findall(r"[A-Z0-9]+", norm(t)) if w not in _ENLACES]
+
+
+def nombre_literal(proyecto, nombre_candidato) -> bool:
+    """¿El nombre del certificado y el del candidato son EL MISMO NOMBRE, palabra
+    por palabra? True si la secuencia más corta aparece CONTIGUA dentro de la más
+    larga (uno contiene al otro), con al menos `_MIN_TOKENS_LITERAL` palabras.
+
+    No es parecido de vocabulario: es contención literal en orden. La diferencia
+    importa porque el score de nombre (`_sim`, token_set_ratio) da 100 a dos
+    nombres que comparten las palabras en cualquier orden y con relleno en medio —
+    el techo que ADR-005 midió—, mientras que «MEJORAMIENTO DE LOS SERVICIOS DE
+    SALUD EN EL HOSPITAL TOCACHE, PROVINCIA DE TOCACHE» contenido tal cual en el
+    nombre oficial del candidato dice que es ESE proyecto y no otro.
+
+    Sirve solo para DESEMPATAR (ver `_compuertas`), nunca para resolver por sí
+    misma: el Estado sí registra proyectos distintos con nombres idénticos (caso
+    1:3 de la auditoría: dos CUIs con el mismo nombre, uno con sufijo de distrito),
+    y por eso el desempate exige además que el nombre literal lo tenga UN SOLO
+    CUI del ranking."""
+    a = _secuencia_nombre(proyecto)
+    b = _secuencia_nombre(nombre_candidato)
+    if len(a) < _MIN_TOKENS_LITERAL or len(b) < _MIN_TOKENS_LITERAL:
+        return False
+    corta, larga = (a, b) if len(a) <= len(b) else (b, a)
+    n = len(corta)
+    return any(larga[i:i + n] == corta for i in range(len(larga) - n + 1))
 
 
 def _anio_de(fecha_iniobra) -> Optional[int]:
@@ -1312,18 +1381,27 @@ def _checkpoint_naturaleza(r: dict, exp: dict) -> dict:
 # marcador exacto sobre texto normalizado — es un vocabulario finito y estable
 # que certificados y portal comparten (caso LaFora: el cert decía literal «PLAN
 # DE CONTINGENCIA» y el sistema eligió la OBRA PRINCIPAL, ciega al texto).
+# ORDEN SIGNIFICATIVO — `fase_de` devuelve la PRIMERA que calza. SALDO va antes de
+# PRINCIPAL a propósito: InfoObras rotula el saldo de una obra como «… - SALDO DE
+# OBRA PRINCIPAL», y con PRINCIPAL delante ese registro se clasificaba PRINCIPAL.
+# Consecuencia medida en la auditoría del 12-sep (caso 13:2): el CUI citado por el
+# certificado SÍ tenía su registro de SALDO entre los hermanos, y el resolver
+# mandaba a revisión diciendo «el CUI no muestra un registro de SALDO». Un saldo de
+# la obra principal es un SALDO: es la fase que se contrata y se valoriza aparte.
 _FASES = {
     "CONTINGENCIA": re.compile(
         r"\b(?:PLAN|OBRA|MODULOS?)\s+DE\s+CONTINGENCIA\b|\bCONTINGENCIA\s+DEL?\s+PROYECTO\b"),
-    "PRINCIPAL": re.compile(r"\bOBRA\s+PRINCIPAL\b"),
     "SALDO": re.compile(r"\bSALDO\s+DE\s+(?:LA\s+)?OBRA\b|\bDESAGREGADO\s+N"),
+    "PRINCIPAL": re.compile(r"\bOBRA\s+PRINCIPAL\b"),
     "EXPEDIENTE": _RE_REGISTRO_ET,
 }
 
 
 def fase_de(texto) -> Optional[str]:
-    """Fase/componente que el texto declara ('CONTINGENCIA', 'PRINCIPAL',
-    'SALDO', 'EXPEDIENTE') o None si no declara ninguna (el caso común)."""
+    """Fase/componente que el texto declara ('CONTINGENCIA', 'SALDO', 'PRINCIPAL',
+    'EXPEDIENTE') o None si no declara ninguna (el caso común).
+
+    El orden de `_FASES` decide los solapes: «SALDO DE OBRA PRINCIPAL» es SALDO."""
     n = norm(str(texto or ""))
     for fase, pat in _FASES.items():
         if pat.search(n):
@@ -1996,6 +2074,7 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
     sig_geo = ubigeo_cert(exp) if base_ok else None   # señales prov/dist del cert (F8)
     porcui: dict[str, dict] = {}
     origenes: dict[str, set] = {}          # orígenes vistos por CUI (para 'ambos')
+    literales: set[str] = set()            # CUIs con nombre LITERAL del certificado
     vetados: list[dict] = []
     for o in vistos.values():
         cui = _cui_de(o)
@@ -2060,12 +2139,19 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
             if not veto_geo and not ruc_match and _muni_contradice(exp, ficha):
                 veto_geo = True
                 veto_nivel = "municipalidad"
+        # NOMBRE LITERAL (desempate): se mide contra el nombre de InfoObras Y
+        # contra el nombre OFICIAL del MEF por separado — nunca contra `full`, que
+        # los concatena y crearía una secuencia que no existe en ningún documento.
+        lit = nombre_literal(proyecto, o.get("nombrObra"))
+        if not lit and ficha and ficha.get("nombre"):
+            lit = nombre_literal(proyecto, ficha["nombre"])
         cand = {"cui": cui, "nombre_obra": (o.get("nombrObra") or ""),
                 "full": full,
                 "departamento": o.get("nombrDepartamento"),
                 "obra_id": o.get("codigoObra") or o.get("obraId"),
                 "ruc_match": ruc_match, "num_match": num_match,
                 "ent_match": ent_match, "geo_match": geo_match,
+                "nombre_literal": lit,
                 "score": round(sc, 1),
                 # estado del MEF: "" = el CUI NO está en la base local (desconocido,
                 # que no es lo mismo que vivo — ver `_estado_separa`).
@@ -2119,6 +2205,11 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
             vetados.append(cand)
             continue
         prev = porcui.get(cui)
+        # El nombre literal es del CUI, no del registro: un CUI con varios
+        # registros (principal, saldo, contingencia) puede traer el nombre exacto
+        # del certificado en uno solo, y el representante se elige por score.
+        if lit:
+            literales.add(cui)
         # representante de cada CUI = el de mayor score; ante EMPATE, menor
         # obra_id (el orden que devuelve la API no es estable entre corridas).
         if (prev is None
@@ -2133,6 +2224,8 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
         origs = origenes.get(cui)
         if origs:
             cand["origen"] = "ambos" if len(origs) > 1 else next(iter(origs))
+        if cui in literales:
+            cand["nombre_literal"] = True
 
     # orden DETERMINÍSTICO: score desc; ante EMPATE de score gana la inversión VIVA
     # sobre la DESACTIVADA en el MEF y, recién después, menor CUI y menor obra_id.
@@ -2213,10 +2306,20 @@ def _via_mef_expediente(exp: dict, best: dict, ranked: list, candidatos: list,
                              "verifica contra el contrato y la resolución de aprobación del MEF"),
                 "candidatos": candidatos, "obra": obra}
     _traza().ev("via_mef_expediente_revision", cui=cui, mef_score=ms, motivo=motivo)
+    # El motivo no puede presentar como «el proyecto con ese nombre» a una ficha
+    # que quedó POR DEBAJO de otro candidato del ranking: `best` puede no ser
+    # `ranked[0]` (el candado MEF demota), y entonces el mensaje citaba un CUI que
+    # el evaluador no reconoce como el candidato fuerte (auditoría 12-sep, caso
+    # 12:3: citaba un hospital de otro departamento mientras el candidato de mayor
+    # puntaje era el correcto). Se nombra al candidato de mayor puntaje.
+    aviso = ""
+    if ranked and ranked[0]["cui"] != cui:
+        aviso = (f" · el candidato de mayor puntaje es el CUI {ranked[0]['cui']}, "
+                 "apartado por no tener confirmación en InfoObras")
     return {"estado": "revision", "cui": None, "via": "NOMBRE",
             "decision": (f"hay un proyecto con ese nombre en el Banco de Inversiones del MEF "
                          f"(CUI {cui}) sin registro de ejecución en InfoObras, pero {motivo} "
-                         "— confirmar"),
+                         "— confirmar" + aviso),
             "candidatos": candidatos, "obra": None}
 
 
@@ -2253,6 +2356,19 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
     # ADR-010 · para un EXPEDIENTE, la ficha del MEF sintetizada (`solo_ficha`) SÍ es
     # elegible: el Banco de Inversiones es su fuente primaria y la vía MEF (abajo)
     # decide con sus propios candados. Para obras el candado sigue intacto.
+    #
+    # PENDIENTE DE DECISIÓN (auditoría 12-sep, casos 16:1 · 15:1 · 2:2 · 12:3): en
+    # los cuatro, el candidato que el auditor da por correcto llegó por la FUSIÓN
+    # (origen 'mef') y su provincia/distrito oficial COINCIDE con la que declara el
+    # certificado, pero el trío de este candado no mira `geo_match` y lo demota; un
+    # homónimo más débil ocupa su lugar como `best` y dispara el guard de ubicación
+    # («homónimo apartado por estar en otra ubicación»). Sumar `geo_match` acá
+    # —usar `_corroborado`, la lista que ADR-013 ya definió— los resuelve a los
+    # cuatro, PERO es relajar la sensibilidad del candado de ADR-005 §1, no un
+    # desempate: rompe el caso Chinchinga de `tests/test_resolucion_fusion.py`, que
+    # es exactamente el mismo patrón (InfoObras solo trae basura, el MEF aporta el
+    # nombre y la ubicación calza) y que el golden respaldaba. No se cambia sin
+    # decisión explícita — ver el handoff 2026-09-12_claude-opus-desempate.md.
     _exped = es_expediente_exp(exp)
 
     def _mef_sin_corroborar(c: dict) -> bool:
@@ -2369,6 +2485,19 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
     # auditados: cero verdades desactivadas tienen un rival vivo a ≤4 pts, así que
     # esta puerta no sacrifica ningún correcto). Al revés NO aplica: si el mejor es
     # el desactivado, la duda sigue viva y se manda a revisión como siempre.
+    #
+    # NOMBRE LITERAL COMO SEÑAL SEPARADORA (auditoría 12-sep, casos 1:5 y 14:3).
+    # El guard no exige «ninguna duda»: exige que NINGUNA SEÑAL DURA separe a los
+    # candidatos. Cuando UN SOLO CUI del ranking lleva el nombre del certificado
+    # palabra por palabra (`nombre_literal`) y los demás son proyectos distintos
+    # —«Hospital II-2 Tarapoto» y «avenidas de Tocache» frente a «Hospital
+    # Tocache»—, esa señal existe y el motivo «varios proyectos homónimos sin señal
+    # que los distinga» es literalmente falso. No se mueve NINGÚN umbral: DELTA
+    # sigue en 4 y los scores no cambian; se le da al guard la señal que pide.
+    # La UNICIDAD es la garantía: dos CUIs con el mismo nombre literal (caso 1:3,
+    # el mismo nombre con y sin sufijo de distrito) no se separan y siguen en
+    # revisión — que es el techo del fuzzy que ADR-005 midió y que este desempate
+    # NO pretende superar.
     _DELTA_EMPATE = 4.0
     if best and not _es_experiencia_privada(exp):
         # OJO: NO es `_corroborado`. Este trío está calibrado contra la golden
@@ -2377,6 +2506,17 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
         # de nombre genérico (ADR-013), que es una puerta nueva y separada.
         def _senal_dura(c: dict) -> bool:
             return bool(c.get("ruc_match") or c.get("num_match") or c.get("ent_match"))
+
+        # La unicidad se mide sobre ranked Y vetados: un candidato apartado que
+        # lleva el MISMO nombre literal es ambigüedad real, no una señal. Se evalúa
+        # aparte del trío de ADR-005 (no se mezcla con él) porque es una señal
+        # DOMINANTE: cuando los dos candidatos comparten `ent_match` —la entidad
+        # regional que ejecuta ambos proyectos, señal vacía justo acá— el trío los
+        # empata y solo el nombre literal los separa (caso 1:5).
+        _lit = {c["cui"] for c in (*ranked, *vetados) if c.get("nombre_literal")}
+        _separa_literal = bool(len(_lit) == 1 and best["cui"] in _lit)
+        if _separa_literal:
+            _traza().ev("desempate_nombre_literal", cui=best["cui"])
 
         def _estado_separa(a: dict, b: dict) -> bool:
             """`a` está VIVO en el MEF y `b` DESACTIVADO. Exige el dato en AMBOS: un
@@ -2396,7 +2536,7 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
                         desactivados=[f"{c['cui']}·{c['score']}"
                                       for c in descartados_estado][:3])
         otro = next(iter(rivales), None)
-        if (otro is not None
+        if (otro is not None and not _separa_literal
                 and (best["score"] - otro["score"]) <= _DELTA_EMPATE
                 and _senal_dura(best) == _senal_dura(otro)):
             _traza().ev("guard_empate", best=best["cui"], otro=otro["cui"],
@@ -2414,7 +2554,7 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
                           if c.get("veto") == "ubigeo" and c["cui"] != best["cui"]
                           and not _estado_separa(best, c)
                           and (best["score"] - c["score"]) <= _DELTA_EMPATE), None)
-        if rival_geo is not None and not _senal_dura(best):
+        if rival_geo is not None and not _senal_dura(best) and not _separa_literal:
             _traza().ev("guard_empate_geo", best=best["cui"], vetado=rival_geo["cui"],
                         gap=round(best["score"] - rival_geo["score"], 1))
             return {"estado": "revision", "cui": None, "via": "NOMBRE",
@@ -2735,13 +2875,52 @@ def _emisor_compatible(a, b) -> bool:
     return score_match_empresa(a, b) >= 85
 
 
+_SIM_PROYECTO_DEDUP = 92.0   # similitud de nombre para «es la MISMA obra»
+
+
+def _mismo_proyecto(a, b) -> bool:
+    """¿Dos experiencias hablan de la MISMA obra? Se compara la secuencia de
+    nombre (sin prefijo de servicio ni cola geográfica): identidad literal, o
+    similitud ≥ `_SIM_PROYECTO_DEDUP` con al menos 4 palabras a cada lado.
+
+    No basta el parecido genérico: «MEJORAMIENTO DE LOS SERVICIOS DE SALUD…» ronda
+    el 80 entre obras distintas, así que el umbral es alto y se mide sobre el
+    nombre YA despojado del prefijo (dos certificados del mismo proyecto difieren
+    justo ahí: «Supervisión del Expediente Técnico del Proyecto: X» vs «X»)."""
+    sa, sb = _secuencia_nombre(a), _secuencia_nombre(b)
+    if len(sa) < _MIN_TOKENS_LITERAL or len(sb) < _MIN_TOKENS_LITERAL:
+        return False
+    if sa == sb:
+        return True
+    return _sim(" ".join(sa), " ".join(sb)) >= _SIM_PROYECTO_DEDUP
+
+
 def resolver_con_dedup(experiencias: list[tuple[dict, object]], consulta: Consulta,
                        base=None):
     """Itera [(exp, clave), …] resolviendo con herencia por folio (el '2º periodo
     del mismo certificado' hereda el CUI del hermano) — y la herencia exige
     además MISMO EMISOR (#58). Yields (clave, resultado).
-    `base` (opcional) se arrastra a `resolver` — costura del MEF para F3+."""
+    `base` (opcional) se arrastra a `resolver` — costura del MEF para F3+.
+
+    CONSISTENCIA DENTRO DE LA MISMA PROPUESTA (auditoría 12-sep, casos 2:2 y 15:1
+    frente a 1:2). Además del folio, la herencia procede entre experiencias del
+    MISMO espejo cuyo nombre de proyecto es el mismo (`_mismo_proyecto`) cuando el
+    CUI ya resuelto para una de ellas figura entre los candidatos de la pendiente.
+    Las tres condiciones son obligatorias y ninguna relaja una compuerta:
+
+      · el nombre del proyecto coincide con alta similitud → es la misma obra;
+      · el CUI heredado está en la lista de candidatos de la pendiente → no se
+        inventa una obra que su propia búsqueda no vio;
+      · la experiencia pendiente pasa igual por `_checkpoint_naturaleza` → una
+        privada no se vuelve pública por tener una hermana resuelta.
+
+    El caso que motiva la regla: la MISMA obra (mismo establecimiento, mismo texto
+    de proyecto) quedaba RESUELTA en una experiencia y PENDIENTE en dos más del
+    mismo expediente, con el candidato correcto a la vista en todas. Emitir dos
+    veredictos distintos sobre la misma obra dentro de una propuesta no es
+    prudencia, es incoherencia: el evaluador ya tiene la respuesta al lado."""
     por_folio: dict[str, dict] = {}
+    por_proyecto: list[dict] = []
     for exp, clave in experiencias:
         r = resolver(exp, consulta, base)
         fb = _folio_base(exp.get("folio"))
@@ -2768,7 +2947,27 @@ def resolver_con_dedup(experiencias: list[tuple[dict, object]], consulta: Consul
                                  " · otra experiencia comparte el n° de folio pero "
                                  "su emisor difiere — no se hereda su obra (posible "
                                  "folio corrido)")
+        if r["estado"] == "revision" and not r.get("seleccion_obra_pendiente"):
+            cuis_vistos = {str(c.get("cui")) for c in (r.get("candidatos") or [])
+                           if c.get("cui")}
+            hermana = next((h for h in por_proyecto
+                            if str(h["res"]["cui"]) in cuis_vistos
+                            and _mismo_proyecto(exp.get("proyecto"), h["proyecto"])),
+                           None)
+            if hermana is not None:
+                heredado = hermana["res"]
+                _traza().ev("dedup_mismo_proyecto", cui=heredado["cui"],
+                            proyecto=str(exp.get("proyecto") or "")[:80])
+                r = {"estado": "resuelto", "cui": heredado["cui"], "via": "DEDUP",
+                     "decision": ("la misma obra ya fue identificada en otra "
+                                  "experiencia de esta propuesta y el mismo CUI "
+                                  "figura entre los candidatos de esta"),
+                     "candidatos": r.get("candidatos") or [],
+                     "obra": heredado.get("obra")}
+                r = _checkpoint_naturaleza(r, exp)
         if r["estado"] == "resuelto" and fb:
             por_folio.setdefault(fb, {"res": r,
                                       "emisor": exp.get("entidad_emisora")})
+        if r["estado"] == "resuelto" and r.get("cui"):
+            por_proyecto.append({"res": r, "proyecto": exp.get("proyecto") or ""})
         yield clave, r
