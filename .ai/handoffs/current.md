@@ -1,7 +1,15 @@
 ---
 timestamp: "2026-09-13"
-agent: Claude Opus
+agent: "Claude"
 ---
+
+## 13-sep (tarde) — motivo MEF, cronología del Banco y PRIVADA antes que «confirmar»
+
+[Tres correcciones](2026-09-13_claude.md) en `demo` (`6425424`, `1e2844a`): el motivo
+del pendiente MEF ya no afirma «hay un proyecto con ese nombre» con parecido bajo; el
+índice MEF local lleva `fecha_registro`/`fecha_viabilidad` y la vía MEF descarta rivales
+posteriores al certificado; la vía MEF sin resolver devuelve PRIVADA cuando el cliente es
+privado por léxico. Suite 1935; replay 23 jobs sin regresiones. Base MEF reconstruida.
 
 ## 13-sep — ADR-015 implementado: el orden con la vía MEF, las variantes del establecimiento y la rama de privadas al final
 
