@@ -3,6 +3,32 @@ timestamp: "2026-09-12"
 agent: Claude Opus
 ---
 
+## 12-sep — El replay medía un universo falso, y el desempate de los falsos negativos
+
+[Dos commits](2026-09-12_claude-opus-desempate.md) en `resolver/desempate-falsos-negativos`
+(desde `080064e`). **El instrumento estaba roto**: el enriquecimiento no persiste el
+`obra_id` de los candidatos y el resolver usa ese campo como clave de `vistos`, así
+que el replay conservaba **un solo candidato por experiencia** —sin rivales no se
+disparan los guards de empate— y además agrupaba por profesional (apagando la
+herencia, que cruza profesionales). Arreglado eso, la reconstrucción del job auditado
+reproduce 7 de los 9 falsos negativos; **todas las cifras de replay anteriores están
+medidas sobre un universo recortado**. Con la auditoría del 12-sep como referencia se
+corrigieron cuatro causas sin mover ningún umbral: la ubicación del certificado se lee
+con el rótulo sin «de» y coincide contra los términos declarados sin rótulo; «SALDO DE
+OBRA PRINCIPAL» se clasifica SALDO (antes PRINCIPAL le ganaba el orden y el motivo
+decía que el CUI no tenía registro de saldo cuando sí); `resolver_con_dedup` hereda
+entre experiencias del mismo proyecto cuando el CUI ganador figura entre los
+candidatos de la pendiente; y el **nombre literal único** del certificado desempata el
+guard de empate (no es parecido de vocabulario: es contención palabra por palabra, y
+dos candidatos con el mismo nombre literal siguen en revisión). Coincidencias con la
+auditoría **de 51 a 56 de 62**; replay sobre 23 jobs: 6 pasan de revisión a resuelto,
+9 vuelven a coincidir con el histórico, **cero RESUELTO cambia de CUI**. **1901 pruebas
+pasan, 33 omitidas** (+18). ⚠ **Pendiente de tu decisión**: 16:1 y 12:3 se resuelven
+sumando `geo_match` al candado de ADR-005 §1 (`_mef_sin_corroborar`), pero eso rompe el
+caso Chinchinga del golden — es bajar sensibilidad, no desempatar, así que lo dejé sin
+tocar y documentado. Tampoco se implementó el desempate por fechas del MEF: no hay
+fuente offline (la base local no trae fechas). Sin push, sin regenerar entregables.
+
 ## 12-sep — Clientes privados reconocidos y la constancia sola en el Excel
 
 [Dos cambios acotados](2026-09-12_claude-opus-privadas.md) en `mejoras/privadas-constancia`
