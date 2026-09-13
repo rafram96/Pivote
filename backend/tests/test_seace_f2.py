@@ -307,7 +307,8 @@ def test_excel_muestra_documentos_seace_y_ambiguedad(tmp_path):
     texto = "\n".join(str(c.value) for c in celdas)
     assert "DOCUMENTOS DEL PROCESO (SEACE)" in texto
     assert "Bases integradas" in texto
-    assert "Adjuntos del contrato" in texto
+    assert "Contrato firmado" in texto
+    assert "Adjuntos del contrato" not in texto
     assert "Contenido de los documentos" not in texto
     assert "SERVICIO ESPERADO (concurso)" not in texto
     assert "SERVICIO DECLARADO (certificado)" not in texto

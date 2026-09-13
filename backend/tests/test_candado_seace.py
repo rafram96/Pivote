@@ -483,17 +483,25 @@ def test_excel_muestra_el_rotulo_de_los_tres_estados(tmp_path, resultado):
     texto = _textos_excel(
         tmp_path, _seace({"resultado": resultado, "motivo": "motivo de prueba",
                           "senales": []}))
-    esperado = "Coincidencias en los datos del proceso" if resultado == CONFIRMADO else rotulo(resultado)
+    # La hoja del profesional rotula corto; la hoja «Cronología de expedientes»
+    # conserva el rótulo largo de conjunto (12-sep).
+    corto = {CONFIRMADO: "Confirmado", POR_CONFIRMAR: "Por confirmar"}.get(
+        resultado, "Contradice")
+    assert corto in texto
+    esperado = ("Coincidencias en los datos del proceso" if resultado == CONFIRMADO
+                else rotulo(resultado))
     assert esperado in texto
     assert "Contenido de los documentos" not in texto
     assert "SERVICIO ESPERADO (concurso)" not in texto
     assert "SERVICIO DECLARADO (certificado)" not in texto
     assert "CONTRASTE DE SERVICIO" not in texto
     assert rotulo(CONFIRMADO) not in texto
-    if resultado == CONFIRMADO:
-        assert "motivo de prueba" not in texto      # solo se explica lo dudoso
+    # El motivo cabe en la propia fila de correspondencia SOLO si contradice; ni
+    # confirmado ni «por confirmar» arrastran la explicación al Excel.
+    if resultado == CONTRADICE:
+        assert "Contradice — motivo de prueba" in texto
     else:
-        assert "motivo de prueba" in texto
+        assert "motivo de prueba" not in texto
 
 
 def test_excel_de_job_viejo_sin_candado_no_rompe(tmp_path):

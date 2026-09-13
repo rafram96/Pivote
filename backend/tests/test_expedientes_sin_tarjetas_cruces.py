@@ -45,7 +45,10 @@ def test_incidente_queda_en_ficha_con_motivos_y_en_gantt(tmp_path, resultado, co
     assert nota.row < p5
     assert "Inicio frente al contrato: " + respuesta in nota.value
     assert "Motivo de inicio conservado." in nota.value
-    assert "Motivo de aprobación conservado." in nota.value
+    # la comprobación de término COINCIDE: no es una incidencia y su motivo ya
+    # no se arrastra a la nota (12-sep, «solo las partes con dato»)
+    assert "Término frente a aprobación" not in nota.value
+    assert "Motivo de aprobación conservado." not in nota.value
     assert nota.fill.fgColor.rgb.endswith(color)
     assert "Inicio frente al contrato: " + respuesta in bloques[0]["filas"][0]["rotulo"]
     assert len(ws._images) == 1
@@ -70,15 +73,25 @@ def test_fecha_inferida_se_explica_aunque_ambos_cruces_sean_compatibles(tmp_path
     wb.close()
 
 
-@pytest.mark.parametrize("via", [None, "PRIVADA", "NA"])
-def test_ausencia_de_fuente_y_ruta_privada_no_desaparecen(tmp_path, via):
+@pytest.mark.parametrize("via", ["PRIVADA", "NA"])
+def test_ruta_privada_no_desaparece(tmp_path, via):
+    """La ruta privada sí es un resultado: se dice que la fuente pública no aplica."""
     espejo, _ = _datos()
     wb, ws, _ = _generar(tmp_path, espejo, {"1:1": {"via": via}})
     nota = next(c for c in ws["A"] if str(c.value).startswith("Observación de fechas —"))
-    assert "POR VERIFICAR" in nota.value
-    if via:
-        assert "InfoObras, MEF y SEACE no aplican" in nota.value
+    assert "OBRA PRIVADA" in nota.value
+    assert "InfoObras, MEF y SEACE no aplican" in nota.value
     assert nota.fill.fgColor.rgb.endswith("FFF2CC")
+    wb.close()
+
+
+def test_sin_fuente_ni_fecha_comparada_no_deja_fila_de_por_verificar(tmp_path):
+    """Punto 5 de la limpieza del 12-sep: dos «POR VERIFICAR» sin una sola fecha
+    con la que comparar no son una observación — son la ausencia de la fuente, y
+    repetirlas en cada certificado era ruido. El motivo sigue en API y ZIP."""
+    espejo, _ = _datos()
+    wb, ws, _ = _generar(tmp_path, espejo, {"1:1": {"via": None, "cui": "9000010"}})
+    assert not any(str(c.value).startswith("Observación de fechas —") for c in ws["A"])
     wb.close()
 
 

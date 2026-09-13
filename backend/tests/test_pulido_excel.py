@@ -337,13 +337,15 @@ def test_lo_que_esta_por_verificar_usa_el_amarillo_suave(tmp_path):
         generar_excel_final(espejo, tmp_path / "am.xlsx", **extras))
     hoja = wb.worksheets[2]
 
-    for texto in ("En esta corrida", "🟡 ALT04",
+    for texto in ("Sin procesos en SEACE", "🟡 ALT04",
                   "PROVISIONAL — POR VERIFICAR"):
         celda = _buscar(hoja, texto)
         assert celda is not None, f"el caso no ejercitó «{texto}»"
-        if texto == "En esta corrida":
+        if texto == "Sin procesos en SEACE":
+            # el aviso corto no se confunde con el de cobertura de datos abiertos
+            # ni arrastra la advertencia larga que se retiró el 12-sep
             assert "cobertura" not in celda.value and "2018" not in celda.value
-            assert "Esto no prueba que no existan" in celda.value
+            assert "no prueba" not in celda.value
         assert _fill(celda) == AMARILLO_SUAVE, (
             f"«{texto}» sigue en el amarillo del dato declarado")
 

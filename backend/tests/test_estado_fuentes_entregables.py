@@ -179,26 +179,34 @@ def test_fuentes_ausentes_y_seace_ambiguo_no_se_convierten_en_fallo():
 
 
 @pytest.mark.parametrize("estado,esperado", [
-    ("con_resultados", "datos recibidos, emisor por identificar"),
-    ("sin_resultados", "sin coincidencias"),
-    ("fuente_no_disponible", "consulta no completada"),
-    ("respuesta_no_reconocida", "respuesta no interpretable"),
-    ("no_consultado", "no consultado"),
-    ("no_registrado", "consulta sin detalle"),
+    ("con_resultados", "SUNAT respondió; emisor por confirmar."),
+    ("sin_resultados", "Sin coincidencia en SUNAT."),
+    ("fuente_no_disponible", "SUNAT no respondió; emisor por confirmar."),
+    ("respuesta_no_reconocida", "SUNAT no respondió; emisor por confirmar."),
+    ("no_consultado", "Emisor por confirmar; sin consulta a SUNAT registrada."),
+    ("no_registrado", "Emisor por confirmar; sin consulta a SUNAT registrada."),
 ])
 def test_resumen_sunat_conserva_causa_sin_repetir_traza(estado, esperado):
+    """La celda del emisor habla como el evaluador; la traza queda en los datos.
+
+    Sin jerga de recursos («sunat_nombre»), sin estados internos y sin el motivo
+    técnico: eso sigue íntegro en `proyectar_estado_fuentes` para API y ZIP.
+    """
     ficha = {"consultas_fuentes": {"sunat_nombre": {
         "estado": estado, "motivo": "detalle técnico extenso que no va en la tarjeta",
     }}}
-    assert _resumen_sunat_sin_emisor(ficha) == f"SUNAT — nombre: {esperado}"
+    assert _resumen_sunat_sin_emisor(ficha) == esperado
+    assert "detalle técnico" not in _resumen_sunat_sin_emisor(ficha)
+    assert "·" not in _resumen_sunat_sin_emisor(ficha)
     assert ficha["consultas_fuentes"]["sunat_nombre"]["motivo"].startswith("detalle técnico")
 
 
 def test_resumen_sunat_no_mezcla_busqueda_vacia_y_detalle_fallido():
+    """Una búsqueda completada sin coincidencias manda sobre el recurso fallido."""
     ficha = {"consultas_fuentes": {
         "sunat_nombre": {"estado": "sin_resultados"},
         "sunat_ruc": {"estado": "fuente_no_disponible"},
     }}
-    assert _resumen_sunat_sin_emisor(ficha) == (
-        "SUNAT — nombre: sin coincidencias; RUC: consulta no completada")
-    assert _resumen_sunat_sin_emisor({}) == "Emisor por verificar; consulta SUNAT no registrada."
+    assert _resumen_sunat_sin_emisor(ficha) == "Sin coincidencia en SUNAT."
+    assert _resumen_sunat_sin_emisor({}) == (
+        "Emisor por confirmar; sin consulta a SUNAT registrada.")

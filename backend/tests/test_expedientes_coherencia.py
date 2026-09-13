@@ -40,7 +40,9 @@ def test_parte_5_conserva_no_computable_y_distingue_totales(tmp_path):
     hoja = next(ws for ws in wb.worksheets if ws.title.startswith("P1."))
     texto = "\n".join(str(c.value) for row in hoja.iter_rows() for c in row
                        if c.value is not None)
-    assert "Efectivo computado = aporte antes de descontar traslapes" in texto
+    # leyenda de una línea (limpieza del 12-sep): la explicación larga se retiró
+    assert "Efectivo = aporte antes de descontar traslapes." in texto
+    assert "Efectivo computado" not in texto
     assert "No computado" in texto
     assert "TOTAL DECLARADO POR EXPERIENCIAS" in texto
     assert "SUMA COMPUTADA ANTES DE TRASLAPES" in texto

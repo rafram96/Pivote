@@ -659,17 +659,24 @@ def test_hoja_profesional_emisor_sin_anomalia():
     construir_hoja_profesional(ws, prof, {}, {}, fichas, {}, sunat)
     texto = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
     assert "sin anomalía de antigüedad" in texto
-    # objeto social (CIIU) mostrado, con el prefijo "Principal -" limpiado
-    assert "Objeto social" in texto and "7110" in texto and "ARQUITECTURA E INGENIERIA" in texto
-    assert "Principal -" not in texto
-    assert "HABIDO" in texto and "SOCIEDAD ANONIMA CERRADA" in texto
+    assert "20512345678" in texto and "EMPRESA OK" in texto
+    assert "ACTIVO / HABIDO" in texto
+    # 12-sep: el giro, el tipo de contribuyente y el domicilio no deciden nada
+    # sobre el certificado — dejaron de pintarse; siguen en la API y el ZIP.
+    for retirado in ("Objeto social", "7110", "ARQUITECTURA E INGENIERIA",
+                     "Principal -", "Tipo", "SOCIEDAD ANONIMA CERRADA",
+                     "Domicilio fiscal", "AV X 123", "Inicio actividades"):
+        assert retirado not in texto, retirado
 
 
 def test_hoja_profesional_representantes_e_historico_del_emisor():
-    """Issue #30: el cuadro del emisor lista los representantes legales y responde
-    —en el TÍTULO del campo— si estaba habido al emitir y durante la obra; el
-    histórico va en un cuadro contiguo (R:U) y el representante de obra se corre
-    a W:Z."""
+    """El cuadro del emisor responde —en el TÍTULO del campo— si estaba habido al
+    emitir y durante la obra; el histórico contiguo (R:U) conserva la tabla de
+    condición y el representante de obra sigue en W:Z.
+
+    Los representantes legales (issue #30) y los nombres/domicilios anteriores
+    eran informativos: desde el 12-sep no se pintan (siguen en la API y el ZIP).
+    """
     import openpyxl
     from entregables.excel_final import construir_hoja_profesional
 
@@ -706,10 +713,10 @@ def test_hoja_profesional_representantes_e_historico_del_emisor():
     celdas = {c.coordinate: str(c.value) for row in ws.iter_rows() for c in row if c.value}
     texto = "\n".join(celdas.values())
 
-    # representantes: todos, con cargo y fecha desde — y SIN cruce con el firmante
-    assert "Representantes legales (SUNAT)" in texto
-    assert "ZHANG XIA" in texto and "LI WENXUE" in texto
-    assert "APODERADO" in texto and "17/08/20" in texto
+    # los representantes ya no se pintan (tampoco su cruce con el firmante)
+    assert "Representantes legales" not in texto
+    assert "ZHANG XIA" not in texto and "LI WENXUE" not in texto
+    assert "APODERADO" not in texto
     assert "ALT12" not in texto and "firmante" not in texto
 
     # la pregunta va en el TÍTULO del campo, no solo en el valor
@@ -724,7 +731,11 @@ def test_hoja_profesional_representantes_e_historico_del_emisor():
     hist = next(k for k, v in celdas.items() if v == "HISTÓRICO SUNAT DEL EMISOR")
     assert emisor[0] == "M" and hist[0] == "R"
     assert emisor[1:] == hist[1:], "los dos cuadros del emisor arrancan en la misma fila"
-    assert "CONSTRUCTORA X EIRL" in texto and "JR. AREQUIPA 55" in texto
+    # la tabla de condición se conserva; razón social y domicilio anteriores no
+    assert "Condición del contribuyente durante la experiencia" in texto
+    assert "CONSTRUCTORA X EIRL" not in texto and "JR. AREQUIPA 55" not in texto
+    assert "Nombre o razón social anterior" not in texto
+    assert "Domicilio fiscal anterior" not in texto
 
     # el representante de obra (InfoObras) se corrió a W:Z
     rep_obra = next(k for k, v in celdas.items() if v == "REPRESENTANTE DE OBRA (InfoObras)")

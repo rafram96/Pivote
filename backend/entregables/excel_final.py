@@ -164,6 +164,32 @@ def _rotulo_candado_seace(resultado) -> Optional[str]:
     return rotulo(resultado)
 
 
+def _correspondencia_seace(candado) -> Optional[str]:
+    """Rótulo corto del candado para la hoja del profesional.
+
+    El evaluador necesita saber si los datos del proceso confirman, contradicen
+    o no alcanzan; la explicación completa del candado vive en la API y el ZIP.
+    Cuando CONTRADICE, el motivo entra aquí en pocas palabras — antes se pegaba
+    como una fila aparte de prosa debajo del bloque.
+    """
+    from validacion.candado_seace import CONFIRMADO, CONTRADICE, POR_CONFIRMAR
+    resultado = str((candado or {}).get("resultado") or "")
+    if resultado == CONFIRMADO:
+        return "Confirmado"
+    if resultado == POR_CONFIRMAR:
+        return "Por confirmar"
+    if resultado != CONTRADICE:
+        return None
+    motivo = str((candado or {}).get("motivo") or "").strip()
+    _, _, detalle = motivo.partition(":")
+    detalle = " ".join((detalle or motivo).split())
+    if not detalle:
+        return "Contradice"
+    if len(detalle) > 110:
+        detalle = detalle[:110].rsplit(" ", 1)[0] + "…"
+    return f"Contradice — {detalle}"
+
+
 def _mayus_inicial(texto) -> str:
     """Primera letra en mayúscula SIN tocar el resto: `str.capitalize()` bajaría
     los veredictos que el motor escribe en mayúsculas ("NO CUMPLE pero…")."""
@@ -203,20 +229,23 @@ def _es_revision_efectiva(v) -> bool:
 
 
 def _resumen_sunat_sin_emisor(fuentes) -> str:
-    """Conserva el motivo en el cuadro existente, sin volcar la traza técnica."""
+    """Una frase de evaluador, no la traza de la consulta (12-sep).
+
+    El detalle por recurso sigue viviendo en `estado_fuentes` para la API y el
+    ZIP; en la celda solo se dice qué pasó con el emisor. `sin_resultados` manda
+    sobre un fallo del otro recurso: que una consulta no respondiera no borra la
+    búsqueda que sí se completó sin coincidencias.
+    """
     consultas = consultas_de(fuentes)
-    estados = {
-        "con_resultados": "datos recibidos, emisor por identificar",
-        "sin_resultados": "sin coincidencias",
-        "fuente_no_disponible": "consulta no completada",
-        "respuesta_no_reconocida": "respuesta no interpretable",
-        "no_consultado": "no consultado",
-    }
-    partes = [f"{etiqueta}: {estados.get(consultas[clave].get('estado'), 'consulta sin detalle')}"
-              for clave, etiqueta in (("sunat_nombre", "nombre"), ("sunat_ruc", "RUC"))
-              if clave in consultas]
-    return ("SUNAT — " + "; ".join(partes) if partes else
-            "Emisor por verificar; consulta SUNAT no registrada.")
+    estados = {str((consultas.get(clave) or {}).get("estado") or "")
+               for clave in ("sunat_nombre", "sunat_ruc") if clave in consultas}
+    if "sin_resultados" in estados:
+        return "Sin coincidencia en SUNAT."
+    if estados & {"fuente_no_disponible", "respuesta_no_reconocida"}:
+        return "SUNAT no respondió; emisor por confirmar."
+    if "con_resultados" in estados:
+        return "SUNAT respondió; emisor por confirmar."
+    return "Emisor por confirmar; sin consulta a SUNAT registrada."
 
 
 def completar_revisiones_privadas(revisiones: dict, enriquecimiento: Optional[dict]) -> dict:
@@ -851,6 +880,14 @@ def _tipo_experiencia(e: dict, fx: dict, tipo_evaluacion: Optional[str] = None) 
     return "indeterminada"
 
 
+def _motivo_regla(cruce, tipo: str) -> str:
+    """Motivo de UNA regla de cruce, con la misma normalización de fuente."""
+    motivo = (cruce or {}).get("motivo") if isinstance(cruce, dict) else None
+    if not motivo:
+        return ""
+    return normalizar_motivo_fuente(motivo) if tipo == "expediente" else str(motivo)
+
+
 def presentacion_cruces(e: dict, fx: Optional[dict],
                         tipo_evaluacion: Optional[str] = None) -> dict:
     """Los cruces de UNA experiencia, ya traducidos a lo que se pinta.
@@ -872,6 +909,11 @@ def presentacion_cruces(e: dict, fx: Optional[dict],
     via = str(fx.get("via") or "").upper()
     if via == "PRIVADA" or (tipo == "expediente" and via == "NA"):
         pendiente = bool(fx.get("privada_pendiente"))
+        motivo_privada = (("SUNAT aún no identificó inequívocamente al emisor. "
+                           if pendiente else "")
+                          + "InfoObras, MEF y SEACE no aplican. La ruta de "
+                            "verificación es SUNAT y la revisión documental del "
+                            "certificado.")
         rotulo_a = ("REVISIÓN — RUTA PRIVADA / SUNAT PENDIENTE" if pendiente
                     else "FUENTE PÚBLICA NO APLICA — OBRA PRIVADA")
         rotulo_b = (_CRON_SIN_FUENTE_B + "; revisar el sustento privado"
@@ -885,12 +927,8 @@ def presentacion_cruces(e: dict, fx: Optional[dict],
             "fin": fecha_excel(e.get("fecha_final")), "firma": None,
             "aprobacion": None, "resp_a": rotulo_a,
             "resp_b": rotulo_b, "aplica_b": tipo != "ejecucion",
-            "inferida": False,
-            "motivo": (("SUNAT aún no identificó inequívocamente al emisor. "
-                        if pendiente else "") +
-                       "InfoObras, MEF y SEACE no aplican. La ruta de "
-                       "verificación es SUNAT y la revisión documental del "
-                       "certificado."),
+            "inferida": False, "motivo": motivo_privada,
+            "motivo_a": motivo_privada, "motivo_b": motivo_privada,
         }
     cruces = fx.get("cruces_fechas") or []
     ca = _cron_cruce(cruces, REGLA_INICIO) or {}
@@ -922,6 +960,10 @@ def presentacion_cruces(e: dict, fx: Optional[dict],
         "aplica_b": cb is not None or tipo in {"expediente", "indeterminada"},
         "inferida": bool(cb and cb.get("inferida") and aprobacion),
         "motivo": _sin_jerga(" ".join(str(m) for m in motivos)),
+        # La misma explicación, separada por regla: la hoja del profesional pinta
+        # solo la de la comprobación que tiene un dato con el que comparar.
+        "motivo_a": _sin_jerga(str(_motivo_regla(ca, tipo) or "")),
+        "motivo_b": _sin_jerga(str(_motivo_regla(cb, tipo) or "")),
     }
 
 
@@ -1427,7 +1469,7 @@ def construir_hoja_profesional(
             n_encontrados = sum(int(v.get("docs") or 0)
                                 for v in (fx.get("valorizaciones") or [])
                                 if isinstance(v, dict))
-        texto_encontrados = ("Sin documentos registrados en este análisis" if n_encontrados == 0 else
+        texto_encontrados = ("Sin documentos descargados" if n_encontrados == 0 else
                              "1 archivo encontrado" if n_encontrados == 1 else
                              f"{n_encontrados} archivos encontrados")
         kv("Documentos encontrados", texto_encontrados)
@@ -1475,8 +1517,7 @@ def construir_hoja_profesional(
         # `es_exped` se calculó al inicio de la ficha.
         if verif or aprob or es_exped:
             ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
-            c = ws.cell(rr, 6, "EXPEDIENTE TÉCNICO — verificación (no hay valorizaciones: "
-                               "este cargo elaboró el expediente, no ejecutó la obra)")
+            c = ws.cell(rr, 6, "EXPEDIENTE TÉCNICO — verificación")
             c.font, c.fill = F_PARTE, FILL_PARTE
             c.alignment = Alignment(vertical="center", wrap_text=True)
             rr += 1
@@ -1556,11 +1597,6 @@ def construir_hoja_profesional(
                         _fila("Lectura de la resolución",
                               "el PDF es un escaneo sin texto reconocible — se adjunta en el ZIP")
                 _fila("CUI confirmado (MEF)", verif.get("cui_confirmado"))
-                fuentes = ", ".join(verif.get("fuentes") or [])
-                if fuentes:
-                    ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
-                    ws.cell(rr, 6, f"Fuente: {fuentes}").font = F_CELL
-                    rr += 1
         else:
             ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
             c = ws.cell(rr, 6, "VALORIZACIONES — en amarillo, las del periodo del certificado")
@@ -1640,8 +1676,7 @@ def construir_hoja_profesional(
         if estado != "seleccionado":
             textos = {
                 "fuente_no_disponible": "Por confirmar — la fuente no respondió.",
-                "sin_procesos": "En esta corrida no se obtuvieron procesos de contratación "
-                                "para este CUI. Esto no prueba que no existan.",
+                "sin_procesos": "Sin procesos en SEACE para este CUI",
                 "sin_tipo": "No se encontró un proceso del tipo correspondiente a la experiencia.",
             }
             texto = textos.get(estado, datos.get("motivo") or "Por confirmar.")
@@ -1660,9 +1695,9 @@ def construir_hoja_profesional(
         filas = [("Tipo de proceso", tipo)]
         # El candado coteja datos del proceso, no el contenido de los adjuntos.
         candado = datos.get("candado") if isinstance(datos.get("candado"), dict) else {}
-        rotulo_candado = _rotulo_candado_seace(candado.get("resultado"))
+        rotulo_candado = _correspondencia_seace(candado)
         docs = datos.get("docs") or {}
-        for clave, etiqueta in (("bases", "Bases integradas"), ("contrato", "Adjuntos del contrato")):
+        for clave, etiqueta in (("bases", "Bases integradas"), ("contrato", "Contrato firmado")):
             if "documentos" in datos:
                 candidatos = [d for d in (datos.get("documentos") or [])
                               if isinstance(d, dict) and d.get("categoria") == clave]
@@ -1670,16 +1705,13 @@ def construir_hoja_profesional(
                 legado = docs.get(clave) or {}
                 candidatos = [legado] if legado.get("url") else []
             enlaces = sum(bool(d.get("url")) for d in candidatos)
-            valor = (("1 enlace encontrado" if enlaces == 1 else f"{enlaces} enlaces encontrados") if enlaces
-                     else "Sin enlace recuperado en esta consulta")
-            sin_enlace = len(candidatos) - enlaces
-            if sin_enlace:
-                valor += f"; {sin_enlace} registro(s) sin enlace"
+            valor = (("1 archivo encontrado" if enlaces == 1 else f"{enlaces} archivos encontrados")
+                     if enlaces else "Sin enlace recuperado")
             filas.append((etiqueta, valor))
         if datos.get("fecha_suscripcion"):
             filas.append(("Fecha de firma", datos["fecha_suscripcion"]))
         if rotulo_candado:
-            filas.append(("Datos del proceso vs. certificado", rotulo_candado))
+            filas.append(("Correspondencia con el certificado", rotulo_candado))
         entidad = (datos.get("proceso") or {}).get("entidad_convocante")
         if entidad:
             filas.append(("Entidad convocante", entidad))
@@ -1693,26 +1725,10 @@ def construir_hoja_profesional(
             ws.row_dimensions[rr].height = max(
                 ws.row_dimensions[rr].height or 15,
                 max(-(-len(etiqueta) // 27), -(-len(str(valor)) // 50)) * 13 + 3)
-            if (etiqueta == "Datos del proceso vs. certificado"
+            if (etiqueta == "Correspondencia con el certificado"
                     and candado.get("resultado") != "confirmado"):
                 cv.fill = FILL_PEND
             rr += 1
-        observaciones = observaciones_temporales(candado)
-        if observaciones:
-            texto = "Observación de fechas — " + " ".join(observaciones)
-            ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
-            c = ws.cell(rr, 6, texto)
-            c.font, c.fill, c.border, c.alignment = F_CELL, FILL_PEND, BORDER, AL_WRAP
-            ws.row_dimensions[rr].height = max(15, (-(-len(texto) // 70)) * 13 + 2)
-            rr += 1
-        if rotulo_candado and candado.get("resultado") != "confirmado":
-            texto = str(candado.get("motivo") or "")
-            if texto:
-                ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
-                c = ws.cell(rr, 6, texto)
-                c.font, c.fill, c.border, c.alignment = F_CELL, FILL_PEND, BORDER, AL_WRAP
-                ws.row_dimensions[rr].height = max(15, (-(-len(texto) // 70)) * 13 + 2)
-                rr += 1
         if datos.get("ambiguo"):
             texto = ("Por confirmar — hay varios procesos del mismo tipo. "
                      "La selección automática no acredita el vínculo de sus documentos con el encargo.")
@@ -2193,56 +2209,25 @@ def construir_hoja_profesional(
                    fill=FILL_OK if ok else (FILL_ALERTA if ok is False else None),
                    height=None if ok else 34)
 
-        def render_representantes_emisor(reps: Optional[list]) -> None:
-            """Representantes legales del emisor según SUNAT. INFORMATIVO: sin
-            cruce con el firmante del certificado (ADR-008 descartó ALT-12)."""
-            reps = reps or []
-            if not reps:
-                return
-            nonlocal rr
-            sub("Representantes legales (SUNAT) — informativo")
-
-            def fila_rep(nombre, cargo, desde, *, font=F_CELL):
-                nonlocal rr
-                ws.merge_cells(start_row=rr, start_column=13, end_row=rr, end_column=14)
-                for col, val in ((13, nombre), (15, cargo), (16, desde)):
-                    cc = ws.cell(rr, col, val)
-                    cc.font, cc.border, cc.alignment = font, BORDER, AL_WRAP
-                if len(str(nombre)) > 24:
-                    ws.row_dimensions[rr].height = 28
-                rr += 1
-
-            fila_rep("Nombre", "Cargo", "Desde", font=F_BOLD)
-            for rp in reps:
-                fila_rep(rp.get("nombre") or "—", rp.get("cargo") or "—",
-                         _ddmmaa(rp.get("fecha_desde")))
-
         creacion = _fecha_iso(s.get("fecha_inscripcion")) if s else None
         if s and s.get("ruc"):                       # datos completos del emisor
+            # Solo lo que decide algo sobre el emisor: identidad, estado y las
+            # dos preguntas de HABIDO. Tipo, objeto social, inicio de actividades,
+            # domicilio y representantes eran informativos y recargaban la hoja
+            # (12-sep); siguen íntegros en la API y el ZIP.
             kv("RUC", s.get("ruc"))
             kv("Razón social", s.get("razon_social") or "—")
-            if s.get("tipo_contribuyente"):
-                kv("Tipo", s.get("tipo_contribuyente"))
-            acts = s.get("actividades_economicas") or []
-            objeto = re.sub(r"^\s*Principal\s*-\s*", "", acts[0]) if acts else "—"
-            kv("Objeto social", objeto, height=58)   # CIIU largo → más alto, envuelve
             estado, cond = s.get("estado"), s.get("condicion")
             mal = (estado and not str(estado).upper().startswith("ACTIVO")) or \
                   (cond and str(cond).upper() != "HABIDO")
             kv("Estado / Condición", f"{estado or '—'} / {cond or '—'}",
                fill=FILL_ALERTA if mal else None)
-            ini_act = _fecha_iso(s.get("fecha_inicio_actividades"))
-            if ini_act:
-                kv("Inicio actividades", ini_act.strftime("%d/%m/%Y"))
-            if s.get("domicilio_fiscal"):
-                kv("Domicilio fiscal", s.get("domicilio_fiscal"))
             if str(s.get("via") or "").startswith("nombre"):
                 detalle = ("por nombre — única idéntica entre varias en SUNAT"
                            if s.get("via") == "nombre_exacto"
                            else "por nombre (el cert no traía RUC)")
                 kv("Cruce", detalle)
             render_habido(s.get("habido"))
-            render_representantes_emisor(s.get("representantes"))
             emision = _fecha_iso(fecha_emision)
             alt04 = s.get("alt04") or {}
             if not alt04 and creacion and ((emision and creacion > emision)
@@ -2305,21 +2290,18 @@ def construir_hoja_profesional(
 
     def render_historico(top: int, s: Optional[dict]) -> int:
         """Cuadro HISTÓRICO SUNAT del emisor en columnas R:U, pegado al cuadro del
-        emisor (M:P): forman un par. Compacto — solo lo que tiene datos:
+        emisor (M:P): forman un par. Compacto — la condición del contribuyente
+        RECORTADA al periodo de la experiencia (el histórico completo puede traer
+        30 tramos; el resto vive en el panel), en rojo lo que no fue HABIDO.
 
-          · nombres/razones sociales anteriores, con su fecha de baja
-          · condición del contribuyente RECORTADA al periodo de la experiencia
-            (el histórico completo puede traer 30 tramos; el resto vive en el
-            panel), en rojo lo que no fue HABIDO
-          · domicilios fiscales anteriores, con su fecha de baja
+        Razones sociales y domicilios anteriores ya no se pintan (12-sep): son
+        informativos y no deciden nada sobre el certificado; el histórico íntegro
+        sigue en la API y el ZIP.
 
         Devuelve la última fila usada (o top-1 si no hay nada que mostrar)."""
         rr = top
-        hist = (s or {}).get("historico") or {}
-        razones = hist.get("razones_sociales") or []
-        domicilios = hist.get("domicilios") or []
         tramos = (((s or {}).get("habido") or {}).get("periodo") or {}).get("tramos") or []
-        if not (razones or domicilios or tramos):
+        if not tramos:
             return rr - 1
 
         ws.merge_cells(start_row=rr, start_column=18, end_row=rr, end_column=21)
@@ -2346,36 +2328,18 @@ def construir_hoja_profesional(
                 ws.row_dimensions[rr].height = 28
             rr += 1
 
-        def fila_texto_fecha(texto, fecha, *, font=F_CELL):
-            """Texto largo en R:T + su fecha en U (razón social / domicilio)."""
-            ws.merge_cells(start_row=rr, start_column=18, end_row=rr, end_column=20)
-            _escribir(((18, texto), (21, fecha)), font, None, len(str(texto)))
-
         def fila_tramo(condicion, desde, hasta, *, font=F_CELL, fill=None):
             """Tramo de condición: R | S | T:U."""
             ws.merge_cells(start_row=rr, start_column=20, end_row=rr, end_column=21)
             _escribir(((18, condicion), (19, desde), (20, hasta)), font, fill, 0)
 
-        if razones:
-            sub("Nombre o razón social anterior")
-            fila_texto_fecha("Nombre", "Fecha de baja", font=F_BOLD)
-            for rz in razones:
-                fila_texto_fecha(rz.get("nombre") or "—", _ddmmaa(rz.get("fecha_baja")))
-
-        if tramos:
-            sub("Condición del contribuyente durante la experiencia")
-            fila_tramo("Condición", "Desde", "Hasta", font=F_BOLD)
-            for t in tramos:
-                mal = (t.get("condicion") or "").upper() != "HABIDO"
-                fila_tramo(t.get("condicion") or "—", _ddmmaa(t.get("desde")),
-                           _ddmmaa(t.get("hasta")),
-                           fill=FILL_ALERTA if mal else None)
-
-        if domicilios:
-            sub("Domicilio fiscal anterior")
-            fila_texto_fecha("Dirección", "Fecha de baja", font=F_BOLD)
-            for d in domicilios:
-                fila_texto_fecha(d.get("direccion") or "—", _ddmmaa(d.get("fecha_baja")))
+        sub("Condición del contribuyente durante la experiencia")
+        fila_tramo("Condición", "Desde", "Hasta", font=F_BOLD)
+        for t in tramos:
+            mal = (t.get("condicion") or "").upper() != "HABIDO"
+            fila_tramo(t.get("condicion") or "—", _ddmmaa(t.get("desde")),
+                       _ddmmaa(t.get("hasta")),
+                       fill=FILL_ALERTA if mal else None)
 
         return rr - 1
 
@@ -2798,17 +2762,28 @@ def construir_hoja_profesional(
         # junto a su certificado; las respuestas completas siguen en el Gantt.
         if es_exp_prof:
             cruce = presentacion_cruces(e, fx, tipo_evaluacion)
-            incidencias = [f"{rotulo}: {cruce[clave]}" for rotulo, clave in (
-                ("Inicio frente al contrato", "resp_a"),
-                ("Término frente a aprobación", "resp_b"))
-                if cruce[clave] != "SÍ"]
+            # Una comprobación aporta algo solo si tiene RESULTADO: coincide,
+            # contradice, o al menos la fecha con la que se comparó. Dos
+            # «POR VERIFICAR» sin fecha no son una observación: son la ausencia
+            # de la fuente, y repetirlas en cada certificado era ruido (12-sep).
+            incidencias, motivos_pintados = [], []
+            for rotulo, clave, fecha, clave_motivo in (
+                    ("Inicio frente al contrato", "resp_a", "firma", "motivo_a"),
+                    ("Término frente a aprobación", "resp_b", "aprobacion", "motivo_b")):
+                if cruce[clave] == "SÍ":
+                    continue
+                if not cruce[fecha] and str(cruce[clave]).startswith("POR VERIFICAR"):
+                    continue
+                incidencias.append(f"{rotulo}: {cruce[clave]}")
+                if cruce.get(clave_motivo):
+                    motivos_pintados.append(cruce[clave_motivo])
             if cruce["inferida"]:
                 incidencias.append("Fecha de aprobación inferida: "
                                    + _ddmmaa_larga(cruce["aprobacion"]))
             if incidencias:
                 texto = "Observación de fechas — " + " · ".join(incidencias)
-                if cruce["motivo"]:
-                    texto += "\n" + cruce["motivo"]
+                if motivos_pintados:
+                    texto += "\n" + " ".join(dict.fromkeys(motivos_pintados))
                 ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=26)
                 c = ws.cell(r, 1, _sin_jerga(texto))
                 c.font, c.border, c.alignment = F_CELL, BORDER, AL_WRAP
@@ -3043,12 +3018,11 @@ def construir_hoja_profesional(
         # para lo mismo (P5 439 vs 759, P9 574 vs 838, P12 926 vs 1056).
         _p5_head_exp()
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=26)
-        leyenda_p5 = ("Declarado = duración del período del certificado calculada con "
-                      "la regla vigente. Efectivo computado = aporte antes de descontar "
-                      "traslapes; computar no verifica por sí solo tiempo ni cargo.")
+        leyenda_p5 = ("Declarado = días del período certificado. "
+                      "Efectivo = aporte antes de descontar traslapes.")
         c_ley = ws.cell(r, 1, leyenda_p5)
         c_ley.font, c_ley.fill, c_ley.alignment = F_CELL, FILL_RECAP, AL_WRAP
-        ws.row_dimensions[r].height = 32
+        ws.row_dimensions[r].height = 15
         r += 1
         _periodos_exp: list[tuple[date, date]] = []
         _paral_exp: dict[int, list[tuple[date, date]]] = {}
