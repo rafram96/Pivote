@@ -10,6 +10,9 @@ del pendiente MEF ya no afirma «hay un proyecto con ese nombre» con parecido b
 índice MEF local lleva `fecha_registro`/`fecha_viabilidad` y la vía MEF descarta rivales
 posteriores al certificado; la vía MEF sin resolver devuelve PRIVADA cuando el cliente es
 privado por léxico. Suite 1935; replay 23 jobs sin regresiones. Base MEF reconstruida.
+Luego `aeab64d` (punto 2): contratos del SEACE antiguo sin verificar TLS, adjuntos 08-A
+sin clasificar al ZIP, fila «Documentos del MEF» en el Excel; auditoría de sustento de 23
+expedientes: 13 útil, 10 de otra fase, 0 de otro proyecto.
 
 ## 13-sep — ADR-015 implementado: el orden con la vía MEF, las variantes del establecimiento y la rama de privadas al final
 
