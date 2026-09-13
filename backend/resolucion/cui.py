@@ -2412,6 +2412,11 @@ def _rival_variante(best: dict, ranked: list, exp: dict) -> Optional[tuple]:
 
 _UMBRAL_MEF_NOMBRE = 95.0    # score de nombre del Banco de Inversiones para resolver
 _COBERTURA_MEF_MIN = 0.8     # fracción del nombre oficial que el certificado debe contener
+# Por debajo de este parecido de nombre la ficha del MEF NO es «un proyecto con ese
+# nombre»: es solo el más parecido que hubo. El motivo de revisión lo dice así para
+# no sugerir que el Banco de Inversiones registra el proyecto (auditoría 12-sep,
+# caso de un expediente interno de EsSalud de 2007 sin registro en el Banco).
+_MEF_PARECIDO_BAJO = 80.0
 _DELTA_RIVAL_MEF = 3.0       # otra ficha a menos de esto en score MEF = empate
 
 
@@ -2483,10 +2488,20 @@ def _via_mef_expediente(exp: dict, best: dict, ranked: list, candidatos: list,
     if ranked and ranked[0]["cui"] != cui:
         aviso = (f" · el candidato de mayor puntaje es el CUI {ranked[0]['cui']}, "
                  "apartado por no tener confirmación en InfoObras")
+    if ms < _MEF_PARECIDO_BAJO:
+        # Parecido bajo: no hay en el Banco un proyecto con ese nombre. Decirlo
+        # al revés («hay un proyecto con ese nombre… pero no coincide») hacía
+        # creer al evaluador que el MEF sí registraba el proyecto.
+        decision = ("no se encontró en el Banco de Inversiones del MEF un proyecto con el "
+                    f"nombre del certificado; el más parecido (CUI {cui}) no corresponde "
+                    "lo suficiente — pegar el CUI si lo conoce o dejar como no ubicable"
+                    + aviso)
+    else:
+        decision = (f"hay un proyecto con ese nombre en el Banco de Inversiones del MEF "
+                    f"(CUI {cui}) sin registro de ejecución en InfoObras, pero {motivo} "
+                    "— confirmar" + aviso)
     return {"estado": "revision", "cui": None, "via": "NOMBRE",
-            "decision": (f"hay un proyecto con ese nombre en el Banco de Inversiones del MEF "
-                         f"(CUI {cui}) sin registro de ejecución en InfoObras, pero {motivo} "
-                         "— confirmar" + aviso),
+            "decision": decision,
             "candidatos": candidatos, "obra": None}
 
 
