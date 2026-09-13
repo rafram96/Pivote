@@ -58,10 +58,15 @@ def test_parsear_08a_completo():
     # el 08-A trae documentos, y al menos uno es la resolución de aprobación
     assert f["documentos"], "debería listar documentos descargables"
     assert f["resolucion"] is not None
-    # el candidato elegido debe verse como resolución (número con dígitos)
-    assert f["resolucion"]["numero"] and any(ch.isdigit() for ch in f["resolucion"]["numero"])
-    # y la R.G.R 121-2019 (aprobación original) debe estar entre los documentos vistos
-    assert any("121-2019" in d["label"] for d in f["documentos"])
+    # Desde el 13-sep-2026 la aprobación se toma de la SECCIÓN B del 08-A
+    # («Expediente técnico o documento equivalente»), no del acto que «más se
+    # ve» como resolución en la lista plana: en esta ficha la fila de la
+    # sección B enlaza «APROBACIÓN DEL EXP. TEC,» (sin número) y la R.G.R
+    # 121-2019 vive en la sección C (liquidación).
+    assert f["resolucion"]["origen"] == "seccion_b"
+    assert f["resolucion"]["documento"].startswith("APROBACIÓN DEL EXP")
+    # y la R.G.R 121-2019 debe seguir entre los documentos vistos, en la sección C
+    assert any("121-2019" in d["label"] and d["seccion"] == "C" for d in f["documentos"])
 
 
 def test_parsear_08a_flaco_no_revienta():

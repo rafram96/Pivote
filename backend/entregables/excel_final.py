@@ -1600,8 +1600,14 @@ def construir_hoja_profesional(
                     _fila("Monto del contrato (S/)", cn.get("monto"), None, FMT_SOLES)
                 if _ffmt:
                     _fila("Fecha del contrato", _ffmt)
-                _fila("Resolución de aprobación", rs.get("numero") or rs.get("documento"),
-                      rs.get("veredicto"))
+                # La fecha de aprobación que el propio 08-A registra en su sección B
+                # acompaña al número: es el dato que el evaluador contrasta con el
+                # fin del certificado aunque el PDF no se pueda leer.
+                _res_txt = rs.get("numero") or rs.get("documento")
+                _f08a = _fecha_iso(rs.get("fecha_08a")) if rs.get("fecha_08a") else None
+                if _res_txt and _f08a:
+                    _res_txt = f"{_res_txt} — aprobación registrada en el 08-A el {_f08a.strftime('%d/%m/%Y')}"
+                _fila("Resolución de aprobación", _res_txt, rs.get("veredicto"))
                 # Lo que dice la propia resolución, leída del PDF (capa de texto u
                 # OCR local): fecha oficial y consultor nombrado. Es el contraste
                 # que faltaba para los expedientes: la fecha alimenta la Regla B y el

@@ -436,3 +436,11 @@ def test_con_adjuntos_sin_clasificar_la_fila_los_cuenta(tmp_path, tipo):
     assert "publica 3 adjunto(s) para este CUI, pero ninguno es contrato ni resolución" in texto
     assert "van al ZIP como adjuntos sin clasificar" in texto
     assert "no publica contrato ni adjuntos" not in texto
+
+
+@pytest.mark.parametrize("tipo", ["expedientes"])
+def test_la_resolucion_muestra_la_fecha_de_aprobacion_del_08a(tmp_path, tipo):
+    enr = _enriquecimiento()
+    enr["1:1"]["verificacion_expediente"]["resolucion"]["fecha_08a"] = "2022-02-11"
+    _, _, texto, _ = _hoja(tmp_path, tipo, enr)
+    assert "0001-2022 — aprobación registrada en el 08-A el 11/02/2022" in texto

@@ -150,27 +150,126 @@ def _nombres_coinciden(a: str, b: str) -> bool:
 
 # ── parseo del Formato 08-A (puro) ───────────────────────────────────────────
 
+# SECCIONES DEL 08-A (13-sep-2026). La ficha de ejecución del Banco de Inversiones
+# no es una lista plana de adjuntos: cada enlace vive en una fila de una sección.
+#   B. «Datos de la fase de Ejecución: Expediente técnico o documento equivalente»
+#      → el documento que APROBÓ el expediente técnico, con su fecha entre
+#        paréntesis, y en las filas de costo («EXPEDIENTE TÉCNICO: S/…») el
+#        contrato con que se elaboró.
+#   C. «Datos de la fase de Ejecución durante la ejecución física»
+#      → modificaciones posteriores (actualizaciones, adicionales, ampliaciones
+#        de plazo, liquidación): OTRA FASE respecto del certificado de elaboración.
+# Elegir la aprobación por etiqueta, sin la sección, tomaba el acto más reciente:
+# auditoría documental de 23 expedientes (13-sep), 7 de 10 «otra fase» por esto.
+_RE_H4_SECCION = re.compile(r"<h4[^>]*>\s*(?:<strong>)?\s*([A-F])\.\s*Datos de la fase", re.I)
+_RE_FECHA_PARENT = re.compile(r"\((\d{1,2})/(\d{1,2})/(\d{4})\)\s*$")
+_RE_CONCEPTO_COSTO_ET = re.compile(r"^\s*EXPEDIENTE\s+T[EÉ]CNICO\b", re.I)
+
+
+def _fecha_parentesis(texto: str) -> Optional[str]:
+    """«N° 018-2016-GRJ/GRI (27/01/2016)» → '2016-01-27' (o None)."""
+    m = _RE_FECHA_PARENT.search(texto or "")
+    if not m:
+        return None
+    d, mth, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    try:
+        return date(y, mth, d).isoformat()
+    except ValueError:
+        return None
+
+
+def _contexto_enlaces_08a(html: str) -> dict:
+    """idArchivo → {seccion, concepto, fecha} leyendo la sección (último <h4>
+    «X. Datos de la fase…» anterior) y la fila <tr> que contiene cada enlace.
+    Primera aparición manda (un mismo archivo puede repetirse en varias filas)."""
+    secciones = [(m.start(), m.group(1).upper()) for m in _RE_H4_SECCION.finditer(html)]
+    out: dict = {}
+    for tr in re.finditer(r"<tr[^>]*>(.*?)</tr>", html, re.S | re.I):
+        fila = tr.group(1)
+        if "downloadArchivoPublico" not in fila:
+            continue
+        seccion = "otra"
+        for pos, letra in secciones:
+            if pos < tr.start():
+                seccion = letra
+        celdas = [_RE_WS.sub(" ", unescape(_RE_TAG.sub(" ", c))).strip()
+                  for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", fila, re.S | re.I)]
+        concepto = next((c for c in celdas if c), "")
+        # la fecha «(dd/mm/aaaa)» va en la CELDA del enlace, a veces fuera del <a>
+        for celda in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", fila, re.S | re.I):
+            if "downloadArchivoPublico" not in celda:
+                continue
+            texto_celda = _RE_WS.sub(" ", unescape(_RE_TAG.sub(" ", celda))).strip()
+            fecha = _fecha_parentesis(texto_celda)
+            for m in re.finditer(
+                r'href="[^"]*downloadArchivoPublico\?idArchivo=([^"&]*)[^"]*"[^>]*>(.*?)</a>',
+                celda, re.S | re.I,
+            ):
+                idar = m.group(1).strip()
+                texto = _RE_WS.sub(" ", unescape(_RE_TAG.sub(" ", m.group(2)))).strip()
+                if idar and idar not in out:
+                    out[idar] = {"seccion": seccion, "concepto": concepto,
+                                 "fecha": _fecha_parentesis(texto) or fecha}
+    return out
+
+
 def _documentos_08a(html: str) -> list[dict]:
     """Extrae los documentos descargables (downloadArchivoPublico) con etiqueta.
     Descarta los de idArchivo o etiqueta vacíos (ruido de la plantilla). Marca
-    `es_aprobacion` por el texto del enlace."""
+    `es_aprobacion` por el texto del enlace y añade la SECCIÓN del 08-A en que
+    aparece el enlace, el concepto de su fila y la fecha entre paréntesis
+    (ver `_contexto_enlaces_08a`)."""
     out, vistos = [], set()
+    contexto = _contexto_enlaces_08a(html)
+    # El texto del enlace puede venir precedido por un icono (<i class="fa
+    # fa-paperclip">): se toma TODO el interior del <a> sin etiquetas. Con el
+    # regex anterior ([^<]*) esos enlaces quedaban con etiqueta vacía y se
+    # descartaban como ruido (los «documentos de sustento» de la sección A).
     for m in re.finditer(
-        r'href="([^"]*downloadArchivoPublico\?idArchivo=([^"&]*)[^"]*)"[^>]*>([^<]*)',
-        html,
+        r'href="([^"]*downloadArchivoPublico\?idArchivo=([^"&]*)[^"]*)"[^>]*>(.*?)</a>',
+        html, re.S | re.I,
     ):
-        url, idar, label = m.group(1), m.group(2).strip(), unescape(m.group(3)).strip()
+        url, idar = m.group(1), m.group(2).strip()
+        label = _RE_WS.sub(" ", unescape(_RE_TAG.sub(" ", m.group(3)))).strip()
         if not idar or not label or idar in vistos:
             continue
         vistos.add(idar)
         contractual = bool(_RE_ACTO_CONTRACTUAL.search(label))
+        ctx = contexto.get(idar) or {}
         out.append({
             "label": label,
             "url": urljoin(BASE, url.replace("&amp;", "&")),
             "es_aprobacion": bool(_RE_APROB.search(label)) and not contractual,
             "tipo_indicado": "acto_contractual" if contractual else "por_identificar",
+            "seccion": ctx.get("seccion") or "otra",
+            "concepto": ctx.get("concepto") or "",
+            "fecha": ctx.get("fecha"),
         })
     return out
+
+
+def _aprobacion_por_seccion_b(docs: list[dict]) -> Optional[dict]:
+    """El documento de aprobación del expediente según la sección B: el de las
+    filas de componentes (excluidas las filas de costo «EXPEDIENTE TÉCNICO: S/…»,
+    que citan el contrato). Empate → el que más se ve como resolución. None si
+    la sección B no trae enlaces."""
+    b = [d for d in docs if d.get("seccion") == "B" and d.get("tipo_indicado") != "acto_contractual"]
+    if not b:
+        return None
+    componentes = [d for d in b if not _RE_CONCEPTO_COSTO_ET.search(d.get("concepto") or "")]
+    candidatos = componentes or b
+    return sorted(candidatos, key=lambda d: -_score_aprobacion(d["label"]))[0]
+
+
+def _contrato_et_por_seccion_b(docs: list[dict], aprobacion: Optional[dict]) -> Optional[dict]:
+    """Documento citado en la fila «EXPEDIENTE TÉCNICO: S/…» de la sección B cuando
+    NO es la misma aprobación: suele ser el contrato con que se elaboró el
+    expediente (número y fecha de suscripción)."""
+    for d in docs:
+        if d.get("seccion") == "B" and _RE_CONCEPTO_COSTO_ET.search(d.get("concepto") or "") \
+                and (aprobacion is None or d["url"] != aprobacion["url"]):
+            return d
+    return None
 
 
 def parsear_ficha_08a(html: str) -> dict:
@@ -198,16 +297,27 @@ def parsear_ficha_08a(html: str) -> dict:
 
     seccion_b = bool(re.search(r"B\.\s*Datos de la fase de Ejecuci[oó]n", txt, re.I))
     docs = _documentos_08a(html)
-    # entre los documentos de aprobación (puede haber varios: original + modificaciones),
-    # el mejor candidato a resolución es el que más se ve como tal.
-    aprobs = sorted((d for d in docs if d["es_aprobacion"]),
-                    key=lambda d: -_score_aprobacion(d["label"]))
+    # PRIMERO la sección B: es donde el 08-A registra qué documento aprobó el
+    # expediente técnico y cuándo. Solo si la ficha no la trae con enlaces se cae
+    # a la elección por etiqueta de siempre (el acto que «más se ve» como
+    # resolución), que en fichas con modificaciones elegía la más reciente.
+    elegido = _aprobacion_por_seccion_b(docs)
+    origen_aprobacion = "seccion_b" if elegido else None
+    if elegido is None:
+        aprobs = sorted((d for d in docs if d["es_aprobacion"]),
+                        key=lambda d: -_score_aprobacion(d["label"]))
+        elegido = aprobs[0] if aprobs else None
+        origen_aprobacion = "etiqueta" if elegido else None
     resolucion = None
-    if aprobs:
-        elegido = aprobs[0]
+    if elegido:
         mnum = _RE_NUM_RES.search(elegido["label"])
         resolucion = {"documento": elegido["label"], "url": elegido["url"],
-                      "numero": mnum.group(1).strip() if mnum else None}
+                      "numero": mnum.group(1).strip() if mnum else None,
+                      "fecha": elegido.get("fecha"), "origen": origen_aprobacion}
+    contrato_et = _contrato_et_por_seccion_b(docs, elegido)
+    modificaciones = [{"documento": d["label"], "url": d["url"], "fecha": d.get("fecha"),
+                       "concepto": d.get("concepto")}
+                      for d in docs if d.get("seccion") == "C"]
 
     return {
         "etapa": etapa,
@@ -217,6 +327,11 @@ def parsear_ficha_08a(html: str) -> dict:
         "monto_expediente": monto_exp,
         "documentos": docs,
         "resolucion": resolucion,
+        # contrato con que se elaboró el ET según la fila de costo de la sección B
+        "contrato_et_08a": ({"documento": contrato_et["label"], "url": contrato_et["url"],
+                             "fecha": contrato_et.get("fecha")} if contrato_et else None),
+        # actos de la sección C: modificaciones durante la ejecución física
+        "modificaciones_08a": modificaciones,
         "tiene_ficha": bool(etapa or estado or seccion_b or docs),
     }
 
@@ -370,7 +485,15 @@ def verificar_expediente(exp: dict, ficha: dict, contratos: list[dict]) -> dict:
         bloque["resolucion"] = {"numero": res.get("numero"), "documento": res.get("documento"),
                                 # `url` viaja para que la etapa descargue y LEA la
                                 # resolución (fecha oficial + consultor nombrado).
-                                "url": res.get("url"), "veredicto": "ok"}
+                                "url": res.get("url"), "veredicto": "ok",
+                                # fecha y procedencia según el propio 08-A (sección B
+                                # = aprobación del expediente; etiqueta = elección
+                                # por nombre, como antes del 13-sep-2026).
+                                "fecha_08a": res.get("fecha"), "origen": res.get("origen")}
+    if ficha.get("contrato_et_08a"):
+        bloque["contrato_et_08a"] = ficha["contrato_et_08a"]
+    if ficha.get("modificaciones_08a"):
+        bloque["modificaciones_08a"] = ficha["modificaciones_08a"]
     else:
         bloque["resolucion"] = {"veredicto": "no_verificable",
                                 "detalle": "sin documento de aprobación en el 08-A del MEF"}
