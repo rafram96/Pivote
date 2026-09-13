@@ -327,6 +327,17 @@ def _render_cert_pages(cert_pdf, dpi=130, q=70, max_pag=12):
     return out
 
 
+def paginas_pdf(pdf) -> int:
+    """Nº de páginas de un PDF, 0 si no se puede leer. Se usa para decir cuántas
+    páginas tiene el documento completo cuando el Excel solo embebe la primera."""
+    import fitz
+    try:
+        with fitz.open(str(pdf)) as doc:
+            return doc.page_count
+    except Exception:      # noqa: BLE001 — un PDF ilegible no rompe el entregable
+        return 0
+
+
 def _factor_a_pdf_valido(pdf) -> bool:
     """Rechaza un recorte con texto que claramente pertenece a otro factor.
     Un escaneo sin capa de texto se conserva: no hay evidencia para descartarlo."""
@@ -2433,14 +2444,22 @@ def construir_hoja_profesional(
             ws.row_dimensions[r].height = 10
             r += 1
 
-    def embeber_cert(cert_pdf, titulo="DOCUMENTO DE LA EXPERIENCIA — constancia / conformidad (imagen)"):
+    def embeber_cert(cert_pdf, titulo="DOCUMENTO DE LA EXPERIENCIA — constancia / conformidad (imagen)",
+                     max_pag=12):
         """Embebe las páginas de un PDF (principal primero) a lo ancho, bajo una
         banda de título, para que el evaluador lo vea sin abrir el PDF. Se usa para
         la constancia de la experiencia y también para el TDR/Anexo (mejora A).
-        Tolerante: si PyMuPDF/Pillow fallan, deja una nota y sigue."""
+        Tolerante: si PyMuPDF/Pillow fallan, deja una nota y sigue.
+
+        `max_pag=1` (constancia de la experiencia, 2026-09-12): el postor adjunta
+        a la constancia lo que quiere —una resolución gerencial de diez páginas,
+        por ejemplo— y eso inflaba la hoja en cientos de filas sin aportar nada a
+        la evaluación. Solo se embebe la constancia; el PDF íntegro viaja en el
+        ZIP y una fila lo dice. El TDR, el Anexo 16 y el Factor siguen con el
+        límite de siempre: son de una o dos páginas y ya están acotados."""
         nonlocal r
         try:
-            paginas = _render_cert_pages(cert_pdf)
+            paginas = _render_cert_pages(cert_pdf, max_pag=max_pag)
         except Exception as ex:    # noqa: BLE001 — no romper el Excel por un cert
             logger.warning("certificado no embebido %s: %s", cert_pdf, ex)
             c = ws.cell(r, 1, "Certificado no embebido — revisar el PDF original")
@@ -2460,6 +2479,14 @@ def construir_hoja_profesional(
             img.height = int(h0 * _CERT_ANCHO_PX / w0)
             ws.add_image(img, f"A{r}")
             r += -(-img.height // 15) + 1     # avanza las filas que ocupa la imagen
+        # Solo se cuenta el total cuando el render pudo quedar TRUNCADO (una
+        # apertura extra del PDF, y nunca en el caso normal de una sola página).
+        total = paginas_pdf(cert_pdf) if len(paginas) >= max_pag else len(paginas)
+        if total > len(paginas):
+            c = ws.cell(r, 1, f"Documento de {total} páginas; el PDF completo está "
+                              "en el ZIP (carpeta de la experiencia).")
+            c.font = F_CELL
+            r += 1
 
     banda(f"PROFESIONAL {n_prof}: {prof.get('cargo', '')}")
     ws.cell(r, 1, f"Nombre: {prof.get('nombre') or '—'}").font = F_BOLD; r += 1
@@ -2807,7 +2834,9 @@ def construir_hoja_profesional(
                   "experiencia (posible folio corrido) — verificar en la propuesta",
                   F_AVISO, FILL_AVISO)
         elif cert_pdf:
-            embeber_cert(cert_pdf)
+            # SOLO la constancia (1ª página): lo que el postor adjuntó detrás
+            # viaja completo en el ZIP, no en la hoja.
+            embeber_cert(cert_pdf, max_pag=1)
 
         separador()   # 2 filas amarillas (A:Z) cerrando la experiencia
 

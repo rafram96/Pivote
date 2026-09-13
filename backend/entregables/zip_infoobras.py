@@ -841,6 +841,45 @@ def _formatos_indice() -> list[str]:
     return [f for f in _FORMATOS_INDICE if f in pedidos]
 
 
+def _paginas_pdf(ruta: Path) -> int:
+    """Nº de páginas de un PDF; 0 si no se puede leer. PyMuPDF se importa
+    perezoso: el ZIP se arma igual si el entorno no lo tiene."""
+    try:
+        import fitz
+        with fitz.open(str(ruta)) as doc:
+            return doc.page_count
+    except Exception:      # noqa: BLE001 — un PDF ilegible no rompe el entregable
+        return 0
+
+
+def _constancia_de(ruta, n_prof, n_exp) -> Optional[dict]:
+    """Datos de la constancia adjunta a la propuesta para una experiencia:
+    `{ruta, archivo, paginas}`, o None si no hay PDF recortado."""
+    if not ruta:
+        return None
+    ruta = Path(ruta)
+    if not ruta.is_file():
+        return None
+    return {"ruta": ruta, "archivo": f"CONSTANCIA_P{n_prof}_E{n_exp}.pdf",
+            "paginas": _paginas_pdf(ruta)}
+
+
+def rotulo_constancia(constancia: Optional[dict]) -> Optional[str]:
+    """Rótulo del índice para la constancia de la propuesta. Deja claro que es un
+    ADJUNTO de la propuesta, no un documento descargado de una fuente oficial."""
+    if not constancia:
+        return None
+    n = int(constancia.get("paginas") or 0)
+    if n == 1:
+        detalle = " (1 página)"
+    elif n > 1:
+        detalle = f" ({n} páginas)"
+    else:
+        detalle = ""
+    return (f"Constancia presentada en la propuesta{detalle} — "
+            f"{constancia['archivo']}")
+
+
 def _cabecera_indice(manifiestos: bool) -> list[str]:
     """Párrafo introductorio del índice (explica por qué un documento se repite
     entre experiencias de la misma obra). La línea del manifiesto solo aparece si
@@ -850,6 +889,10 @@ def _cabecera_indice(manifiestos: bool) -> list[str]:
         "se comparten entre experiencias de una misma obra se repiten para",
         "navegación directa y el índice lo indica.",
     ]
+    lineas.append("CONSTANCIA_P#_E#.pdf es la constancia presentada en la "
+                  "propuesta, completa: es un adjunto del postor, no un "
+                  "documento descargado de una fuente oficial, y no cuenta "
+                  "como tal en este índice.")
     if manifiestos:
         lineas.append("El MANIFIESTO_DOCUMENTOS.txt de cada carpeta lista "
                       "su contenido con la huella SHA-256.")
@@ -862,6 +905,7 @@ _CAMPOS_INDICE_JSON = (
     "n_prof", "cargo", "n_exp", "proyecto", "documentos", "compartidos",
     "propios", "notas", "sin_documentos", "motivo", "secciones_incompletas",
     "advertencias", "seace", "procedencia", "identificacion", "estado_fuentes",
+    "constancia",
 )
 
 
@@ -907,6 +951,9 @@ def _indice_txt(meta: dict, registros: list[dict], cabecera: list[str]) -> str:
             nota_txt = f" + {r['notas']} nota(s)" if r["notas"] else ""
             lineas.append(f"{prefijo}{detalle}{nota_txt}")
         lineas.append(f"  {rotulo_cui(r['procedencia'])}")
+        rot_constancia = rotulo_constancia(r.get("constancia"))
+        if rot_constancia:
+            lineas.append(f"  {rot_constancia}")
         if r.get("identificacion"):
             lineas.append(f"  Identificación: {r['identificacion']['etiqueta']}")
         if r.get("seace"):
@@ -955,6 +1002,9 @@ def _indice_md(meta: dict, registros: list[dict], cabecera: list[str]) -> str:
             else:
                 out.append(f"- **Documentos:** {r['documentos']}{nota}")
         out.append(f"- {rotulo_cui(r['procedencia'])}")
+        rot_constancia = rotulo_constancia(r.get("constancia"))
+        if rot_constancia:
+            out.append(f"- {rot_constancia}")
         if r.get("identificacion"):
             out.append(f"- Identificación: {r['identificacion']['etiqueta']}")
         if r.get("seace"):
@@ -1030,6 +1080,7 @@ def construir_zip_infoobras(
     descargas: dict[tuple[int, int], Path],
     salida: Path,
     enriquecimiento: Optional[dict] = None,
+    certificados: Optional[dict] = None,
 ) -> Path:
     """Arma el ZIP del análisis: Proyecto → Profesional → Experiencia → archivos.
 
@@ -1038,6 +1089,14 @@ def construir_zip_infoobras(
     conserva la procedencia aun sin índice o PDFs; no cuenta como descarga.
     `enriquecimiento`: {"n_prof:n_exp": {cui, via, ...}}. Sin enriquecimiento
     no se presenta el CUI declarado como utilizado por el backend.
+    `certificados`: {(n_prof, n_exp): PDF de la constancia recortada por la
+    skill} (lo devuelve `mapear_certificados`). Desde 2026-09-12 el Excel embebe
+    SOLO la primera página de esa constancia, así que el PDF ÍNTEGRO —con lo que
+    el postor le haya adjuntado detrás— entra al ZIP como
+    `CONSTANCIA_P{n}_E{m}.pdf` en la carpeta de la experiencia. NO es un
+    documento descargado de una fuente oficial: es un adjunto de la propuesta, y
+    por eso no suma a los conteos de `documentos` del índice ni levanta el
+    `SIN DOCUMENTOS` de una experiencia sin descargas.
 
     Dos variables de entorno ajustan el entregable sin tocar el árbol:
     `PIVOTE_MANIFIESTOS_ZIP` (manifiesto SHA-256 por experiencia, default sí) y
@@ -1045,6 +1104,7 @@ def construir_zip_infoobras(
     `json`). Ninguna cambia qué documentos entran al ZIP.
     """
     enr = enriquecimiento or {}
+    certs = certificados or {}
     # Import diferido: el paquete orquestador importa a su vez entregables.
     from orquestador.descargas_seace import (
         es_archivo_seace, nota_seace_ausencia, NOTA_SEACE_DESCARGA_FALLIDA,
@@ -1112,6 +1172,12 @@ def construir_zip_infoobras(
                     lineas_identidad.extend(
                         f"  {linea}" for linea in _lineas_ficha_infoobras(datos_sub))
                 zf.writestr(f"{base}/IDENTIFICACION.txt", "\n".join(lineas_identidad) + "\n")
+                # Constancia de la propuesta: el PDF COMPLETO, aunque el Excel
+                # solo muestre su primera página. No es evidencia oficial
+                # descargada, así que va aparte de los conteos de documentos.
+                constancia = _constancia_de(certs.get((n_prof, n_exp)), n_prof, n_exp)
+                if constancia:
+                    zf.write(constancia["ruta"], f"{base}/{constancia['archivo']}")
                 manifiesto = (info.get("descargas_reales")
                               if isinstance(info.get("descargas_reales"), dict) else {})
                 reg: dict[str, Any] = {
@@ -1123,6 +1189,9 @@ def construir_zip_infoobras(
                     "seace": _linea_candado_seace(info),
                     "procedencia": procedencia, "identificacion": identificacion,
                     "estado_fuentes": proyectar_estado_fuentes(info),
+                    "constancia": ({"archivo": constancia["archivo"],
+                                    "paginas": constancia["paginas"]}
+                                   if constancia else None),
                     "_grupo_obra": None,
                 }
                 registros.append(reg)
@@ -1198,6 +1267,15 @@ def construir_zip_infoobras(
                         digests.append(digest)
                         rel = "/".join(str(x) for x in p.relative_to(origen).parts)
                         manifiesto_docs.append(f"{rel} -> {digest}")
+                    if constancia:
+                        # Bloque APARTE: el manifiesto distingue lo descargado de
+                        # una fuente oficial de lo que adjuntó el postor.
+                        manifiesto_docs += [
+                            "",
+                            "ADJUNTO DE LA PROPUESTA (no descargado de una fuente oficial)",
+                            f"{rotulo_constancia(reg['constancia'])} -> "
+                            f"{_sha256_archivo(constancia['ruta'])}",
+                        ]
                     if reales and manifiestos:
                         zf.writestr(f"{base}/MANIFIESTO_DOCUMENTOS.txt",
                                     "\n".join(manifiesto_docs) + "\n")

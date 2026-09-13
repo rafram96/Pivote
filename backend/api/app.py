@@ -294,7 +294,8 @@ def _asegurar_descargas(job_id: str) -> None:
             ruta_zip = _dir_job(job_id) / "infoobras.zip"
             with _zip_build_lock:
                 construir_zip_infoobras(espejo, _mapa_descargas(job_id), ruta_zip,
-                                        enriquecimiento=enr)
+                                        enriquecimiento=enr,
+                                        certificados=mapear_certificados(DATA_DIR, job_id))
             # re-leer JUSTO antes de guardar: una resolución de revisión concurrente
             # pudo tocar el job durante la descarga/armado del ZIP → no pisarla.
             job = repo.cargar(job_id) or job
@@ -1408,7 +1409,9 @@ def descargar_zip(job_id: str):
                 if not ruta.exists():
                     espejo = _espejo_o_404(job_id)
                     enr = repo.cargar_enriquecimiento(job_id) or {}
-                    construir_zip_infoobras(espejo, _mapa_descargas(job_id), ruta, enriquecimiento=enr)
+                    construir_zip_infoobras(
+                        espejo, _mapa_descargas(job_id), ruta, enriquecimiento=enr,
+                        certificados=mapear_certificados(DATA_DIR, job_id))
         else:
             return JSONResponse(status_code=409, content={
                 "descargas_estado": job.descargas_estado,
