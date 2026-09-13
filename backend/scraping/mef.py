@@ -632,6 +632,26 @@ def fetch_contratos(cui, codsnip="", session: Optional[requests.Session] = None,
     return _fetch_contratos_crudo(cui, codsnip, session, diagnostico=diagnostico) or []
 
 
+# Los contratos del expediente que el 08-A enlaza al SEACE antiguo
+# (`prodapp2.seace.gob.pe`, servlet DownloadContratosFileServlet) llegan con una
+# cadena de certificados incompleta: la verificación estricta falla con
+# «unable to get local issuer certificate» y 14 de 27 contratos de una
+# propuesta real (13-sep-2026) quedaban sin descargar. Misma salida que
+# `scraping/seace_abierto.py` para los hosts del SEACE: verify=False SOLO en
+# esos hosts, con el aviso silenciado allí. El MEF (ofi5) y el almacenamiento
+# nuevo del SEACE (Oracle) siguen verificándose.
+_HOSTS_SIN_VERIFICAR_TLS = ("seace.gob.pe",)
+import urllib3  # noqa: E402
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+def _verificar_tls(url: str) -> bool:
+    from urllib.parse import urlparse
+    host = (urlparse(url).hostname or "").lower()
+    return not any(host == h or host.endswith("." + h) for h in _HOSTS_SIN_VERIFICAR_TLS)
+
+
 def descargar_pdf(session: requests.Session, url: str, destino, *, timeout: float = 60.0) -> bool:
     """Descarga en streaming un PDF (resolución o contrato) a `destino`. Rename
     atómico. Los links del 08-A llevan token de sesión → usar la MISMA session."""
@@ -642,7 +662,8 @@ def descargar_pdf(session: requests.Session, url: str, destino, *, timeout: floa
 
     def _bajar() -> bool:
         try:
-            with session.get(url, timeout=timeout, stream=True) as r:
+            with session.get(url, timeout=timeout, stream=True,
+                             verify=_verificar_tls(url)) as r:
                 if r.status_code >= 500:
                     raise RespuestaTransitoria(f"HTTP {r.status_code}")
                 if r.status_code != 200:

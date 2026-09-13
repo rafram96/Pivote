@@ -13,6 +13,8 @@ from orquestador.descargas_seace import (
 )
 
 SECCION_MEF = "Verificación MEF"
+MAX_ADJUNTOS_SIN_CLASIFICAR = 10
+_TIPO_TXT = {"adjunto_08a": "Adjunto MEF sin clasificar", "acto_contractual": "Acto contractual"}
 
 
 def documentos_por_experiencia(exp: dict, info: dict, tipo_evaluacion, sub_pos=None) -> list[dict]:
@@ -50,7 +52,33 @@ def documentos_seleccionados(info: dict) -> list[dict]:
                            "etiqueta": doc.get("label"), "cui": info.get("cui"),
                            "clasificacion": "Indicado por etiqueta; contenido por confirmar"})
             urls.add(doc["url"])
+    # Sin contrato ni resolución identificados, los adjuntos de la ficha 08-A que
+    # el sistema no supo clasificar son el ÚNICO sustento que el MEF ofrece: se
+    # entregan tal cual, rotulados como sin clasificar, en vez de dejar la
+    # carpeta vacía (auditoría 13-sep: 7 de 13 expedientes «sin documentos»
+    # tenían entre 3 y 10 adjuntos —resoluciones ejecutivas, contratos,
+    # informes— que nunca llegaron al evaluador). Tope para no arrastrar
+    # expedientes enteros; el orden del portal se conserva.
+    if not salida:
+        for doc in (verificacion.get("documentos_08a") or [])[:MAX_ADJUNTOS_SIN_CLASIFICAR]:
+            if doc.get("url") and doc["url"] not in urls:
+                salida.append({"tipo": "adjunto_08a", "url": doc["url"],
+                               "etiqueta": doc.get("label"), "cui": info.get("cui"),
+                               "clasificacion": "Adjunto de la ficha 08-A sin clasificar; "
+                                                "contenido por confirmar"})
+                urls.add(doc["url"])
     return salida
+
+
+def _puede_servir_zip(url: str, destino: Path) -> bool:
+    """Solo el servlet de contratos del SEACE antiguo entrega ZIP bajo enlaces
+    «.pdf» (13-sep-2026, 1 de 10 contratos). Para cualquier otra fuente un fallo
+    es terminal: no se reintenta con otra extensión ni con otro documento."""
+    from urllib.parse import urlparse
+    host = (urlparse(url).hostname or "").lower()
+    return (Path(destino).suffix.lower() == ".pdf"
+            and (host == "seace.gob.pe" or host.endswith(".seace.gob.pe"))
+            and "DownloadContratosFileServlet" in url)
 
 
 class DescargasMefSeleccionadas:
@@ -90,6 +118,9 @@ class DescargasMefSeleccionadas:
             if doc["tipo"] == "acto_contractual":
                 sufijo = hashlib.sha256(doc["url"].encode()).hexdigest()[:12]
                 destino_pdf = carpeta / f"ACTO_CONTRACTUAL_{sufijo}.pdf"
+            elif doc["tipo"] == "adjunto_08a":
+                sufijo = hashlib.sha256(doc["url"].encode()).hexdigest()[:12]
+                destino_pdf = carpeta / f"ADJUNTO_08A_{sufijo}.pdf"
             try:
                 if doc.get("leida"):
                     self._copiar_lectura(doc, destino_pdf)
@@ -100,8 +131,22 @@ class DescargasMefSeleccionadas:
                     clave = hashlib.sha256(url.encode()).hexdigest()
                     if self.intentar(f"mef_documento:{clave}"):
                         resultado = self.cache.materializar(url, destino_pdf, descargar=self.descargar)
+                        # El servlet de contratos del SEACE antiguo entrega a veces
+                        # un ZIP (contrato más anexos) bajo un enlace «.pdf»: la
+                        # caché lo rechaza como PDF inválido. Segundo intento como
+                        # ZIP, con el mismo enlace, solo cuando el primero falló.
+                        if not resultado.ok and _puede_servir_zip(url, destino_pdf):
+                            destino_zip = destino_pdf.with_suffix(".zip")
+                            resultado = self.cache.materializar(url, destino_zip, descargar=self.descargar)
+                            if resultado.ok:
+                                destino_pdf = destino_zip
                     else:
                         resultado = self.cache.materializar_existente(url, destino_pdf)
+                        if not resultado.ok and _puede_servir_zip(url, destino_pdf):
+                            destino_zip = destino_pdf.with_suffix(".zip")
+                            resultado = self.cache.materializar_existente(url, destino_zip)
+                            if resultado.ok:
+                                destino_pdf = destino_zip
                     if not resultado.ok:
                         raise ValueError("No se pudo obtener el enlace seleccionado; no se eligió otro documento")
                 registro.update(estado="descargado", archivo_entregado=destino_pdf.name,
@@ -125,7 +170,7 @@ class DescargasMefSeleccionadas:
             lineas = ["Documentos MEF seleccionados para esta experiencia.",
                       "Se conserva la selección del análisis; no se certifica su correspondencia ni el tipo del acto.", ""]
             for r in registros:
-                lineas.append(f"{r['tipo'].capitalize()} {r.get('numero') or 'sin número'}: "
+                lineas.append(f"{_TIPO_TXT.get(r['tipo'], r['tipo'].capitalize())} {r.get('numero') or 'sin número'}: "
                               + ("descargado" if r["estado"] == "descargado" else "no descargado"))
                 if r.get("archivo_entregado"):
                     lineas.append(f"Archivo: {r['archivo_entregado']}")

@@ -1576,6 +1576,24 @@ def construir_hoja_profesional(
                 c = ws.cell(rr, 6, "VERIFICACIÓN SEACE / MEF (Banco de Inversiones)")
                 c.font, c.fill = F_HEAD, FILL_HEAD; c.alignment = AL_HEAD
                 rr += 1
+                # Sin contrato ni resolución que mostrar, la fila muda («—») se
+                # leía como fallo del sistema. Se dice qué pasó en el portal: la
+                # ficha 08-A no tiene adjuntos ni lista contractual, o los tiene y
+                # ninguno es contrato ni aprobación del expediente (auditoría
+                # 13-sep: 13 de 50 expedientes identificados caían aquí).
+                _sin_docs_mef = not (ct.get("valor") or cn.get("numero")
+                                     or rs.get("numero") or rs.get("documento"))
+                if _sin_docs_mef:
+                    _n_adj = len(verif.get("documentos_08a") or [])
+                    if _n_adj:
+                        _txt = (f"el Banco de Inversiones publica {_n_adj} adjunto(s) para "
+                                "este CUI, pero ninguno es contrato ni resolución de "
+                                "aprobación del expediente técnico — el evaluador puede "
+                                "revisarlos en la ficha 08-A del MEF")
+                    else:
+                        _txt = ("el Banco de Inversiones no publica contrato ni adjuntos "
+                                "para este CUI — ausencia del portal, no del sistema")
+                    _fila("Documentos del MEF", _txt)
                 _fila("Contratista (MEF)", ct.get("valor"), ct.get("veredicto"))
                 _fila("N° de contrato", cn.get("numero"), cn.get("veredicto"))
                 if cn.get("monto") is not None:
@@ -1607,7 +1625,9 @@ def construir_hoja_profesional(
                     else:
                         _fila("Lectura de la resolución",
                               "el PDF es un escaneo sin texto reconocible — se adjunta en el ZIP")
-                _fila("CUI confirmado (MEF)", verif.get("cui_confirmado"))
+                _fila("CUI según la ficha del MEF (sin documento que lo respalde)"
+                      if _sin_docs_mef else "CUI confirmado (MEF)",
+                      verif.get("cui_confirmado"))
         else:
             ws.merge_cells(start_row=rr, start_column=6, end_row=rr, end_column=11)
             c = ws.cell(rr, 6, "VALORIZACIONES — en amarillo, las del periodo del certificado")

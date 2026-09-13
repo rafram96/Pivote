@@ -411,3 +411,27 @@ def test_alt04_sigue_usando_la_inscripcion_aunque_no_se_pinte(tmp_path, tipo):
     assert "ANTES de" in alerta and "05/01/23" in alerta
     assert "Inicio actividades" not in contenido
     _wb.close()
+
+
+# ── 11 · sin contrato ni resolución, el bloque MEF dice qué pasó en el portal ──
+
+@pytest.mark.parametrize("tipo", ["expedientes"])
+def test_sin_documentos_mef_la_fila_dice_que_el_portal_no_publica(tmp_path, tipo):
+    enr = _enriquecimiento()
+    _, _, texto, _ = _hoja(tmp_path, tipo, enr)
+    assert "no publica contrato ni adjuntos para este CUI" in texto
+    assert "CUI según la ficha del MEF (sin documento que lo respalde)" in texto
+    # la experiencia CON documentos conserva su etiqueta de siempre
+    assert "CUI confirmado (MEF)" in texto
+
+
+@pytest.mark.parametrize("tipo", ["expedientes"])
+def test_con_adjuntos_sin_clasificar_la_fila_los_cuenta(tmp_path, tipo):
+    enr = _enriquecimiento()
+    enr["1:2"]["verificacion_expediente"]["documentos_08a"] = [
+        {"label": "RER N° 1-2013", "url": "https://mef/a.pdf"},
+        {"label": "INFORME N° 2-2014", "url": "https://mef/b.pdf"},
+        {"label": "CARTA N° 3-2015", "url": "https://mef/c.pdf"}]
+    _, _, texto, _ = _hoja(tmp_path, tipo, enr)
+    assert "publica 3 adjunto(s) para este CUI, pero ninguno es contrato ni resolución" in texto
+    assert "no publica contrato ni adjuntos" not in texto

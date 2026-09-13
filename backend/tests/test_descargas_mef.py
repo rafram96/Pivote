@@ -213,3 +213,80 @@ def test_actos_contractuales_se_descargan_sin_rotular_aprobacion(tmp_path):
     assert not (carpeta / "RESOLUCION_SELECCIONADA.pdf").exists()
     assert len(llamadas) == 3
     assert "contenido por confirmar" in (carpeta / "DOCUMENTOS_MEF.txt").read_text(encoding="utf-8")
+
+
+def test_sin_contrato_ni_resolucion_se_entregan_los_adjuntos_08a_sin_clasificar(tmp_path):
+    espejo, info = caso()
+    info["1:1"]["verificacion_expediente"] = {
+        "cui_confirmado": "2000001",
+        "documentos_08a": [
+            {"label": "RER N° 100-2013-GR/PR", "url": "https://mef/adj1.pdf",
+             "es_aprobacion": False, "tipo_indicado": "por_identificar"},
+            {"label": "INFORME N° 5-2014", "url": "https://mef/adj2.pdf",
+             "es_aprobacion": False, "tipo_indicado": "por_identificar"}]}
+    llamadas = []
+    descargar_documentos_job(espejo, info, "prueba", tmp_path, descargar_mef=descargador(llamadas))
+    carpeta = tmp_path / "prueba/descargas/P1_E1/Verificación MEF"
+    assert len(list(carpeta.glob("ADJUNTO_08A_*.pdf"))) == 2
+    assert sorted(llamadas) == ["https://mef/adj1.pdf", "https://mef/adj2.pdf"]
+    texto = (carpeta / "DOCUMENTOS_MEF.txt").read_text(encoding="utf-8")
+    assert "Adjunto MEF sin clasificar" in texto and "RER N° 100-2013-GR/PR" in texto
+    seccion = info["1:1"]["descargas_reales"]["secciones"]["Verificación MEF"]
+    assert seccion["esperados"] == 2 and seccion["descargados"] == 2
+    assert all(d["tipo"] == "adjunto_08a" for d in seccion["documentos"])
+
+
+def test_con_contrato_los_adjuntos_08a_no_se_suman(tmp_path):
+    espejo, info = caso()
+    info["1:1"]["verificacion_expediente"]["documentos_08a"] = [
+        {"label": "INFORME N° 5-2014", "url": "https://mef/adj2.pdf",
+         "es_aprobacion": False, "tipo_indicado": "por_identificar"}]
+    llamadas = []
+    descargar_documentos_job(espejo, info, "prueba", tmp_path, descargar_mef=descargador(llamadas))
+    assert llamadas == ["https://mef/contrato-2.pdf"]
+
+
+def test_los_adjuntos_08a_tienen_tope(tmp_path):
+    from orquestador.descargas_mef import MAX_ADJUNTOS_SIN_CLASIFICAR, documentos_seleccionados
+    info = {"cui": "2000001", "verificacion_expediente": {"documentos_08a": [
+        {"label": f"DOC {i}", "url": f"https://mef/a{i}.pdf"} for i in range(30)]}}
+    assert len(documentos_seleccionados(info)) == MAX_ADJUNTOS_SIN_CLASIFICAR
+
+
+def test_contrato_servido_como_zip_se_entrega_como_zip(tmp_path):
+    espejo, info = caso()
+    info["1:1"]["verificacion_expediente"]["contrato"]["pdf"] = (
+        "https://prodapp2.seace.gob.pe/portalseace-uiwd-pub/DownloadContratosFileServlet?fileName=c.pdf")
+    llamadas = []
+
+    def descargar(url, ruta):
+        llamadas.append(ruta.suffix)
+        ruta.parent.mkdir(parents=True, exist_ok=True)
+        # el servlet entrega un ZIP real bajo un enlace .pdf
+        with zipfile.ZipFile(ruta, "w") as z:
+            z.writestr("contrato.pdf", b"%PDF-1.4 contrato")
+        return True
+
+    descargar_documentos_job(espejo, info, "prueba", tmp_path, descargar_mef=descargar)
+    carpeta = tmp_path / "prueba/descargas/P1_E1/Verificación MEF"
+    assert (carpeta / "CONTRATO_SELECCIONADO.zip").exists()
+    assert not (carpeta / "CONTRATO_SELECCIONADO.pdf").exists()
+    doc = info["1:1"]["descargas_reales"]["secciones"]["Verificación MEF"]["documentos"][0]
+    assert doc["estado"] == "descargado" and doc["archivo_entregado"] == "CONTRATO_SELECCIONADO.zip"
+    assert llamadas == [".pdf", ".zip"]
+
+
+def test_fuera_del_servlet_antiguo_no_se_reintenta_como_zip(tmp_path):
+    espejo, info = caso()
+    llamadas = []
+
+    def descargar(url, ruta):
+        llamadas.append(ruta.suffix)
+        ruta.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(ruta, "w") as z:
+            z.writestr("contrato.pdf", b"%PDF-1.4 contrato")
+        return True
+
+    descargar_documentos_job(espejo, info, "prueba", tmp_path, descargar_mef=descargar)
+    doc = info["1:1"]["descargas_reales"]["secciones"]["Verificación MEF"]["documentos"][0]
+    assert doc["estado"] == "descarga_fallida" and llamadas == [".pdf"]
