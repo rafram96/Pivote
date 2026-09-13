@@ -1150,13 +1150,115 @@ _RE_PRIVADA = re.compile(
     r"|\b[ic]\.?\s?e\.?\s?p\b(?!\.?\s*n?[°º]?\s*\d)", re.I)
 
 
+# ── ampliación del léxico de privadas (2026-09-12) ───────────────────────────
+# Hasta hoy el léxico era SOLO educativo (colegio particular / I.E.P. + nombre).
+# En una propuesta real de expedientes seis experiencias de CLÍNICAS privadas
+# quedaron en la cola de revisión como si fueran públicas sin identificar, y a
+# una el resolver le buscó CUI en el MEF. Regla del cliente: «los de privada
+# déjalos tal cual» — no se les busca CUI, se clasifican PRIVADA / NO APLICA.
+#
+# CRITERIO (fechado 2026-09-12), en tres capas y con un VETO por delante:
+#   0. VETO público: si el texto nombra una entidad o un establecimiento público
+#      INEQUÍVOCO (EsSalud, MINSA/ministerio, Gobierno Regional/Local,
+#      Municipalidad, PRONIS/PRONIED, universidad/instituto nacional, hospital
+#      regional/nacional/militar, DIRESA/GERESA/red de salud, centro o puesto de
+#      salud, asociación público privada, obra por impuestos) NO es privada,
+#      aunque aparezca cualquier señal de las de abajo. Una APP y un «Hospital
+#      … de EsSalud» son obra pública por más que digan «privada» o «clínica».
+#   1. léxico explícito: el educativo de siempre, más «proyecto/obra/edificio
+#      privado» (nunca «propiedad privada» ni «inversión privada»: el adjetivo
+#      tiene que calificar al proyecto o a la obra).
+#   2. sustantivo de establecimiento de salud PRIVADO: «clínica» y «policlínico».
+#      En el Perú el establecimiento público se llama hospital / centro de salud /
+#      puesto de salud; «clínica» como NÚCLEO del nombre del establecimiento es
+#      promotor privado. Se descartan antes los usos ADJETIVALES («ingeniería
+#      clínica» de EsSalud, «historia clínica», «patología clínica»…), que no
+#      nombran un local. «Centro médico / oftalmológico / odontológico» NO entra
+#      solo: medido sobre 1174 experiencias de espejos locales, añadirlo marcaba
+#      privadas 12 obras con nombre canónico de inversión pública («CONSTRUCCIÓN
+#      Y MEJORAMIENTO DEL CENTRO MÉDICO …, DISTRITO DE …, PROVINCIA DE …»). Esos
+#      nombres llegan igual por la capa 1 cuando el certificado declara el
+#      proyecto como privado, o acompañando a «clínica» (caso real «CLINICA – AP
+#      CENTROS MEDICOS …»); si no, quedan en revisión, que es lo correcto.
+#   3. contratante PERSONA NATURAL («SR./SRA./DON/DOÑA + nombre»): una persona
+#      natural nunca es entidad contratante del Estado.
+# La forma societaria del contratante (S.A., S.A.C., E.I.R.L., S.R.L.) NO entra
+# aquí: en obra pública ese campo llega mal llenado con el contratista o el
+# consorcio muy a menudo, así que decidir «privada» con eso degradaría
+# experiencias públicas YA RESUELTAS. Se usa como señal DÉBIL de
+# `posible_privada` (revisión, nunca 'na') en `_clasificar_privada`; ver allí.
+_RE_PUBLICA_INEQUIVOCA = re.compile(
+    r"\bes\s?-?\s?salud\b|\bessalud\b|\bseguro\s+social\s+de\s+salud\b"
+    r"|\bminsa\b|\bministerio\b|\bgobierno\s+(?:regional|local)\b"
+    r"|\bgob(?:ierno)?\.?\s*reg(?:ional)?\b|\bgore\b"
+    r"|\bmunicipalidad\b|\bmunicipio\b"
+    r"|\bpronis\b|\bpronied\b|\bprovias\b"
+    r"|\b(?:universidad|instituto)\s+nacional\b"
+    r"|\bhospital\s+(?:regional|nacional|militar|docente|de\s+la\s+polic[ií]a)\b"
+    r"|\b(?:diresa|geresa|disa)\b|\bred\s+(?:asistencial|de\s+salud)\b"
+    r"|\b(?:direcci[oó]n|gerencia)\s+regional\s+de\s+salud\b"
+    r"|\b(?:centro|puesto)\s+de\s+salud\b"
+    r"|\basociaci[oó]n\s+p[uú]blic[oa][\s-]*privad[ao]\b"
+    r"|\bobras?\s+por\s+impuestos\b", re.I)
+
+# «privado» calificando al proyecto/obra (no a la propiedad ni a la inversión).
+_RE_PRIVADA_PROYECTO = re.compile(
+    r"\b(?:proyecto|obra|edificio|edificaci[oó]n|inmueble|local|complejo)\s+"
+    r"privad[ao]s?\b", re.I)
+
+# Sustantivo de establecimiento de salud privado como núcleo del nombre. Riesgo
+# residual conocido: EsSalud llama «policlínico» a varios de sus locales; el veto
+# de arriba los salva cuando el texto la nombra, y si no, el humano lo ve en el
+# Excel con el rótulo PRIVADA.
+_RE_PRIVADA_SALUD = re.compile(
+    r"\bcl[ií]nicas?\b|\bpolicl[ií]nic[ao]s?\b", re.I)
+
+# Usos ADJETIVALES de «clínico/a» que NO nombran un establecimiento: se borran
+# del texto antes de buscar el sustantivo (caso real: la «Gerencia de Ingeniería
+# Clínica» de EsSalud emitiendo el certificado de una obra pública).
+_RE_CLINICA_ADJETIVO = re.compile(
+    r"\b(?:ingenier[ií]a|patolog[ií]a|historias?|laboratorios?|an[aá]lisis|"
+    r"muestras?|pr[aá]cticas?|gu[ií]as?|nutrici[oó]n|psicolog[ií]a|farmacia|"
+    r"farmacolog[ií]a|investigaci[oó]n|gesti[oó]n|auditor[ií]a|ensayos?)\s+"
+    r"cl[ií]nic[ao]s?\b", re.I)
+
+# Contratante persona natural: jamás es entidad contratante del Estado. Se exige
+# el tratamiento AL INICIO del campo y un nombre detrás.
+_RE_CONTRATANTE_PERSONA = re.compile(
+    r"^\s*(?:sr|sra|srta|sres|don|do[nñ]a)\.?\s+[^\W\d_]{2,}", re.I)
+
+# Forma societaria privada del contratante (señal DÉBIL, ver `_clasificar_privada`).
+_RE_FORMA_SOCIETARIA = re.compile(
+    r"\bS\.?\s?A\.?\s?C\.?\b|\bE\.?\s?I\.?\s?R\.?\s?L\.?\b"
+    r"|\bS\.?\s?R\.?\s?L\.?\b|\bS\.\s?A\.\s?A\.?\b"
+    r"|\bS\.\s?A\.(?!\s?[CA])|\bSOCIEDAD\s+AN[OÓ]NIMA\b", re.I)
+
+
+def _texto_cliente(exp: dict) -> str:
+    """Texto donde se busca la naturaleza del CLIENTE/promotor: proyecto +
+    entidad_contratante + objeto. El EMISOR queda fuera a propósito (en obra
+    pública el emisor es el contratista privado, siempre)."""
+    return " ".join(str(exp.get(k) or "") for k in
+                    ("proyecto", "entidad_contratante", "objeto"))
+
+
 def _es_experiencia_privada(exp: dict) -> bool:
     """True si el CLIENTE/promotor de la experiencia es privado (no una entidad
-    pública). Mira proyecto + entidad_contratante (+ ubicación textual del cert);
-    NO mira al emisor (el contratista privado es lo normal en obra pública)."""
-    campos = " ".join(str(exp.get(k) or "") for k in
-                      ("proyecto", "entidad_contratante", "objeto"))
-    return bool(_RE_PRIVADA.search(campos))
+    pública). Mira proyecto + entidad_contratante (+ objeto); NO mira al emisor
+    (el contratista privado es lo normal en obra pública).
+
+    Criterio vigente y su razón: bloque fechado 2026-09-12 de arriba — veto
+    público inequívoco → léxico explícito → establecimiento de salud privado →
+    contratante persona natural."""
+    campos = _texto_cliente(exp)
+    if _RE_PUBLICA_INEQUIVOCA.search(campos):
+        return False
+    if _RE_PRIVADA.search(campos) or _RE_PRIVADA_PROYECTO.search(campos):
+        return True
+    if _RE_PRIVADA_SALUD.search(_RE_CLINICA_ADJETIVO.sub(" ", campos)):
+        return True
+    return bool(_RE_CONTRATANTE_PERSONA.match(
+        str(exp.get("entidad_contratante") or "")))
 
 
 def _checkpoint_naturaleza(r: dict, exp: dict) -> dict:
@@ -1712,10 +1814,18 @@ def _clasificar_privada(exp: dict, candidatos: list, vetados: list, base=None) -
                 "decision": "cliente/obra privada — InfoObras solo registra obra "
                             "pública; verificación documental del certificado",
                 "candidatos": [], "obra": None}
-    # b. sin señal léxica, pero la entidad contratante no se reconoce como pública
+    # b. sin señal léxica, pero la entidad contratante no se reconoce como pública.
+    #    Con base MEF: catálogo de 11,004 entidades (ADR-004). Sin base, la rama
+    #    era INERTE; desde 2026-09-12 la forma societaria privada del contratante
+    #    (S.A./S.A.C./E.I.R.L./S.R.L.) basta para señalar `posible_privada`. Es
+    #    revisión, NUNCA 'na': ese campo llega mal llenado con el contratista de
+    #    la obra pública con demasiada frecuencia para decidir con él.
     entidad = str(exp.get("entidad_contratante") or "").strip()
-    if base and base.disponible() and entidad and not base.es_entidad_publica(entidad)[0]:
-        _, score = base.es_entidad_publica(entidad)
+    con_base = bool(base and base.disponible() and entidad)
+    reconocida, score = base.es_entidad_publica(entidad) if con_base else (False, None)
+    no_publica = bool(entidad) and not reconocida and (
+        con_base or bool(_RE_FORMA_SOCIETARIA.search(entidad)))
+    if no_publica:
         _traza().ev("posible_privada", entidad=entidad, score=score)
         motivo = _con_pista_mef(exp,
                                 "sin candidato público fiable; la entidad contratante "

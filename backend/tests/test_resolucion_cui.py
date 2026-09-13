@@ -1022,3 +1022,111 @@ def test_checkpoint_swap_unitario_desde_la_obra_equivocada():
     assert r["obra"]["obra_id"] == 500434
     assert r["registros_cui"] == 2
     assert "fase del certificado" in r["decision"]
+
+
+# ── léxico ampliado de privadas (2026-09-12) ─────────────────────────────────
+# Los seis patrones vienen de una propuesta real de expedientes donde clínicas
+# privadas quedaban en la cola de revisión como públicas sin identificar. Los
+# nombres de abajo son INVENTADOS (repo público).
+
+_PRIVADAS_NUEVAS = [
+    # 1. clínica sin nombre propio, contratante PERSONA NATURAL
+    {"proyecto": "Elaboración del Expediente Técnico del Proyecto: CLINICA DE "
+                 "ALTA COMPLEJIDAD EN LA CIUDAD DE PUERTO ALEGRE, Nivel II, "
+                 "Categoría 2",
+     "entidad_contratante": "SR. Aurelio Peñaranda Vilca"},
+    # 2. clínica con nombre propio y SIN contratante
+    {"proyecto": "Elaboración del expediente técnico para la ejecución de la "
+                 "obra: Ampliación y Remodelación de los Bloques B y C, de la "
+                 "Clínica Monte Sereno"},
+    # 3. la propia clínica es la contratante
+    {"proyecto": "Elaboración del Expediente Técnico: componente equipamiento, "
+                 "CLINICA MEDICA SAN TELMO Categoría II-2",
+     "entidad_contratante": "CLINICA MEDICA SAN TELMO"},
+    # 4. clínica + «centros médicos» como promotor (el emisor es la clínica)
+    {"proyecto": "Proyecto arquitectónico y expediente técnico del proyecto "
+                 "CLINICA - MC CENTROS MEDICOS ALTIPLANO - SEDE NORTE",
+     "entidad_emisora": "MC CENTROS MEDICOS ALTIPLANO E.I.R.L."},
+    # 5. el certificado declara el proyecto como privado
+    {"proyecto": "Expediente técnico del proyecto privado denominado: CENTRO "
+                 "OFTALMOLÓGICO VISTA CLARA",
+     "entidad_emisora": "OPTICAS DEL SUR SAC"},
+    # 6. «clínica privada» con contratante ONG
+    {"proyecto": "ELABORACION DEL EXPEDIENTE TECNICO DEFINITIVO A NIVEL DE "
+                 "EJECUCION DE OBRA DE LA: CLINICA PRIVADA LOS MOLLES",
+     "entidad_contratante": "Servicios Rurales y Promoción Andina - SERPRA"},
+]
+
+
+def test_privada_lexico_ampliado_cubre_los_seis_patrones():
+    for exp in _PRIVADAS_NUEVAS:
+        assert _es_experiencia_privada(exp), exp["proyecto"][:60]
+
+
+def test_privada_lexico_ampliado_clasifica_na_al_final():
+    """Regla del cliente: «los de privada déjalos tal cual». La búsqueda pública
+    SÍ ocurre (ADR-004, público-primero), pero el veredicto final es NA/PRIVADA."""
+    for exp in _PRIVADAS_NUEVAS:
+        r = resolver(dict(exp), _FakeConsulta([]))
+        assert r["estado"] == "na" and r["via"] == "PRIVADA", exp["proyecto"][:60]
+        assert r["cui"] is None and r["obra"] is None
+
+
+def test_privada_lexico_ampliado_no_toca_lo_publico_inequivoco():
+    """Negativos que HOY resuelven bien y no deben cambiar: entidad pública
+    nombrada, APP, adjetivo «clínica» sin local, y emisor privado (lo normal)."""
+    publicas = [
+        # hospital de EsSalud
+        {"proyecto": "Mejoramiento de los servicios de salud del Hospital II "
+                     "Pasco de ESSALUD"},
+        # clínica docente de una universidad nacional → pública
+        {"proyecto": "Ampliación de la Clínica Docente de la Universidad "
+                     "Nacional del Altiplano"},
+        # centro de salud de un gobierno regional
+        {"proyecto": "Mejoramiento del Centro de Salud Villa Aurora",
+         "entidad_contratante": "Gobierno Regional de Junín"},
+        # asociación público privada (el promotor es el Estado)
+        {"proyecto": "Supervisión del diseño, obra y equipamiento del CONTRATO "
+                     "DE ASOCIACION PUBLICO PRIVADA para la remodelación e "
+                     "implementación de la Torre Asistencial"},
+        # «clínica» como ADJETIVO: no nombra un establecimiento
+        {"proyecto": "Implementación del área de ingeniería clínica y del "
+                     "laboratorio de patología clínica del establecimiento",
+         "entidad_contratante": "Unidad Ejecutora 401 Salud"},
+        # el adjetivo «privada» no califica al proyecto
+        {"proyecto": "Mejoramiento de la carretera vecinal, con liberación de "
+                     "predios de propiedad privada y proyecto de inversión "
+                     "privada asociado"},
+        # emisor privado S.A.C. certificando obra PÚBLICA: el caso normal
+        {"proyecto": "Mejoramiento del Hospital Regional de Villa Sur",
+         "entidad_emisora": "CONSTRUCTORA ANDINA DEL NORTE S.A.C."},
+        # municipalidad
+        {"proyecto": "Creación del policlínico municipal de Villa Sur",
+         "entidad_contratante": "Municipalidad Distrital de Villa Sur"},
+    ]
+    for exp in publicas:
+        assert not _es_experiencia_privada(exp), exp["proyecto"][:60]
+
+
+def test_privada_contratante_persona_natural_exige_nombre():
+    """«SR.» suelto o seguido de un número no es una persona natural nombrada."""
+    assert not _es_experiencia_privada(
+        {"proyecto": "Mejoramiento del local comunal", "entidad_contratante": "SR."})
+    assert not _es_experiencia_privada(
+        {"proyecto": "Mejoramiento del local comunal",
+         "entidad_contratante": "SERVICIOS INTEGRALES DON MARIO"})   # no al inicio
+    assert _es_experiencia_privada(
+        {"proyecto": "Construcción de vivienda multifamiliar",
+         "entidad_contratante": "Doña Petronila Quispe Huamán"})
+
+
+def test_forma_societaria_es_posible_privada_no_na_sin_base():
+    """La forma societaria del contratante NO clasifica privada: señala
+    `posible_privada` (revisión) incluso sin base MEF, porque ese campo llega mal
+    llenado con el contratista de la obra pública con demasiada frecuencia."""
+    exp = {"proyecto": "Construcción del local comunal de Santa Rosa del Alto",
+           "entidad_contratante": "CONSTRUCTORA ALFA BETA S.A.C."}
+    r = resolver(exp, _FakeConsulta([]), base=None)
+    assert r["estado"] == "revision" and r["cui"] is None, r
+    assert r.get("posible_privada") is True, r
+    assert "no se reconoce como pública" in r["decision"]
