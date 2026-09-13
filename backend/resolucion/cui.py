@@ -2239,6 +2239,13 @@ def _rankear(vistos: dict, exp: dict, base=None) -> tuple[list, list]:
     return ranked, vetados
 
 
+def _digitos_codigo(v) -> str:
+    """Dígitos significativos de un código citado por el certificado ('' si no
+    cita ninguno)."""
+    d = re.sub(r"\D", "", str(v or ""))
+    return d if d and int(d) != 0 else ""
+
+
 def _corroborado(c: dict, exp: Optional[dict] = None) -> bool:
     """¿Alguna señal DURA de identidad respalda al candidato, más allá del parecido
     de nombre? RUC del emisor en la obra, N° de institución compartido, entidad
@@ -2256,6 +2263,97 @@ def _corroborado(c: dict, exp: Optional[dict] = None) -> bool:
         return False
     ent = (exp or {}).get("entidad_contratante") or ""
     return bool(tokens_distintivos(ent)) if ent else True
+
+
+# ── ADR-015 · VARIANTES DE LA MISMA INVERSIÓN ────────────────────────────────
+# El Estado registra el MISMO establecimiento bajo códigos distintos cuando la
+# intervención se parte: el plan de contingencia mientras se construye, el saldo
+# de obra tras una resolución de contrato, la reformulación o actualización del
+# estudio, un componente o una etapa, o la CONTRATACIÓN del expediente técnico de
+# otra inversión (cuyo registro se llama como el contrato, no como el proyecto, y
+# cita el código de la inversión madre). Esos nombres NO son homónimos: describen
+# la misma obra, y el puntaje de similitud no puede decidir cuál acredita el
+# certificado.
+_RE_VARIANTE_INVERSION = re.compile(
+    r"\bPLAN\s+DE\s+CONTINGENCIA\b|\bCONTINGENCIA\b"
+    r"|\bREFORMULACION\b|\bREFORMULAD[OA]\b"
+    r"|\bACTUALIZACION\b|\bACTUALIZAD[OA]\b"
+    r"|\bSALDO\b|\bCOMPONENTE\b|\bETAPA\b")
+_RE_CODIGO_INVERSION = re.compile(
+    r"\bCODIGO\s+(?:DE\s+)?(?:SNIP|UNICO)\b|\bSNIP\s*N\b|\bCUI\s*N\b")
+
+
+def _variante_de_inversion(nombre) -> Optional[str]:
+    """Marcador que convierte al nombre de un registro en VARIANTE de otra
+    inversión del mismo establecimiento, o None si no lo tiene."""
+    n = norm(str(nombre or ""))
+    m = _RE_VARIANTE_INVERSION.search(n)
+    if m:
+        return m.group(0)
+    # el registro se llama como el CONTRATO que elabora el expediente de otra
+    # inversión y cita su código: "CONTRATACION DE LA ELABORACION DEL EXPEDIENTE
+    # TECNICO … DEL PROYECTO …, CON CODIGO DE SNIP N° …"
+    if _RE_REGISTRO_ET.search(n) and _RE_CODIGO_INVERSION.search(n):
+        return "CONTRATACION DEL EXPEDIENTE DE OTRA INVERSION"
+    return None
+
+
+def _rival_variante(best: dict, ranked: list, exp: dict) -> Optional[tuple]:
+    """¿Hay otro CUI del ranking que es una VARIANTE del mejor (o al revés) sobre
+    el MISMO establecimiento y la MISMA ubicación? Devuelve
+    `(rival, marca, cui_de_la_variante)`.
+
+    Es un candado de ABSTENCIÓN, no un desempate: cuando el certificado no cita el
+    código ni el número del contrato, nada en el papel dice si acredita la
+    inversión principal o su variante, y el orden entre ambas es ruido de
+    similitud. Por eso NO mira la diferencia de puntaje — en producción los dos
+    registros del caso 3:1 de la auditoría quedaron a 2,4 puntos (y el guard de
+    empate los frenó) mientras que la reconstrucción offline los separa por 5,6 y
+    resolvía el principal: el mismo certificado, dos veredictos, según cuánto
+    ruido tuviera el score. La ambigüedad es del documento, no del puntaje.
+
+    Condiciones, todas obligatorias:
+      · el certificado NO declara él mismo la variante (si dice «saldo de obra»,
+        el registro de saldo es el correcto y de eso se ocupa `_checkpoint_fase`);
+      · el certificado NO cita un código de inversión (ese camino es el PASO 0);
+      · el nombre del certificado tiene tokens propios y AMBOS candidatos los
+        llevan completos;
+      · AMBOS llevan el nombre del certificado LITERAL (`nombre_literal`): es la
+        condición que distingue «dos códigos del MISMO proyecto» de «dos
+        proyectos distintos del mismo pueblo». Medida sobre el replay de los 23
+        jobs locales, sin ella el candado alcanzaba 6 casos más que NO son
+        variantes —un parque y un mercado en la misma comunidad nativa, un
+        atractivo turístico «I ETAPA» en la misma provincia que un hospital, el
+        saldo de obra de OTRO centro de salud de la misma provincia— porque el
+        topónimo compartido basta para que los tokens coincidan. Con ella queda
+        exactamente el patrón que ADR-015 describe: la misma inversión inscrita
+        dos veces;
+      · AMBOS coinciden POSITIVAMENTE con la ubicación declarada (`geo_match`):
+        dos establecimientos homónimos de provincias distintas los separa el veto
+        de ubicación de siempre, no este candado;
+      · exactamente UNO de los dos lleva el marcador de variante."""
+    proyecto = str(exp.get("proyecto") or "")
+    if _variante_de_inversion(proyecto) or _digitos_codigo(exp.get("cui")):
+        return None
+    toks = tokens_distintivos(proyecto)
+    if not toks:
+        return None
+    if not (best.get("nombre_literal") and best.get("geo_match")
+            and toks <= _palabras(best.get("full") or "")):
+        return None
+    marca_best = _variante_de_inversion(best.get("full"))
+    for otro in ranked:
+        if otro["cui"] == best["cui"]:
+            continue
+        if not (otro.get("nombre_literal") and otro.get("geo_match")
+                and toks <= _palabras(otro.get("full") or "")):
+            continue
+        marca_otro = _variante_de_inversion(otro.get("full"))
+        if bool(marca_best) == bool(marca_otro):
+            continue
+        return (otro, (marca_otro or marca_best),
+                otro["cui"] if marca_otro else best["cui"])
+    return None
 
 
 _UMBRAL_MEF_NOMBRE = 95.0    # score de nombre del Banco de Inversiones para resolver
@@ -2538,6 +2636,32 @@ def _compuertas(best, ranked: list, vetados: list, exp: dict, base=None) -> dict
     # el mismo nombre con y sin sufijo de distrito) no se separan y siguen en
     # revisión — que es el techo del fuzzy que ADR-005 midió y que este desempate
     # NO pretende superar.
+    # ── ADR-015 · VARIANTES DEL MISMO ESTABLECIMIENTO ────────────────────────
+    # Dos CUIs del mismo establecimiento y la misma ubicación donde uno es una
+    # VARIANTE del otro (plan de contingencia, saldo, reformulación,
+    # actualización, componente, etapa, o la contratación del expediente de otra
+    # inversión) no son homónimos: son la misma obra registrada dos veces. Si el
+    # certificado no cita el código ni el número del contrato, el papel no dice
+    # cuál acredita → revisión con los dos a la vista y NOMBRADOS en el motivo.
+    # Independiente del puntaje a propósito (ver `_rival_variante`).
+    if best and not _es_experiencia_privada(exp):
+        _var = _rival_variante(best, ranked, exp)
+        if _var is not None:
+            _otro, _marca, _cui_var = _var
+            _traza().ev("candado_variante_establecimiento", best=best["cui"],
+                        rival=_otro["cui"], variante=_cui_var, marca=_marca,
+                        gap=round(best["score"] - _otro["score"], 1))
+            _cands = candidatos + ([] if any(c["cui"] == _otro["cui"] for c in candidatos)
+                                   else [_proj(_otro)])
+            return {"estado": "revision", "cui": None, "via": "NOMBRE",
+                    "decision": _con_pista_mef(exp,
+                        f"el mismo establecimiento figura con dos códigos, el CUI "
+                        f"{best['cui']} y el CUI {_otro['cui']}: el CUI {_cui_var} es "
+                        f"una variante del otro ({_marca.lower()}) y el certificado no "
+                        "cita el código ni el número del contrato, así que no dice "
+                        "cuál acredita — elegir en revisión"),
+                    "candidatos": _cands, "obra": None}
+
     _DELTA_EMPATE = 4.0
     if best and not _es_experiencia_privada(exp):
         # OJO: NO es `_corroborado`. Este trío está calibrado contra la golden
