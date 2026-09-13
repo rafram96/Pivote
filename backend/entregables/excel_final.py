@@ -1588,8 +1588,8 @@ def construir_hoja_profesional(
                     if _n_adj:
                         _txt = (f"el Banco de Inversiones publica {_n_adj} adjunto(s) para "
                                 "este CUI, pero ninguno es contrato ni resolución de "
-                                "aprobación del expediente técnico — el evaluador puede "
-                                "revisarlos en la ficha 08-A del MEF")
+                                "aprobación del expediente técnico — van al ZIP como "
+                                "adjuntos sin clasificar, para que el evaluador los revise")
                     else:
                         _txt = ("el Banco de Inversiones no publica contrato ni adjuntos "
                                 "para este CUI — ausencia del portal, no del sistema")

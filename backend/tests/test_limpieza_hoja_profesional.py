@@ -434,4 +434,5 @@ def test_con_adjuntos_sin_clasificar_la_fila_los_cuenta(tmp_path, tipo):
         {"label": "CARTA N° 3-2015", "url": "https://mef/c.pdf"}]
     _, _, texto, _ = _hoja(tmp_path, tipo, enr)
     assert "publica 3 adjunto(s) para este CUI, pero ninguno es contrato ni resolución" in texto
+    assert "van al ZIP como adjuntos sin clasificar" in texto
     assert "no publica contrato ni adjuntos" not in texto
