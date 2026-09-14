@@ -15,6 +15,9 @@ sin clasificar al ZIP, fila «Documentos del MEF» en el Excel; auditoría de su
 expedientes: 13 útil, 10 de otra fase, 0 de otro proyecto. Luego `387db52` y `13c7a69`: la
 aprobación del expediente se toma de la sección B de la ficha 08-A (con fecha); en Tacna las
 resoluciones bajadas pasan de 21 a 40 y los casos de Pasco/Lorena toman la resolución correcta.
+`3556e7b`…`d455cb5`: contrato del expediente por ENCARGO (elaboración vs supervisión), cotas
+por fecha de fin/emisión, enlaces del DWH completados y regresión del enlace corregida.
+Tacna corrida 8: 105 documentos pedidos y bajados, 0 fallos MEF. `demo` = `d455cb5`.
 
 ## 13-sep — ADR-015 implementado: el orden con la vía MEF, las variantes del establecimiento y la rama de privadas al final
 
