@@ -579,12 +579,12 @@ def verificar_expediente(exp: dict, ficha: dict, contratos: list[dict]) -> dict:
             bloque["contrato"]["nota_encargo"] = (
                 "el certificado acredita la supervisión del expediente y el MEF solo "
                 "publica el contrato de elaboración — confirma el proyecto, no el encargo")
+        if c.get("url_pdf"):
+            bloque["contrato"]["pdf"] = c["url_pdf"]
     if posteriores:
         bloque["contratos_posteriores_al_certificado"] = [
             f"{x['numero']} — {x.get('contratista') or 'sin contratista'} "
             f"({x['fecha_suscripcion'].isoformat()})" for x in posteriores][:5]
-        if c.get("url_pdf"):
-            bloque["contrato"]["pdf"] = c["url_pdf"]
 
     res = ficha.get("resolucion")
     bloque["documentos_08a"] = ficha.get("documentos") or []

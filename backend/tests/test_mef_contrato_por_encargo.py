@@ -105,3 +105,24 @@ def test_filas_repetidas_del_dwh_completan_el_enlace_del_contrato():
     ]
     cs = mef.normalizar_contratos(crudo)
     assert len(cs) == 1 and cs[0]["url_pdf"] == "https://x/16.pdf"
+
+
+def test_el_enlace_del_contrato_se_conserva_haya_o_no_contratos_posteriores():
+    # regresión 13-sep-2026: el enlace quedó anidado bajo «posteriores» y el
+    # contrato salía sin PDF salvo cuando había contratos tardíos
+    b = mef.verificar_expediente(_exp("elaboracion_expediente", emisora="CONSORCIO PROYECTISTA FICTICIO",
+                                      proyecto="Elaboración del expediente técnico del proyecto H"),
+                                 {}, [ELAB])
+    assert b["contrato"]["pdf"] == "https://x/001-2017.pdf"
+    assert "contratos_posteriores_al_certificado" not in b
+
+
+def test_contratos_posteriores_sin_contrato_elegido_no_revienta():
+    # regresión 13-sep-2026: 15 de 50 verificaciones cayeron con
+    # «'NoneType' object has no attribute 'get'» cuando solo había tardíos
+    b = mef.verificar_expediente(_exp("elaboracion_expediente", emisora="OTRA S.A.",
+                                      proyecto="Elaboración del expediente técnico del proyecto H"),
+                                 {}, [TARDIO])
+    assert "contrato" not in b
+    assert b["contratos_posteriores_al_certificado"] == [
+        "053-2026 — CONSORCIO ACTUAL FICTICIO (2026-05-01)"]
