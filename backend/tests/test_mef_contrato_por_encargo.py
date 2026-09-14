@@ -77,3 +77,21 @@ def test_sin_fecha_final_no_se_descarta_ningun_contrato():
                                  {}, [TARDIO, ELAB])
     assert b["contrato"]["numero"] == "053-2026"
     assert "contratos_posteriores_al_certificado" not in b
+
+
+def test_sin_fecha_final_legible_la_emision_del_certificado_es_la_cota():
+    exp = _exp("elaboracion_expediente", emisora="CONSORCIO ACTUAL FICTICIO",
+               proyecto="Elaboración del expediente técnico del proyecto H",
+               fin="POR VERIFICAR (solo consta el plazo del expediente)")
+    exp["fecha_emision"] = "2018-01 (Enero del 2018)"
+    b = mef.verificar_expediente(exp, {}, [TARDIO, ELAB])
+    assert b["contrato"]["numero"] == "001-2017"
+    assert b["contratos_posteriores_al_certificado"] == [
+        "053-2026 — CONSORCIO ACTUAL FICTICIO (2026-05-01)"]
+
+
+def test_fecha_flexible_de_mes_toma_el_ultimo_dia():
+    assert mef._fecha_iso_a_date("2018-01 (Enero del 2018)").isoformat() == "2018-01-31"
+    assert mef._fecha_iso_a_date("2019-12").isoformat() == "2019-12-31"
+    assert mef._fecha_iso_a_date("2019-06-11").isoformat() == "2019-06-11"
+    assert mef._fecha_iso_a_date("POR VERIFICAR") is None

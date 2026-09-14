@@ -18,7 +18,7 @@ import logging
 import inspect
 import re
 import time   # el backoff duerme en errores_red; se deja para parchear `mef.time.sleep`
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from html import unescape
 from typing import Optional
 from urllib.parse import urljoin
@@ -416,19 +416,34 @@ def contratos_de_supervision_expediente(contratos: list[dict]) -> list[dict]:
     return sorted(sup, key=lambda c: (c.get("monto") if c.get("monto") is not None else float("inf")))
 
 
+_RE_FECHA_FLEX = re.compile(r"^\s*(\d{4})-(\d{2})(?:-(\d{2}))?")
+
+
 def _fecha_iso_a_date(v) -> Optional[date]:
+    """Fecha flexible del espejo → date. Acepta «2018-01 (Enero del 2018)» (toma
+    el ÚLTIMO día del mes: es una cota superior) y «2019-06-11». None si no
+    hay fecha reconocible («POR VERIFICAR…»)."""
+    m = _RE_FECHA_FLEX.match(str(v or ""))
+    if not m:
+        return None
+    y, mth = int(m.group(1)), int(m.group(2))
     try:
-        return date.fromisoformat(str(v)[:10]) if v else None
+        if m.group(3):
+            return date(y, mth, int(m.group(3)))
+        siguiente = date(y + (mth == 12), (mth % 12) + 1, 1)
+        return siguiente - timedelta(days=1)
     except ValueError:
         return None
 
 
-def contratos_no_posteriores(contratos: list[dict], fecha_final) -> tuple[list[dict], list[dict]]:
+def contratos_no_posteriores(contratos: list[dict], fecha_final, fecha_emision=None) -> tuple[list[dict], list[dict]]:
     """Separa los contratos suscritos DESPUÉS de que terminó el certificado: un
     servicio no pudo prestarse bajo un contrato firmado cuando ya había
     terminado (caso real: el contrato del propio concurso en curso, 2026,
-    adjunto a un certificado anterior). Devuelve (válidos, posteriores)."""
-    fin = _fecha_iso_a_date(fecha_final)
+    adjunto a un certificado anterior). Si el certificado no trae fecha de fin
+    legible, la cota es su fecha de EMISIÓN: un certificado emitido en 2018 no
+    puede descansar en un contrato de 2026. Devuelve (válidos, posteriores)."""
+    fin = _fecha_iso_a_date(fecha_final) or _fecha_iso_a_date(fecha_emision)
     if not fin:
         return list(contratos or []), []
     validos, posteriores = [], []
@@ -498,7 +513,8 @@ def verificar_expediente(exp: dict, ficha: dict, contratos: list[dict]) -> dict:
     # MEF no publica el de supervisión); si acredita la elaboración, el pool de
     # siempre. El contrato del emisor manda dentro del pool.
     encargo = encargo_declarado(exp)
-    vigentes, posteriores = contratos_no_posteriores(contratos, exp.get("fecha_final"))
+    vigentes, posteriores = contratos_no_posteriores(contratos, exp.get("fecha_final"),
+                                                     exp.get("fecha_emision"))
     encargo_contrato = encargo
     if encargo == "supervision":
         ces = contratos_de_supervision_expediente(vigentes)
