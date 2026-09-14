@@ -95,3 +95,13 @@ def test_fecha_flexible_de_mes_toma_el_ultimo_dia():
     assert mef._fecha_iso_a_date("2019-12").isoformat() == "2019-12-31"
     assert mef._fecha_iso_a_date("2019-06-11").isoformat() == "2019-06-11"
     assert mef._fecha_iso_a_date("POR VERIFICAR") is None
+
+
+def test_filas_repetidas_del_dwh_completan_el_enlace_del_contrato():
+    crudo = [
+        {"NUM_CONTRATO": "16-2018", "MTO_TOTAL": "1000", "NOM_CONTRATISTA": "X", "DES_PROCESO": "ELABORACION DE EXPEDIENTE", "URL_CONTRATO": ""},
+        {"NUM_CONTRATO": "16-2018", "MTO_TOTAL": "1000", "NOM_CONTRATISTA": "X", "DES_PROCESO": "ELABORACION DE EXPEDIENTE", "URL_CONTRATO": "https://x/16.pdf"},
+        {"NUM_CONTRATO": "16-2018", "MTO_TOTAL": "1000", "NOM_CONTRATISTA": "X", "DES_PROCESO": "ELABORACION DE EXPEDIENTE", "URL_CONTRATO": "https://x/otro.pdf"},
+    ]
+    cs = mef.normalizar_contratos(crudo)
+    assert len(cs) == 1 and cs[0]["url_pdf"] == "https://x/16.pdf"

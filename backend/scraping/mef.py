@@ -341,7 +341,7 @@ def parsear_ficha_08a(html: str) -> dict:
 def normalizar_contratos(raw: list) -> list[dict]:
     """Lista cruda del endpoint DWH → contratos normalizados y DEDUPLICADOS
     (el DWH repite filas). Función PURA (tests offline)."""
-    out, vistos = [], set()
+    out, vistos = [], {}
     for c in raw or []:
         if not isinstance(c, dict):
             continue
@@ -351,9 +351,16 @@ def normalizar_contratos(raw: list) -> list[dict]:
         monto = _num(c.get("MTO_TOTAL"))
         clave = (numero, monto)
         if clave in vistos:
+            # El DWH repite el contrato (una fila por ítem/registro) y NO todas
+            # las filas traen URL_CONTRATO: según el orden en que lleguen, la
+            # fila conservada podía quedarse sin enlace y el contrato salía
+            # «sin_enlace» en una corrida y con PDF en la siguiente (13-sep-2026,
+            # 8 de 24 contratos). Se completa el enlace desde la fila repetida.
+            url_rep = (c.get("URL_CONTRATO") or "").strip() or None
+            if url_rep and not vistos[clave].get("url_pdf"):
+                vistos[clave]["url_pdf"] = url_rep
             continue
-        vistos.add(clave)
-        out.append({
+        registro = {
             "numero": numero,
             "contratista": (c.get("NOM_CONTRATISTA") or "").strip(),
             "monto": monto,
@@ -362,7 +369,9 @@ def normalizar_contratos(raw: list) -> list[dict]:
             "fecha_suscripcion": _fecha(c.get("FEC_SUSCRIPCION")),
             "valor_referencial": _num(c.get("VALOR_REFER")),
             "url_pdf": (c.get("URL_CONTRATO") or "").strip() or None,
-        })
+        }
+        vistos[clave] = registro
+        out.append(registro)
     return out
 
 
