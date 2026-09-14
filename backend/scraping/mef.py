@@ -381,6 +381,63 @@ def contratos_de_expediente(contratos: list[dict]) -> list[dict]:
     return sorted(exp, key=lambda c: (c.get("monto") if c.get("monto") is not None else float("inf")))
 
 
+# ENCARGO DEL CERTIFICADO (13-sep-2026). Un certificado puede acreditar la
+# ELABORACIÓN del expediente o su SUPERVISIÓN; son contratos distintos del mismo
+# CUI, con contratistas distintos. `contratos_de_expediente` excluía la
+# supervisión a propósito (evita confundir obra con expediente), y por eso a un
+# certificado de supervisión se le adjuntaba el contrato del proyectista
+# (auditoría documental: 4:2, 5:2, 6:1, 10:6).
+_RE_SUPERVISION_ET = re.compile(
+    r"supervisi[oó]n.*\b(expediente|estudio)\b|\b(expediente|estudio)\b.*supervisi[oó]n", re.I)
+_RE_SUPERVISION_OBRA = re.compile(r"supervisi[oó]n\s+de\s+(?:la\s+)?(?:obra|ejecuci)", re.I)
+
+
+def encargo_declarado(exp: dict) -> str:
+    """'supervision' | 'elaboracion' según lo que acredita el certificado: el
+    tipo estructurado de `servicio_declarado` y, si no lo trae, el texto del
+    proyecto («Supervisión de la elaboración del expediente…»)."""
+    tipo = str(((exp or {}).get("servicio_declarado") or {}).get("tipo") or "")
+    if tipo == "supervision_expediente":
+        return "supervision"
+    if tipo == "elaboracion_expediente":
+        return "elaboracion"
+    texto = " ".join(str((exp or {}).get(k) or "") for k in ("proyecto", "cargo_ocupado"))
+    if _RE_SUPERVISION_ET.search(texto) and not _RE_SUPERVISION_OBRA.search(texto):
+        return "supervision"
+    return "elaboracion"
+
+
+def contratos_de_supervision_expediente(contratos: list[dict]) -> list[dict]:
+    """Contratos de SUPERVISIÓN de la elaboración del expediente/estudio (no de
+    supervisión de obra), del más barato al más caro. Función PURA."""
+    sup = [c for c in contratos or []
+           if _RE_SUPERVISION_ET.search(c.get("objeto") or "")
+           and not _RE_SUPERVISION_OBRA.search(c.get("objeto") or "")]
+    return sorted(sup, key=lambda c: (c.get("monto") if c.get("monto") is not None else float("inf")))
+
+
+def _fecha_iso_a_date(v) -> Optional[date]:
+    try:
+        return date.fromisoformat(str(v)[:10]) if v else None
+    except ValueError:
+        return None
+
+
+def contratos_no_posteriores(contratos: list[dict], fecha_final) -> tuple[list[dict], list[dict]]:
+    """Separa los contratos suscritos DESPUÉS de que terminó el certificado: un
+    servicio no pudo prestarse bajo un contrato firmado cuando ya había
+    terminado (caso real: el contrato del propio concurso en curso, 2026,
+    adjunto a un certificado anterior). Devuelve (válidos, posteriores)."""
+    fin = _fecha_iso_a_date(fecha_final)
+    if not fin:
+        return list(contratos or []), []
+    validos, posteriores = [], []
+    for c in contratos or []:
+        fs = c.get("fecha_suscripcion")
+        (posteriores if (fs and fs > fin) else validos).append(c)
+    return validos, posteriores
+
+
 def contrato_de_expediente(contratos: list[dict]) -> Optional[dict]:
     """Entre los contratos del CUI, elige el de ELABORACIÓN del expediente (no el
     de supervisión/ejecución de obra). Prefiere objeto 'expediente' sin
@@ -434,11 +491,28 @@ def verificar_expediente(exp: dict, ficha: dict, contratos: list[dict]) -> dict:
     # resuelto la experiencia mirando TODOS (casos reales 7:3 y 10:3). Ahora se
     # prefiere el contrato cuyo contratista ES el emisor del certificado; si
     # ninguno lo es, se conserva exactamente la elección de antes.
-    ces = contratos_de_expediente(contratos)
+    # ENCARGO y CRONOLOGÍA (13-sep-2026): primero se apartan los contratos
+    # suscritos después del fin del certificado; luego, si el certificado
+    # acredita la SUPERVISIÓN del expediente, el pool son los contratos de
+    # supervisión del expediente (con caída al de elaboración, rotulada, si el
+    # MEF no publica el de supervisión); si acredita la elaboración, el pool de
+    # siempre. El contrato del emisor manda dentro del pool.
+    encargo = encargo_declarado(exp)
+    vigentes, posteriores = contratos_no_posteriores(contratos, exp.get("fecha_final"))
+    encargo_contrato = encargo
+    if encargo == "supervision":
+        ces = contratos_de_supervision_expediente(vigentes)
+        if not ces:
+            ces = contratos_de_expediente(vigentes)
+            encargo_contrato = "elaboracion" if ces else encargo
+    else:
+        ces = contratos_de_expediente(vigentes)
     c_emisor = next((x for x in ces
                      if _nombres_coinciden(identidad_contratista, x.get("contratista") or "")),
                     None) if identidad_contratista else None
-    c = c_emisor or contrato_de_expediente(contratos)
+    c = c_emisor or (ces[0] if encargo_contrato == "supervision" and ces
+                     else contrato_de_expediente(vigentes) if encargo_contrato == "elaboracion"
+                     else None)
     if c:
         elegido_por = ("emisor" if c_emisor is not None
                        else ("unico" if len(ces) <= 1 else "mas_barato"))
@@ -470,7 +544,20 @@ def verificar_expediente(exp: dict, ficha: dict, contratos: list[dict]) -> dict:
             # un tercero que también trabajó el mismo CUI.
             "elegido_por": elegido_por,
             "otros_contratos_expediente": otros,
+            # qué acredita el certificado y de qué encargo es el contrato: si no
+            # coinciden, el contrato no sustenta el encargo (solo el proyecto).
+            "encargo_certificado": encargo,
+            "encargo_contrato": encargo_contrato,
         }
+        if encargo_contrato != encargo:
+            bloque["contrato"]["veredicto"] = "no_verificable"
+            bloque["contrato"]["nota_encargo"] = (
+                "el certificado acredita la supervisión del expediente y el MEF solo "
+                "publica el contrato de elaboración — confirma el proyecto, no el encargo")
+    if posteriores:
+        bloque["contratos_posteriores_al_certificado"] = [
+            f"{x['numero']} — {x.get('contratista') or 'sin contratista'} "
+            f"({x['fecha_suscripcion'].isoformat()})" for x in posteriores][:5]
         if c.get("url_pdf"):
             bloque["contrato"]["pdf"] = c["url_pdf"]
 

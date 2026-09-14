@@ -1596,6 +1596,8 @@ def construir_hoja_profesional(
                     _fila("Documentos del MEF", _txt)
                 _fila("Contratista (MEF)", ct.get("valor"), ct.get("veredicto"))
                 _fila("N° de contrato", cn.get("numero"), cn.get("veredicto"))
+                if cn.get("nota_encargo"):
+                    _fila("Encargo del contrato", cn["nota_encargo"])
                 if cn.get("monto") is not None:
                     _fila("Monto del contrato (S/)", cn.get("monto"), None, FMT_SOLES)
                 if _ffmt:

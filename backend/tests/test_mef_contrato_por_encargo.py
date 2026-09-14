@@ -1,0 +1,79 @@
+"""El contrato del expediente se elige por ENCARGO: un certificado de supervisión
+del expediente lleva el contrato de supervisión, no el del proyectista; y un
+contrato suscrito después del fin del certificado no puede sustentarlo
+(auditoría documental 13-sep-2026: 4:2, 5:2, 6:1, 10:6 y 15:3). Datos sintéticos."""
+from datetime import date
+
+from scraping import mef
+
+
+def _c(numero, objeto, contratista, monto, fecha):
+    return {"numero": numero, "objeto": objeto, "contratista": contratista, "monto": monto,
+            "fecha_suscripcion": fecha, "nomenclatura": "", "valor_referencial": None,
+            "url_pdf": f"https://x/{numero}.pdf"}
+
+
+ELAB = _c("001-2017", "CONTRATACIÓN DEL SERVICIO DE ELABORACIÓN DE EXPEDIENTE TÉCNICO DEL PROYECTO H",
+          "CONSORCIO PROYECTISTA FICTICIO", 500000.0, date(2017, 3, 1))
+SUP = _c("019-2017", "CONSULTORÍA DE OBRA PARA LA SUPERVISIÓN DE LA ELABORACIÓN DEL EXPEDIENTE TÉCNICO DEL PROYECTO H",
+         "CONSORCIO SUPERVISOR FICTICIO", 120000.0, date(2017, 8, 1))
+SUP_OBRA = _c("050-2019", "SUPERVISIÓN DE LA OBRA DEL PROYECTO H", "CONSORCIO OBRA FICTICIA", 900000.0, date(2019, 1, 1))
+TARDIO = _c("053-2026", "CONSULTORÍA DE OBRA PARA EL SALDO DEL EXPEDIENTE TÉCNICO DEL PROYECTO H",
+            "CONSORCIO ACTUAL FICTICIO", 300000.0, date(2026, 5, 1))
+
+
+def _exp(tipo, emisora="CONSORCIO SUPERVISOR FICTICIO", proyecto="Supervisión de la elaboración del expediente técnico del proyecto H",
+         fin="2018-10-11"):
+    return {"cui": "2999301", "proyecto": proyecto, "entidad_emisora": emisora,
+            "fecha_inicial": "2017-08-19", "fecha_final": fin,
+            "servicio_declarado": {"tipo": tipo, "texto": proyecto}}
+
+
+def test_certificado_de_supervision_lleva_el_contrato_de_supervision():
+    b = mef.verificar_expediente(_exp("supervision_expediente"), {}, [ELAB, SUP, SUP_OBRA])
+    assert b["contrato"]["numero"] == "019-2017"
+    assert b["contrato"]["encargo_certificado"] == "supervision"
+    assert b["contrato"]["encargo_contrato"] == "supervision"
+    assert b["contrato"]["veredicto"] == "ok" and b["contratista"]["veredicto"] == "ok"
+    assert "nota_encargo" not in b["contrato"]
+
+
+def test_supervision_de_obra_no_cuenta_como_supervision_del_expediente():
+    b = mef.verificar_expediente(_exp("supervision_expediente", emisora="OTRA S.A."), {}, [ELAB, SUP_OBRA])
+    # sin contrato de supervisión del ET cae al de elaboración, rotulado
+    assert b["contrato"]["numero"] == "001-2017"
+    assert b["contrato"]["encargo_contrato"] == "elaboracion"
+    assert b["contrato"]["veredicto"] == "no_verificable"
+    assert "supervisión del expediente" in b["contrato"]["nota_encargo"]
+
+
+def test_certificado_de_elaboracion_conserva_el_contrato_de_siempre():
+    b = mef.verificar_expediente(_exp("elaboracion_expediente", emisora="CONSORCIO PROYECTISTA FICTICIO",
+                                      proyecto="Elaboración del expediente técnico del proyecto H"),
+                                 {}, [ELAB, SUP])
+    assert b["contrato"]["numero"] == "001-2017" and b["contrato"]["elegido_por"] == "emisor"
+    assert b["contrato"]["encargo_certificado"] == "elaboracion"
+    assert "nota_encargo" not in b["contrato"]
+
+
+def test_sin_tipo_estructurado_el_texto_del_proyecto_decide():
+    assert mef.encargo_declarado({"proyecto": "Supervisión del Estudio del Expediente Técnico del proyecto H"}) == "supervision"
+    assert mef.encargo_declarado({"proyecto": "Elaboración del expediente técnico del proyecto H"}) == "elaboracion"
+    assert mef.encargo_declarado({"proyecto": "Supervisión de la obra del proyecto H"}) == "elaboracion"
+
+
+def test_contrato_suscrito_despues_del_certificado_queda_fuera():
+    b = mef.verificar_expediente(_exp("elaboracion_expediente", emisora="CONSORCIO ACTUAL FICTICIO",
+                                      proyecto="Elaboración del expediente técnico del proyecto H"),
+                                 {}, [TARDIO, ELAB])
+    assert b["contrato"]["numero"] == "001-2017"
+    assert b["contratos_posteriores_al_certificado"] == [
+        "053-2026 — CONSORCIO ACTUAL FICTICIO (2026-05-01)"]
+
+
+def test_sin_fecha_final_no_se_descarta_ningun_contrato():
+    b = mef.verificar_expediente(_exp("elaboracion_expediente", emisora="CONSORCIO ACTUAL FICTICIO",
+                                      proyecto="Elaboración del expediente técnico del proyecto H", fin=None),
+                                 {}, [TARDIO, ELAB])
+    assert b["contrato"]["numero"] == "053-2026"
+    assert "contratos_posteriores_al_certificado" not in b
