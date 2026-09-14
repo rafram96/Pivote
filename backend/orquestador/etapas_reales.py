@@ -704,7 +704,11 @@ class EtapaInfoObrasReal:
                         datos = self._verificar_mef(exp, cui, codsnip)
         except Exception as e:  # noqa: BLE001
             from scraping.errores_red import corto
-            logger.info("verificación MEF CUI %s no respondió: %s", cui, corto(e))
+            # con traza: un AttributeError aquí es un defecto nuestro, no del portal
+            # (13-sep-2026: 15 de 50 verificaciones cayeron con «'NoneType' object
+            # has no attribute 'get'» y el resumen las contó como portal caído).
+            logger.info("verificación MEF CUI %s no respondió: %s", cui, corto(e),
+                        exc_info=not isinstance(e, (TimeoutError, ConnectionError)))
             diagnostico = {"estado": "fuente_no_disponible", "motivo": "No se pudo completar la consulta MEF; no demuestra ausencia de documentos."}
         if isinstance(enriquecimiento, dict):
             consultas = (datos or {}).get("consultas_fuentes") or {}
